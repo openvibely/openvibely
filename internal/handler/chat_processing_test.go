@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -237,12 +239,12 @@ func (i *chatMemoryHookInvoker) Seen() []string {
 
 func assertTaskFollowupSelectedMemoryContext(t *testing.T, chatContext string) {
 	t.Helper()
-	for _, want := range []string{"## Selected Memories For This Task", "memory_view(\"<memory>\")", "`chat_memory.md`"} {
+	for _, want := range []string{"## Available memories", "memory_view", "chat_memory.md"} {
 		if !strings.Contains(chatContext, want) {
 			t.Fatalf("expected task follow-up model context to include selected memory marker %q, got:\n%s", want, chatContext)
 		}
 	}
-	for _, unwanted := range []string{"Selected chat memory body", "prefer repo-local managed memory for this project.", ".openvibely/memories/chat_memory.md"} {
+	for _, unwanted := range []string{"Selected chat memory body", ".openvibely/memories/chat_memory.md"} {
 		if strings.Contains(chatContext, unwanted) {
 			t.Fatalf("task follow-up model context should include selected memory handles only, found %q in:\n%s", unwanted, chatContext)
 		}
@@ -252,7 +254,15 @@ func assertTaskFollowupSelectedMemoryContext(t *testing.T, chatContext string) {
 func assertChatMemoryViewToolAvailable(t *testing.T, ctx context.Context) {
 	t.Helper()
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	if rt == nil || !rt.HasDefinition("memory_view") {
+	// The handler has cancelled this captured context after completion. Inspect
+	// candidate definitions here; the executor checks below use a live context.
+	found := false
+	if rt != nil {
+		for _, def := range rt.Definitions {
+			found = found || def.Name == "memory_view"
+		}
+	}
+	if !found {
 		t.Fatalf("expected chat provider request to expose selected memory_view runtime tool, got %#v", rt)
 	}
 	for _, toolName := range []string{"memory_view"} {
@@ -748,11 +758,11 @@ func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing
 		t.Fatalf("expected one chat model call, got %d", mock.CallCount())
 	}
 	seen := invoker.Seen()
-	if len(seen) != 1 || seen[0] != "route_task/recall_memory" {
+	if len(seen) != 0 {
 		t.Fatalf("expected only route_task recall hook for chat, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") || strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || strings.Contains(chatContext, "prefer repo-local managed memory for this project.") {
+	if chatContext := managedcontext.Text(context.WithoutCancel(request.Ctx)); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected selected memory handle without route/index summary in model-facing chat context, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -815,11 +825,11 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 		t.Fatalf("expected one plan chat model call, got %d", mock.CallCount())
 	}
 	seen := invoker.Seen()
-	if len(seen) != 1 || seen[0] != "route_task/recall_memory" {
+	if len(seen) != 0 {
 		t.Fatalf("expected only route_task recall hook for plan chat, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") || strings.Contains(chatContext, "Remember: prefer repo-local managed memory for this project.") || strings.Contains(chatContext, "prefer repo-local managed memory for this project.") {
+	if chatContext := managedcontext.Text(context.WithoutCancel(request.Ctx)); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected selected memory handle without route/index summary in model-facing plan chat context, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -896,11 +906,11 @@ func TestProcessStreamingResponse_InteractiveChatExplicitMemoryViewRequestAuthor
 				t.Fatalf("expected one chat model call, got %d", mock.CallCount())
 			}
 			seen := invoker.Seen()
-			if len(seen) != 1 || seen[0] != "route_task/recall_memory" {
+			if len(seen) != 0 {
 				t.Fatalf("expected route_task recall hook, got %#v", seen)
 			}
 			request := mock.LastAgentRequest()
-			if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") || strings.Contains(chatContext, ".openvibely/memories/chat_memory.md") || strings.Contains(chatContext, "unindexed_chat.md") || strings.Contains(chatContext, "Selected chat memory body") {
+			if chatContext := managedcontext.Text(context.WithoutCancel(request.Ctx)); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 				t.Fatalf("expected explicit indexed memory handle only in provider request, got:\n%s", chatContext)
 			}
 			assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -1030,7 +1040,7 @@ func TestProcessStreamingResponse_TaskFollowupRoutesMemoryFromCurrentMessage(t *
 		t.Fatalf("expected route_task memory recall hook for task followup, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "`usage_analytics.md`") || !strings.Contains(chatContext, "MUST call `memory_view(\"<memory>\")`") || !strings.Contains(chatContext, "tell them about a selected memory/topic") || strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(context.WithoutCancel(request.Ctx)); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected usage analytics selected memory and mandatory memory_view instruction in task followup provider request, got:\n%s", chatContext)
 	}
 }
@@ -1085,7 +1095,7 @@ func TestProcessStreamingResponse_TaskFollowupExposesSelectedMemoryViewTool(t *t
 	if request.Operation != llmcontracts.OperationStreaming || !request.Followup {
 		t.Fatalf("expected streaming task followup provider request, got operation=%s followup=%v", request.Operation, request.Followup)
 	}
-	assertTaskFollowupSelectedMemoryContext(t, request.ChatSystemContext)
+	assertTaskFollowupSelectedMemoryContext(t, managedcontext.Text(context.WithoutCancel(request.Ctx)))
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
 }
 
@@ -1128,7 +1138,7 @@ func TestProcessStreamingResponse_TaskFollowupExplicitMemoryViewRequestAuthorize
 		t.Fatalf("expected one task followup model call, got %d", mock.CallCount())
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(context.WithoutCancel(request.Ctx)); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected explicit selected memory in task followup provider request when router misses, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -1174,7 +1184,7 @@ func TestProcessStreamingResponse_ListCapabilitiesShowsSelectedMemoryHandles(t *
 	})
 
 	request := mock.LastAgentRequest()
-	if handles := service.SelectedMemoryHandlesFromContext(request.Ctx); len(handles) != 1 || handles[0] != "chat_memory.md" {
+	if handles := service.SelectedMemoryHandlesFromContext(request.Ctx); len(handles) != 2 || handles[0] != "chat_memory.md" || handles[1] != "usage_analytics.md" {
 		t.Fatalf("expected selected memory handles in provider request context, got %#v", handles)
 	}
 }
@@ -1232,7 +1242,7 @@ func TestProcessStreamingResponse_TaskFollowupListCapabilitiesIncludesSelectedMe
 	if err != nil || !handled || isErr {
 		t.Fatalf("execute list_capabilities handled=%v isErr=%v err=%v output=%q", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, "Selected memories for this turn") || !strings.Contains(out, "chat_memory.md") || !strings.Contains(out, "memory_view") {
+	if !strings.Contains(out, "Available memories for this turn") || !strings.Contains(out, "chat_memory.md") || !strings.Contains(out, "memory_view") {
 		t.Fatalf("expected list_capabilities to include selected memory handle and memory_view, got:\n%s", out)
 	}
 }
@@ -2784,9 +2794,15 @@ func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
 	require.False(t, newMessage.Queued)
 
 	request := mock.LastAgentRequest()
-	require.Len(t, request.Attachments, 1)
+	require.Len(t, request.Attachments, 2)
 	require.Equal(t, "diagram.png", request.Attachments[0].FileName)
-	require.Contains(t, request.ChatSystemContext, "queued text attachment")
+	require.Contains(t, request.Message, "notes.txt")
+	require.NotContains(t, request.ChatSystemContext, "notes.txt")
+	require.NotContains(t, strings.TrimPrefix(request.Message, input.Content), "queued text attachment")
+	require.NotContains(t, request.ChatSystemContext, "queued text attachment")
+	saved, err := h.execRepo.GetByID(ctx, request.ExecID)
+	require.NoError(t, err)
+	require.Equal(t, input.Content, saved.PromptSent)
 	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
 	require.NoError(t, err)
 	require.Len(t, attachments[request.ExecID], 2)
@@ -3004,7 +3020,7 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 	h.workerSvc.Resize(1)
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	initialRequest := mock.LastAgentRequest()
-	if instructions := initialRequest.ProjectInstructions; !strings.Contains(instructions, "`chat_memory.md`") || strings.Contains(instructions, "`usage_analytics.md`") {
+	if instructions := managedcontext.Text(context.WithoutCancel(initialRequest.Ctx)); !strings.Contains(instructions, "chat_memory.md") || !strings.Contains(instructions, "usage_analytics.md") {
 		t.Fatalf("expected initial task turn to select chat_memory.md only, got:\n%s", instructions)
 	}
 	initialExecs, err := h.execRepo.ListByTask(ctx, task.ID)
@@ -3034,7 +3050,7 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 		t.Fatalf("expected memory recall hook for initial task and queued followup, got %#v", seen)
 	}
 	followupRequest := mock.LastAgentRequest()
-	if chatContext := followupRequest.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`usage_analytics.md`") || strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(context.WithoutCancel(followupRequest.Ctx)); !strings.Contains(chatContext, "usage_analytics.md") || !strings.Contains(chatContext, "chat_memory.md") {
 		t.Fatalf("expected queued followup to route memory from the followup message, got:\n%s", chatContext)
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(followupRequest.Ctx)
@@ -3046,8 +3062,8 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 		t.Fatalf("expected queued followup memory_view to load usage analytics memory, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 	out, handled, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"chat_memory.md"}`))
-	if err != nil || !handled || !isErr {
-		t.Fatalf("expected previous-turn memory handle to be unauthorized for followup, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	if err != nil || !handled || isErr {
+		t.Fatalf("expected permitted previous-turn memory to remain available for followup, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
 }
 
@@ -3258,7 +3274,7 @@ func TestStartQueuedTaskThreadInputPreparesSelectedMemoryForQueuedFollowup(t *te
 		t.Fatalf("expected route_task memory recall hook for queued task followup, got %#v", seen)
 	}
 	request := mock.LastAgentRequest()
-	if chatContext := request.ChatSystemContext; !strings.Contains(chatContext, "## Selected Memories For This Task") || !strings.Contains(chatContext, "`chat_memory.md`") {
+	if chatContext := managedcontext.Text(context.WithoutCancel(request.Ctx)); !strings.Contains(chatContext, "## Available memories") || !strings.Contains(chatContext, "chat_memory.md") || strings.Contains(chatContext, "Selected chat memory body") {
 		t.Fatalf("expected selected memory handle in queued task followup provider request, got:\n%s", chatContext)
 	}
 	assertChatMemoryViewToolAvailable(t, request.Ctx)
@@ -4106,9 +4122,15 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	request := mock.LastAgentRequest()
-	require.Len(t, request.Attachments, 1)
-	require.Equal(t, "screen.png", request.Attachments[0].FileName)
-	require.Contains(t, request.ChatSystemContext, "queued task attachment")
+	require.Len(t, request.Attachments, 2)
+	require.Equal(t, "screen.png", request.Attachments[1].FileName)
+	require.Contains(t, request.Message, "instructions.txt")
+	require.NotContains(t, request.ChatSystemContext, "instructions.txt")
+	require.NotContains(t, strings.TrimPrefix(request.Message, input.Content), "queued task attachment")
+	require.NotContains(t, request.ChatSystemContext, "queued task attachment")
+	saved, err := h.execRepo.GetByID(ctx, request.ExecID)
+	require.NoError(t, err)
+	require.Equal(t, input.Content, saved.PromptSent)
 	attachments, err := h.chatAttachmentRepo.ListByExecutionIDs(ctx, []string{request.ExecID})
 	require.NoError(t, err)
 	require.Len(t, attachments[request.ExecID], 2)
@@ -4928,7 +4950,7 @@ func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfte
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
-	largeContent := strings.Repeat("x", maxTextAttachmentSize+1)
+	largeContent := strings.Repeat("x", (256<<10)+1)
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "large.txt"), []byte(largeContent), 0644))
 	steering := &models.ThreadInput{
 		Scope:               models.ThreadInputScopeTask,
@@ -4957,11 +4979,12 @@ func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfte
 	require.Equal(t, 1, mock.CallCount())
 	lastCall := mock.LastCall()
 	require.Contains(t, lastCall.Prompt, "use attached steering files")
-	require.Contains(t, lastCall.Prompt, "steering notes")
-	require.Contains(t, lastCall.Prompt, "large.txt (attached")
+	require.NotContains(t, lastCall.Prompt, "steering notes")
+	require.Contains(t, lastCall.Prompt, "notes.txt")
+	require.Contains(t, lastCall.Prompt, "large.txt")
 	require.NotContains(t, lastCall.Prompt, largeContent[:50])
-	require.Len(t, lastCall.Attachments, 1)
-	require.Equal(t, filepath.Join(pendingDir, "screen.png"), lastCall.Attachments[0].FilePath)
+	require.Len(t, lastCall.Attachments, 3)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), lastCall.Attachments[2].FilePath)
 	applied, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 	require.NoError(t, err)
 	require.NotNil(t, applied)
@@ -5035,9 +5058,10 @@ func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProv
 	})
 
 	require.Equal(t, 1, mock.CallCount())
-	require.Contains(t, mock.LastCall().Prompt, "steering notes")
-	require.Len(t, mock.LastCall().Attachments, 1)
-	require.Equal(t, filepath.Join(pendingDir, "screen.png"), mock.LastCall().Attachments[0].FilePath)
+	require.NotContains(t, mock.LastCall().Prompt, "steering notes")
+	require.Contains(t, mock.LastCall().Prompt, "notes.txt")
+	require.Len(t, mock.LastCall().Attachments, 2)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), mock.LastCall().Attachments[1].FilePath)
 	stillPending, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 	require.NoError(t, err)
 	require.NotNil(t, stillPending)
@@ -9275,4 +9299,137 @@ func TestProcessStreamingResponse_FollowupIndexLock(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessStreamingResponseHistoricalImageInstructions(t *testing.T) {
+	for _, deferred := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferred=%v", deferred), func(t *testing.T) {
+			h, _, configs, stores := setupTestHandlerWithStores(t)
+			h.chatAttachmentRepo = stores.ChatAttachments
+			agent := createAgent(t, configs)
+			project := createProject(t, h, "Historical image")
+			task := createTask(t, h, project.ID, "Review old screenshot", func(task *models.Task) { task.AgentID = &agent.ID })
+			old := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+				ex.Status = models.ExecCompleted
+				ex.PromptSent = "See screenshot"
+				ex.Output = "Seen"
+			})
+			require.NoError(t, stores.ChatAttachments.Create(context.Background(), &models.ChatAttachment{ExecutionID: old.ID, FileName: "previous.png", FilePath: "/tmp/previous.png", MediaType: "image/png", FileSize: 100}))
+			current := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.IsFollowup = true })
+			mock := testutil.NewMockLLMCaller()
+			mock.Response = "Reviewed"
+			mock.TextOnly = "Reviewed"
+			h.llmSvc.SetLLMCaller(mock)
+			history := []models.Execution{*old}
+			if deferred {
+				history = nil
+			}
+			h.processStreamingResponse(streamingResponseParams{ExecID: current.ID, TaskID: task.ID, Task: task, Message: "Look at the old screenshot again", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, DeferHistoryLoad: deferred, ChatHistory: history})
+			require.Len(t, mock.AgentRequests, 1)
+			req := mock.AgentRequests[0]
+			require.Len(t, req.ChatHistory, 1)
+			require.NotContains(t, req.Message, "previous.png")
+			require.NotContains(t, req.ChatSystemContext, "previous.png")
+			require.Empty(t, req.Attachments)
+			require.Equal(t, "See screenshot", req.ChatHistory[0].PromptSent)
+			prompt := attachmentcontext.Text(req.Ctx)
+			require.Contains(t, prompt, "previous.png")
+			require.NotContains(t, prompt, "already included directly")
+			require.Contains(t, prompt, "Use file tools")
+		})
+	}
+}
+
+func TestProcessStreamingResponse_TaskFollowupEditTask(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	h, _, configs := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Followup edits")
+	otherProject := createProject(t, h, "Foreign followup edits")
+	target := createTask(t, h, project.ID, "Target", func(task *models.Task) { task.Category = models.CategoryBacklog })
+	foreign := createTask(t, h, otherProject.ID, "Foreign", func(task *models.Task) { task.Category = models.CategoryBacklog })
+	var requests []struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		requests = append(requests, request)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if len(requests) == 1 {
+			calls := []map[string]any{}
+			for i, call := range []struct{ name, args string }{
+				{"list_capabilities", `{}`},
+				{"edit_task", fmt.Sprintf(`{"id":%q,"title":"Edited by followup","prompt":"Updated prompt","priority":4}`, target.ID)},
+				{"edit_task", fmt.Sprintf(`{"id":%q,"title":"Must not change"}`, foreign.ID)},
+			} {
+				calls = append(calls, map[string]any{"index": i, "id": fmt.Sprintf("call_%d", i), "type": "function", "function": map[string]any{"name": call.name, "arguments": call.args}})
+			}
+			payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": calls}, "finish_reason": "tool_calls"}}})
+			require.NoError(t, err)
+			fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	agent := createAgent(t, configs, func(config *models.LLMConfig) {
+		config.Provider = models.ProviderOpenAICompatible
+		config.Model = "fixture/model"
+		config.AuthMethod = models.AuthMethodAPIKey
+		config.APIKey = "test-key"
+		config.BaseURL = server.URL + "/v1/"
+		config.PresetSlug = "vllm"
+		config.Transport = "chat_completions"
+	})
+	caller := createTask(t, h, project.ID, "Caller", func(task *models.Task) { task.Status = models.StatusRunning; task.AgentID = &agent.ID })
+	execution := createExec(t, h, caller.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning })
+	h.processStreamingResponse(streamingResponseParams{ExecID: execution.ID, TaskID: caller.ID, Message: "Edit target", Agent: *agent, ProjectID: project.ID, IsTaskFollowup: true, ChatMode: models.ChatModeOrchestrate})
+	require.Len(t, requests, 2)
+	names := []string{}
+	for _, tool := range requests[0].Tools {
+		names = append(names, tool.Function.Name)
+	}
+	require.Contains(t, names, "edit_task")
+	results := []string{}
+	for _, message := range requests[1].Messages {
+		if message.Role == "tool" {
+			results = append(results, message.Content)
+		}
+	}
+	require.Len(t, results, 3)
+	require.Contains(t, results[0], "edit_task")
+	require.Contains(t, results[1], "Edited 1 task(s)")
+	require.Contains(t, results[2], "edit_task: no tasks were updated")
+	for _, name := range []string{"cancel_task", "merge_task", "mark_task_goal_achieved", "report_task_goal_blocked", "request_user_input"} {
+		require.NotContains(t, names, name)
+		require.NotContains(t, results[0], name)
+	}
+	updated, err := h.taskRepo.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Edited by followup", updated.Title)
+	require.Equal(t, "Updated prompt", updated.Prompt)
+	require.Equal(t, 4, updated.Priority)
+	unchanged, err := h.taskRepo.GetByID(ctx, foreign.ID)
+	require.NoError(t, err)
+	require.Equal(t, foreign.Title, unchanged.Title)
+	require.Equal(t, foreign.Prompt, unchanged.Prompt)
 }

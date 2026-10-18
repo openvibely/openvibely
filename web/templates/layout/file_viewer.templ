@@ -1,0 +1,13 @@
+package layout
+import "github.com/openvibely/openvibely/web/static"
+
+templ FileViewer() {
+ <link rel="stylesheet" href={static.URL("file-viewer.css")}/>
+ <script src={static.URL("file-image.js")}></script>
+ <script src={static.URL("file-pdf.js")}></script>
+ <script src={static.URL("file-sheets.js")}></script>
+ <script src={static.URL("file-viewer.js")}></script>
+ <script src={static.URL("file-math.js")}></script>
+ <script src={static.URL("chat-svg.js")}></script>
+ <script src={static.URL("skill-dependencies.js")}></script>
+}

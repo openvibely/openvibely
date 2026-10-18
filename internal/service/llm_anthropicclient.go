@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/openvibely/openvibely/internal/applog"
-	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
@@ -107,28 +105,4 @@ func appendMergedMessage(messages []anthropicclient.Message, role, content strin
 		return messages
 	}
 	return append(messages, anthropicclient.Message{Role: role, Content: content})
-}
-
-// convertAttachments converts internal models.Attachment to anthropicclient.FileAttachment format.
-// Used by legacy callAnthropic and callAnthropicChat paths.
-func convertAttachments(attachments []models.Attachment) ([]*anthropicclient.FileAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-
-	prepared, err := llmattachment.Preprocess(attachments)
-	if err != nil {
-		return nil, fmt.Errorf("preprocess attachments: %w", err)
-	}
-
-	result := make([]*anthropicclient.FileAttachment, 0, len(prepared))
-	for _, att := range prepared {
-		mcAtt, err := anthropicclient.NewFileAttachment(att.FilePath)
-		if err != nil {
-			applog.Infof("[agent-svc] convertAttachments error loading %s: %v", att.FilePath, err)
-			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
-		}
-		result = append(result, mcAtt)
-	}
-	return result, nil
 }

@@ -445,7 +445,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		}
 	}
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -543,7 +543,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		prompt
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -600,6 +600,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+		OnHistory:                      a.responsesHistoryRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -684,7 +685,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -743,6 +744,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+		OnHistory:                      a.responsesHistoryRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -820,7 +822,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 		prompt
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -840,19 +842,20 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
-		Model:            agent.Model,
-		ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
-		FirstPartyOpenAI: true,
-		Temperature:      agent.Temperature,
-		ContextWindow:    agent.ContextWindow,
-		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
-		WorkDir:          effectiveWorkDir,
-		Attachments:      oaAttachments,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
-		SkipDefaultTools: skipDefaultTools,
+		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:               agent.Model,
+		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		FirstPartyOpenAI:    true,
+		Temperature:         agent.Temperature,
+		ContextWindow:       agent.ContextWindow,
+		MaxOutputTokens:     openAIAgenticOutputBudget,
+		System:              llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
+		WorkDir:             effectiveWorkDir,
+		Attachments:         oaAttachments,
+		ExtraTools:          extraTools,
+		ToolExecutor:        toolExecutor,
+		ToolFilter:          toolFilter,
+		SkipDefaultTools:    skipDefaultTools,
 		OnText: func(text string) {
 			if isStreamingMarkerChunk(text) {
 				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)
@@ -868,6 +871,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 	})
+	err = a.saveCompletionsHistory(ctx, execID, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("completions API: %w", err)
@@ -895,7 +899,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	defer releaseTransport()
 
-	client.History = append(client.History, buildClientHistory(chatHistory)...)
+	client.SetCompletionsHistory(buildCompletionsHistory(chatHistory))
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	if !isTaskFollowup {
@@ -903,7 +907,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
 
-	oaAttachments, err := convertAttachments(attachments)
+	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
@@ -924,20 +928,21 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, message, &openaiclient.CompletionsOptions{
-		Model:            agent.Model,
-		ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
-		FirstPartyOpenAI: true,
-		Temperature:      agent.Temperature,
-		ContextWindow:    agent.ContextWindow,
-		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           systemPromptStr,
-		DisableTools:     disableTools,
-		WorkDir:          effectiveWorkDir,
-		Attachments:      oaAttachments,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
-		SkipDefaultTools: skipDefaultTools,
+		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:               agent.Model,
+		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		FirstPartyOpenAI:    true,
+		Temperature:         agent.Temperature,
+		ContextWindow:       agent.ContextWindow,
+		MaxOutputTokens:     openAIAgenticOutputBudget,
+		System:              systemPromptStr,
+		DisableTools:        disableTools,
+		WorkDir:             effectiveWorkDir,
+		Attachments:         oaAttachments,
+		ExtraTools:          extraTools,
+		ToolExecutor:        toolExecutor,
+		ToolFilter:          toolFilter,
+		SkipDefaultTools:    skipDefaultTools,
 		OnText: func(text string) {
 			if isStreamingMarkerChunk(text) {
 				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)
@@ -953,6 +958,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 	})
+	err = a.saveCompletionsHistory(ctx, execID, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", llmusage.FromTotal(0), fmt.Errorf("completions API: %w", err)
@@ -1154,6 +1160,11 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.ResponsesInput) > 0 {
 				messages = []openaiclient.Message{{ResponsesInputItems: saved.ResponsesInput}}
 				checkpoint = true
+			} else if items := completionsReplayInput(replay.TranscriptJSON); len(items) > 0 {
+				// Completions records contain this execution only; preserve the prefix.
+				prefix := historyMessageItems(messages)
+				messages = []openaiclient.Message{{ResponsesInputItems: append(prefix, items...)}}
+				checkpoint = true
 			} else if checkpoint {
 				// Text continuations after the native checkpoint are newer history,
 				// not part of the prefix replaced by that checkpoint.
@@ -1224,36 +1235,19 @@ func restoreOpenAIAstraReasoningState(ctx context.Context, client *openaiclient.
 	}
 }
 
-func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-
-	prepared, err := llmattachment.Preprocess(attachments)
+func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
+	inputs, err := llmattachment.ModelInputs(ctx, attachments)
 	if err != nil {
-		return nil, fmt.Errorf("preprocess attachments: %w", err)
+		return nil, err
 	}
-
-	result := make([]*openaiclient.FileAttachment, 0, len(prepared))
-	for _, att := range prepared {
-		oaAtt, err := openaiclient.NewFileAttachment(att.FilePath)
-		if err != nil {
-			// Skip unsupported file types silently (e.g. PDFs)
-			if _, ok := err.(*openaiclient.UnsupportedFileTypeError); ok {
-				applog.Infof("[openai-adapter] convertAttachments skipping unsupported file %s: %v", att.FileName, err)
-				continue
-			}
-			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
-		}
-		if strings.TrimSpace(att.FileName) != "" {
-			oaAtt.FileName = att.FileName
-		}
-		if strings.TrimSpace(att.MediaType) != "" {
-			oaAtt.MediaType = strings.TrimSpace(att.MediaType)
-		}
-		result = append(result, oaAtt)
+	out := make([]*openaiclient.FileAttachment, 0, len(inputs))
+	for _, input := range inputs {
+		out = append(out, &openaiclient.FileAttachment{FileName: input.Name, MediaType: input.MediaType, Data: input.Data})
 	}
-	return result, nil
+	return out, nil
+}
+func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
+	return convertAttachmentsContext(context.Background(), attachments)
 }
 
 func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (openaiclient.LocalSteeringInput, error) {

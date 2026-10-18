@@ -566,7 +566,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if strings.Contains(agent.SystemPrompt, "system_prompt:") {
 		t.Fatalf("agent prompt should come from SKILLS.md markdown body, not YAML system_prompt: %q", agent.SystemPrompt)
 	}
-	for _, want := range []string{"route_task", "observe_task_for_learning", "maintain_skill_library"} {
+	for _, want := range []string{"observe_task_for_learning", "maintain_skill_library"} {
 		found := false
 		for _, skill := range agent.Skills {
 			if skill.Name == want {
@@ -585,21 +585,18 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if err != nil {
 		t.Fatalf("HooksByAgent: %v", err)
 	}
-	if len(hooks) != 2 {
+	if len(hooks) != 1 {
 		t.Fatalf("expected two declaration-backed lifecycle hooks, got %d: %#v", len(hooks), hooks)
 	}
 	have := map[string]models.AgentLifecycleHook{}
 	for _, hook := range hooks {
 		have[string(hook.When)+"/"+hook.SkillKey] = hook
 	}
-	if hook, ok := have["route_task/route_task"]; !ok || hook.OutputContract != models.OutputContractSelectedSkills || hook.Blocking || !hook.Enabled {
-		t.Fatalf("bad route_task hook: %#v", hook)
+	if _, ok := have["route_task/route_task"]; ok {
+		t.Fatal("obsolete selector installed")
 	}
-	if hook, ok := have["after_complete/observe_task_for_learning"]; !ok || hook.OutputContract != models.OutputContractLearningSummary || hook.Blocking || !hook.Enabled {
+	if hook, ok := have["after_complete/observe_task_for_learning"]; !ok || hook.OutputContract != models.OutputContractLearningSummary || hook.Blocking || hook.Enabled {
 		t.Fatalf("bad observe hook: %#v", hook)
-	}
-	if hook := have["route_task/route_task"]; hook.PayloadJSON != "{}" {
-		t.Fatalf("Skill Curator route hook should stay unscoped, got payload %s", hook.PayloadJSON)
 	}
 	if hook := have["after_complete/observe_task_for_learning"]; hook.PayloadJSON != `{"blocks":["conversation_transcript","learning_snapshot"]}` {
 		t.Fatalf("Skill Curator observe hook must declare compact after-complete payload, got %s", hook.PayloadJSON)
@@ -702,7 +699,7 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if err != nil {
 		t.Fatalf("HooksByAgent second: %v", err)
 	}
-	if len(hooks) != 2 {
+	if len(hooks) != 1 {
 		t.Fatalf("expected idempotent hook repair, got %d hooks", len(hooks))
 	}
 }
@@ -737,6 +734,21 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 	if err != nil || agent == nil {
 		t.Fatalf("load skill curator: %v %#v", err, agent)
 	}
+	hooks, err := lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil || len(hooks) == 0 {
+		t.Fatalf("hooks: %+v %v", hooks, err)
+	}
+	for i := range hooks {
+		wantEnabled := hooks[i].When != models.LifecycleAfterComplete
+		if hooks[i].Enabled != wantEnabled {
+			t.Fatalf("unexpected default enabled state: %+v", hooks[i])
+		}
+		// Opt into learning and opt out of routing; repair must preserve both.
+		hooks[i].Enabled = !wantEnabled
+		if err := lifecycleRepo.UpdateHook(ctx, &hooks[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	agent.Model = modelCfg.ID
 	agent.Enabled = false
 	if err := agentRepo.Update(ctx, agent); err != nil {
@@ -744,6 +756,15 @@ func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAn
 	}
 	if err := svc.EnsureProject(ctx, project.ID); err != nil {
 		t.Fatalf("reconcile after user controls: %v", err)
+	}
+	hooks, err = lifecycleRepo.HooksByAgent(ctx, agent.ID)
+	if err != nil || len(hooks) == 0 {
+		t.Fatalf("reconciled hooks: %+v %v", hooks, err)
+	}
+	for _, hook := range hooks {
+		if hook.Enabled != (hook.When == models.LifecycleAfterComplete) {
+			t.Fatalf("repair changed user hook choice: %+v", hook)
+		}
 	}
 	reconciled, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
 	if err != nil || reconciled == nil {

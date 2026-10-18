@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -14,27 +15,40 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 	if s == nil || agent == nil || !agentExplicitlyAllowsAnyTool(agent, "skill_view", "skills_list", "agent_list", "agent_view", "skill_manage", "skill_import", "agent_skill_manage") {
 		return nil
 	}
-	selectedCatalog := lifecycleTurnFromContext(ctx).Catalog
+	if agent.SystemKind != models.AgentSystemKindSkillCurator || task.Category != models.CategoryScheduled || lifecycleTurnFromContext(ctx).TaskThreadTurn {
+		if _, prepared := ctx.Value(managedTurnKey{}).(managedTurn); prepared {
+			// The prepared reader resolves the current cached catalog on each call.
+			// Do not shadow it with a reader bound to the initial turn catalog.
+			return nil
+		}
+		return agentskills.SelectedSkillRuntimeTools(lifecycleTurnFromContext(ctx).Catalog)
+	}
 	projectRoot := ""
 	if s.projectRepo != nil {
 		projectRoot = projectSkillRoot(ctx, s.projectRepo, task.ProjectID)
 	}
-	standaloneCatalog := s.standaloneSkillCatalog(task, projectRoot)
-
 	var inspector agentskills.AgentInspector
 	if s.agentRepo != nil {
 		inspector = newAgentInspector(s.agentRepo, s.lifecycleRepo, nil)
 	}
-	var readers *llmcontracts.RuntimeTools
-	readerCatalog := selectedCatalog
-	if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
-		readerCatalog = mergeSkillCatalogs(task.ID+":skill-tools", standaloneCatalog, selectedCatalog)
-		readers = agentskills.SkillRuntimeTools(readerCatalog, s.globalSkillRoot, projectRoot, inspector)
-	} else if agentExplicitlyAllowsTool(agent, "skill_view") {
-		readers = agentskills.SelectedSkillRuntimeTools(selectedCatalog)
-	}
 	turn := lifecycleTurnFromContext(ctx)
-	readers = s.instrumentSkillRuntimeTools(readers, readerCatalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)})
+	buildReaders := func(callCtx context.Context) *llmcontracts.RuntimeTools {
+		// Rebuild the authorized scopes together so project overrides and newly
+		// created skills take effect before the next read in this execution.
+		catalog, err := agentskills.BuildAgentCatalog(task.ID, s.globalSkillRoot, projectRoot, agent.Key)
+		if err != nil {
+			catalog = agentskills.NewCatalog(task.ID, nil)
+		}
+		var readers *llmcontracts.RuntimeTools
+		if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
+			catalog = mergeSkillCatalogs(task.ID+":skill-tools", s.standaloneSkillCatalog(task, projectRoot), catalog)
+			readers = agentskills.ExecutingSkillRuntimeTools(catalog, s.globalSkillRoot, projectRoot, inspector)
+		} else if agentExplicitlyAllowsTool(agent, "skill_view") {
+			readers = agentskills.SelectedSkillRuntimeTools(catalog)
+		}
+		return s.instrumentSkillRuntimeTools(readers, catalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)})
+	}
+	readers := refreshingSkillReaders(buildReaders(ctx), buildReaders)
 	var writers []*llmcontracts.RuntimeTools
 	if agentExplicitlyAllowsTool(agent, "skill_manage") || agentExplicitlyAllowsTool(agent, "skill_import") || agentExplicitlyAllowsTool(agent, "agent_skill_manage") {
 		importer := s.agentSkillImporter(task)
@@ -112,4 +126,28 @@ func agentExplicitlyAllowsTool(agent *models.Agent, name string) bool {
 		}
 	}
 	return false
+}
+
+// refreshingSkillReaders shares per-call catalog refresh across main turns and
+// maintenance. The factory owns scope and analytics; the outer runtime retains
+// its definitions and permission filters.
+func refreshingSkillReaders(initial *llmcontracts.RuntimeTools, build func(context.Context) *llmcontracts.RuntimeTools) *llmcontracts.RuntimeTools {
+	if initial == nil {
+		return nil
+	}
+	out := *initial
+	out.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		if !initial.HasDefinition(name) {
+			return "", false, false, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return "", true, true, err
+		}
+		current := build(ctx)
+		if current == nil || current.Executor == nil {
+			return "Skill reader unavailable", true, true, nil
+		}
+		return current.Executor(ctx, name, input)
+	}
+	return &out
 }

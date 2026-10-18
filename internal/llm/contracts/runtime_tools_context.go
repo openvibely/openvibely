@@ -35,6 +35,8 @@ type RuntimeToolFilter func(name string) (allow bool, handled bool)
 
 // RuntimeTools carries request-scoped tool definitions and execution hooks.
 type RuntimeTools struct {
+	// Definitions are candidates; providers must apply Filter before every request.
+	// Keeping denied candidates permits grants to change during a tool loop.
 	Definitions []RuntimeToolDefinition
 	Executor    RuntimeToolExecutor
 	Filter      RuntimeToolFilter
@@ -56,6 +58,11 @@ func (rt *RuntimeTools) HasDefinition(name string) bool {
 	}
 	for _, def := range rt.Definitions {
 		if strings.EqualFold(strings.TrimSpace(def.Name), needle) {
+			if rt.Filter != nil {
+				if allow, handled := rt.Filter(def.Name); handled {
+					return allow
+				}
+			}
 			return true
 		}
 	}
@@ -71,7 +78,7 @@ func (rt *RuntimeTools) DefinitionNames() []string {
 	}
 	var names []string
 	for _, def := range rt.Definitions {
-		if name := strings.TrimSpace(def.Name); name != "" {
+		if name := strings.TrimSpace(def.Name); name != "" && rt.HasDefinition(name) {
 			names = append(names, name)
 		}
 	}

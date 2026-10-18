@@ -285,21 +285,25 @@ func BuildCatalogAll(turnID, globalRoot, projectRoot string) (*Catalog, error) {
 func buildCatalog(turnID, globalRoot, projectRoot string, includeDisabled bool) (*Catalog, error) {
 	var entries []Entry
 	if globalRoot != "" {
-		got, err := loadStandaloneSkills(globalRoot, SourceGlobal, includeDisabled)
+		got, err := loadStandaloneSkills(globalRoot, SourceGlobal, true)
 		if err != nil {
 			return nil, fmt.Errorf("read global skill index: %w", err)
 		}
 		entries = append(entries, got...)
 	}
 	if projectRoot != "" {
-		got, err := loadStandaloneSkills(projectRoot, SourceProject, includeDisabled)
+		got, err := loadStandaloneSkills(projectRoot, SourceProject, true)
 		if err != nil {
 			return nil, fmt.Errorf("read project skill index: %w", err)
 		}
 		entries = append(entries, got...)
 	}
 
-	return NewCatalog(turnID, mergeCatalogEntries(entries)), nil
+	entries = mergeCatalogEntries(entries)
+	if !includeDisabled {
+		entries = enabledCatalogEntries(entries)
+	}
+	return NewCatalog(turnID, entries), nil
 }
 
 // mergeCatalogEntries applies project-over-global precedence and returns one
@@ -336,20 +340,20 @@ func BuildAgentCatalog(turnID, globalRoot, projectRoot, agentKey string) (*Catal
 	}
 	var entries []Entry
 	if globalRoot != "" {
-		got, err := loadAgentSkills(globalRoot, agentKey, SourceGlobal, false)
+		got, err := loadAgentSkills(globalRoot, agentKey, SourceGlobal, true)
 		if err != nil {
 			return nil, fmt.Errorf("read global agent skill index: %w", err)
 		}
 		entries = append(entries, got...)
 	}
 	if projectRoot != "" {
-		got, err := loadAgentSkills(projectRoot, agentKey, SourceProject, false)
+		got, err := loadAgentSkills(projectRoot, agentKey, SourceProject, true)
 		if err != nil {
 			return nil, fmt.Errorf("read project agent skill index: %w", err)
 		}
 		entries = append(entries, got...)
 	}
-	deduped := mergeCatalogEntries(entries)
+	deduped := enabledCatalogEntries(mergeCatalogEntries(entries))
 	for i := range deduped {
 		deduped[i].Source = SourceAgent
 	}
@@ -510,4 +514,14 @@ func isValidSlug(name string) bool {
 		}
 	}
 	return true
+}
+
+func enabledCatalogEntries(entries []Entry) []Entry {
+	out := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
+		if !skillDisabledOnDisk(entry.AbsolutePath) {
+			out = append(out, entry)
+		}
+	}
+	return out
 }

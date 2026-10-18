@@ -21,7 +21,7 @@ templ KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSo
 			<li class="ov-menu-rule" role="separator"></li>
 			@MenuSubmenu("Filter") {
 				if category == models.CategoryCompleted {
-					@KanbanFilter(cat, "status", "Outcome", []string{"", "completed", "failed", "cancelled"}, []string{"All outcomes", "Succeeded", "Failed", "Cancelled"})
+					@KanbanFilter(cat, "status", "Outcome", []string{"", "completed", "goal-met", "failed", "cancelled"}, []string{"All outcomes", "Succeeded", "Goal met", "Failed", "Cancelled"})
 					@KanbanFilter(cat, "merge", "Merge status", []string{"", "merged", "unmerged", "conflict", "failed", "none"}, []string{"All merge states", "Merged", "Unmerged", "Conflicts", "Merge failed", "No branch"})
 				} else {
 					@KanbanFilter(cat, "status", "Status", []string{"", "pending", "failed", "cancelled", "blocked"}, []string{"All statuses", "Pending", "Failed", "Cancelled", "Blocked"})

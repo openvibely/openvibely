@@ -100,6 +100,7 @@ type Handler struct {
 	discordSvc                 DiscordServiceProvider
 	channelMessageRouter       *service.ChannelMessageRouter
 	localRepoPathEnabled       *bool
+	desktopFileSaver           DesktopFileSaver
 	projectFolderPicker        ProjectFolderPicker
 	webhookRepo                persistence.WebhookStore
 	channelTargetRepo          persistence.ChannelTargetStore
@@ -335,6 +336,10 @@ func New(
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
 		taskSvc.SetFailedTaskThreadFollowupRetryHook(h.RetryLatestFailedTaskThreadFollowup)
 	}
+	if llmSvc != nil {
+		llmSvc.SetTaskRuntimeProvider(h.initialTaskRuntimeTools)
+	}
+
 	return h
 }
 
@@ -720,6 +725,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 			return next(c)
 		}
 	})
+	e.GET("/files", h.ListFilesPanel)
+	e.GET("/files/:id", h.GeneratedFileContent)
+	e.POST("/files/:id", h.saveDesktopFile(h.GeneratedFileContent))
 	e.GET("/favicon.png", h.AppIconPNG)
 	e.GET("/favicon.ico", h.AppIconICO)
 	e.GET(static.Prefix+"*", echo.WrapHandler(static.Handler()))
@@ -872,6 +880,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/attachments", h.GetTaskAttachments)
 	e.POST("/tasks/:taskId/attachments", h.UploadAttachment)
 	e.GET("/attachments/:id/download", h.DownloadTaskAttachment)
+	e.POST("/attachments/:id/download", h.saveDesktopFile(h.DownloadTaskAttachment))
 	e.DELETE("/attachments/:id", h.DeleteAttachment)
 
 	// Executions
@@ -919,6 +928,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/models/:id/edit-details", h.GetModelEditDetails)
 	e.GET("/models/openai-compatible/available", h.ListOpenAICompatibleAvailableModels)
 	e.GET("/models/ollama/available", h.ListOllamaAvailableModels)
+	e.GET("/models/ollama/context", h.DetectOllamaContext)
 	e.POST("/models/:id", h.UpdateModel)
 	e.PUT("/models/:id", h.UpdateModel)
 	e.POST("/models/:id/set-default", h.SetDefaultModel)
@@ -996,6 +1006,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Personality
 	e.GET("/personality", h.handleAppSettings)
 	e.POST("/personality/save", h.handlePersonalitySave)
+
+	// Themes
+	e.GET("/themes", h.Themes)
 
 	// Custom personalities
 	e.POST("/personality/custom", h.CreateCustomPersonality)
@@ -1076,7 +1089,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/chat/history", h.ClearChat)
 	e.POST("/chat/attachments", h.UploadChatAttachment)
 	e.GET("/chat/attachments/pending/:session/:name", h.PreviewPendingAttachment)
+	e.POST("/chat/attachments/pending/:session/:name", h.saveDesktopFile(h.PreviewPendingAttachment))
 	e.GET("/chat/attachments/:id/download", h.DownloadChatAttachment)
+	e.POST("/chat/attachments/:id/download", h.saveDesktopFile(h.DownloadChatAttachment))
 	e.DELETE("/chat/attachments/:id", h.DeleteChatAttachment)
 
 	// Brief & Debrief

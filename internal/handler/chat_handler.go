@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -338,19 +339,20 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
 	if err := h.startStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           task.ID,
-		Message:          message,
-		Agent:            *agent,
-		ChatHistory:      priorHistory,
-		ProjectID:        projectID,
-		PrincipalID:      h.authPrincipalID(c),
-		SystemContext:    combineContexts(attachmentContext, personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   false,
-		ChatMode:         chatMode,
-		Surface:          chatcontrol.SurfaceWeb,
+		ExecID:            exec.ID,
+		TaskID:            task.ID,
+		Message:           message,
+		Agent:             *agent,
+		ChatHistory:       priorHistory,
+		ProjectID:         projectID,
+		PrincipalID:       h.authPrincipalID(c),
+		SystemContext:     personalityContext,
+		AttachmentContext: attachmentContext,
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    false,
+		ChatMode:          chatMode,
+		Surface:           chatcontrol.SurfaceWeb,
 	}); err != nil {
 		c.Response().Header().Set("Retry-After", "30")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
@@ -556,44 +558,21 @@ type chatAttachmentModelContextOptions struct {
 }
 
 func buildChatAttachmentModelContext(files []chatAttachmentModelContextFile, opts chatAttachmentModelContextOptions) (string, []models.Attachment, error) {
-	var attachmentContents []string
-	var imageAttachments []models.Attachment
-
+	var attachments []models.Attachment
 	for _, file := range files {
 		mediaType := file.MediaType
 		if mediaType == "" {
 			mediaType = mediaTypeFromExtension(file.FileName)
 		}
-
-		if isImageFile(file.FileName) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  file.FileName,
-				FilePath:  file.FilePath,
-				MediaType: mediaType,
-				FileSize:  file.FileSize,
-			})
-			continue
-		}
-
-		if file.FileSize <= maxTextAttachmentSize {
-			content, err := os.ReadFile(file.FilePath)
-			if err != nil {
-				if opts.IgnoreReadErrors {
-					continue
-				}
-				return "", nil, fmt.Errorf("reading file %s: %w", file.FilePath, err)
-			}
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.FileName, string(content)))
-		} else {
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.FileName, file.FileSize))
+		attachments = append(attachments, models.Attachment{FileName: file.FileName, FilePath: file.FilePath, MediaType: mediaType, FileSize: file.FileSize})
+	}
+	var references []models.Attachment
+	for _, att := range attachments {
+		if !isImageFile(att.FileName) {
+			references = append(references, att)
 		}
 	}
-
-	textContext := ""
-	if len(attachmentContents) > 0 {
-		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return textContext, imageAttachments, nil
+	return llmprompt.BuildAttachmentInstructions(references), attachments, nil
 }
 
 // processAttachments moves uploaded files from pending directory to execution directory,
@@ -1283,4 +1262,21 @@ func (h *Handler) chatStreamSSEDBFallback(ctx context.Context, c echo.Context, e
 			}
 		}
 	}
+}
+
+// OpenAI commits steering attachments before the next sample. Keep the source
+// path for loading image bytes, but expose the committed path to file tools.
+func (h *Handler) previewSteeringAttachments(sessionID, executionID string, provider models.LLMProvider) (string, []models.Attachment, error) {
+	text, attachments, err := h.previewPendingAttachments(sessionID)
+	if err != nil || provider != models.ProviderOpenAI {
+		return text, attachments, err
+	}
+	var references []models.Attachment
+	for i := range attachments {
+		attachments[i].ReferencePath = filepath.Join(uploadsDir, "chat", executionID, attachments[i].FileName)
+		if !isImageFile(attachments[i].FileName) {
+			references = append(references, attachments[i])
+		}
+	}
+	return llmprompt.BuildAttachmentInstructions(references), attachments, nil
 }

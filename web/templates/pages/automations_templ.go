@@ -1761,7 +1761,7 @@ func automationYAMLSharedScript() templ.Component {
 			templ_7745c5c3_Var94 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<script>\n\t\twindow.openVibelyYAML = window.openVibelyYAML || (function() {\n\t\t\tfunction escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;'); }\n\t\t\tfunction lineIndent(line) { var match = line.match(/^\\s*/); return match ? match[0].length : 0; }\n\t\t\tfunction indentationGuides(indent) {\n\t\t\t\tif (!indent) return '';\n\t\t\t\tvar dots = [];\n\t\t\t\tfor (var column = 0; column < indent; column++) {\n\t\t\t\t\tdots.push('<span class=\"absolute z-10 rounded-full\" style=\"left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)\" data-automation-yaml-indent-dot aria-hidden=\"true\"></span>');\n\t\t\t\t}\n\t\t\t\treturn '<span class=\"pointer-events-none absolute inset-y-0 left-0 z-10\" style=\"width:' + indent + 'ch\" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden=\"true\">' + dots.join('') + '</span>';\n\t\t\t}\n\t\t\tfunction highlightLine(line, lineNumber, diagnosticLine) {\n\t\t\t\tvar indentation = line.match(/^\\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);\n\t\t\t\tif (/^\\s*#/.test(line)) rendered = '<span class=\"text-base-content/50\">' + escapeYAMLHTML(content) + '</span>';\n\t\t\t\telse if (match) {\n\t\t\t\t\tvar value = match[4], valueClass = 'text-base-content/80';\n\t\t\t\t\tif (/^\\s*(?:true|false|null|~|-?\\d+(?:\\.\\d+)?)\\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';\n\t\t\t\t\trendered = escapeYAMLHTML(match[1]) + '<span class=\"text-primary\" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class=\"' + valueClass + '\">' + escapeYAMLHTML(value) + '</span>';\n\t\t\t\t}\n\t\t\t\tif (diagnosticLine && lineNumber === diagnosticLine) rendered = '<span class=\"decoration-error underline decoration-wavy\" style=\"text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: oklch(var(--er)); text-decoration-thickness: 1px\" data-automation-yaml-error-line>' + rendered + '</span>';\n\t\t\t\treturn rendered;\n\t\t\t}\n\t\t\t// renderLineSpan renders one complete, self-contained highlighted line\n\t\t\t// (indent guide + hanging indent + syntax highlighting + optional fold\n\t\t\t// summary), identically for every caller so indentation can never\n\t\t\t// silently diverge between the editable and read-only YAML views.\n\t\t\tfunction renderLineSpan(line, lineNumber, options) {\n\t\t\t\toptions = options || {};\n\t\t\t\tvar indent = lineIndent(line), hangingIndent = indent ? ' style=\"padding-left:' + indent + 'ch\"' : '', rendered = highlightLine(line, lineNumber, options.diagnosticLine);\n\t\t\t\tif (options.folded) rendered += '<span class=\"ml-2 text-base-content/45\" data-automation-yaml-fold-summary>…</span>';\n\t\t\t\treturn '<span class=\"relative block min-h-6 break-words\" data-automation-yaml-highlight-line data-yaml-line=\"' + lineNumber + '\" data-yaml-indent=\"' + indent + '\"' + hangingIndent + '>' + indentationGuides(indent) + rendered + '</span>';\n\t\t\t}\n\t\t\treturn {escapeHTML: escapeYAMLHTML, lineIndent: lineIndent, indentationGuides: indentationGuides, highlightLine: highlightLine, renderLineSpan: renderLineSpan};\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<script>\n\t\twindow.openVibelyYAML = window.openVibelyYAML || (function() {\n\t\t\tfunction escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;'); }\n\t\t\tfunction lineIndent(line) { var match = line.match(/^\\s*/); return match ? match[0].length : 0; }\n\t\t\tfunction indentationGuides(indent) {\n\t\t\t\tif (!indent) return '';\n\t\t\t\tvar dots = [];\n\t\t\t\tfor (var column = 0; column < indent; column++) {\n\t\t\t\t\t\tdots.push('<span class=\"absolute z-10 rounded-full\" style=\"left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:var(--ov-yaml-indent-dot, oklch(var(--bc) / 0.3))\" data-automation-yaml-indent-dot aria-hidden=\"true\"></span>');\n\t\t\t\t}\n\t\t\t\treturn '<span class=\"pointer-events-none absolute inset-y-0 left-0 z-10\" style=\"width:' + indent + 'ch\" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden=\"true\">' + dots.join('') + '</span>';\n\t\t\t}\n\t\t\tfunction highlightLine(line, lineNumber, diagnosticLine) {\n\t\t\t\tvar indentation = line.match(/^\\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);\n\t\t\t\t\tif (/^\\s*#/.test(line)) rendered = '<span class=\"text-base-content/50\" data-automation-yaml-comment>' + escapeYAMLHTML(content) + '</span>';\n\t\t\t\t\telse if (match) {\n\t\t\t\t\t\tvar value = match[4], scalar = /^\\s*(?:true|false|null|~|-?\\d+(?:\\.\\d+)?)\\s*(?:#.*)?$/i.test(value);\n\t\t\t\t\t\trendered = escapeYAMLHTML(match[1]) + '<span class=\"text-primary\" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class=\"' + (scalar ? 'text-secondary' : 'text-base-content/80') + '\" data-automation-yaml-value' + (scalar ? ' data-automation-yaml-scalar' : '') + '>' + escapeYAMLHTML(value) + '</span>';\n\t\t\t\t\t}\n\t\t\t\t\tif (diagnosticLine && lineNumber === diagnosticLine) rendered = '<span class=\"decoration-error underline decoration-wavy\" style=\"text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: var(--ov-error, oklch(var(--er))); text-decoration-thickness: 1px\" data-automation-yaml-error-line>' + rendered + '</span>';\n\t\t\t\treturn rendered;\n\t\t\t}\n\t\t\t// renderLineSpan renders one complete, self-contained highlighted line\n\t\t\t// (indent guide + hanging indent + syntax highlighting + optional fold\n\t\t\t// summary), identically for every caller so indentation can never\n\t\t\t// silently diverge between the editable and read-only YAML views.\n\t\t\tfunction renderLineSpan(line, lineNumber, options) {\n\t\t\t\toptions = options || {};\n\t\t\t\tvar indent = lineIndent(line), hangingIndent = indent ? ' style=\"padding-left:' + indent + 'ch\"' : '', rendered = highlightLine(line, lineNumber, options.diagnosticLine);\n\t\t\t\tif (options.folded) rendered += '<span class=\"ml-2 text-base-content/45\" data-automation-yaml-fold-summary>…</span>';\n\t\t\t\treturn '<span class=\"relative block min-h-6 break-words\" data-automation-yaml-highlight-line data-yaml-line=\"' + lineNumber + '\" data-yaml-indent=\"' + indent + '\"' + hangingIndent + '>' + indentationGuides(indent) + rendered + '</span>';\n\t\t\t}\n\t\t\treturn {escapeHTML: escapeYAMLHTML, lineIndent: lineIndent, indentationGuides: indentationGuides, highlightLine: highlightLine, renderLineSpan: renderLineSpan};\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1805,7 +1805,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var96 string
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(graph.Automation.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 481, Col: 132}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 480, Col: 132}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
 		if templ_7745c5c3_Err != nil {
@@ -1818,7 +1818,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var97 string
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 481, Col: 169}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 480, Col: 169}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
@@ -1831,7 +1831,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var98 string
 		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 482, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 481, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 		if templ_7745c5c3_Err != nil {
@@ -1865,7 +1865,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var99 string
 			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(graph.Automation.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 491, Col: 146}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 490, Col: 146}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 			if templ_7745c5c3_Err != nil {
@@ -1895,7 +1895,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var100 string
 		templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.JoinStringErrs(string(graph.Automation.LifecycleState))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 497, Col: 124}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 496, Col: 124}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var100))
 		if templ_7745c5c3_Err != nil {
@@ -1908,7 +1908,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var101 string
 		templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinStringErrs(string(graph.Automation.HealthState))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 498, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 497, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
 		if templ_7745c5c3_Err != nil {
@@ -1921,7 +1921,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var102 templ.SafeURL
 		templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 500, Col: 196}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 499, Col: 196}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var102))
 		if templ_7745c5c3_Err != nil {
@@ -1934,7 +1934,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 500, Col: 300}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 499, Col: 300}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {
@@ -1947,7 +1947,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var104 string
 		templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 501, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 500, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 		if templ_7745c5c3_Err != nil {
@@ -1965,7 +1965,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var105 templ.SafeURL
 			templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 504, Col: 189}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 503, Col: 189}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 			if templ_7745c5c3_Err != nil {
@@ -1978,7 +1978,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var106 string
 			templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 504, Col: 466}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 503, Col: 466}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var106)
 			if templ_7745c5c3_Err != nil {
@@ -1991,7 +1991,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var107 templ.SafeURL
 			templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 505, Col: 185}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 504, Col: 185}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
 			if templ_7745c5c3_Err != nil {
@@ -2004,7 +2004,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var108 string
 			templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 505, Col: 251}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 504, Col: 251}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108)
 			if templ_7745c5c3_Err != nil {
@@ -2023,7 +2023,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var109 templ.SafeURL
 			templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 508, Col: 187}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 507, Col: 187}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
 			if templ_7745c5c3_Err != nil {
@@ -2036,7 +2036,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var110 string
 			templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 508, Col: 253}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 507, Col: 253}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var110)
 			if templ_7745c5c3_Err != nil {
@@ -2054,7 +2054,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var111 string
 		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationLiveGraphViewBox(graph.Nodes))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 515, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 514, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var111)
 		if templ_7745c5c3_Err != nil {
@@ -2067,7 +2067,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var112 string
 		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.ResolveAttributeValue(graph.Automation.Name + " live automation graph")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 515, Col: 202}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 514, Col: 202}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
 		if templ_7745c5c3_Err != nil {
@@ -2099,7 +2099,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var114 string
 				templ_7745c5c3_Var114, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphLayoutX(source.PositionX)+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 520, Col: 104}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 104}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var114)
 				if templ_7745c5c3_Err != nil {
@@ -2112,7 +2112,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var115 string
 				templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphLayoutY(source.PositionY)+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 520, Col: 201}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 201}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var115)
 				if templ_7745c5c3_Err != nil {
@@ -2125,7 +2125,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var116 string
 				templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphLayoutX(target.PositionX)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 520, Col: 270}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 270}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var116)
 				if templ_7745c5c3_Err != nil {
@@ -2138,7 +2138,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var117 string
 				templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphLayoutY(target.PositionY)+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 520, Col: 367}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 367}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var117)
 				if templ_7745c5c3_Err != nil {
@@ -2164,7 +2164,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var119 string
 				templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%s, %d transitions, %d recent", edge.Label, edge.TransitionCount, edge.RecentTransitionCount))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 520, Col: 663}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 663}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
 				if templ_7745c5c3_Err != nil {
@@ -2185,7 +2185,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var120 templ.SafeURL
 				templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(taskURL))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 525, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 524, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 				if templ_7745c5c3_Err != nil {
@@ -2198,7 +2198,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var121 string
 				templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 525, Col: 84}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 524, Col: 84}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var121)
 				if templ_7745c5c3_Err != nil {
@@ -2211,7 +2211,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				var templ_7745c5c3_Var122 string
 				templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationLiveNodeAria(node))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 525, Col: 327}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 524, Col: 327}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var122)
 				if templ_7745c5c3_Err != nil {
@@ -2251,7 +2251,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var123 string
 		templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(automationYAMLLineNumbers(graph.YAML))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 545, Col: 317}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 544, Col: 317}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 		if templ_7745c5c3_Err != nil {
@@ -2264,7 +2264,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(graph.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 549, Col: 395}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 548, Col: 395}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 		if templ_7745c5c3_Err != nil {
@@ -2290,7 +2290,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var125 string
 			templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinStringErrs(automationAdapterLabel(graph.Version.AdapterKey))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 558, Col: 158}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 557, Col: 158}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
 			if templ_7745c5c3_Err != nil {
@@ -2303,7 +2303,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var126 templ.SafeURL
 			templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 562, Col: 142}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 561, Col: 142}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 			if templ_7745c5c3_Err != nil {
@@ -2316,7 +2316,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var127 string
 			templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 562, Col: 246}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 561, Col: 246}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var127)
 			if templ_7745c5c3_Err != nil {
@@ -2329,7 +2329,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var128 string
 			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 562, Col: 338}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 561, Col: 338}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 			if templ_7745c5c3_Err != nil {
@@ -2356,7 +2356,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var129 string
 			templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(graph.Automation.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 573, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 572, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 			if templ_7745c5c3_Err != nil {
@@ -2369,7 +2369,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var130 templ.SafeURL
 			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 577, Col: 141}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 576, Col: 141}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 			if templ_7745c5c3_Err != nil {
@@ -2382,7 +2382,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var131 string
 			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 577, Col: 244}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 576, Col: 244}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
 			if templ_7745c5c3_Err != nil {
@@ -2395,7 +2395,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			var templ_7745c5c3_Var132 string
 			templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 577, Col: 325}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 576, Col: 325}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var132)
 			if templ_7745c5c3_Err != nil {
@@ -2587,7 +2587,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 			var templ_7745c5c3_Var134 string
 			templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.NodeKey)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 941, Col: 119}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 940, Col: 119}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 			if templ_7745c5c3_Err != nil {
@@ -2600,7 +2600,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 			var templ_7745c5c3_Var135 string
 			templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(node.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 942, Col: 114}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 941, Col: 114}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 			if templ_7745c5c3_Err != nil {
@@ -2613,7 +2613,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 			var templ_7745c5c3_Var136 string
 			templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinStringErrs(node.NodeKey)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 942, Col: 175}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 941, Col: 175}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var136))
 			if templ_7745c5c3_Err != nil {
@@ -2626,7 +2626,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 			var templ_7745c5c3_Var137 string
 			templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinStringErrs(node.Role)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 942, Col: 192}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 941, Col: 192}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var137))
 			if templ_7745c5c3_Err != nil {
@@ -2639,7 +2639,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 			var templ_7745c5c3_Var138 string
 			templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(automationNodeTypeLabel(node.NodeType))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 942, Col: 285}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 941, Col: 285}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 			if templ_7745c5c3_Err != nil {
@@ -2657,7 +2657,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 				var templ_7745c5c3_Var139 string
 				templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(field.Label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 945, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 944, Col: 78}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 				if templ_7745c5c3_Err != nil {
@@ -2670,7 +2670,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 				var templ_7745c5c3_Var140 string
 				templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.JoinStringErrs(field.Value)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 945, Col: 147}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 944, Col: 147}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var140))
 				if templ_7745c5c3_Err != nil {
@@ -2699,7 +2699,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 				var templ_7745c5c3_Var141 string
 				templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.EdgeKey)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 954, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 953, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var141)
 				if templ_7745c5c3_Err != nil {
@@ -2712,7 +2712,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 				var templ_7745c5c3_Var142 string
 				templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinStringErrs(source.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 954, Col: 145}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 953, Col: 145}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
 				if templ_7745c5c3_Err != nil {
@@ -2725,7 +2725,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 				var templ_7745c5c3_Var143 string
 				templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.JoinStringErrs(target.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 954, Col: 165}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 953, Col: 165}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var143))
 				if templ_7745c5c3_Err != nil {
@@ -2743,7 +2743,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 					var templ_7745c5c3_Var144 string
 					templ_7745c5c3_Var144, templ_7745c5c3_Err = templ.JoinStringErrs(edge.Label)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 956, Col: 43}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 955, Col: 43}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var144))
 					if templ_7745c5c3_Err != nil {
@@ -2762,7 +2762,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph) templ.Componen
 					var templ_7745c5c3_Var145 string
 					templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.JoinStringErrs(condition)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 959, Col: 73}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 958, Col: 73}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var145))
 					if templ_7745c5c3_Err != nil {
@@ -2815,7 +2815,7 @@ func automationTaskModelSelector(node models.AutomationDraftNode, modelOptions [
 		var templ_7745c5c3_Var147 string
 		templ_7745c5c3_Var147, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_model_config_id")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 969, Col: 151}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 968, Col: 151}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var147)
 		if templ_7745c5c3_Err != nil {
@@ -2843,7 +2843,7 @@ func automationTaskModelSelector(node models.AutomationDraftNode, modelOptions [
 			var templ_7745c5c3_Var148 string
 			templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.ResolveAttributeValue(model.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 971, Col: 27}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 970, Col: 27}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var148)
 			if templ_7745c5c3_Err != nil {
@@ -2866,7 +2866,7 @@ func automationTaskModelSelector(node models.AutomationDraftNode, modelOptions [
 			var templ_7745c5c3_Var149 string
 			templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.JoinStringErrs(automationModelOptionLabel(model))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 971, Col: 144}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 970, Col: 144}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var149))
 			if templ_7745c5c3_Err != nil {
@@ -2913,7 +2913,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 		var templ_7745c5c3_Var151 templ.SafeURL
 		templ_7745c5c3_Var151, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 978, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 977, Col: 123}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var151))
 		if templ_7745c5c3_Err != nil {
@@ -2926,7 +2926,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 		var templ_7745c5c3_Var152 string
 		templ_7745c5c3_Var152, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 978, Col: 184}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 977, Col: 184}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var152)
 		if templ_7745c5c3_Err != nil {
@@ -2939,7 +2939,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 		var templ_7745c5c3_Var153 string
 		templ_7745c5c3_Var153, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 979, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 978, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var153)
 		if templ_7745c5c3_Err != nil {
@@ -2952,7 +2952,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 		var templ_7745c5c3_Var154 string
 		templ_7745c5c3_Var154, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 980, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 979, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var154)
 		if templ_7745c5c3_Err != nil {
@@ -2965,7 +2965,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 		var templ_7745c5c3_Var155 string
 		templ_7745c5c3_Var155, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 982, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 981, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var155)
 		if templ_7745c5c3_Err != nil {
@@ -2978,7 +2978,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 		var templ_7745c5c3_Var156 string
 		templ_7745c5c3_Var156, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 983, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 982, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var156)
 		if templ_7745c5c3_Err != nil {
@@ -2996,7 +2996,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var157 string
 			templ_7745c5c3_Var157, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 986, Col: 111}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 985, Col: 111}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var157)
 			if templ_7745c5c3_Err != nil {
@@ -3009,7 +3009,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var158 string
 			templ_7745c5c3_Var158, templ_7745c5c3_Err = templ.JoinStringErrs(node.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 987, Col: 115}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 986, Col: 115}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var158))
 			if templ_7745c5c3_Err != nil {
@@ -3022,7 +3022,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var159 string
 			templ_7745c5c3_Var159, templ_7745c5c3_Err = templ.JoinStringErrs(node.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 987, Col: 172}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 986, Col: 172}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var159))
 			if templ_7745c5c3_Err != nil {
@@ -3035,7 +3035,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var160 string
 			templ_7745c5c3_Var160, templ_7745c5c3_Err = templ.JoinStringErrs(node.Role)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 987, Col: 189}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 986, Col: 189}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var160))
 			if templ_7745c5c3_Err != nil {
@@ -3053,7 +3053,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var161 string
 				templ_7745c5c3_Var161, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 989, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 988, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var161)
 				if templ_7745c5c3_Err != nil {
@@ -3066,7 +3066,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var162 string
 				templ_7745c5c3_Var162, templ_7745c5c3_Err = templ.JoinStringErrs(notice)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 989, Col: 104}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 988, Col: 104}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var162))
 				if templ_7745c5c3_Err != nil {
@@ -3084,7 +3084,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var163 string
 			templ_7745c5c3_Var163, templ_7745c5c3_Err = templ.JoinStringErrs(automationNodeTypeLabel(node.Type))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 991, Col: 126}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 990, Col: 126}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var163))
 			if templ_7745c5c3_Err != nil {
@@ -3097,7 +3097,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var164 string
 			templ_7745c5c3_Var164, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 991, Col: 232}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 990, Col: 232}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var164)
 			if templ_7745c5c3_Err != nil {
@@ -3110,7 +3110,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var165 string
 			templ_7745c5c3_Var165, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete node " + node.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 991, Col: 274}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 990, Col: 274}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var165)
 			if templ_7745c5c3_Err != nil {
@@ -3123,7 +3123,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var166 string
 			templ_7745c5c3_Var166, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_name")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 992, Col: 149}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 991, Col: 149}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var166)
 			if templ_7745c5c3_Err != nil {
@@ -3136,7 +3136,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var167 string
 			templ_7745c5c3_Var167, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 992, Col: 169}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 991, Col: 169}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var167)
 			if templ_7745c5c3_Err != nil {
@@ -3154,7 +3154,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var168 string
 				templ_7745c5c3_Var168, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_prompt")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 994, Col: 170}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 993, Col: 170}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var168)
 				if templ_7745c5c3_Err != nil {
@@ -3167,7 +3167,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var169 string
 				templ_7745c5c3_Var169, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftStringConfig(node, "prompt"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 994, Col: 236}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 993, Col: 236}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var169))
 				if templ_7745c5c3_Err != nil {
@@ -3180,7 +3180,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var170 string
 				templ_7745c5c3_Var170, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_agent_ref")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 996, Col: 161}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 995, Col: 161}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var170)
 				if templ_7745c5c3_Err != nil {
@@ -3208,7 +3208,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 					var templ_7745c5c3_Var171 string
 					templ_7745c5c3_Var171, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 998, Col: 35}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 997, Col: 35}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var171)
 					if templ_7745c5c3_Err != nil {
@@ -3231,7 +3231,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 					var templ_7745c5c3_Var172 string
 					templ_7745c5c3_Var172, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 998, Col: 123}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 997, Col: 123}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var172))
 					if templ_7745c5c3_Err != nil {
@@ -3272,7 +3272,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 					var templ_7745c5c3_Var173 string
 					templ_7745c5c3_Var173, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_category")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1009, Col: 155}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1008, Col: 155}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var173)
 					if templ_7745c5c3_Err != nil {
@@ -3335,7 +3335,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var174 string
 				templ_7745c5c3_Var174, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_priority")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1017, Col: 181}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1016, Col: 181}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var174)
 				if templ_7745c5c3_Err != nil {
@@ -3348,7 +3348,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var175 string
 				templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1017, Col: 253}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1016, Col: 253}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var175)
 				if templ_7745c5c3_Err != nil {
@@ -3381,7 +3381,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var176 string
 				templ_7745c5c3_Var176, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_goal")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1026, Col: 178}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1025, Col: 178}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var176)
 				if templ_7745c5c3_Err != nil {
@@ -3394,7 +3394,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var177 string
 				templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftStringConfig(node, "goal"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1026, Col: 241}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1025, Col: 241}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var177))
 				if templ_7745c5c3_Err != nil {
@@ -3413,7 +3413,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var178 string
 				templ_7745c5c3_Var178, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_run_at")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1029, Col: 198}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1028, Col: 198}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var178)
 				if templ_7745c5c3_Err != nil {
@@ -3426,7 +3426,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var179 string
 				templ_7745c5c3_Var179, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftStringConfig(node, "run_at"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1029, Col: 252}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1028, Col: 252}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var179)
 				if templ_7745c5c3_Err != nil {
@@ -3439,7 +3439,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var180 string
 				templ_7745c5c3_Var180, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_repeat_type")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1029, Col: 411}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1028, Col: 411}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var180)
 				if templ_7745c5c3_Err != nil {
@@ -3457,7 +3457,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 					var templ_7745c5c3_Var181 string
 					templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.ResolveAttributeValue(repeat)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1030, Col: 31}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1029, Col: 31}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var181)
 					if templ_7745c5c3_Err != nil {
@@ -3480,7 +3480,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 					var templ_7745c5c3_Var182 string
 					templ_7745c5c3_Var182, templ_7745c5c3_Err = templ.JoinStringErrs(repeat)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1030, Col: 115}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1029, Col: 115}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var182))
 					if templ_7745c5c3_Err != nil {
@@ -3498,7 +3498,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var183 string
 				templ_7745c5c3_Var183, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_repeat_interval")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1032, Col: 206}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1031, Col: 206}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var183)
 				if templ_7745c5c3_Err != nil {
@@ -3511,7 +3511,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var184 string
 				templ_7745c5c3_Var184, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", automationDraftIntConfig(node, "repeat_interval")))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1032, Col: 285}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1031, Col: 285}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var184)
 				if templ_7745c5c3_Err != nil {
@@ -3524,7 +3524,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var185 string
 				templ_7745c5c3_Var185, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_clear_context_on_start")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1032, Col: 457}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1031, Col: 457}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var185)
 				if templ_7745c5c3_Err != nil {
@@ -3553,7 +3553,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var186 string
 				templ_7745c5c3_Var186, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_notification_type")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1035, Col: 210}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1034, Col: 210}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var186)
 				if templ_7745c5c3_Err != nil {
@@ -3566,7 +3566,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var187 string
 				templ_7745c5c3_Var187, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftStringConfig(node, "notification_type"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1035, Col: 275}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1034, Col: 275}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var187)
 				if templ_7745c5c3_Err != nil {
@@ -3579,7 +3579,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var188 string
 				templ_7745c5c3_Var188, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_instructions")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1035, Col: 473}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1034, Col: 473}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var188)
 				if templ_7745c5c3_Err != nil {
@@ -3592,7 +3592,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var189 string
 				templ_7745c5c3_Var189, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftStringConfig(node, "instructions"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1035, Col: 544}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1034, Col: 544}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var189))
 				if templ_7745c5c3_Err != nil {
@@ -3611,7 +3611,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var190 string
 				templ_7745c5c3_Var190, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_instructions")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1038, Col: 220}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1037, Col: 220}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var190)
 				if templ_7745c5c3_Err != nil {
@@ -3624,7 +3624,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var191 string
 				templ_7745c5c3_Var191, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftStringConfig(node, "instructions"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1038, Col: 291}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1037, Col: 291}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var191))
 				if templ_7745c5c3_Err != nil {
@@ -3637,7 +3637,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var192 string
 				templ_7745c5c3_Var192, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_labels")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1038, Col: 451}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1037, Col: 451}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var192)
 				if templ_7745c5c3_Err != nil {
@@ -3650,7 +3650,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var193 string
 				templ_7745c5c3_Var193, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftStringSliceConfig(node, "labels"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1038, Col: 510}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1037, Col: 510}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var193)
 				if templ_7745c5c3_Err != nil {
@@ -3669,7 +3669,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var194 string
 				templ_7745c5c3_Var194, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_instructions")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1041, Col: 227}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1040, Col: 227}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var194)
 				if templ_7745c5c3_Err != nil {
@@ -3682,7 +3682,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var195 string
 				templ_7745c5c3_Var195, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftStringConfig(node, "instructions"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1041, Col: 298}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1040, Col: 298}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var195))
 				if templ_7745c5c3_Err != nil {
@@ -3695,7 +3695,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var196 string
 				templ_7745c5c3_Var196, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_base")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1041, Col: 461}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1040, Col: 461}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var196)
 				if templ_7745c5c3_Err != nil {
@@ -3708,7 +3708,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var197 string
 				templ_7745c5c3_Var197, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftStringConfig(node, "base"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1041, Col: 513}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1040, Col: 513}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var197)
 				if templ_7745c5c3_Err != nil {
@@ -3721,7 +3721,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var198 string
 				templ_7745c5c3_Var198, templ_7745c5c3_Err = templ.ResolveAttributeValue("node_" + node.Key + "_draft")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1041, Col: 706}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1040, Col: 706}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var198)
 				if templ_7745c5c3_Err != nil {
@@ -3759,7 +3759,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var199 string
 			templ_7745c5c3_Var199, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var199)
 			if templ_7745c5c3_Err != nil {
@@ -3772,7 +3772,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var200 string
 			templ_7745c5c3_Var200, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftNodeName(page.Result.Candidate.Nodes, edge.From))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 247}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 247}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var200))
 			if templ_7745c5c3_Err != nil {
@@ -3785,7 +3785,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var201 string
 			templ_7745c5c3_Var201, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftNodeName(page.Result.Candidate.Nodes, edge.To))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 317}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 317}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var201))
 			if templ_7745c5c3_Err != nil {
@@ -3798,7 +3798,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var202 string
 			templ_7745c5c3_Var202, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 423}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 423}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var202)
 			if templ_7745c5c3_Err != nil {
@@ -3811,7 +3811,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var203 string
 			templ_7745c5c3_Var203, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete connection " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 598}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 598}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var203)
 			if templ_7745c5c3_Err != nil {
@@ -3824,7 +3824,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var204 string
 			templ_7745c5c3_Var204, templ_7745c5c3_Err = templ.ResolveAttributeValue("edge_" + edge.Key + "_label")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 1075}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 1075}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var204)
 			if templ_7745c5c3_Err != nil {
@@ -3837,7 +3837,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			var templ_7745c5c3_Var205 string
 			templ_7745c5c3_Var205, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1047, Col: 1096}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1046, Col: 1096}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var205)
 			if templ_7745c5c3_Err != nil {
@@ -3855,7 +3855,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var206 string
 				templ_7745c5c3_Var206, templ_7745c5c3_Err = templ.ResolveAttributeValue("edge_" + edge.Key + "_state")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1049, Col: 159}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1048, Col: 159}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var206)
 				if templ_7745c5c3_Err != nil {
@@ -3893,7 +3893,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 				var templ_7745c5c3_Var207 string
 				templ_7745c5c3_Var207, templ_7745c5c3_Err = templ.ResolveAttributeValue("edge_" + edge.Key + "_state")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1051, Col: 159}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1050, Col: 159}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var207)
 				if templ_7745c5c3_Err != nil {
@@ -4021,7 +4021,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var211 string
 		templ_7745c5c3_Var211, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprint(page.UnsavedChanges))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1079, Col: 210}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1078, Col: 210}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var211)
 		if templ_7745c5c3_Err != nil {
@@ -4085,7 +4085,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var214 templ.SafeURL
 				templ_7745c5c3_Var214, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1094, Col: 138}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1093, Col: 138}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var214))
 				if templ_7745c5c3_Err != nil {
@@ -4098,7 +4098,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var215 string
 				templ_7745c5c3_Var215, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1094, Col: 231}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1093, Col: 231}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var215)
 				if templ_7745c5c3_Err != nil {
@@ -4134,7 +4134,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var216 string
 				templ_7745c5c3_Var216, templ_7745c5c3_Err = templ.JoinStringErrs(page.Result.Candidate.Description)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1105, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1104, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var216))
 				if templ_7745c5c3_Err != nil {
@@ -4163,7 +4163,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var217 string
 			templ_7745c5c3_Var217, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1113, Col: 266}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1112, Col: 266}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var217)
 			if templ_7745c5c3_Err != nil {
@@ -4190,7 +4190,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var218 string
 			templ_7745c5c3_Var218, templ_7745c5c3_Err = templ.JoinStringErrs(page.Result.Candidate.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1124, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1123, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var218))
 			if templ_7745c5c3_Err != nil {
@@ -4203,7 +4203,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var219 templ.SafeURL
 			templ_7745c5c3_Var219, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1128, Col: 138}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1127, Col: 138}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var219))
 			if templ_7745c5c3_Err != nil {
@@ -4216,7 +4216,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var220 string
 			templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1128, Col: 239}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1127, Col: 239}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var220)
 			if templ_7745c5c3_Err != nil {
@@ -4229,7 +4229,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var221 string
 			templ_7745c5c3_Var221, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1128, Col: 320}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1127, Col: 320}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var221)
 			if templ_7745c5c3_Err != nil {
@@ -4256,7 +4256,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var222 string
 			templ_7745c5c3_Var222, templ_7745c5c3_Err = templ.JoinStringErrs(automationAdapterLabel(page.Result.Candidate.AdapterKey))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1139, Col: 165}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1138, Col: 165}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var222))
 			if templ_7745c5c3_Err != nil {
@@ -4269,7 +4269,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var223 templ.SafeURL
 			templ_7745c5c3_Var223, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1143, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1142, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var223))
 			if templ_7745c5c3_Err != nil {
@@ -4282,7 +4282,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var224 string
 			templ_7745c5c3_Var224, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1143, Col: 159}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1142, Col: 159}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var224)
 			if templ_7745c5c3_Err != nil {
@@ -4295,7 +4295,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var225 string
 			templ_7745c5c3_Var225, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1143, Col: 251}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1142, Col: 251}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var225)
 			if templ_7745c5c3_Err != nil {
@@ -4314,7 +4314,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var226 string
 			templ_7745c5c3_Var226, templ_7745c5c3_Err = templ.JoinStringErrs(page.Error)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1150, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1149, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var226))
 			if templ_7745c5c3_Err != nil {
@@ -4338,7 +4338,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var227 string
 				templ_7745c5c3_Var227, templ_7745c5c3_Err = templ.JoinStringErrs(item)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1156, Col: 16}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1155, Col: 16}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var227))
 				if templ_7745c5c3_Err != nil {
@@ -4361,7 +4361,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var228 string
 				templ_7745c5c3_Var228, templ_7745c5c3_Err = templ.JoinStringErrs(item)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1161, Col: 16}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1160, Col: 16}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var228))
 				if templ_7745c5c3_Err != nil {
@@ -4395,7 +4395,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var229 string
 			templ_7745c5c3_Var229, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1168, Col: 198}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1167, Col: 198}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var229))
 			if templ_7745c5c3_Err != nil {
@@ -4413,7 +4413,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var230 string
 				templ_7745c5c3_Var230, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1171, Col: 20}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1170, Col: 20}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var230))
 				if templ_7745c5c3_Err != nil {
@@ -4454,7 +4454,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var233 string
 		templ_7745c5c3_Var233, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftEdgesJSON(page.EdgePalette))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1176, Col: 403}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1175, Col: 403}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var233)
 		if templ_7745c5c3_Err != nil {
@@ -4502,7 +4502,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var236 templ.SafeURL
 			templ_7745c5c3_Var236, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1184, Col: 187}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1183, Col: 187}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var236))
 			if templ_7745c5c3_Err != nil {
@@ -4515,7 +4515,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var237 string
 			templ_7745c5c3_Var237, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1185, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1184, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var237)
 			if templ_7745c5c3_Err != nil {
@@ -4534,7 +4534,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var238 templ.SafeURL
 			templ_7745c5c3_Var238, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1189, Col: 189}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1188, Col: 189}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var238))
 			if templ_7745c5c3_Err != nil {
@@ -4547,7 +4547,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			var templ_7745c5c3_Var239 string
 			templ_7745c5c3_Var239, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1190, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1189, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var239)
 			if templ_7745c5c3_Err != nil {
@@ -4565,7 +4565,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var240 string
 		templ_7745c5c3_Var240, templ_7745c5c3_Err = templ.JoinStringErrs(automationYAMLLineNumbers(page.YAML))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1195, Col: 319}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1194, Col: 319}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var240))
 		if templ_7745c5c3_Err != nil {
@@ -4578,7 +4578,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var241 string
 		templ_7745c5c3_Var241, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1197, Col: 435}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1196, Col: 435}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var241)
 		if templ_7745c5c3_Err != nil {
@@ -4591,7 +4591,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var242 string
 		templ_7745c5c3_Var242, templ_7745c5c3_Err = templ.JoinStringErrs(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1197, Col: 515}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1196, Col: 515}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var242))
 		if templ_7745c5c3_Err != nil {
@@ -4635,7 +4635,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var243 templ.SafeURL
 		templ_7745c5c3_Var243, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1211, Col: 120}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1210, Col: 120}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var243))
 		if templ_7745c5c3_Err != nil {
@@ -4648,7 +4648,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var244 string
 		templ_7745c5c3_Var244, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1211, Col: 181}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1210, Col: 181}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var244)
 		if templ_7745c5c3_Err != nil {
@@ -4661,7 +4661,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var245 string
 		templ_7745c5c3_Var245, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1211, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var245)
 		if templ_7745c5c3_Err != nil {
@@ -4674,7 +4674,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var246 string
 		templ_7745c5c3_Var246, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 135}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1211, Col: 135}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var246)
 		if templ_7745c5c3_Err != nil {
@@ -4687,7 +4687,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var247 string
 		templ_7745c5c3_Var247, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 219}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1211, Col: 219}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var247)
 		if templ_7745c5c3_Err != nil {
@@ -4700,7 +4700,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var248 string
 		templ_7745c5c3_Var248, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1212, Col: 304}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1211, Col: 304}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var248)
 		if templ_7745c5c3_Err != nil {
@@ -4720,7 +4720,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 					var templ_7745c5c3_Var249 string
 					templ_7745c5c3_Var249, templ_7745c5c3_Err = templ.ResolveAttributeValue("runtime:" + node.Key)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1229, Col: 47}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1228, Col: 47}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var249)
 					if templ_7745c5c3_Err != nil {
@@ -4733,7 +4733,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 					var templ_7745c5c3_Var250 string
 					templ_7745c5c3_Var250, templ_7745c5c3_Err = templ.JoinStringErrs("Restore: " + node.Name + " · " + automationNodeTypeLabel(node.Type))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1229, Col: 121}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1228, Col: 121}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var250))
 					if templ_7745c5c3_Err != nil {
@@ -4784,7 +4784,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var254 string
 		templ_7745c5c3_Var254, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftGraphViewBox(page.Result.Candidate.Nodes))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1246, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1245, Col: 99}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var254)
 		if templ_7745c5c3_Err != nil {
@@ -4810,7 +4810,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var256 string
 		templ_7745c5c3_Var256, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Result.Candidate.Name + " graph design")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1246, Col: 365}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1245, Col: 365}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var256)
 		if templ_7745c5c3_Err != nil {
@@ -4837,7 +4837,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var257 string
 				templ_7745c5c3_Var257, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1253, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var257)
 				if templ_7745c5c3_Err != nil {
@@ -4850,7 +4850,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var258 string
 				templ_7745c5c3_Var258, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.From)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1253, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var258)
 				if templ_7745c5c3_Err != nil {
@@ -4863,7 +4863,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var259 string
 				templ_7745c5c3_Var259, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.To)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 109}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1253, Col: 109}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var259)
 				if templ_7745c5c3_Err != nil {
@@ -4876,7 +4876,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var260 string
 				templ_7745c5c3_Var260, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 303}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1253, Col: 303}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var260)
 				if templ_7745c5c3_Err != nil {
@@ -4889,7 +4889,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var261 string
 				templ_7745c5c3_Var261, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1255, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 97}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var261)
 				if templ_7745c5c3_Err != nil {
@@ -4902,7 +4902,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var262 string
 				templ_7745c5c3_Var262, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1255, Col: 171}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 171}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var262)
 				if templ_7745c5c3_Err != nil {
@@ -4915,7 +4915,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var263 string
 				templ_7745c5c3_Var263, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1255, Col: 217}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 217}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var263)
 				if templ_7745c5c3_Err != nil {
@@ -4928,7 +4928,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var264 string
 				templ_7745c5c3_Var264, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1255, Col: 291}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1254, Col: 291}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var264)
 				if templ_7745c5c3_Err != nil {
@@ -4949,7 +4949,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var265 string
 				templ_7745c5c3_Var265, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 123}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var265)
 				if templ_7745c5c3_Err != nil {
@@ -4962,7 +4962,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var266 string
 				templ_7745c5c3_Var266, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", node.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 176}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 176}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var266)
 				if templ_7745c5c3_Err != nil {
@@ -4975,7 +4975,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var267 string
 				templ_7745c5c3_Var267, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", node.Position.Y))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 229}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 229}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var267)
 				if templ_7745c5c3_Err != nil {
@@ -4988,7 +4988,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var268 string
 				templ_7745c5c3_Var268, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 321}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 321}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var268)
 				if templ_7745c5c3_Err != nil {
@@ -5001,7 +5001,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var269 string
 				templ_7745c5c3_Var269, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 413}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 413}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var269)
 				if templ_7745c5c3_Err != nil {
@@ -5014,7 +5014,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var270 string
 				templ_7745c5c3_Var270, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 497}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 497}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var270)
 				if templ_7745c5c3_Err != nil {
@@ -5027,7 +5027,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var271 string
 				templ_7745c5c3_Var271, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Name + ", " + string(node.Type) + ", use arrow keys to move")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 604}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1260, Col: 604}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var271)
 				if templ_7745c5c3_Err != nil {
@@ -5040,7 +5040,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var272 string
 				templ_7745c5c3_Var272, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 68}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 68}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var272)
 				if templ_7745c5c3_Err != nil {
@@ -5053,7 +5053,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var273 string
 				templ_7745c5c3_Var273, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 126}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1261, Col: 126}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var273)
 				if templ_7745c5c3_Err != nil {
@@ -5066,7 +5066,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var274 string
 				templ_7745c5c3_Var274, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1263, Col: 90}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 90}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var274)
 				if templ_7745c5c3_Err != nil {
@@ -5079,7 +5079,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var275 string
 				templ_7745c5c3_Var275, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1263, Col: 148}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 148}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var275)
 				if templ_7745c5c3_Err != nil {
@@ -5092,7 +5092,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var276 string
 				templ_7745c5c3_Var276, templ_7745c5c3_Err = templ.JoinStringErrs(node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1263, Col: 272}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 272}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var276))
 				if templ_7745c5c3_Err != nil {
@@ -5105,7 +5105,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var277 string
 				templ_7745c5c3_Var277, templ_7745c5c3_Err = templ.JoinStringErrs(automationNodeTypeLabel(node.Type))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1263, Col: 325}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1262, Col: 325}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var277))
 				if templ_7745c5c3_Err != nil {
@@ -5123,7 +5123,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 					var templ_7745c5c3_Var278 string
 					templ_7745c5c3_Var278, templ_7745c5c3_Err = templ.JoinStringErrs(automationDraftNodeModelLabel(node, page.Capabilities.Models))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1265, Col: 82}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1264, Col: 82}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var278))
 					if templ_7745c5c3_Err != nil {
@@ -5141,7 +5141,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var279 string
 				templ_7745c5c3_Var279, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 109}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1266, Col: 109}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var279)
 				if templ_7745c5c3_Err != nil {
@@ -5154,7 +5154,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var280 string
 				templ_7745c5c3_Var280, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 213}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1266, Col: 213}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var280)
 				if templ_7745c5c3_Err != nil {
@@ -5167,7 +5167,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var281 string
 				templ_7745c5c3_Var281, templ_7745c5c3_Err = templ.ResolveAttributeValue("Input for " + node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 325}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1266, Col: 325}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var281)
 				if templ_7745c5c3_Err != nil {
@@ -5180,7 +5180,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var282 string
 				templ_7745c5c3_Var282, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1268, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var282)
 				if templ_7745c5c3_Err != nil {
@@ -5193,7 +5193,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var283 string
 				templ_7745c5c3_Var283, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1268, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 123}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var283)
 				if templ_7745c5c3_Err != nil {
@@ -5206,7 +5206,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var284 string
 				templ_7745c5c3_Var284, templ_7745c5c3_Err = templ.ResolveAttributeValue(node.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1268, Col: 228}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 228}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var284)
 				if templ_7745c5c3_Err != nil {
@@ -5219,7 +5219,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var285 string
 				templ_7745c5c3_Var285, templ_7745c5c3_Err = templ.ResolveAttributeValue("Output from " + node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1268, Col: 344}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1267, Col: 344}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var285)
 				if templ_7745c5c3_Err != nil {
@@ -5232,7 +5232,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var286 string
 				templ_7745c5c3_Var286, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f 16)", automationGraphNodeWidth-16))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1269, Col: 103}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1268, Col: 103}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var286)
 				if templ_7745c5c3_Err != nil {
@@ -5245,7 +5245,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var287 string
 				templ_7745c5c3_Var287, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete " + node.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1269, Col: 198}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1268, Col: 198}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var287)
 				if templ_7745c5c3_Err != nil {
@@ -5266,7 +5266,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var288 string
 				templ_7745c5c3_Var288, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1275, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1274, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var288)
 				if templ_7745c5c3_Err != nil {
@@ -5279,7 +5279,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var289 string
 				templ_7745c5c3_Var289, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1275, Col: 131}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1274, Col: 131}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var289)
 				if templ_7745c5c3_Err != nil {
@@ -5292,7 +5292,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var290 string
 				templ_7745c5c3_Var290, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1275, Col: 205}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1274, Col: 205}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var290)
 				if templ_7745c5c3_Err != nil {
@@ -5305,7 +5305,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var291 string
 				templ_7745c5c3_Var291, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1275, Col: 251}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1274, Col: 251}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var291)
 				if templ_7745c5c3_Err != nil {
@@ -5318,7 +5318,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var292 string
 				templ_7745c5c3_Var292, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1275, Col: 325}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1274, Col: 325}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var292)
 				if templ_7745c5c3_Err != nil {
@@ -5343,7 +5343,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var293 string
 				templ_7745c5c3_Var293, templ_7745c5c3_Err = templ.ResolveAttributeValue(edge.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1281, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1280, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var293)
 				if templ_7745c5c3_Err != nil {
@@ -5356,7 +5356,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var294 string
 				templ_7745c5c3_Var294, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1282, Col: 132}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1281, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var294)
 				if templ_7745c5c3_Err != nil {
@@ -5369,7 +5369,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var295 string
 				templ_7745c5c3_Var295, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1282, Col: 206}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1281, Col: 206}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var295)
 				if templ_7745c5c3_Err != nil {
@@ -5382,7 +5382,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var296 string
 				templ_7745c5c3_Var296, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.X))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1283, Col: 105}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1282, Col: 105}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var296)
 				if templ_7745c5c3_Err != nil {
@@ -5395,7 +5395,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var297 string
 				templ_7745c5c3_Var297, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1283, Col: 179}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1282, Col: 179}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var297)
 				if templ_7745c5c3_Err != nil {
@@ -5408,7 +5408,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var298 string
 				templ_7745c5c3_Var298, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1284, Col: 212}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1283, Col: 212}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var298)
 				if templ_7745c5c3_Err != nil {
@@ -5447,7 +5447,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var299 string
 				templ_7745c5c3_Var299, templ_7745c5c3_Err = templ.JoinStringErrs(item)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1301, Col: 17}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1300, Col: 17}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var299))
 				if templ_7745c5c3_Err != nil {
@@ -5470,7 +5470,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				var templ_7745c5c3_Var300 string
 				templ_7745c5c3_Var300, templ_7745c5c3_Err = templ.JoinStringErrs(item)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1306, Col: 17}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1305, Col: 17}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var300))
 				if templ_7745c5c3_Err != nil {
@@ -5493,7 +5493,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var301 templ.SafeURL
 		templ_7745c5c3_Var301, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(automationBuilderPostURL(page, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1311, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1310, Col: 123}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var301))
 		if templ_7745c5c3_Err != nil {
@@ -5506,7 +5506,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var302 string
 		templ_7745c5c3_Var302, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationBuilderPostURL(page, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1311, Col: 184}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1310, Col: 184}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var302)
 		if templ_7745c5c3_Err != nil {
@@ -5519,7 +5519,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var303 string
 		templ_7745c5c3_Var303, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1312, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1311, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var303)
 		if templ_7745c5c3_Err != nil {
@@ -5532,7 +5532,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var304 string
 		templ_7745c5c3_Var304, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1313, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1312, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var304)
 		if templ_7745c5c3_Err != nil {
@@ -5545,7 +5545,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var305 string
 		templ_7745c5c3_Var305, templ_7745c5c3_Err = templ.ResolveAttributeValue(page.InitialView)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1314, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1313, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var305)
 		if templ_7745c5c3_Err != nil {
@@ -5558,13 +5558,13 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var306 string
 		templ_7745c5c3_Var306, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftCandidateJSON(page.Result.Candidate))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1315, Col: 94}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1314, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var306)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 457, "\" data-candidate-json><script>\n\t\t\t(function() {\n\t\t\t\tvar root = document.querySelector('[data-automation-draft-canvas]');\n\t\t\t\tvar builder = document.getElementById('automation-builder');\n\t\t\t\tvar svg = root && root.querySelector('[data-automation-canvas]');\n\t\t\t\tvar source = builder && builder.querySelector('[data-candidate-json]');\n\t\t\t\tif (!root || !builder || !svg || !source) return;\n\t\t\t\t\tvar candidate;\n\t\t\t\t\ttry { candidate = JSON.parse(source.value); } catch (_) { return; }\n\t\t\t\t\tvar edgePalette = [];\t\t\t\ttry { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }\n\t\t\t\tvar connectStatus = root.querySelector('[data-automation-connect-status]');\n\t\t\t\tvar preview = svg.querySelector('[data-automation-edge-preview]');\n\t\t\t\t\tvar selectedEdgeKey = '';\n\t\t\t\t\tvar keyboardSource = null;\n\t\t\t\t\tvar activeConnection = null;\n\t\t\t\t\tvar initialViewBox = svg.getAttribute('viewBox').split(/\\s+/).map(Number);\n\t\t\t\t\tvar viewBox = initialViewBox.slice();\n\n\t\t\t\t\tfunction nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }\n\t\t\t\t\tfunction edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }\n\t\t\t\t\tfunction nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }\n\t\t\t\t\t\tfunction nodeGroup(key) { return svg.querySelector('[data-node-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\t\t\t\t\tfunction nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }\n\t\t\t\t\tfunction yamlString(value) { return JSON.stringify(String(value == null ? '' : value)); }\n\t\t\t\t\tfunction yamlPlainKeyPattern() { return /^[A-Za-z_][A-Za-z0-9_]*$/; }\n\t\t\t\t\tfunction yamlKey(key) { return yamlPlainKeyPattern().test(String(key)) ? String(key) : yamlString(key); }\n\t\t\t\t\tfunction yamlScalar(value) {\n\t\t\t\t\t\tif (value === null || value === undefined) return 'null';\n\t\t\t\t\t\tif (typeof value === 'boolean' || typeof value === 'number') return String(value);\n\t\t\t\t\t\treturn yamlString(value);\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlIndent(level) { return '  '.repeat(level); }\n\t\t\t\t\tfunction yamlIsEmptyContainer(value) {\n\t\t\t\t\t\tif (Array.isArray(value)) return value.length === 0;\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') return Object.keys(value).length === 0;\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlBlockLines(value, level) {\n\t\t\t\t\t\tif (Array.isArray(value)) {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tvalue.forEach(function(item) {\n\t\t\t\t\t\t\t\tif (item !== null && typeof item === 'object' && !yamlIsEmptyContainer(item)) {\n\t\t\t\t\t\t\t\t\tvar subLines = yamlBlockLines(item, level + 1);\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + subLines[0].slice(yamlIndent(level + 1).length));\n\t\t\t\t\t\t\t\t\tsubLines.slice(1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (item !== null && typeof item === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + (Array.isArray(item) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + yamlScalar(item));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tObject.keys(value).forEach(function(key) {\n\t\t\t\t\t\t\t\tvar nested = value[key];\n\t\t\t\t\t\t\t\tif (nested !== null && typeof nested === 'object' && !yamlIsEmptyContainer(nested)) {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ':');\n\t\t\t\t\t\t\t\t\tyamlBlockLines(nested, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (nested !== null && typeof nested === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + (Array.isArray(nested) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + yamlScalar(nested));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn [yamlIndent(level) + yamlScalar(value)];\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlNestedField(lines, label, value, level) {\n\t\t\t\t\t\tvar normalized = (value && typeof value === 'object') ? value : {};\n\t\t\t\t\t\tif (yamlIsEmptyContainer(normalized)) {\n\t\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ': ' + (Array.isArray(normalized) ? '[]' : '{}'));\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ':');\n\t\t\t\t\t\tyamlBlockLines(normalized, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction visualCandidateYAML() {\n\t\t\t\t\t\tvar lines = [\n\t\t\t\t\t\t\t'schema_version: ' + Number(candidate.schema_version || 1),\n\t\t\t\t\t\t\t'name: ' + yamlString(candidate.name),\n\t\t\t\t\t\t\t'description: ' + yamlString(candidate.description),\n\t\t\t\t\t\t\t'automation_type: ' + yamlString(candidate.automation_type),\n\t\t\t\t\t\t\t'adapter_key: ' + yamlString(candidate.adapter_key),\n\t\t\t\t\t\t\t'nodes:'\n\t\t\t\t\t\t];\n\t\t\t\t\t\t(candidate.nodes || []).forEach(function(node) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(node.key));\n\t\t\t\t\t\t\tlines.push('    name: ' + yamlString(node.name));\n\t\t\t\t\t\t\tlines.push('    type: ' + yamlString(node.type));\n\t\t\t\t\t\t\tlines.push('    role: ' + yamlString(node.role));\n\t\t\t\t\t\t\tyamlNestedField(lines, 'config', node.config || {}, 2);\n\t\t\t\t\t\t\tif (node.position) yamlNestedField(lines, 'position', node.position, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlines.push('edges:');\n\t\t\t\t\t\t(candidate.edges || []).forEach(function(edge) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(edge.key));\n\t\t\t\t\t\t\tlines.push('    from: ' + yamlString(edge.from));\n\t\t\t\t\t\t\tlines.push('    to: ' + yamlString(edge.to));\n\t\t\t\t\t\t\tlines.push('    from_port: ' + yamlString(edge.from_port || 'right'));\n\t\t\t\t\t\t\tlines.push('    to_port: ' + yamlString(edge.to_port || 'left'));\n\t\t\t\t\t\t\tif (edge.label) lines.push('    label: ' + yamlString(edge.label));\n\t\t\t\t\t\t\tif (edge.condition && Object.keys(edge.condition).length) yamlNestedField(lines, 'condition', edge.condition, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (candidate.assumptions && candidate.assumptions.length) yamlNestedField(lines, 'assumptions', candidate.assumptions, 0);\n\t\t\t\t\t\tif (candidate.warnings && candidate.warnings.length) yamlNestedField(lines, 'warnings', candidate.warnings, 0);\n\t\t\t\t\t\treturn lines.join('\\n') + '\\n';\n\t\t\t\t\t}\n\t\t\t\t\tvar yamlEditor = builder.querySelector('[data-automation-yaml-editor]');\n\t\t\t\t\tvar yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');\n\t\t\t\t\tvar yamlFoldControls = builder.querySelector('[data-automation-yaml-fold-controls]');\n\t\t\t\t\tvar yamlGutter = builder.querySelector('[data-automation-yaml-gutter]');\n\t\t\t\t\tvar yamlViewport = builder.querySelector('[data-automation-yaml-editor-viewport]');\n\t\t\t\t\tvar yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');\n\t\t\t\t\tvar yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');\n\t\t\t\t\tvar yamlDiagnosticLine = 0;\n\t\t\t\t\tvar yamlShared = window.openVibelyYAML;\n\t\t\t\t\t\tvar yamlFoldingEnabled = false;\n\t\t\t\t\t\tvar yamlFoldedLines = new Set();\n\t\t\t\t\t\tvar yamlSourceValue = yamlEditor ? yamlEditor.value : '';\n\t\t\t\t\t\tvar yamlVisibleLineMap = [];\n\t\t\t\t\t\tvar yamlRenderingValue = false;\n\t\t\t\t\t\tvar yamlPendingSelectionStart = 0;\n\t\t\t\t\t\tvar yamlPendingSelectionEnd = 0;\n\t\t\t\t\t\tvar yamlPendingValue = '';\n\t\t\t\t\t\tvar yamlPendingInputType = '';\n\t\t\t\t\t\tvar yamlParseTimer = 0;\t\t\t\t\tvar yamlParseRequest = 0;\n\t\t\t\t\tvar yamlLineLayoutFrame = 0;\n\t\t\t\t\t\tfunction yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }\n\t\t\t\t\t\tfunction restoreYAMLScrollTop(value) {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tyamlEditor.scrollTop = value;\n\t\t\t\t\t\t\tif (yamlViewport) yamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction scrollYAMLFromWheel(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !event.deltaY) return;\n\t\t\t\t\t\t\tvar scroller = yamlEditor;\n\t\t\t\t\t\t\tif (!scroller) return;\t\t\t\t\t\tvar delta = event.deltaY;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;\n\t\t\t\t\t\tvar previousTop = scroller.scrollTop;\n\t\t\t\t\t\tscroller.scrollTop += delta;\n\t\t\t\t\t\tif (scroller.scrollTop !== previousTop) {\n\t\t\t\t\t\t\tif (scroller === yamlEditor) syncYAMLHighlightScroll();\n\t\t\t\t\t\t\telse {\n\t\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = scroller.scrollTop;\n\t\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-scroller.scrollTop) + 'px)';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction automationYAMLValue() { return yamlFoldedLines.size > 0 ? yamlSourceValue : (yamlEditor ? yamlEditor.value : yamlSourceValue); }\n\t\t\t\t\t\tfunction setYAMLEditorDisplay(value) {\n\t\t\t\t\t\t\tif (!yamlEditor || yamlEditor.value === value) return;\n\t\t\t\t\t\t\tyamlRenderingValue = true;\n\t\t\t\t\t\t\tyamlEditor.value = value;\n\t\t\t\t\t\t\tyamlRenderingValue = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeYAMLHTML(value) { return yamlShared.escapeHTML(value); }\n\t\t\t\t\t\tfunction yamlLineIndent(line) { return yamlShared.lineIndent(line); }\n\t\t\t\t\t\tfunction yamlFoldRanges(lines) {\n\t\t\t\t\t\t\tvar ranges = {};\t\t\t\t\t\tfor (var index = 0; index < lines.length; index++) {\n\t\t\t\t\t\t\tvar line = lines[index];\n\t\t\t\t\t\t\tif (!line.trim() || line.trim().charAt(0) === '#') continue;\n\t\t\t\t\t\t\tvar indent = yamlLineIndent(line), next = index + 1;\n\t\t\t\t\t\t\twhile (next < lines.length && (!lines[next].trim() || lines[next].trim().charAt(0) === '#')) next++;\n\t\t\t\t\t\t\tif (next >= lines.length || yamlLineIndent(lines[next]) <= indent) continue;\n\t\t\t\t\t\t\tvar end = next;\n\t\t\t\t\t\t\twhile (end + 1 < lines.length && (!lines[end + 1].trim() || lines[end + 1].trim().charAt(0) === '#' || yamlLineIndent(lines[end + 1]) > indent)) end++;\n\t\t\t\t\t\t\tranges[index] = end;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn ranges;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction reconcileYAMLFolds(ranges) {\n\t\t\t\t\t\t\tArray.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlActiveRailInfo() {\n\t\t\t\t\t\t\tif (!yamlEditor || document.activeElement !== yamlEditor) return null;\n\t\t\t\t\t\t\treturn {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlRailColor(active) {\n\t\t\t\t\t\t\tif (!active) return 'oklch(var(--bc) / 0.3)';\n\t\t\t\t\t\t\tvar isDark = document.documentElement.getAttribute('data-theme') === 'dark';\n\t\t\t\t\t\t\treturn isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {\n\t\t\t\t\t\tvar rails = [], maxIndent = 0, candidates = [];\n\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });\n\t\t\t\t\t\t\tfor (var column = 0; column < maxIndent; column += 2) {\n\t\t\t\t\t\t\t\tvar startLine = 0, endLine = 0, startRow = 0, endRow = 0;\n\t\t\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex, rowIndex) {\n\t\t\t\t\t\t\t\t\tvar line = lines[lineIndex], ignorable = !line.trim() || /^\\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);\n\t\t\t\t\t\t\t\t\tif (continues) {\n\t\t\t\t\t\t\t\t\t\tif (!startLine) startLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tif (!startRow) startRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t} else if (startLine) {\n\t\t\t\t\t\t\t\t\t\tcandidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t\t\t\tstartLine = 0;\n\t\t\t\t\t\t\t\t\t\tstartRow = 0;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\tif (startLine) candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar activeCandidate = null;\n\t\t\t\t\t\t\tif (activeInfo) {\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar withinGroup = activeInfo.line >= candidate.start && activeInfo.line <= candidate.end;\n\t\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo.line === candidate.start - 1;\n\t\t\t\t\t\t\t\t\tif ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar color = yamlRailColor(candidate === activeCandidate);\n\t\t\t\t\t\t\t\t\trails.push('<span class=\"pointer-events-none absolute transition-colors\" style=\"left:calc(0.75rem + ' + candidate.column + 'ch);top:calc(' + (candidate.rowStart - 1) + ' * 1.5rem);height:calc(' + (candidate.rowEnd - candidate.rowStart + 1) + ' * 1.5rem);width:1px;z-index:20;background-color:' + color + '\" data-automation-yaml-indent-rail data-yaml-rail-start=\"' + candidate.start + '\" data-yaml-rail-end=\"' + candidate.end + '\" data-yaml-rail-column=\"' + candidate.column + '\" aria-hidden=\"true\"></span>');\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\treturn rails.join('');\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLActiveRail() {\n\t\t\t\t\t\t\tif (!yamlHighlight || !yamlEditor) return;\n\t\t\t\t\t\t\tvar rails = yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]');\n\t\t\t\t\t\t\tif (!rails.length) return;\n\t\t\t\t\t\t\tvar activeInfo = yamlActiveRailInfo();\n\t\t\t\t\t\t\tvar active = null;\n\t\t\t\t\t\t\trails.forEach(function(rail) {\n\t\t\t\t\t\t\t\tvar start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);\n\t\t\t\t\t\t\t\tvar withinGroup = activeInfo && activeInfo.line >= start && activeInfo.line <= end;\n\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo && activeInfo.line === start - 1;\n\t\t\t\t\t\t\t\tif (activeInfo && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\trails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction layoutYAMLIndentationRails() {\n\t\t\t\t\t\tif (!yamlHighlight) return;\n\t\t\t\t\t\tyamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {\n\t\t\t\t\t\t\tvar start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailStart + '\"]');\n\t\t\t\t\t\t\tvar end = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailEnd + '\"]');\n\t\t\t\t\t\t\tif (!start || !end) return;\n\t\t\t\t\t\t\trail.style.top = start.offsetTop + 'px';\n\t\t\t\t\t\t\trail.style.height = Math.max(0, end.offsetTop + end.offsetHeight - start.offsetTop) + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction layoutYAMLLines() {\n\t\t\t\t\t\tyamlLineLayoutFrame = 0;\n\t\t\t\t\t\tif (!yamlLineNumbers || !yamlFoldControls || !yamlHighlight || !yamlViewport || !yamlViewport.clientWidth) return;\n\t\t\t\t\t\tvar lineNumberRows = yamlLineNumbers.querySelectorAll('[data-automation-yaml-line-number]');\n\t\t\t\t\t\tlineNumberRows.forEach(function(lineNumberRow) {\n\t\t\t\t\t\t\tvar sourceLine = lineNumberRow.dataset.yamlLine;\n\t\t\t\t\t\t\tvar highlightLine = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (!highlightLine) return;\n\t\t\t\t\t\t\tlineNumberRow.style.height = Math.ceil(highlightLine.getBoundingClientRect().height) + 'px';\n\t\t\t\t\t\t\tvar control = yamlFoldControls.querySelector('[data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (control) control.style.top = highlightLine.offsetTop + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlayoutYAMLIndentationRails();\n\t\t\t\t\t}\n\t\t\t\t\tfunction queueYAMLLineLayout() {\n\t\t\t\t\t\tif (yamlLineLayoutFrame) cancelAnimationFrame(yamlLineLayoutFrame);\n\t\t\t\t\t\tyamlLineLayoutFrame = requestAnimationFrame(layoutYAMLLines);\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLLineNumbers() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlLineNumbers || !yamlFoldControls || !yamlHighlight) return;\nvar lines = yamlSourceValue.split('\\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], displayLines = [], index = 0;\n\t\t\t\t\t\t\treconcileYAMLFolds(ranges);\n\t\t\t\t\t\t\tvar folded = yamlFoldedLines.size > 0;\n\t\t\t\t\t\t\twhile (index < lines.length) {\t\t\t\t\t\t\tvar foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);\n\t\t\t\t\t\t\tvisibleLines.push(index);\n\t\t\t\t\t\t\tdisplayLines.push(lines[index]);\n\t\t\t\t\t\t\tlineNumbers.push('<span class=\"block min-h-6\" data-automation-yaml-line-number data-yaml-line=\"' + (index + 1) + '\">' + (index + 1) + '</span>');\t\t\t\t\t\t\t\tif (canFold && yamlFoldingEnabled) {\n\t\t\t\t\t\t\t\t\tvar visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';\n\t\t\t\t\t\t\t\t\tcontrols.push('<button class=\"pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60' + visibilityClass + '\" style=\"top:0\" type=\"button\" data-automation-yaml-fold data-yaml-line=\"' + (index + 1) + '\" data-yaml-indent=\"' + indent + '\" aria-label=\"' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '\"><svg class=\"h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7.5 10 12.5 15 7.5\"></path></svg></button>');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\thighlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));\t\t\t\t\t\t\t\tif (isFolded) index = foldEnd + 1; else index++;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tyamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines, yamlActiveRailInfo()) + highlighted.join('');\n\t\t\t\t\t\t\tyamlLineNumbers.innerHTML = lineNumbers.join('');\n\t\t\t\t\t\t\tyamlFoldControls.innerHTML = controls.join('');\n\t\t\t\t\t\t\tyamlVisibleLineMap = visibleLines.slice();\n\t\t\t\t\t\t\tif (folded) {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(displayLines.join('\\n'));\n\t\t\t\t\t\t\t\tyamlHighlight.classList.remove('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.style.transform = '';\n\t\t\t\t\t\t\t\tyamlFoldControls.style.transform = '';\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.classList.remove('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.setAttribute('aria-label', 'Collapsed YAML source');\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(yamlSourceValue);\n\t\t\t\t\t\t\t\tyamlVisibleLineMap = [];\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.remove('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = -1;\t\t\t\t\t\t\t\t\tyamlViewport.removeAttribute('aria-label');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tupdateYAMLActiveRail();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlOffsetToLineCol(text, offset) {\n\t\t\t\t\t\t\tvar prefix = text.slice(0, offset).split('\\n');\n\t\t\t\t\t\t\treturn {line: prefix.length - 1, col: prefix[prefix.length - 1].length};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlLineColToSourceOffset(sourceLines, sourceLineIndex, col) {\n\t\t\t\t\t\t\tvar offset = 0;\n\t\t\t\t\t\t\tfor (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;\n\t\t\t\t\t\t\treturn offset + col;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction syncYAMLHighlightScroll() {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tif (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction showYAMLDiagnostic(message) {\t\t\t\t\t\tvar match = String(message || '').match(/line\\s+(\\d+)/i);\n\t\t\t\t\t\tyamlDiagnosticLine = match ? Number(match[1]) : 0;\n\t\t\t\t\t\tif (yamlDiagnostic) {\n\t\t\t\t\t\t\tyamlDiagnostic.textContent = message || '';\n\t\t\t\t\t\t\tyamlDiagnostic.classList.toggle('hidden', !message);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLWhileTyping() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tyamlParseTimer = window.setTimeout(function() {\n\t\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t\t}, 300);\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLNow() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t}\n\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\tyamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);\n\t\t\t\t\t\t\tyamlEditor.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tif (event.key !== 'Tab' || event.altKey || event.metaKey || event.ctrlKey) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tvar value = yamlEditor.value;\n\t\t\t\t\t\t\t\tvar start = yamlEditor.selectionStart, end = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = value;\n\t\t\t\t\t\t\t\tif (event.shiftKey) {\n\t\t\t\t\t\t\t\t\tvar lineStart = value.lastIndexOf('\\n', start - 1) + 1;\n\t\t\t\t\t\t\t\t\tvar removable = 0;\n\t\t\t\t\t\t\t\t\twhile (removable < 2 && value.charAt(lineStart + removable) === ' ') removable++;\n\t\t\t\t\t\t\t\t\tif (removable === 0) return;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'deleteContentBackward';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('', lineStart, lineStart + removable, 'preserve');\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionStart = Math.max(lineStart, start - removable);\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionEnd = Math.max(lineStart, end - removable);\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'insertText';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('  ', start, end, 'end');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tyamlEditor.dispatchEvent(new Event('input', {bubbles: true}));\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('beforeinput', function(event) {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tyamlPendingSelectionStart = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = yamlEditor.value;\n\t\t\t\t\t\t\t\tyamlPendingInputType = event && event.inputType ? event.inputType : '';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('input', function() {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tif (yamlFoldedLines.size === 0) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tvar oldSourceLines = yamlSourceValue.split('\\n');\n\t\t\t\t\t\t\t\t\tvar newVisibleValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t\tvar preEditVisibleValue = yamlPendingValue || newVisibleValue;\n\t\t\t\t\t\t\t\t\tvar preEditStart = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionStart);\n\t\t\t\t\t\t\t\t\tvar preEditEnd = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionEnd);\n\t\t\t\t\t\t\t\t\tvar postEditOffset = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\t\tvar startVisibleLine = Math.min(preEditStart.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tvar endVisibleLine = Math.min(preEditEnd.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tif (startVisibleLine < 0 || endVisibleLine < 0 || !yamlVisibleLineMap.length) {\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = newVisibleValue;\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tvar sourceStartLine = yamlVisibleLineMap[startVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceEndLine = yamlVisibleLineMap[endVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);\n\t\t\t\t\t\t\t\t\t\tvar sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);\n\t\t\t\t\t\t\t\t\t\tvar collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\tif (collapsedDeletion) {\n\t\t\t\t\t\t\t\t\t\t\tvar removedLength = preEditVisibleValue.length - newVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\t\tvar sourceLineText = oldSourceLines[sourceStartLine] || '';\n\t\t\t\t\t\t\t\t\t\t\tif (yamlPendingInputType === 'deleteContentForward') {\n\t\t\t\t\t\t\t\t\t\t\t\tvar nextVisibleSourceLine = yamlVisibleLineMap[startVisibleLine + 1];\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryForward = preEditStart.col === sourceLineText.length && nextVisibleSourceLine !== undefined && nextVisibleSourceLine !== sourceStartLine + 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryForward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar forwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, nextVisibleSourceLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = forwardBoundaryOffset;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = forwardBoundaryOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\tvar prevVisibleSourceLine = startVisibleLine > 0 ? yamlVisibleLineMap[startVisibleLine - 1] : undefined;\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryBackward = preEditStart.col === 0 && startVisibleLine > 0 && prevVisibleSourceLine !== sourceStartLine - 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryBackward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar backwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, backwardBoundaryOffset);\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, sourceStartOffset - removedLength);\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t} else {\t\t\t\t\t\t\t\t\t\t\tvar visibleEditStartOffset = 0;\n\t\t\t\t\t\t\t\t\t\t\tfor (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;\n\t\t\t\t\t\t\t\t\t\t\tvisibleEditStartOffset += preEditStart.col;\n\t\t\t\t\t\t\t\t\t\t\tvar insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);\n\t\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\t\t\t});\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\tyamlEditor.addEventListener('mousedown', function() { window.requestAnimationFrame(updateYAMLActiveRail); });\n\t\t\t\t\t\tyamlEditor.addEventListener('keyup', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('input', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('focus', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('blur', updateYAMLActiveRail);\n\t\t\t\t\t}\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {\n\t\t\t\t\t\tvar toggle = event.target.closest('[data-automation-yaml-fold]');\n\t\t\t\t\t\tif (!toggle) return;\n\t\t\t\t\t\tvar line = Number(toggle.dataset.yamlLine) - 1;\n\t\t\t\t\t\tvar scrollTop = yamlActiveScrollTop();\n\t\t\t\t\t\tif (yamlFoldedLines.has(line)) yamlFoldedLines.delete(line); else yamlFoldedLines.add(line);\n\t\t\t\t\t\tif (yamlEditor) yamlEditor.blur();\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\trestoreYAMLScrollTop(scrollTop);\n\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('scroll', function() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tscrollYAMLFromWheel(event);\n\t\t\t\t\t\t}, {passive: false});\n\t\t\t\t\t\tif (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});\n\t\t\t\t\t\twindow.addEventListener('resize', queueYAMLLineLayout);\t\t\t\t\tfunction syncCandidate(writeYAML) {\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tvar automationNameValue = automationName ? automationName.value : '';\n\t\t\t\t\t\tif (automationName) candidate.name = automationNameValue;\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });\n\t\t\t\t\t\tif (writeYAML !== false) {\n\t\t\t\t\t\t\tvar serializedYAML = visualCandidateYAML();\n\t\t\t\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = serializedYAML;\n\t\t\t\t\t\t\t\t\tyamlFoldedLines.clear();\n\t\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(serializedYAML);\n\t\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\t}\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });\n\t\t\t\t\t\t}\n\t\t\t\t\t}\t\t\t\t\tfunction applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }\n\t\t\t\tfunction graphPoint(event) {\n\t\t\t\t\tvar point = svg.createSVGPoint();\n\t\t\t\t\tpoint.x = event.clientX;\n\t\t\t\t\tpoint.y = event.clientY;\n\t\t\t\t\treturn point.matrixTransform(svg.getScreenCTM().inverse());\n\t\t\t\t}\n\t\t\t\tfunction renderNode(group, x, y) {\n\t\t\t\t\tgroup.dataset.nodeX = String(x);\n\t\t\t\t\tgroup.dataset.nodeY = String(y);\n\t\t\t\t\tgroup.setAttribute('transform', 'translate(' + x + ' ' + y + ')');\n\t\t\t\t\tvar node = nodeCandidate(group.dataset.nodeKey);\n\t\t\t\t\tif (node) node.position = {x: x, y: y};\n\t\t\t\t}\n\t\t\t\t\tfunction edgePoints(edge) {\n\t\t\t\t\t\tvar from = nodeGroup(edge.from), to = nodeGroup(edge.to); if (!from || !to) return null;\n\t\t\t\t\t\treturn {start: nodePortPoint(edge.from, 'right'), finish: nodePortPoint(edge.to, 'left')};\n\t\t\t\t\t}\n\t\t\t\t\tfunction setEdgeLine(line, points) { line.setAttribute('x1', points.start.x); line.setAttribute('y1', points.start.y); line.setAttribute('x2', points.finish.x); line.setAttribute('y2', points.finish.y); }\n\t\t\t\t\tfunction renderEdge(group) {\n\t\t\t\t\t\tvar edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;\n\t\t\t\t\t\tgroup.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\tgroup.querySelectorAll('[data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);\n\t\t\t\t\t\t\tvar controls = edgeControls(edge.key); if (!controls) return;\n\t\t\t\t\t\t\tvar start = controls.querySelector('[data-edge-endpoint=\"from\"]'), finish = controls.querySelector('[data-edge-endpoint=\"to\"]');\n\t\t\t\t\t\t\tstart.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);\n\t\t\t\t\t\t\tcontrols.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');\t\t\t\t\t}\n\t\t\t\t\tfunction renderEdges() { svg.querySelectorAll('.automation-draft-edge').forEach(renderEdge); }\n\t\t\t\t\tfunction connectionExists(from, to, exceptKey) { return (candidate.edges || []).some(function(edge) { return edge.key !== exceptKey && edge.from === from && edge.to === to; }); }\n\t\t\t\t\tfunction safeKey(value, fallback) {\n\t\t\t\t\tvar key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80).replace(/_+$/g, '');\n\t\t\t\t\treturn key || fallback;\n\t\t\t\t}\n\t\t\t\t\tfunction uniqueEdgeKey(base, exceptKey) {\n\t\t\t\t\t\tvar keys = new Set((candidate.edges || []).filter(function(edge) { return edge.key !== exceptKey; }).map(function(edge) { return edge.key; }));\n\t\t\t\t\t\tif (!keys.has(base)) return base;\n\t\t\t\t\t\tfor (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;\n\t\t\t\t\t}\n\t\t\t\t\tfunction svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }\n\t\t\t\t\t\tfunction appendEdgeGroup(edge) {\n\t\t\t\t\t\t\tvar group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\t\tgroup.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));\n\t\t\t\t\t\t\tvar controls = svgElement('g', {class: 'automation-edge-controls', 'data-edge-controls': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\t['from', 'to'].forEach(function(endpoint) { controls.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });\n\t\t\t\t\t\t\tvar remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); remove.appendChild(svgElement('path', {d: 'M-4 -4 L4 4 M4 -4 L-4 4', class: 'automation-delete-x'})); controls.appendChild(remove);\n\t\t\t\t\t\t\tvar foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\tsvg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); svg.appendChild(controls); bindEdgeGroup(group); renderEdge(group);\n\t\t\t\t\t\t}\t\t\t\t\tfunction canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }\n\t\t\t\t\tfunction addConnection(from, to) {\n\t\t\t\t\t\tif (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }\n\t\t\t\t\t\tif (connectionExists(from, to, '')) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }\n\t\t\t\t\t\tcandidate.edges = candidate.edges || [];\n\t\t\t\t\t\tvar canonical = canonicalEdge(from, to, '');\n\t\t\t\t\t\tvar edge = canonical ? JSON.parse(JSON.stringify(canonical)) : {key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), ''), from: from, to: to, label: '', condition: {}};\n\t\t\t\t\t\tedge.from_port = 'right'; edge.to_port = 'left'; candidate.edges.push(edge);\n\t\t\t\t\t\tappendEdgeGroup(edge); syncCandidate();\n\t\t\t\t\t\tif (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Select a line to rewire or delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction reconnectEdge(key, endpoint, nodeKey) {\n\t\t\t\t\t\tvar edge = edgeCandidate(key); if (!edge) return; var from = endpoint === 'from' ? nodeKey : edge.from; var to = endpoint === 'to' ? nodeKey : edge.to;\n\t\t\t\t\t\tif (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }\n\t\t\t\t\t\tvar oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; edge.from_port = 'right'; edge.to_port = 'left';\n\t\t\t\t\t\tif (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(oldKey) + '\"]');\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tvar controls = edgeControls(oldKey); if (controls) controls.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tif (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';\t\t\t\t\t}\n\t\t\t\t\tfunction removeEdge(key) {\n\t\t\t\t\t\tcandidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(key) + '\"]'); if (group) group.remove();\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(key); if (foreground) foreground.remove();\n\t\t\t\t\t\t\tvar controls = edgeControls(key); if (controls) controls.remove();\t\t\t\t\t\tif (selectedEdgeKey === key) selectEdge(null);\n\t\t\t\t\t\tsyncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from a right handle to a left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { if (!edgeCandidate(controls.dataset.edgeKey)) controls.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }\n\t\t\t\t\tfunction selectEdge(group) {\n\t\t\t\t\t\tselectedEdgeKey = group ? group.dataset.edgeKey : '';\n\t\t\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\tif (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or use the × control to delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction beginReconnect(group, handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;\n\t\t\t\t\t\tvar endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish;\n\t\t\t\t\t\tactiveConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId, requiredPortKind: endpoint === 'from' ? 'output' : 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets('', '', activeConnection.requiredPortKind); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tfunction bindEdgeGroup(group) {\n\t\t\t\t\t\tvar hit = group.querySelector('[data-edge-hit]'); hit.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); hit.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); selectEdge(group); });\n\t\t\t\t\t\tvar controls = edgeControls(group.dataset.edgeKey); if (!controls) return;\n\t\t\t\t\t\tcontrols.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });\n\t\t\t\t\t\tvar remove = controls.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeEdge(group.dataset.edgeKey); } });\n\t\t\t\t\t}\n\t\t\t\t\tfunction clearConnectionHandles() {\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected', 'automation-connect-handle--eligible'); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction showConnectionTargets(selectedNode, selectedSide, requiredPortKind) {\n\t\t\t\t\t\tclearConnectionHandles();\n\t\t\t\t\t\tif (selectedNode) {\n\t\t\t\t\t\t\tvar sourceHandle = svg.querySelector('[data-connect-port=\"' + CSS.escape(selectedNode) + '\"][data-port-side=\"' + selectedSide + '\"]');\n\t\t\t\t\t\t\tif (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\t\tif (handle.dataset.portKind === requiredPortKind && handle.dataset.connectPort !== selectedNode) handle.classList.add('automation-connect-handle--eligible');\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeConnectionListeners() {\n\t\t\t\t\twindow.removeEventListener('pointermove', moveConnection);\n\t\t\t\t\twindow.removeEventListener('pointerup', finishConnection);\n\t\t\t\t\twindow.removeEventListener('pointercancel', cancelConnection);\n\t\t\t\t}\n\t\t\t\tfunction clearActiveConnection() {\n\t\t\t\t\tactiveConnection = null; keyboardSource = null; preview.setAttribute('hidden', ''); clearConnectionHandles(); removeConnectionListeners();\n\t\t\t\t}\n\t\t\t\tfunction moveConnection(event) {\n\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\tvar point = graphPoint(event); preview.setAttribute('x2', point.x); preview.setAttribute('y2', point.y);\n\t\t\t\t}\n\t\t\t\t\tfunction finishConnection(event) {\n\t\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\t\tvar target = null;\n\t\t\t\t\t\tif (document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }\n\t\t\t\t\t\tif (!target && event.target instanceof Element) target = event.target.closest('[data-connect-port]');\n\t\t\t\t\t\tvar connection = activeConnection; clearActiveConnection();\n\t\t\t\t\t\tif (target && target.dataset.portKind === connection.requiredPortKind) {\n\t\t\t\t\t\t\tif (connection.reconnectKey) reconnectEdge(connection.reconnectKey, connection.endpoint, target.dataset.connectPort);\n\t\t\t\t\t\t\telse addConnection(connection.from, target.dataset.connectPort);\n\t\t\t\t\t\t} else if (target && connectStatus) {\n\t\t\t\t\t\t\tconnectStatus.textContent = connection.requiredPortKind === 'input' ? 'Connections must end at a left handle.' : 'Connection sources must use a right handle.';\n\t\t\t\t\t\t} else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drop a connection from a right handle onto another node\\'s left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }\n\t\t\t\t\tfunction beginConnection(handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection();\n\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\tvar start = nodePortPoint(handle.dataset.connectPort, 'right'); if (!start) return;\n\t\t\t\t\t\tactiveConnection = {from: handle.dataset.connectPort, fromSide: 'right', pointerId: event.pointerId, requiredPortKind: 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets(activeConnection.from, 'right', 'input'); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);\n\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\thandle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });\n\t\t\t\t\t\thandle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });\n\t\t\t\t\t\t\thandle.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tevent.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();\n\t\t\t\t\t\t\t\tif (!keyboardSource) {\n\t\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\t\t\t\tkeyboardSource = {key: handle.dataset.connectPort, side: 'right'}; showConnectionTargets(keyboardSource.key, 'right', 'input'); if (connectStatus) connectStatus.textContent = 'Source selected. Focus another node\\'s left handle and press Enter.'; return;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'input') { if (connectStatus) connectStatus.textContent = 'Connections must end at a left handle.'; return; }\n\t\t\t\t\t\t\t\tvar start = keyboardSource; keyboardSource = null; clearConnectionHandles(); addConnection(start.key, handle.dataset.connectPort);\n\t\t\t\t\t\t\t});\t\t\t\t\t});\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) {\n\t\t\t\t\t\tvar remove = group.querySelector('[data-delete-node]');\n\t\t\t\t\t\tfunction deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeNode(group.dataset.nodeKey); }\n\t\t\t\t\t\tremove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent);\n\t\t\t\t\t\tremove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\t\tif (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;\n\t\t\t\t\t\t\tevent.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t\tvar start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);\n\t\t\t\t\t\tvar dragFrame = 0;\n\t\t\t\t\t\tfunction move(moveEvent) {\n\t\t\t\t\t\t\tvar point = graphPoint(moveEvent);\n\t\t\t\t\t\t\trenderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();\n\t\t\t\t\t\t\tif (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction done() {\n\t\t\t\t\t\t\tgroup.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);\n\t\t\t\t\t\t\tif (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }\n\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgroup.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);\n\t\t\t\t\t});\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\tif (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeNode(group.dataset.nodeKey); return; }\n\t\t\t\t\t\t\tvar dx = 0, dy = 0;\n\t\t\t\t\t\t\tif (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;\n\t\t\t\t\t\tif (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10;\n\t\t\t\t\t\tif (!dx && !dy) return;\n\t\t\t\t\t\tevent.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\t\tvar pan = null;\n\t\t\t\t\tvar panFrame = 0;\n\t\t\t\t\tfunction applyBuilderPan() {\n\t\t\t\t\t\tpanFrame = 0;\n\t\t\t\t\t\tif (!pan || !pan.pending) return;\n\t\t\t\t\t\tviewBox[0] = pan.view[0] - (pan.pending.x - pan.clientX) * pan.unitsX;\n\t\t\t\t\t\tviewBox[1] = pan.view[1] - (pan.pending.y - pan.clientY) * pan.unitsY;\n\t\t\t\t\t\tapplyViewBox();\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\tif (event.target !== svg || event.button !== 0) return;\n\t\t\t\t\t\tvar rect = svg.getBoundingClientRect();\n\t\t\t\t\t\tif (!rect.width || !rect.height) return;\n\t\t\t\t\t\tpan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, view:viewBox.slice(), unitsX:viewBox[2]/rect.width, unitsY:viewBox[3]/rect.height, pending:null};\n\t\t\t\t\t\ttry { svg.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t});\n\t\t\t\t\tsvg.addEventListener('pointermove', function(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (!panFrame) panFrame = requestAnimationFrame(applyBuilderPan);\n\t\t\t\t\t});\n\t\t\t\t\tfunction finishBuilderPan(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }\n\t\t\t\t\t\tapplyBuilderPan(); pan = null;\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerup', finishBuilderPan);\n\t\t\t\t\tsvg.addEventListener('pointercancel', finishBuilderPan);\n\t\t\t\t\tfunction zoom(factor) {\n\t\t\t\t\tvar cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;\n\t\t\t\t\tviewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));\n\t\t\t\t\tviewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();\n\t\t\t\t}\n\t\t\t\tsvg.addEventListener('wheel', function(event) {\n\t\t\t\t\tif (!event.ctrlKey && !event.metaKey) return;\n\t\t\t\t\tevent.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88);\n\t\t\t\t}, {passive: false});\n\t\t\t\troot.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); });\n\t\t\t\troot.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });\n\t\t\t\troot.querySelector('[data-automation-fit]').addEventListener('click', function() {\n\t\t\t\t\tvar groups = Array.from(svg.querySelectorAll('.automation-draft-node'));\n\t\t\t\t\tif (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; }\n\t\t\t\t\tvar xs = groups.map(function(group) { return Number(group.dataset.nodeX); });\n\t\t\t\t\tvar ys = groups.map(function(group) { return Number(group.dataset.nodeY); });\n\t\t\t\t\tvar minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;\n\t\t\t\t\tvar maxX = Math.max.apply(null, xs) + 230, maxY = Math.max.apply(null, ys) + 164;\n\t\t\t\t\tviewBox = [minX, minY, maxX - minX, maxY - minY]; applyViewBox();\n\t\t\t\t});\n\t\t\t\troot.querySelector('[data-automation-reset]').addEventListener('click', function() {\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });\n\t\t\t\t\trenderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();\n\t\t\t\t});\n\t\t\t\t\tbuilder.addEventListener('htmx:beforeCleanupElement', function(event) {\n\t\t\t\t\t\tif (event.target === builder) clearActiveConnection();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tif (automationName) automationName.addEventListener('input', syncCandidate);\t\t\t\t\tbuilder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('submit', function() {\n\t\t\t\t\t\tif (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\tvar submittedYAML = automationYAMLValue();\n\t\t\t\t\t\t\tsetYAMLEditorDisplay(submittedYAML);\n\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = submittedYAML; });\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar viewRoot = builder.querySelector('[data-automation-view-root]');\n\t\t\t\t\t\tvar yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');\n\t\t\t\t\t\tvar detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');\n\t\t\t\t\t\tvar graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');\n\t\t\t\t\t\tvar yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');\n\t\t\t\t\t\tvar detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');\n\t\t\t\t\t\tvar detailsForm = builder.querySelector('[data-automation-details-form]');\n\t\t\t\t\t\tfunction selectAutomationBuilderView(view) {\n\t\t\t\t\t\t\tvar applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});\n\t\t\t\t\t\t\tif (!applied) return;\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tif (view === 'yaml') validateYAMLNow();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction previewYAMLThenSelect(view) {\n\t\t\t\t\t\t\tvar form = document.getElementById('automation-design-form');\n\t\t\t\t\t\t\tif (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\t\tvar initialView = form.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\t\tif (initialView) initialView.value = view === 'details' ? 'details' : '';\n\t\t\t\t\t\t\t\tform.requestSubmit();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tselectAutomationBuilderView(view);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgraphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });\n\t\t\t\t\t\tyamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });\n\t\t\t\t\t\t\tdetailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {\n\t\t\t\t\t\t\tbutton.addEventListener('click', function(event) {\n\t\t\t\t\t\t\t\tif (!detailsPanel || detailsPanel.hidden || !detailsForm) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t\t\tdetailsForm.requestSubmit();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t});\n\t\t\t\t\t\t\trenderEdges(); syncCandidate(false);\n\t\t\t\t\t\t\tvar initialView = builder.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\tif (initialView && initialView.value === 'details') selectAutomationBuilderView('details');\n                            // Compare the editable data, not focus or input events: graph edits\n                            // and programmatic field updates must also protect shortcut navigation.\n                            function automationEditSnapshot() {\n                                return JSON.stringify({\n                                    candidate: candidate,\n                                    yaml: automationYAMLValue(),\n                                    name: automationName ? automationName.value : '',\n                                    details: detailsForm ? Array.from(new FormData(detailsForm).entries()) : []\n                                });\n                            }\n                            var initialAutomationEditSnapshot = automationEditSnapshot();\n                            builder.hasUnsavedAutomationChanges = function() {\n                                return builder.dataset.automationUnsavedChanges === 'true' || automationEditSnapshot() !== initialAutomationEditSnapshot;\n                            };\n\t\t\t\t\t})();\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 457, "\" data-candidate-json><script>\n\t\t\t(function() {\n\t\t\t\tvar root = document.querySelector('[data-automation-draft-canvas]');\n\t\t\t\tvar builder = document.getElementById('automation-builder');\n\t\t\t\tvar svg = root && root.querySelector('[data-automation-canvas]');\n\t\t\t\tvar source = builder && builder.querySelector('[data-candidate-json]');\n\t\t\t\tif (!root || !builder || !svg || !source) return;\n\t\t\t\t\tvar candidate;\n\t\t\t\t\ttry { candidate = JSON.parse(source.value); } catch (_) { return; }\n\t\t\t\t\tvar edgePalette = [];\t\t\t\ttry { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }\n\t\t\t\tvar connectStatus = root.querySelector('[data-automation-connect-status]');\n\t\t\t\tvar preview = svg.querySelector('[data-automation-edge-preview]');\n\t\t\t\t\tvar selectedEdgeKey = '';\n\t\t\t\t\tvar keyboardSource = null;\n\t\t\t\t\tvar activeConnection = null;\n\t\t\t\t\tvar initialViewBox = svg.getAttribute('viewBox').split(/\\s+/).map(Number);\n\t\t\t\t\tvar viewBox = initialViewBox.slice();\n\n\t\t\t\t\tfunction nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }\n\t\t\t\t\tfunction edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }\n\t\t\t\t\tfunction nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }\n\t\t\t\t\t\tfunction nodeGroup(key) { return svg.querySelector('[data-node-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\n\t\t\t\t\t\tfunction edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key=\"' + CSS.escape(key) + '\"]'); }\t\t\t\t\tfunction nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }\n\t\t\t\t\tfunction yamlString(value) { return JSON.stringify(String(value == null ? '' : value)); }\n\t\t\t\t\tfunction yamlPlainKeyPattern() { return /^[A-Za-z_][A-Za-z0-9_]*$/; }\n\t\t\t\t\tfunction yamlKey(key) { return yamlPlainKeyPattern().test(String(key)) ? String(key) : yamlString(key); }\n\t\t\t\t\tfunction yamlScalar(value) {\n\t\t\t\t\t\tif (value === null || value === undefined) return 'null';\n\t\t\t\t\t\tif (typeof value === 'boolean' || typeof value === 'number') return String(value);\n\t\t\t\t\t\treturn yamlString(value);\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlIndent(level) { return '  '.repeat(level); }\n\t\t\t\t\tfunction yamlIsEmptyContainer(value) {\n\t\t\t\t\t\tif (Array.isArray(value)) return value.length === 0;\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') return Object.keys(value).length === 0;\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlBlockLines(value, level) {\n\t\t\t\t\t\tif (Array.isArray(value)) {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tvalue.forEach(function(item) {\n\t\t\t\t\t\t\t\tif (item !== null && typeof item === 'object' && !yamlIsEmptyContainer(item)) {\n\t\t\t\t\t\t\t\t\tvar subLines = yamlBlockLines(item, level + 1);\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + subLines[0].slice(yamlIndent(level + 1).length));\n\t\t\t\t\t\t\t\t\tsubLines.slice(1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (item !== null && typeof item === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + (Array.isArray(item) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + '- ' + yamlScalar(item));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (value !== null && typeof value === 'object') {\n\t\t\t\t\t\t\tvar lines = [];\n\t\t\t\t\t\t\tObject.keys(value).forEach(function(key) {\n\t\t\t\t\t\t\t\tvar nested = value[key];\n\t\t\t\t\t\t\t\tif (nested !== null && typeof nested === 'object' && !yamlIsEmptyContainer(nested)) {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ':');\n\t\t\t\t\t\t\t\t\tyamlBlockLines(nested, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t\t\t\t} else if (nested !== null && typeof nested === 'object') {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + (Array.isArray(nested) ? '[]' : '{}'));\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tlines.push(yamlIndent(level) + yamlKey(key) + ': ' + yamlScalar(nested));\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn lines;\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn [yamlIndent(level) + yamlScalar(value)];\n\t\t\t\t\t}\n\t\t\t\t\tfunction yamlNestedField(lines, label, value, level) {\n\t\t\t\t\t\tvar normalized = (value && typeof value === 'object') ? value : {};\n\t\t\t\t\t\tif (yamlIsEmptyContainer(normalized)) {\n\t\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ': ' + (Array.isArray(normalized) ? '[]' : '{}'));\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tlines.push(yamlIndent(level) + label + ':');\n\t\t\t\t\t\tyamlBlockLines(normalized, level + 1).forEach(function(line) { lines.push(line); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction visualCandidateYAML() {\n\t\t\t\t\t\tvar lines = [\n\t\t\t\t\t\t\t'schema_version: ' + Number(candidate.schema_version || 1),\n\t\t\t\t\t\t\t'name: ' + yamlString(candidate.name),\n\t\t\t\t\t\t\t'description: ' + yamlString(candidate.description),\n\t\t\t\t\t\t\t'automation_type: ' + yamlString(candidate.automation_type),\n\t\t\t\t\t\t\t'adapter_key: ' + yamlString(candidate.adapter_key),\n\t\t\t\t\t\t\t'nodes:'\n\t\t\t\t\t\t];\n\t\t\t\t\t\t(candidate.nodes || []).forEach(function(node) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(node.key));\n\t\t\t\t\t\t\tlines.push('    name: ' + yamlString(node.name));\n\t\t\t\t\t\t\tlines.push('    type: ' + yamlString(node.type));\n\t\t\t\t\t\t\tlines.push('    role: ' + yamlString(node.role));\n\t\t\t\t\t\t\tyamlNestedField(lines, 'config', node.config || {}, 2);\n\t\t\t\t\t\t\tif (node.position) yamlNestedField(lines, 'position', node.position, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlines.push('edges:');\n\t\t\t\t\t\t(candidate.edges || []).forEach(function(edge) {\n\t\t\t\t\t\t\tlines.push('  - key: ' + yamlString(edge.key));\n\t\t\t\t\t\t\tlines.push('    from: ' + yamlString(edge.from));\n\t\t\t\t\t\t\tlines.push('    to: ' + yamlString(edge.to));\n\t\t\t\t\t\t\tlines.push('    from_port: ' + yamlString(edge.from_port || 'right'));\n\t\t\t\t\t\t\tlines.push('    to_port: ' + yamlString(edge.to_port || 'left'));\n\t\t\t\t\t\t\tif (edge.label) lines.push('    label: ' + yamlString(edge.label));\n\t\t\t\t\t\t\tif (edge.condition && Object.keys(edge.condition).length) yamlNestedField(lines, 'condition', edge.condition, 2);\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (candidate.assumptions && candidate.assumptions.length) yamlNestedField(lines, 'assumptions', candidate.assumptions, 0);\n\t\t\t\t\t\tif (candidate.warnings && candidate.warnings.length) yamlNestedField(lines, 'warnings', candidate.warnings, 0);\n\t\t\t\t\t\treturn lines.join('\\n') + '\\n';\n\t\t\t\t\t}\n\t\t\t\t\tvar yamlEditor = builder.querySelector('[data-automation-yaml-editor]');\n\t\t\t\t\tvar yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');\n\t\t\t\t\tvar yamlFoldControls = builder.querySelector('[data-automation-yaml-fold-controls]');\n\t\t\t\t\tvar yamlGutter = builder.querySelector('[data-automation-yaml-gutter]');\n\t\t\t\t\tvar yamlViewport = builder.querySelector('[data-automation-yaml-editor-viewport]');\n\t\t\t\t\tvar yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');\n\t\t\t\t\tvar yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');\n\t\t\t\t\tvar yamlDiagnosticLine = 0;\n\t\t\t\t\tvar yamlShared = window.openVibelyYAML;\n\t\t\t\t\t\tvar yamlFoldingEnabled = false;\n\t\t\t\t\t\tvar yamlFoldedLines = new Set();\n\t\t\t\t\t\tvar yamlSourceValue = yamlEditor ? yamlEditor.value : '';\n\t\t\t\t\t\tvar yamlVisibleLineMap = [];\n\t\t\t\t\t\tvar yamlRenderingValue = false;\n\t\t\t\t\t\tvar yamlPendingSelectionStart = 0;\n\t\t\t\t\t\tvar yamlPendingSelectionEnd = 0;\n\t\t\t\t\t\tvar yamlPendingValue = '';\n\t\t\t\t\t\tvar yamlPendingInputType = '';\n\t\t\t\t\t\tvar yamlParseTimer = 0;\t\t\t\t\tvar yamlParseRequest = 0;\n\t\t\t\t\tvar yamlLineLayoutFrame = 0;\n\t\t\t\t\t\tfunction yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }\n\t\t\t\t\t\tfunction restoreYAMLScrollTop(value) {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tyamlEditor.scrollTop = value;\n\t\t\t\t\t\t\tif (yamlViewport) yamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction scrollYAMLFromWheel(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !event.deltaY) return;\n\t\t\t\t\t\t\tvar scroller = yamlEditor;\n\t\t\t\t\t\t\tif (!scroller) return;\t\t\t\t\t\tvar delta = event.deltaY;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;\n\t\t\t\t\t\tif (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;\n\t\t\t\t\t\tvar previousTop = scroller.scrollTop;\n\t\t\t\t\t\tscroller.scrollTop += delta;\n\t\t\t\t\t\tif (scroller.scrollTop !== previousTop) {\n\t\t\t\t\t\t\tif (scroller === yamlEditor) syncYAMLHighlightScroll();\n\t\t\t\t\t\t\telse {\n\t\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = scroller.scrollTop;\n\t\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-scroller.scrollTop) + 'px)';\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction automationYAMLValue() { return yamlFoldedLines.size > 0 ? yamlSourceValue : (yamlEditor ? yamlEditor.value : yamlSourceValue); }\n\t\t\t\t\t\tfunction setYAMLEditorDisplay(value) {\n\t\t\t\t\t\t\tif (!yamlEditor || yamlEditor.value === value) return;\n\t\t\t\t\t\t\tyamlRenderingValue = true;\n\t\t\t\t\t\t\tyamlEditor.value = value;\n\t\t\t\t\t\t\tyamlRenderingValue = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction escapeYAMLHTML(value) { return yamlShared.escapeHTML(value); }\n\t\t\t\t\t\tfunction yamlLineIndent(line) { return yamlShared.lineIndent(line); }\n\t\t\t\t\t\tfunction yamlFoldRanges(lines) {\n\t\t\t\t\t\t\tvar ranges = {};\t\t\t\t\t\tfor (var index = 0; index < lines.length; index++) {\n\t\t\t\t\t\t\tvar line = lines[index];\n\t\t\t\t\t\t\tif (!line.trim() || line.trim().charAt(0) === '#') continue;\n\t\t\t\t\t\t\tvar indent = yamlLineIndent(line), next = index + 1;\n\t\t\t\t\t\t\twhile (next < lines.length && (!lines[next].trim() || lines[next].trim().charAt(0) === '#')) next++;\n\t\t\t\t\t\t\tif (next >= lines.length || yamlLineIndent(lines[next]) <= indent) continue;\n\t\t\t\t\t\t\tvar end = next;\n\t\t\t\t\t\t\twhile (end + 1 < lines.length && (!lines[end + 1].trim() || lines[end + 1].trim().charAt(0) === '#' || yamlLineIndent(lines[end + 1]) > indent)) end++;\n\t\t\t\t\t\t\tranges[index] = end;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\treturn ranges;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction reconcileYAMLFolds(ranges) {\n\t\t\t\t\t\t\tArray.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlActiveRailInfo() {\n\t\t\t\t\t\t\tif (!yamlEditor || document.activeElement !== yamlEditor) return null;\n\t\t\t\t\t\t\treturn {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlRailColor(active) {\n\t\t\t\t\t\t\tvar isDark = document.documentElement.getAttribute('data-theme') === 'dark';\n                            if (document.documentElement.getAttribute('data-ov-theme-layer') !== 'custom') return active ? (isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)') : 'oklch(var(--bc) / 0.3)';\n\t\t\t\t\t\t\treturn active ? (isDark ? 'var(--ov-yaml-indent-active, var(--ov-focus, rgba(212, 212, 212, 0.8)))' : 'var(--ov-yaml-indent-active, var(--ov-focus, rgba(64, 64, 64, 0.6)))') : 'var(--ov-yaml-indent-rail, var(--ov-border-strong, rgba(127, 127, 127, 0.45)))';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {\n\t\t\t\t\t\tvar rails = [], maxIndent = 0, candidates = [];\n\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });\n\t\t\t\t\t\t\tfor (var column = 0; column < maxIndent; column += 2) {\n\t\t\t\t\t\t\t\tvar startLine = 0, endLine = 0, startRow = 0, endRow = 0;\n\t\t\t\t\t\t\t\tvisibleLines.forEach(function(lineIndex, rowIndex) {\n\t\t\t\t\t\t\t\t\tvar line = lines[lineIndex], ignorable = !line.trim() || /^\\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);\n\t\t\t\t\t\t\t\t\tif (continues) {\n\t\t\t\t\t\t\t\t\t\tif (!startLine) startLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendLine = lineIndex + 1;\n\t\t\t\t\t\t\t\t\t\tif (!startRow) startRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t\tendRow = rowIndex + 1;\n\t\t\t\t\t\t\t\t\t} else if (startLine) {\n\t\t\t\t\t\t\t\t\t\tcandidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t\t\t\tstartLine = 0;\n\t\t\t\t\t\t\t\t\t\tstartRow = 0;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\tif (startLine) candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar activeCandidate = null;\n\t\t\t\t\t\t\tif (activeInfo) {\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar withinGroup = activeInfo.line >= candidate.start && activeInfo.line <= candidate.end;\n\t\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo.line === candidate.start - 1;\n\t\t\t\t\t\t\t\t\tif ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tcandidates.forEach(function(candidate) {\n\t\t\t\t\t\t\t\t\tvar color = yamlRailColor(candidate === activeCandidate);\n\t\t\t\t\t\t\t\t\trails.push('<span class=\"pointer-events-none absolute transition-colors\" style=\"left:calc(0.75rem + ' + candidate.column + 'ch);top:calc(' + (candidate.rowStart - 1) + ' * 1.5rem);height:calc(' + (candidate.rowEnd - candidate.rowStart + 1) + ' * 1.5rem);width:1px;z-index:20;background-color:' + color + '\" data-automation-yaml-indent-rail data-yaml-rail-start=\"' + candidate.start + '\" data-yaml-rail-end=\"' + candidate.end + '\" data-yaml-rail-column=\"' + candidate.column + '\" aria-hidden=\"true\"></span>');\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\treturn rails.join('');\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLActiveRail() {\n\t\t\t\t\t\t\tif (!yamlHighlight || !yamlEditor) return;\n\t\t\t\t\t\t\tvar rails = yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]');\n\t\t\t\t\t\t\tif (!rails.length) return;\n\t\t\t\t\t\t\tvar activeInfo = yamlActiveRailInfo();\n\t\t\t\t\t\t\tvar active = null;\n\t\t\t\t\t\t\trails.forEach(function(rail) {\n\t\t\t\t\t\t\t\tvar start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);\n\t\t\t\t\t\t\t\tvar withinGroup = activeInfo && activeInfo.line >= start && activeInfo.line <= end;\n\t\t\t\t\t\t\t\tvar onGroupHeader = activeInfo && activeInfo.line === start - 1;\n\t\t\t\t\t\t\t\tif (activeInfo && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\trails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });\n\t\t\t\t\t\t}\n\t                    var yamlThemeObserver = new MutationObserver(function() {\n                        if (!builder.isConnected) { yamlThemeObserver.disconnect(); return; }\n                        updateYAMLActiveRail();\n                    });\n                    yamlThemeObserver.observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'data-ov-theme-layer']});\n\t\t\t\t\tfunction layoutYAMLIndentationRails() {\n\t\t\t\t\t\tif (!yamlHighlight) return;\n\t\t\t\t\t\tyamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {\n\t\t\t\t\t\t\tvar start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailStart + '\"]');\n\t\t\t\t\t\t\tvar end = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + rail.dataset.yamlRailEnd + '\"]');\n\t\t\t\t\t\t\tif (!start || !end) return;\n\t\t\t\t\t\t\trail.style.top = start.offsetTop + 'px';\n\t\t\t\t\t\t\trail.style.height = Math.max(0, end.offsetTop + end.offsetHeight - start.offsetTop) + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction layoutYAMLLines() {\n\t\t\t\t\t\tyamlLineLayoutFrame = 0;\n\t\t\t\t\t\tif (!yamlLineNumbers || !yamlFoldControls || !yamlHighlight || !yamlViewport || !yamlViewport.clientWidth) return;\n\t\t\t\t\t\tvar lineNumberRows = yamlLineNumbers.querySelectorAll('[data-automation-yaml-line-number]');\n\t\t\t\t\t\tlineNumberRows.forEach(function(lineNumberRow) {\n\t\t\t\t\t\t\tvar sourceLine = lineNumberRow.dataset.yamlLine;\n\t\t\t\t\t\t\tvar highlightLine = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (!highlightLine) return;\n\t\t\t\t\t\t\tlineNumberRow.style.height = Math.ceil(highlightLine.getBoundingClientRect().height) + 'px';\n\t\t\t\t\t\t\tvar control = yamlFoldControls.querySelector('[data-yaml-line=\"' + sourceLine + '\"]');\n\t\t\t\t\t\t\tif (control) control.style.top = highlightLine.offsetTop + 'px';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tlayoutYAMLIndentationRails();\n\t\t\t\t\t}\n\t\t\t\t\tfunction queueYAMLLineLayout() {\n\t\t\t\t\t\tif (yamlLineLayoutFrame) cancelAnimationFrame(yamlLineLayoutFrame);\n\t\t\t\t\t\tyamlLineLayoutFrame = requestAnimationFrame(layoutYAMLLines);\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction updateYAMLLineNumbers() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlLineNumbers || !yamlFoldControls || !yamlHighlight) return;\nvar lines = yamlSourceValue.split('\\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], displayLines = [], index = 0;\n\t\t\t\t\t\t\treconcileYAMLFolds(ranges);\n\t\t\t\t\t\t\tvar folded = yamlFoldedLines.size > 0;\n\t\t\t\t\t\t\twhile (index < lines.length) {\t\t\t\t\t\t\tvar foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);\n\t\t\t\t\t\t\tvisibleLines.push(index);\n\t\t\t\t\t\t\tdisplayLines.push(lines[index]);\n\t\t\t\t\t\t\tlineNumbers.push('<span class=\"block min-h-6\" data-automation-yaml-line-number data-yaml-line=\"' + (index + 1) + '\">' + (index + 1) + '</span>');\t\t\t\t\t\t\t\tif (canFold && yamlFoldingEnabled) {\n\t\t\t\t\t\t\t\t\tvar visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';\n\t\t\t\t\t\t\t\t\tcontrols.push('<button class=\"pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60' + visibilityClass + '\" style=\"top:0\" type=\"button\" data-automation-yaml-fold data-yaml-line=\"' + (index + 1) + '\" data-yaml-indent=\"' + indent + '\" aria-label=\"' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '\"><svg class=\"h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 7.5 10 12.5 15 7.5\"></path></svg></button>');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\thighlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));\t\t\t\t\t\t\t\tif (isFolded) index = foldEnd + 1; else index++;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tyamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines, yamlActiveRailInfo()) + highlighted.join('');\n\t\t\t\t\t\t\tyamlLineNumbers.innerHTML = lineNumbers.join('');\n\t\t\t\t\t\t\tyamlFoldControls.innerHTML = controls.join('');\n\t\t\t\t\t\t\tyamlVisibleLineMap = visibleLines.slice();\n\t\t\t\t\t\t\tif (folded) {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(displayLines.join('\\n'));\n\t\t\t\t\t\t\t\tyamlHighlight.classList.remove('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('min-h-full');\n\t\t\t\t\t\t\t\tyamlHighlight.style.transform = '';\n\t\t\t\t\t\t\t\tyamlFoldControls.style.transform = '';\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.classList.remove('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.setAttribute('aria-label', 'Collapsed YAML source');\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\tyamlEditor.hidden = false;\n\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(yamlSourceValue);\n\t\t\t\t\t\t\t\tyamlVisibleLineMap = [];\n\t\t\t\t\t\t\t\tyamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');\n\t\t\t\t\t\t\t\tif (yamlViewport) {\nyamlViewport.scrollTop = 0;\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.remove('overflow-y-auto', 'overflow-x-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.classList.add('overflow-hidden');\n\t\t\t\t\t\t\t\t\t\tyamlViewport.tabIndex = -1;\t\t\t\t\t\t\t\t\tyamlViewport.removeAttribute('aria-label');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tsyncYAMLHighlightScroll();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tupdateYAMLActiveRail();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlOffsetToLineCol(text, offset) {\n\t\t\t\t\t\t\tvar prefix = text.slice(0, offset).split('\\n');\n\t\t\t\t\t\t\treturn {line: prefix.length - 1, col: prefix[prefix.length - 1].length};\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction yamlLineColToSourceOffset(sourceLines, sourceLineIndex, col) {\n\t\t\t\t\t\t\tvar offset = 0;\n\t\t\t\t\t\t\tfor (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;\n\t\t\t\t\t\t\treturn offset + col;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction syncYAMLHighlightScroll() {\n\t\t\t\t\t\t\tif (!yamlEditor) return;\n\t\t\t\t\t\t\tif (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlEditor.scrollTop) + 'px)';\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction showYAMLDiagnostic(message) {\t\t\t\t\t\tvar match = String(message || '').match(/line\\s+(\\d+)/i);\n\t\t\t\t\t\tyamlDiagnosticLine = match ? Number(match[1]) : 0;\n\t\t\t\t\t\tif (yamlDiagnostic) {\n\t\t\t\t\t\t\tyamlDiagnostic.textContent = message || '';\n\t\t\t\t\t\t\tyamlDiagnostic.classList.toggle('hidden', !message);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLWhileTyping() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tyamlParseTimer = window.setTimeout(function() {\n\t\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t\t}, 300);\n\t\t\t\t\t}\n\t\t\t\t\tfunction validateYAMLNow() {\n\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;\n\t\t\t\t\t\tvar request = ++yamlParseRequest;\n\t\t\t\t\t\twindow.clearTimeout(yamlParseTimer);\n\t\t\t\t\t\tfetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})\n\t\t\t\t\t\t\t.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })\n\t\t\t\t\t\t\t.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })\n\t\t\t\t\t\t\t.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });\n\t\t\t\t\t}\n\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\tyamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);\n\t\t\t\t\t\t\tyamlEditor.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tif (event.key !== 'Tab' || event.altKey || event.metaKey || event.ctrlKey) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tvar value = yamlEditor.value;\n\t\t\t\t\t\t\t\tvar start = yamlEditor.selectionStart, end = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = value;\n\t\t\t\t\t\t\t\tif (event.shiftKey) {\n\t\t\t\t\t\t\t\t\tvar lineStart = value.lastIndexOf('\\n', start - 1) + 1;\n\t\t\t\t\t\t\t\t\tvar removable = 0;\n\t\t\t\t\t\t\t\t\twhile (removable < 2 && value.charAt(lineStart + removable) === ' ') removable++;\n\t\t\t\t\t\t\t\t\tif (removable === 0) return;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'deleteContentBackward';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('', lineStart, lineStart + removable, 'preserve');\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionStart = Math.max(lineStart, start - removable);\n\t\t\t\t\t\t\t\t\tyamlEditor.selectionEnd = Math.max(lineStart, end - removable);\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionStart = start;\n\t\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = end;\n\t\t\t\t\t\t\t\t\tyamlPendingInputType = 'insertText';\n\t\t\t\t\t\t\t\t\tyamlEditor.setRangeText('  ', start, end, 'end');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tyamlEditor.dispatchEvent(new Event('input', {bubbles: true}));\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('beforeinput', function(event) {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tyamlPendingSelectionStart = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\tyamlPendingSelectionEnd = yamlEditor.selectionEnd;\n\t\t\t\t\t\t\t\tyamlPendingValue = yamlEditor.value;\n\t\t\t\t\t\t\t\tyamlPendingInputType = event && event.inputType ? event.inputType : '';\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\tyamlEditor.addEventListener('input', function() {\n\t\t\t\t\t\t\t\tif (yamlRenderingValue) return;\n\t\t\t\t\t\t\t\tif (yamlFoldedLines.size === 0) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\tvar oldSourceLines = yamlSourceValue.split('\\n');\n\t\t\t\t\t\t\t\t\tvar newVisibleValue = yamlEditor.value;\n\t\t\t\t\t\t\t\t\tvar preEditVisibleValue = yamlPendingValue || newVisibleValue;\n\t\t\t\t\t\t\t\t\tvar preEditStart = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionStart);\n\t\t\t\t\t\t\t\t\tvar preEditEnd = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionEnd);\n\t\t\t\t\t\t\t\t\tvar postEditOffset = yamlEditor.selectionStart;\n\t\t\t\t\t\t\t\t\tvar startVisibleLine = Math.min(preEditStart.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tvar endVisibleLine = Math.min(preEditEnd.line, yamlVisibleLineMap.length - 1);\n\t\t\t\t\t\t\t\t\tif (startVisibleLine < 0 || endVisibleLine < 0 || !yamlVisibleLineMap.length) {\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = newVisibleValue;\n\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\tvar sourceStartLine = yamlVisibleLineMap[startVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceEndLine = yamlVisibleLineMap[endVisibleLine];\n\t\t\t\t\t\t\t\t\t\tvar sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);\n\t\t\t\t\t\t\t\t\t\tvar sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);\n\t\t\t\t\t\t\t\t\t\tvar collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\tif (collapsedDeletion) {\n\t\t\t\t\t\t\t\t\t\t\tvar removedLength = preEditVisibleValue.length - newVisibleValue.length;\n\t\t\t\t\t\t\t\t\t\t\tvar sourceLineText = oldSourceLines[sourceStartLine] || '';\n\t\t\t\t\t\t\t\t\t\t\tif (yamlPendingInputType === 'deleteContentForward') {\n\t\t\t\t\t\t\t\t\t\t\t\tvar nextVisibleSourceLine = yamlVisibleLineMap[startVisibleLine + 1];\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryForward = preEditStart.col === sourceLineText.length && nextVisibleSourceLine !== undefined && nextVisibleSourceLine !== sourceStartLine + 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryForward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar forwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, nextVisibleSourceLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = forwardBoundaryOffset;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = forwardBoundaryOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\tvar prevVisibleSourceLine = startVisibleLine > 0 ? yamlVisibleLineMap[startVisibleLine - 1] : undefined;\n\t\t\t\t\t\t\t\t\t\t\t\tvar atFoldBoundaryBackward = preEditStart.col === 0 && startVisibleLine > 0 && prevVisibleSourceLine !== sourceStartLine - 1;\n\t\t\t\t\t\t\t\t\t\t\t\tif (atFoldBoundaryBackward) {\n\t\t\t\t\t\t\t\t\t\t\t\t\tvar backwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, 0) - 1;\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, backwardBoundaryOffset);\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceEndOffset = sourceStartOffset + removedLength;\n\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\tsourceStartOffset = Math.max(0, sourceStartOffset - removedLength);\n\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t} else {\t\t\t\t\t\t\t\t\t\t\tvar visibleEditStartOffset = 0;\n\t\t\t\t\t\t\t\t\t\t\tfor (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;\n\t\t\t\t\t\t\t\t\t\t\tvisibleEditStartOffset += preEditStart.col;\n\t\t\t\t\t\t\t\t\t\t\tvar insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);\n\t\t\t\t\t\t\t\t\t\t\tyamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);\n\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\t\t\t});\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\tvalidateYAMLWhileTyping();\n\t\t\t\t\t\tyamlEditor.addEventListener('mousedown', function() { window.requestAnimationFrame(updateYAMLActiveRail); });\n\t\t\t\t\t\tyamlEditor.addEventListener('keyup', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('input', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('focus', updateYAMLActiveRail);\n\t\t\t\t\t\tyamlEditor.addEventListener('blur', updateYAMLActiveRail);\n\t\t\t\t\t}\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {\n\t\t\t\t\t\tvar toggle = event.target.closest('[data-automation-yaml-fold]');\n\t\t\t\t\t\tif (!toggle) return;\n\t\t\t\t\t\tvar line = Number(toggle.dataset.yamlLine) - 1;\n\t\t\t\t\t\tvar scrollTop = yamlActiveScrollTop();\n\t\t\t\t\t\tif (yamlFoldedLines.has(line)) yamlFoldedLines.delete(line); else yamlFoldedLines.add(line);\n\t\t\t\t\t\tif (yamlEditor) yamlEditor.blur();\n\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\trestoreYAMLScrollTop(scrollTop);\n\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('scroll', function() {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tif (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;\n\t\t\t\t\t\t\tif (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tif (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {\n\t\t\t\t\t\t\tif (!yamlEditor || !yamlEditor.hidden) return;\n\t\t\t\t\t\t\tscrollYAMLFromWheel(event);\n\t\t\t\t\t\t}, {passive: false});\n\t\t\t\t\t\tif (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});\n\t\t\t\t\t\twindow.addEventListener('resize', queueYAMLLineLayout);\t\t\t\t\tfunction syncCandidate(writeYAML) {\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tvar automationNameValue = automationName ? automationName.value : '';\n\t\t\t\t\t\tif (automationName) candidate.name = automationNameValue;\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });\n\t\t\t\t\t\tbuilder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });\n\t\t\t\t\t\tif (writeYAML !== false) {\n\t\t\t\t\t\t\tvar serializedYAML = visualCandidateYAML();\n\t\t\t\t\t\t\t\tif (yamlEditor) {\n\t\t\t\t\t\t\t\t\tyamlSourceValue = serializedYAML;\n\t\t\t\t\t\t\t\t\tyamlFoldedLines.clear();\n\t\t\t\t\t\t\t\t\tsetYAMLEditorDisplay(serializedYAML);\n\t\t\t\t\t\t\t\t\tupdateYAMLLineNumbers();\n\t\t\t\t\t\t\t\t}\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });\n\t\t\t\t\t\t}\n\t\t\t\t\t}\t\t\t\t\tfunction applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }\n\t\t\t\tfunction graphPoint(event) {\n\t\t\t\t\tvar point = svg.createSVGPoint();\n\t\t\t\t\tpoint.x = event.clientX;\n\t\t\t\t\tpoint.y = event.clientY;\n\t\t\t\t\treturn point.matrixTransform(svg.getScreenCTM().inverse());\n\t\t\t\t}\n\t\t\t\tfunction renderNode(group, x, y) {\n\t\t\t\t\tgroup.dataset.nodeX = String(x);\n\t\t\t\t\tgroup.dataset.nodeY = String(y);\n\t\t\t\t\tgroup.setAttribute('transform', 'translate(' + x + ' ' + y + ')');\n\t\t\t\t\tvar node = nodeCandidate(group.dataset.nodeKey);\n\t\t\t\t\tif (node) node.position = {x: x, y: y};\n\t\t\t\t}\n\t\t\t\t\tfunction edgePoints(edge) {\n\t\t\t\t\t\tvar from = nodeGroup(edge.from), to = nodeGroup(edge.to); if (!from || !to) return null;\n\t\t\t\t\t\treturn {start: nodePortPoint(edge.from, 'right'), finish: nodePortPoint(edge.to, 'left')};\n\t\t\t\t\t}\n\t\t\t\t\tfunction setEdgeLine(line, points) { line.setAttribute('x1', points.start.x); line.setAttribute('y1', points.start.y); line.setAttribute('x2', points.finish.x); line.setAttribute('y2', points.finish.y); }\n\t\t\t\t\tfunction renderEdge(group) {\n\t\t\t\t\t\tvar edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;\n\t\t\t\t\t\tgroup.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\tgroup.querySelectorAll('[data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);\n\t\t\t\t\t\t\tvar controls = edgeControls(edge.key); if (!controls) return;\n\t\t\t\t\t\t\tvar start = controls.querySelector('[data-edge-endpoint=\"from\"]'), finish = controls.querySelector('[data-edge-endpoint=\"to\"]');\n\t\t\t\t\t\t\tstart.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);\n\t\t\t\t\t\t\tcontrols.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');\t\t\t\t\t}\n\t\t\t\t\tfunction renderEdges() { svg.querySelectorAll('.automation-draft-edge').forEach(renderEdge); }\n\t\t\t\t\tfunction connectionExists(from, to, exceptKey) { return (candidate.edges || []).some(function(edge) { return edge.key !== exceptKey && edge.from === from && edge.to === to; }); }\n\t\t\t\t\tfunction safeKey(value, fallback) {\n\t\t\t\t\tvar key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80).replace(/_+$/g, '');\n\t\t\t\t\treturn key || fallback;\n\t\t\t\t}\n\t\t\t\t\tfunction uniqueEdgeKey(base, exceptKey) {\n\t\t\t\t\t\tvar keys = new Set((candidate.edges || []).filter(function(edge) { return edge.key !== exceptKey; }).map(function(edge) { return edge.key; }));\n\t\t\t\t\t\tif (!keys.has(base)) return base;\n\t\t\t\t\t\tfor (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;\n\t\t\t\t\t}\n\t\t\t\t\tfunction svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }\n\t\t\t\t\t\tfunction appendEdgeGroup(edge) {\n\t\t\t\t\t\t\tvar group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;\n\t\t\t\t\t\t\tgroup.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));\n\t\t\t\t\t\t\tvar controls = svgElement('g', {class: 'automation-edge-controls', 'data-edge-controls': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\t['from', 'to'].forEach(function(endpoint) { controls.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });\n\t\t\t\t\t\t\tvar remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); remove.appendChild(svgElement('path', {d: 'M-4 -4 L4 4 M4 -4 L-4 4', class: 'automation-delete-x'})); controls.appendChild(remove);\n\t\t\t\t\t\t\tvar foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});\n\t\t\t\t\t\t\tsvg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); svg.appendChild(controls); bindEdgeGroup(group); renderEdge(group);\n\t\t\t\t\t\t}\t\t\t\t\tfunction canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }\n\t\t\t\t\tfunction addConnection(from, to) {\n\t\t\t\t\t\tif (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }\n\t\t\t\t\t\tif (connectionExists(from, to, '')) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }\n\t\t\t\t\t\tcandidate.edges = candidate.edges || [];\n\t\t\t\t\t\tvar canonical = canonicalEdge(from, to, '');\n\t\t\t\t\t\tvar edge = canonical ? JSON.parse(JSON.stringify(canonical)) : {key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), ''), from: from, to: to, label: '', condition: {}};\n\t\t\t\t\t\tedge.from_port = 'right'; edge.to_port = 'left'; candidate.edges.push(edge);\n\t\t\t\t\t\tappendEdgeGroup(edge); syncCandidate();\n\t\t\t\t\t\tif (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Select a line to rewire or delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction reconnectEdge(key, endpoint, nodeKey) {\n\t\t\t\t\t\tvar edge = edgeCandidate(key); if (!edge) return; var from = endpoint === 'from' ? nodeKey : edge.from; var to = endpoint === 'to' ? nodeKey : edge.to;\n\t\t\t\t\t\tif (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }\n\t\t\t\t\t\tvar oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; edge.from_port = 'right'; edge.to_port = 'left';\n\t\t\t\t\t\tif (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(oldKey) + '\"]');\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tvar controls = edgeControls(oldKey); if (controls) controls.dataset.edgeKey = edge.key;\n\t\t\t\t\t\t\tif (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';\t\t\t\t\t}\n\t\t\t\t\tfunction removeEdge(key) {\n\t\t\t\t\t\tcandidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });\n\t\t\t\t\t\t\tvar group = svg.querySelector('.automation-draft-edge[data-edge-key=\"' + CSS.escape(key) + '\"]'); if (group) group.remove();\n\t\t\t\t\t\t\tvar foreground = foregroundEdge(key); if (foreground) foreground.remove();\n\t\t\t\t\t\t\tvar controls = edgeControls(key); if (controls) controls.remove();\t\t\t\t\t\tif (selectedEdgeKey === key) selectEdge(null);\n\t\t\t\t\t\tsyncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from a right handle to a left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { if (!edgeCandidate(controls.dataset.edgeKey)) controls.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }\n\t\t\t\t\tfunction selectEdge(group) {\n\t\t\t\t\t\tselectedEdgeKey = group ? group.dataset.edgeKey : '';\n\t\t\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\t\tsvg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });\n\t\t\t\t\t\tif (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or use the × control to delete it.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction beginReconnect(group, handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;\n\t\t\t\t\t\tvar endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish;\n\t\t\t\t\t\tactiveConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId, requiredPortKind: endpoint === 'from' ? 'output' : 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets('', '', activeConnection.requiredPortKind); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tfunction bindEdgeGroup(group) {\n\t\t\t\t\t\tvar hit = group.querySelector('[data-edge-hit]'); hit.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); hit.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); selectEdge(group); });\n\t\t\t\t\t\tvar controls = edgeControls(group.dataset.edgeKey); if (!controls) return;\n\t\t\t\t\t\tcontrols.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });\n\t\t\t\t\t\tvar remove = controls.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeEdge(group.dataset.edgeKey); } });\n\t\t\t\t\t}\n\t\t\t\t\tfunction clearConnectionHandles() {\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected', 'automation-connect-handle--eligible'); });\n\t\t\t\t\t}\n\t\t\t\t\tfunction showConnectionTargets(selectedNode, selectedSide, requiredPortKind) {\n\t\t\t\t\t\tclearConnectionHandles();\n\t\t\t\t\t\tif (selectedNode) {\n\t\t\t\t\t\t\tvar sourceHandle = svg.querySelector('[data-connect-port=\"' + CSS.escape(selectedNode) + '\"][data-port-side=\"' + selectedSide + '\"]');\n\t\t\t\t\t\t\tif (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\t\tif (handle.dataset.portKind === requiredPortKind && handle.dataset.connectPort !== selectedNode) handle.classList.add('automation-connect-handle--eligible');\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeConnectionListeners() {\n\t\t\t\t\twindow.removeEventListener('pointermove', moveConnection);\n\t\t\t\t\twindow.removeEventListener('pointerup', finishConnection);\n\t\t\t\t\twindow.removeEventListener('pointercancel', cancelConnection);\n\t\t\t\t}\n\t\t\t\tfunction clearActiveConnection() {\n\t\t\t\t\tactiveConnection = null; keyboardSource = null; preview.setAttribute('hidden', ''); clearConnectionHandles(); removeConnectionListeners();\n\t\t\t\t}\n\t\t\t\tfunction moveConnection(event) {\n\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\tvar point = graphPoint(event); preview.setAttribute('x2', point.x); preview.setAttribute('y2', point.y);\n\t\t\t\t}\n\t\t\t\t\tfunction finishConnection(event) {\n\t\t\t\t\t\tif (!activeConnection || event.pointerId !== activeConnection.pointerId) return;\n\t\t\t\t\t\tvar target = null;\n\t\t\t\t\t\tif (document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }\n\t\t\t\t\t\tif (!target && event.target instanceof Element) target = event.target.closest('[data-connect-port]');\n\t\t\t\t\t\tvar connection = activeConnection; clearActiveConnection();\n\t\t\t\t\t\tif (target && target.dataset.portKind === connection.requiredPortKind) {\n\t\t\t\t\t\t\tif (connection.reconnectKey) reconnectEdge(connection.reconnectKey, connection.endpoint, target.dataset.connectPort);\n\t\t\t\t\t\t\telse addConnection(connection.from, target.dataset.connectPort);\n\t\t\t\t\t\t} else if (target && connectStatus) {\n\t\t\t\t\t\t\tconnectStatus.textContent = connection.requiredPortKind === 'input' ? 'Connections must end at a left handle.' : 'Connection sources must use a right handle.';\n\t\t\t\t\t\t} else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drop a connection from a right handle onto another node\\'s left handle.';\n\t\t\t\t\t}\n\t\t\t\t\tfunction cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }\n\t\t\t\t\tfunction beginConnection(handle, event) {\n\t\t\t\t\t\tif (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection();\n\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\tvar start = nodePortPoint(handle.dataset.connectPort, 'right'); if (!start) return;\n\t\t\t\t\t\tactiveConnection = {from: handle.dataset.connectPort, fromSide: 'right', pointerId: event.pointerId, requiredPortKind: 'input'};\n\t\t\t\t\t\tpreview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');\n\t\t\t\t\t\tshowConnectionTargets(activeConnection.from, 'right', 'input'); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);\n\t\t\t\t\t}\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);\n\t\t\t\t\tsvg.querySelectorAll('[data-connect-port]').forEach(function(handle) {\n\t\t\t\t\t\thandle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });\n\t\t\t\t\t\thandle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });\n\t\t\t\t\t\t\thandle.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\t\tevent.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();\n\t\t\t\t\t\t\t\tif (!keyboardSource) {\n\t\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'output') { if (connectStatus) connectStatus.textContent = 'Start a connection from a right handle.'; return; }\n\t\t\t\t\t\t\t\t\tkeyboardSource = {key: handle.dataset.connectPort, side: 'right'}; showConnectionTargets(keyboardSource.key, 'right', 'input'); if (connectStatus) connectStatus.textContent = 'Source selected. Focus another node\\'s left handle and press Enter.'; return;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (handle.dataset.portKind !== 'input') { if (connectStatus) connectStatus.textContent = 'Connections must end at a left handle.'; return; }\n\t\t\t\t\t\t\t\tvar start = keyboardSource; keyboardSource = null; clearConnectionHandles(); addConnection(start.key, handle.dataset.connectPort);\n\t\t\t\t\t\t\t});\t\t\t\t\t});\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) {\n\t\t\t\t\t\tvar remove = group.querySelector('[data-delete-node]');\n\t\t\t\t\t\tfunction deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeNode(group.dataset.nodeKey); }\n\t\t\t\t\t\tremove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent);\n\t\t\t\t\t\tremove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });\n\t\t\t\t\t\tgroup.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\t\tif (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;\n\t\t\t\t\t\t\tevent.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t\tvar start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);\n\t\t\t\t\t\tvar dragFrame = 0;\n\t\t\t\t\t\tfunction move(moveEvent) {\n\t\t\t\t\t\t\tvar point = graphPoint(moveEvent);\n\t\t\t\t\t\t\trenderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();\n\t\t\t\t\t\t\tif (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction done() {\n\t\t\t\t\t\t\tgroup.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);\n\t\t\t\t\t\t\tif (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }\n\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgroup.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);\n\t\t\t\t\t});\n\t\t\t\t\t\tgroup.addEventListener('keydown', function(event) {\n\t\t\t\t\t\t\tif (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeNode(group.dataset.nodeKey); return; }\n\t\t\t\t\t\t\tvar dx = 0, dy = 0;\n\t\t\t\t\t\t\tif (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;\n\t\t\t\t\t\tif (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10;\n\t\t\t\t\t\tif (!dx && !dy) return;\n\t\t\t\t\t\tevent.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\t\tvar pan = null;\n\t\t\t\t\tvar panFrame = 0;\n\t\t\t\t\tfunction applyBuilderPan() {\n\t\t\t\t\t\tpanFrame = 0;\n\t\t\t\t\t\tif (!pan || !pan.pending) return;\n\t\t\t\t\t\tviewBox[0] = pan.view[0] - (pan.pending.x - pan.clientX) * pan.unitsX;\n\t\t\t\t\t\tviewBox[1] = pan.view[1] - (pan.pending.y - pan.clientY) * pan.unitsY;\n\t\t\t\t\t\tapplyViewBox();\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerdown', function(event) {\n\t\t\t\t\t\tif (event.target !== svg || event.button !== 0) return;\n\t\t\t\t\t\tvar rect = svg.getBoundingClientRect();\n\t\t\t\t\t\tif (!rect.width || !rect.height) return;\n\t\t\t\t\t\tpan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, view:viewBox.slice(), unitsX:viewBox[2]/rect.width, unitsY:viewBox[3]/rect.height, pending:null};\n\t\t\t\t\t\ttry { svg.setPointerCapture(event.pointerId); } catch (_) {}\n\t\t\t\t\t});\n\t\t\t\t\tsvg.addEventListener('pointermove', function(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (!panFrame) panFrame = requestAnimationFrame(applyBuilderPan);\n\t\t\t\t\t});\n\t\t\t\t\tfunction finishBuilderPan(event) {\n\t\t\t\t\t\tif (!pan || event.pointerId !== pan.pointerId) return;\n\t\t\t\t\t\tpan.pending = {x:event.clientX, y:event.clientY};\n\t\t\t\t\t\tif (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }\n\t\t\t\t\t\tapplyBuilderPan(); pan = null;\n\t\t\t\t\t}\n\t\t\t\t\tsvg.addEventListener('pointerup', finishBuilderPan);\n\t\t\t\t\tsvg.addEventListener('pointercancel', finishBuilderPan);\n\t\t\t\t\tfunction zoom(factor) {\n\t\t\t\t\tvar cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;\n\t\t\t\t\tviewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));\n\t\t\t\t\tviewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();\n\t\t\t\t}\n\t\t\t\tsvg.addEventListener('wheel', function(event) {\n\t\t\t\t\tif (!event.ctrlKey && !event.metaKey) return;\n\t\t\t\t\tevent.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88);\n\t\t\t\t}, {passive: false});\n\t\t\t\troot.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); });\n\t\t\t\troot.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });\n\t\t\t\troot.querySelector('[data-automation-fit]').addEventListener('click', function() {\n\t\t\t\t\tvar groups = Array.from(svg.querySelectorAll('.automation-draft-node'));\n\t\t\t\t\tif (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; }\n\t\t\t\t\tvar xs = groups.map(function(group) { return Number(group.dataset.nodeX); });\n\t\t\t\t\tvar ys = groups.map(function(group) { return Number(group.dataset.nodeY); });\n\t\t\t\t\tvar minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;\n\t\t\t\t\tvar maxX = Math.max.apply(null, xs) + 230, maxY = Math.max.apply(null, ys) + 164;\n\t\t\t\t\tviewBox = [minX, minY, maxX - minX, maxY - minY]; applyViewBox();\n\t\t\t\t});\n\t\t\t\troot.querySelector('[data-automation-reset]').addEventListener('click', function() {\n\t\t\t\t\tsvg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });\n\t\t\t\t\trenderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();\n\t\t\t\t});\n\t\t\t\t\tbuilder.addEventListener('htmx:beforeCleanupElement', function(event) {\n\t\t\t\t\t\tif (event.target === builder) { clearActiveConnection(); yamlThemeObserver.disconnect(); }\n\t\t\t\t\t});\n\t\t\t\t\t\tvar automationName = builder.querySelector('[data-automation-name]');\n\t\t\t\t\t\tif (automationName) automationName.addEventListener('input', syncCandidate);\t\t\t\t\tbuilder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });\n\t\t\t\t\tbuilder.addEventListener('submit', function() {\n\t\t\t\t\t\tif (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\tvar submittedYAML = automationYAMLValue();\n\t\t\t\t\t\t\tsetYAMLEditorDisplay(submittedYAML);\n\t\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = submittedYAML; });\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t});\n\t\t\t\t\t\tvar viewRoot = builder.querySelector('[data-automation-view-root]');\n\t\t\t\t\t\tvar yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');\n\t\t\t\t\t\tvar detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');\n\t\t\t\t\t\tvar graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');\n\t\t\t\t\t\tvar yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');\n\t\t\t\t\t\tvar detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');\n\t\t\t\t\t\tvar detailsForm = builder.querySelector('[data-automation-details-form]');\n\t\t\t\t\t\tfunction selectAutomationBuilderView(view) {\n\t\t\t\t\t\t\tvar applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});\n\t\t\t\t\t\t\tif (!applied) return;\n\t\t\t\t\t\t\tqueueYAMLLineLayout();\n\t\t\t\t\t\t\tif (view === 'yaml') validateYAMLNow();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction previewYAMLThenSelect(view) {\n\t\t\t\t\t\t\tvar form = document.getElementById('automation-design-form');\n\t\t\t\t\t\t\tif (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {\n\t\t\t\t\t\t\t\tvar initialView = form.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\t\tif (initialView) initialView.value = view === 'details' ? 'details' : '';\n\t\t\t\t\t\t\t\tform.requestSubmit();\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tselectAutomationBuilderView(view);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tgraphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });\n\t\t\t\t\t\tyamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });\n\t\t\t\t\t\t\tdetailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });\t\t\t\t\t\tbuilder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {\n\t\t\t\t\t\t\tbutton.addEventListener('click', function(event) {\n\t\t\t\t\t\t\t\tif (!detailsPanel || detailsPanel.hidden || !detailsForm) return;\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t\tsyncCandidate();\n\t\t\t\t\t\t\t\tdetailsForm.requestSubmit();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t});\n\t\t\t\t\t\t\trenderEdges(); syncCandidate(false);\n\t\t\t\t\t\t\tvar initialView = builder.querySelector('[data-automation-initial-view]');\n\t\t\t\t\t\t\tif (initialView && initialView.value === 'details') selectAutomationBuilderView('details');\n                            // Compare the editable data, not focus or input events: graph edits\n                            // and programmatic field updates must also protect shortcut navigation.\n                            function automationEditSnapshot() {\n                                return JSON.stringify({\n                                    candidate: candidate,\n                                    yaml: automationYAMLValue(),\n                                    name: automationName ? automationName.value : '',\n                                    details: detailsForm ? Array.from(new FormData(detailsForm).entries()) : []\n                                });\n                            }\n                            var initialAutomationEditSnapshot = automationEditSnapshot();\n                            builder.hasUnsavedAutomationChanges = function() {\n                                return builder.dataset.automationUnsavedChanges === 'true' || automationEditSnapshot() !== initialAutomationEditSnapshot;\n                            };\n\t\t\t\t\t})();\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -5875,7 +5875,7 @@ func automationGraphThemeStyles() templ.Component {
 			templ_7745c5c3_Var307 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 458, "<style>\n\t\t.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }\n\t\t\t.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }\n\t\t\t.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-width: 4; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }\n\t\t\t.automation-graph-preview-arrow { fill: oklch(var(--p)); }\n\t\t.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }\n\t\t.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }\n\t\t.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }\n\t\t.automation-graph-node--waiting { fill: oklch(var(--in) / 0.15); stroke: oklch(var(--in)); }\n\t\t\t.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); animation: automation-running-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }\n\t\t\t@keyframes automation-running-pulse { 0%, 100% { stroke-opacity: 0.72; } 50% { stroke-opacity: 1; stroke-width: 5; } }\n\t\t\t@media (prefers-reduced-motion: reduce) { .automation-graph-node--running { animation: none; } }\t\t.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }\n\t\t.automation-graph-label { fill: oklch(var(--bc)); pointer-events: none; }\n\t\t.automation-graph-label--primary { fill: oklch(var(--bc)); }\n\t\t.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }\n\t\t.automation-graph-label--muted { fill: oklch(var(--bc) / 0.6); }\n\t\t.automation-node-content { box-sizing: border-box; display: flex; height: 100%; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px 12px; color: oklch(var(--bc)); text-align: center; line-height: 1.15; overflow: hidden; }\n\t\t.automation-node-content strong { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; }\n\t\t.automation-node-content span { font-size: 10px; font-weight: 650; }\n\t\t.automation-node-content small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: oklch(var(--bc) / 0.65); font-size: 9px; }\n\t\t.automation-state-dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 9999px; border: 2px solid oklch(var(--bc) / 0.4); }\n\t\t.automation-state-dot--failed { border-color: oklch(var(--er)); background: oklch(var(--er) / 0.35); }\n\t\t.automation-state-dot--blocked { border-color: oklch(var(--wa)); background: oklch(var(--wa) / 0.35); }\n\t\t.automation-state-dot--waiting { border-color: oklch(var(--in)); background: oklch(var(--in) / 0.35); }\n\t\t.automation-state-dot--running { border-color: oklch(var(--p)); background: oklch(var(--p) / 0.35); }\n\t\t.automation-state-dot--recently_completed { border-color: oklch(var(--su)); background: oklch(var(--su) / 0.35); }\n\t\t.automation-node-state--failed { color: oklch(var(--er)); }\n\t\t.automation-node-state--blocked { color: oklch(var(--wa)); }\n\t\t.automation-node-state--waiting { color: oklch(var(--in)); }\n\t\t.automation-node-state--running { color: oklch(var(--p)); }\n\t\t.automation-node-state--recently_completed { color: oklch(var(--su)); }\n\t\t.automation-canvas-shell svg { cursor: grab; }\n\t\t.automation-graph-link { -webkit-user-drag: none; }\n\t\t.automation-canvas-shell svg:active { cursor: grabbing; }\n\t\t.automation-canvas-shell .automation-draft-node { cursor: grab; }\n\t\t.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }\n\t\t\t.automation-connect-handle { stroke: oklch(var(--p)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-connect-handle--input { fill: oklch(var(--b2)); cursor: default; }\n\t\t\t.automation-connect-handle--output { fill: oklch(var(--p)); cursor: crosshair; }\n\t\t\t.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }\n\t\t\t.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); cursor: crosshair; opacity: 1; stroke-width: 4; }\t\t\t.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--bc) / .5); stroke-width: 3; }\n\t\t\t.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }\n\t\t\t.automation-draft-edge:focus { outline: none; }\n\t\t\t.automation-edge-foreground { pointer-events: none; stroke: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground-arrow { fill: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }\n\t\t\t.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }\n\t\t\t\t.automation-edge-controls--selected .automation-edge-endpoint, .automation-edge-controls--selected .automation-edge-delete, .automation-edge-controls:focus-within .automation-edge-endpoint, .automation-edge-controls:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }\t\t\t.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }\n\t\t\t.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-edge-delete .automation-delete-x, .automation-node-delete .automation-delete-x { fill: none; stroke: oklch(var(--b1)); stroke-width: 2.5; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-edge-delete, .automation-node-delete { cursor: pointer; }\n\t\t\t.automation-edge-delete:focus-visible, .automation-node-delete:focus-visible { outline: none; }\n\t\t\t.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }\n\t\t\t.automation-graph-link:focus-visible .automation-graph-node,\n\t\t.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 458, "<style>\n\t\t.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }\n\t\t\t.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }\n\t\t\t.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-width: 4; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }\n\t\t\t.automation-graph-preview-arrow { fill: oklch(var(--p)); }\n\t\t.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }\n\t\t.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }\n\t\t.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }\n\t\t.automation-graph-node--waiting { fill: oklch(var(--in) / 0.15); stroke: oklch(var(--in)); }\n\t\t\t.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); animation: automation-running-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }\n\t\t\t@keyframes automation-running-pulse { 0%, 100% { stroke-opacity: 0.72; } 50% { stroke-opacity: 1; stroke-width: 5; } }\n\t\t\t@media (prefers-reduced-motion: reduce) { .automation-graph-node--running { animation: none; } }\t\t.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }\n\t\t.automation-graph-label { fill: oklch(var(--bc)); pointer-events: none; }\n\t\t.automation-graph-label--primary { fill: oklch(var(--bc)); }\n\t\t.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }\n\t\t.automation-graph-label--muted { fill: oklch(var(--bc) / 0.6); }\n\t\t.automation-node-content { box-sizing: border-box; display: flex; height: 100%; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px 12px; color: oklch(var(--bc)); text-align: center; line-height: 1.15; overflow: hidden; }\n\t\t.automation-node-content strong { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; }\n\t\t.automation-node-content span { font-size: 10px; font-weight: 650; }\n\t\t.automation-node-content small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: oklch(var(--bc) / 0.65); font-size: 9px; }\n\t\t.automation-state-dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 9999px; border: 2px solid oklch(var(--bc) / 0.4); }\n\t\t.automation-state-dot--failed { border-color: oklch(var(--er)); background: oklch(var(--er) / 0.35); }\n\t\t.automation-state-dot--blocked { border-color: oklch(var(--wa)); background: oklch(var(--wa) / 0.35); }\n\t\t.automation-state-dot--waiting { border-color: oklch(var(--in)); background: oklch(var(--in) / 0.35); }\n\t\t.automation-state-dot--running { border-color: oklch(var(--p)); background: oklch(var(--p) / 0.35); }\n\t\t.automation-state-dot--recently_completed { border-color: oklch(var(--su)); background: oklch(var(--su) / 0.35); }\n\t\t.automation-node-state--failed { color: oklch(var(--er)); }\n\t\t.automation-node-state--blocked { color: oklch(var(--wa)); }\n\t\t.automation-node-state--waiting { color: oklch(var(--in)); }\n\t\t.automation-node-state--running { color: oklch(var(--p)); }\n\t\t.automation-node-state--recently_completed { color: oklch(var(--su)); }\n\t\t.automation-canvas-shell svg { cursor: grab; }\n\t\t.automation-graph-link { -webkit-user-drag: none; }\n\t\t.automation-canvas-shell svg:active { cursor: grabbing; }\n\t\t.automation-canvas-shell .automation-draft-node { cursor: grab; }\n\t\t.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }\n\t\t\t.automation-connect-handle { stroke: oklch(var(--p)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-connect-handle--input { fill: oklch(var(--b2)); cursor: default; }\n\t\t\t.automation-connect-handle--output { fill: oklch(var(--p)); cursor: crosshair; }\n\t\t\t.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }\n\t\t\t.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); cursor: crosshair; opacity: 1; stroke-width: 4; }\t\t\t.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--bc) / .5); stroke-width: 3; }\n\t\t\t.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }\n\t\t\t.automation-draft-edge:focus { outline: none; }\n\t\t\t.automation-edge-foreground { pointer-events: none; stroke: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground-arrow { fill: oklch(var(--bc)); }\n\t\t\t.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }\n\t\t\t.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }\n\t\t\t\t.automation-edge-controls--selected .automation-edge-endpoint, .automation-edge-controls--selected .automation-edge-delete, .automation-edge-controls:focus-within .automation-edge-endpoint, .automation-edge-controls:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }\t\t\t.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }\n\t\t\t.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }\n\t\t\t.automation-edge-delete .automation-delete-x, .automation-node-delete .automation-delete-x { fill: none; stroke: oklch(var(--b1)); stroke-width: 2.5; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }\n\t\t\t.automation-edge-delete, .automation-node-delete { cursor: pointer; }\n\t\t\t.automation-edge-delete:focus-visible, .automation-node-delete:focus-visible { outline: none; }\n\t\t\t.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }\n\t\t\t.automation-graph-link:focus-visible .automation-graph-node,\n\t\t\t.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-canvas-shell { background: var(--ov-surface) !important; border-color: var(--ov-subtle-border) !important; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-edge--highlighted,\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-edge--preview { stroke: var(--ov-focus); opacity: 1; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-preview-arrow { fill: var(--ov-focus); opacity: 1; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-node--failed { fill: var(--ov-diff-delete-bg); stroke: var(--ov-error); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-node--blocked { fill: var(--ov-diff-modify-bg); stroke: var(--ov-warning); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-node--waiting { fill: var(--ov-selection-bg); stroke: var(--ov-info); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-node--running { fill: var(--ov-selection-bg); stroke: var(--ov-focus); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-node--completed { fill: var(--ov-diff-add-bg); stroke: var(--ov-success); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-label,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-label--primary { fill: var(--ov-text); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-label--secondary,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-label--muted { fill: var(--ov-text-muted); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-content { color: var(--ov-text); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-content small { color: var(--ov-text-muted); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot { border-color: var(--ov-subtle-border); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--failed,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-state--failed { border-color: var(--ov-error); color: var(--ov-error); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--blocked,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-state--blocked { border-color: var(--ov-warning); color: var(--ov-warning); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--waiting,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-state--waiting { border-color: var(--ov-info); color: var(--ov-info); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--running,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-state--running { border-color: var(--ov-focus); color: var(--ov-focus); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--recently_completed,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-state--recently_completed { border-color: var(--ov-success); color: var(--ov-success); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--failed { background: var(--ov-diff-delete-bg); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--blocked { background: var(--ov-diff-modify-bg); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--waiting,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--running { background: var(--ov-selection-bg); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-state-dot--recently_completed { background: var(--ov-diff-add-bg); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-connect-handle,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-connect-handle:focus-visible { stroke: var(--ov-focus); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-connect-handle--input { fill: var(--ov-surface-raised); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-connect-handle--output,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-connect-handle--selected,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-endpoint { fill: var(--ov-focus); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-endpoint { stroke: var(--ov-surface); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-connect-handle--eligible { fill: var(--ov-success); stroke: var(--ov-success); }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-foreground-arrow { fill: var(--ov-automation-edge); opacity: 1; }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-delete circle,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-delete circle { fill: var(--ov-error); stroke: var(--ov-surface); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-delete .automation-delete-x,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-delete .automation-delete-x { stroke: var(--ov-error-foreground); }\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-edge-delete:focus-visible circle,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-node-delete:focus-visible circle,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-link:focus-visible .automation-graph-node,\n\t\t\t[data-ov-theme-layer=\"custom\"] .automation-graph-focus:focus-visible .automation-graph-node { stroke: var(--ov-focus); }\n\t\t\t\t[data-ov-theme-layer=\"custom\"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }\t\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6067,7 +6067,7 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 		var templ_7745c5c3_Var313 templ.SafeURL
 		templ_7745c5c3_Var313, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2366, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2420, Col: 179}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var313))
 		if templ_7745c5c3_Err != nil {
@@ -6080,7 +6080,7 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 		var templ_7745c5c3_Var314 string
 		templ_7745c5c3_Var314, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2366, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2420, Col: 250}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var314)
 		if templ_7745c5c3_Err != nil {
@@ -6093,7 +6093,7 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 		var templ_7745c5c3_Var315 string
 		templ_7745c5c3_Var315, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2368, Col: 206}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2422, Col: 206}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var315)
 		if templ_7745c5c3_Err != nil {
@@ -6135,7 +6135,7 @@ func automationEditableBreadcrumb(currentProjectID string, automationID string, 
 		var templ_7745c5c3_Var317 templ.SafeURL
 		templ_7745c5c3_Var317, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2374, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2428, Col: 179}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var317))
 		if templ_7745c5c3_Err != nil {
@@ -6148,7 +6148,7 @@ func automationEditableBreadcrumb(currentProjectID string, automationID string, 
 		var templ_7745c5c3_Var318 string
 		templ_7745c5c3_Var318, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2374, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2428, Col: 250}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var318)
 		if templ_7745c5c3_Err != nil {
@@ -6161,7 +6161,7 @@ func automationEditableBreadcrumb(currentProjectID string, automationID string, 
 		var templ_7745c5c3_Var319 string
 		templ_7745c5c3_Var319, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2376, Col: 206}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2430, Col: 206}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var319)
 		if templ_7745c5c3_Err != nil {
@@ -6233,7 +6233,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 		var templ_7745c5c3_Var323 templ.SafeURL
 		templ_7745c5c3_Var323, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2385, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2439, Col: 179}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var323))
 		if templ_7745c5c3_Err != nil {
@@ -6246,7 +6246,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 		var templ_7745c5c3_Var324 string
 		templ_7745c5c3_Var324, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2385, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2439, Col: 250}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var324)
 		if templ_7745c5c3_Err != nil {
@@ -6269,7 +6269,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 				var templ_7745c5c3_Var325 templ.SafeURL
 				templ_7745c5c3_Var325, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2390, Col: 149}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2444, Col: 149}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var325))
 				if templ_7745c5c3_Err != nil {
@@ -6282,7 +6282,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 				var templ_7745c5c3_Var326 string
 				templ_7745c5c3_Var326, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2390, Col: 237}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2444, Col: 237}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var326)
 				if templ_7745c5c3_Err != nil {
@@ -6295,7 +6295,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 				var templ_7745c5c3_Var327 string
 				templ_7745c5c3_Var327, templ_7745c5c3_Err = templ.JoinStringErrs(automationName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2390, Col: 301}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2444, Col: 301}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var327))
 				if templ_7745c5c3_Err != nil {
@@ -6313,7 +6313,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 				var templ_7745c5c3_Var328 string
 				templ_7745c5c3_Var328, templ_7745c5c3_Err = templ.JoinStringErrs(automationName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2392, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2446, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var328))
 				if templ_7745c5c3_Err != nil {
@@ -6345,7 +6345,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 			var templ_7745c5c3_Var329 string
 			templ_7745c5c3_Var329, templ_7745c5c3_Err = templ.JoinStringErrs(currentLabel)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2403, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2457, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var329))
 			if templ_7745c5c3_Err != nil {
@@ -6393,7 +6393,7 @@ func automationCardDuplicateAction(automationID string, currentProjectID string,
 			var templ_7745c5c3_Var331 templ.SafeURL
 			templ_7745c5c3_Var331, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2410, Col: 113}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2464, Col: 113}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var331))
 			if templ_7745c5c3_Err != nil {
@@ -6406,7 +6406,7 @@ func automationCardDuplicateAction(automationID string, currentProjectID string,
 			var templ_7745c5c3_Var332 string
 			templ_7745c5c3_Var332, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2410, Col: 211}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2464, Col: 211}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var332)
 			if templ_7745c5c3_Err != nil {
@@ -6419,7 +6419,7 @@ func automationCardDuplicateAction(automationID string, currentProjectID string,
 			var templ_7745c5c3_Var333 string
 			templ_7745c5c3_Var333, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2410, Col: 304}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2464, Col: 304}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var333)
 			if templ_7745c5c3_Err != nil {
@@ -6463,7 +6463,7 @@ func automationLiveDuplicateAction(automationID string, currentProjectID string,
 			var templ_7745c5c3_Var335 templ.SafeURL
 			templ_7745c5c3_Var335, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2416, Col: 113}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2470, Col: 113}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var335))
 			if templ_7745c5c3_Err != nil {
@@ -6476,7 +6476,7 @@ func automationLiveDuplicateAction(automationID string, currentProjectID string,
 			var templ_7745c5c3_Var336 string
 			templ_7745c5c3_Var336, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2416, Col: 211}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2470, Col: 211}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var336)
 			if templ_7745c5c3_Err != nil {

@@ -281,6 +281,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/channels?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/personality')) {
 							newUrl = '/personality?project_id=' + encodeURIComponent(newProjectId);
+						} else if (currentPath.includes('/themes')) {
+							newUrl = '/themes?project_id=' + encodeURIComponent(newProjectId);
 						} else {
 							newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						}
@@ -391,7 +393,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
+							if (eventType === 'task_files_changed' || eventType === 'skill_dependency_progress' || eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								if (eventType.indexOf('automation_') === 0) {
 									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
@@ -477,6 +479,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								},
 								listeners: {
 									'task_board_updated': handleLiveEvent,
+                                    'task_files_changed': handleLiveEvent,
+                                    'skill_dependency_progress': handleLiveEvent,
 									'task_status_changed': handleLiveEvent,
 									'task_category_changed': handleLiveEvent,
 									'task_thread_execution_started': handleLiveEvent,
@@ -545,7 +549,25 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					});
 				})();
 
-				// Prevent re-navigation when clicking the nav link for the current page.
+						// Keep sidebar navigation metadata aligned with the current path without
+						// applying DaisyUI's visual .active state, which makes old nav targets
+						// flash as selected during HTMX navigation.
+					(function() {
+						function syncSidebarActiveNavigation() {
+							var currentPath = window.location.pathname;
+							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
+								var active = link.getAttribute('data-nav-base') === currentPath;
+								if (active) link.setAttribute('aria-current', 'page');
+								else link.removeAttribute('aria-current');
+							});
+						}
+						window.syncSidebarActiveNavigation = syncSidebarActiveNavigation;
+						syncSidebarActiveNavigation();
+						document.body.addEventListener('htmx:afterSettle', syncSidebarActiveNavigation);
+						window.addEventListener('popstate', syncSidebarActiveNavigation);
+					})();
+
+					// Prevent re-navigation when clicking the nav link for the current page.
 				// Without this, clicking e.g. "Chat" while already on /chat triggers a
 				// full HTMX content swap (tearing down SSE connections, resetting scroll, etc.)
 				// which looks like a page reload.
@@ -937,6 +959,22 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						<span class="sidebar-text">Personality</span>
 					</a>
 				</li>
+				<li>
+					<a
+						data-nav-base="/themes"
+						href={ templ.SafeURL(fmt.Sprintf("/themes?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/themes?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<rect x="3" y="3" width="14" height="6" rx="2"></rect>
+							<path d="M17 6h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-7v3"></path>
+							<rect x="10" y="16" width="4" height="6" rx="1"></rect>
+						</svg>
+						<span class="sidebar-text">Themes</span>
+					</a>
+				</li>
 			</ul>
 		</div>
 
@@ -967,7 +1005,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					</ul>
 				</div>
 			</div>
-			<label class="theme-toggle-pill sidebar-hide-collapsed" data-tooltip-disabled aria-label="Toggle light/dark mode" onclick="window.toggleTheme()">
+			<label class="theme-toggle-pill sidebar-hide-collapsed" data-tooltip-disabled aria-label="Switch theme mode" role="button" tabindex="0" aria-pressed="false" data-theme-mode-toggle onclick="window.toggleTheme()" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.toggleTheme(); }">
 				<span class="theme-toggle-icon theme-toggle-sun">
 					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
@@ -980,7 +1018,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</span>
 				<span class="theme-toggle-thumb"></span>
 			</label>
-			<a class="theme-toggle-collapsed-btn" data-tooltip-disabled aria-label="Toggle theme" onclick="window.toggleTheme(); return false;" href="#">
+			<a class="theme-toggle-collapsed-btn" data-tooltip-disabled aria-label="Switch theme mode" aria-pressed="false" data-theme-mode-toggle onclick="window.toggleTheme(); return false;" href="#">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 theme-collapsed-sun" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
 				</svg>

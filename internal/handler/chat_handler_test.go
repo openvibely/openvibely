@@ -582,7 +582,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -592,15 +592,15 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "HTTP Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -626,14 +626,14 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Ollama mixture aggregator request")
 	}
-	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable aggregator must not receive tool definitions")
+	require.Contains(t, providerRequest, "tools", "Ollama aggregator must receive shared runtime tools")
 	messages, _ := providerRequest["messages"].([]any)
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable aggregator must not receive marker guidance")
+	}), "aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
 		return err == nil && active == nil
@@ -653,7 +653,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -663,15 +663,15 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "HTTP Ollama Plan Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -693,7 +693,8 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 
 	select {
 	case providerRequest := <-providerRequests:
-		require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable Plan aggregator must not receive tool definitions")
+		raw, _ := json.Marshal(providerRequest["tools"])
+		require.NotContains(t, string(raw), `"name":"create_task"`, "Plan must exclude write tools")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Ollama Plan mixture aggregator request")
 	}
@@ -2723,7 +2724,7 @@ func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t 
 	require.NoError(t, os.MkdirAll(apiDir, 0755))
 
 	notesContent := []byte("remember this note")
-	largeContent := []byte(strings.Repeat("x", maxTextAttachmentSize+1))
+	largeContent := []byte(strings.Repeat("x", (256<<10)+1))
 	imageContent := []byte{0x89, 0x50, 0x4e, 0x47}
 	files := []struct {
 		name    string
@@ -2752,22 +2753,22 @@ func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t 
 	apiText, apiImages, err := buildChatAttachmentModelContext(apiFiles, chatAttachmentModelContextOptions{})
 	require.NoError(t, err)
 
-	assert.Equal(t, pendingText, apiText)
-	assert.Contains(t, pendingText, "--- Attached Files ---")
-	assert.Contains(t, pendingText, "File: notes.txt")
-	assert.Contains(t, pendingText, string(notesContent))
-	assert.Contains(t, pendingText, "File: large.txt (attached")
-	assert.Contains(t, pendingText, "too large to include inline")
-	assert.NotContains(t, pendingText, "screen.png")
+	assert.Equal(t, strings.ReplaceAll(pendingText, pendingDir, apiDir), apiText)
+	assert.Contains(t, pendingText, "notes.txt")
+	assert.NotContains(t, pendingText, string(notesContent))
+	assert.Contains(t, pendingText, "large.txt")
 	assert.NotContains(t, pendingText, string(largeContent[:50]))
+	assert.NotContains(t, pendingText, "screen.png")
+	require.Len(t, pendingImages, 3)
+	require.Len(t, apiImages, 3)
+	for i := range pendingImages {
+		assert.Equal(t, pendingImages[i].FileName, apiImages[i].FileName)
+		assert.Equal(t, pendingImages[i].MediaType, apiImages[i].MediaType)
+		assert.Equal(t, pendingImages[i].FileSize, apiImages[i].FileSize)
+		assert.Equal(t, filepath.Join(pendingDir, files[i].name), pendingImages[i].FilePath)
+		assert.Equal(t, filepath.Join(apiDir, files[i].name), apiImages[i].FilePath)
+	}
 
-	require.Len(t, pendingImages, 1)
-	require.Len(t, apiImages, 1)
-	assert.Equal(t, pendingImages[0].FileName, apiImages[0].FileName)
-	assert.Equal(t, pendingImages[0].MediaType, apiImages[0].MediaType)
-	assert.Equal(t, pendingImages[0].FileSize, apiImages[0].FileSize)
-	assert.Equal(t, filepath.Join(pendingDir, "screen.png"), pendingImages[0].FilePath)
-	assert.Equal(t, filepath.Join(apiDir, "screen.png"), apiImages[0].FilePath)
 }
 
 func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T) {
@@ -2819,15 +2820,16 @@ func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T
 
 	// Text file should be included in text context
 	assert.Contains(t, textContext, "notes.txt")
-	assert.Contains(t, textContext, textContent)
+	assert.NotContains(t, textContext, textContent)
 
 	// Image file should NOT be in text context (this was the bug - binary content was injected as text)
 	assert.NotContains(t, textContext, "screenshot.png")
 
 	// Image file should be returned as a separate attachment for multimodal handling
-	require.Len(t, imageAttachments, 1)
-	assert.Equal(t, "screenshot.png", imageAttachments[0].FileName)
-	assert.Equal(t, "image/png", imageAttachments[0].MediaType)
+	require.Len(t, imageAttachments, 2)
+	assert.Equal(t, "notes.txt", imageAttachments[0].FileName)
+	assert.Equal(t, "screenshot.png", imageAttachments[1].FileName)
+	assert.Equal(t, "image/png", imageAttachments[1].MediaType)
 }
 
 func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
@@ -2865,8 +2867,8 @@ func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 
-	// Create a text file larger than maxTextAttachmentSize
-	largeContent := make([]byte, maxTextAttachmentSize+1)
+	// Large files must remain references without inline contents.
+	largeContent := make([]byte, (256<<10)+1)
 	for i := range largeContent {
 		largeContent[i] = 'x'
 	}
@@ -2877,11 +2879,12 @@ func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
 
 	// Large file should be mentioned but content should NOT be included
 	assert.Contains(t, textContext, "large.txt")
-	assert.Contains(t, textContext, "too large to include inline")
+	assert.Contains(t, textContext, "path:")
 	assert.NotContains(t, textContext, string(largeContent[:50]))
 
-	// No image attachments
-	assert.Empty(t, imageAttachments)
+	// Non-image file travels as a reference.
+	require.Len(t, imageAttachments, 1)
+	assert.Equal(t, "large.txt", imageAttachments[0].FileName)
 }
 
 func TestProcessAttachments_NoSession(t *testing.T) {

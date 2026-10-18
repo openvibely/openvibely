@@ -83,7 +83,9 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    assert(large.content.querySelector('.chat-mermaid'),'async Markdown worker missed diagram');
    const raw=message('chat-messages','completed','<svg onload="window.mermaidUnsafe=true"><script>window.mermaidUnsafe=true</script></svg>');
    await window.cleanAssistantMessages(document.getElementById('chat-messages'));
-   assert(!raw.content.querySelector('svg,script')&&!window.mermaidUnsafe,'raw SVG accepted');
+   const rawContent=raw.content.cloneNode(true);
+   rawContent.querySelectorAll('.code-copy-btn').forEach(button=>button.remove());
+   assert(!rawContent.querySelector('svg,script')&&!window.mermaidUnsafe,'raw SVG accepted');
    const configured=message('chat-messages','completed',fence+'mermaid\n%%{init: {"securityLevel":"loose","htmlLabels":true,"flowchart":{"htmlLabels":true},"themeCSS":"body{color:red}"}}%%\nflowchart LR\n A[Safe] --> B[Node]\nclick A "javascript:alert(1)"\n'+fence);
    await window.cleanAssistantMessages(document.getElementById('chat-messages'));
    assert(configured.content.querySelector('.chat-mermaid'),'directive fixture failed');
@@ -217,6 +219,19 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
 		}
 		if after := browser.evaluate(`document.querySelector('[data-gallery-image]').style.transform`); after == before {
 			t.Fatal("gallery pan did not move the diagram")
+		}
+		if got := browser.evaluateAwait(`(async()=>{
+   const image=document.querySelector('[data-gallery-image]'),transform=image.style.transform;
+   const oldURL=image.src;
+   const theme=document.documentElement.getAttribute('data-theme');
+   document.documentElement.setAttribute('data-theme',theme==='light'?'dark':'light');
+   await window.renderMermaidDiagrams(document);
+   await image.decode();
+   if(image.src===oldURL)throw Error('theme did not refresh the open image');
+   if(document.querySelector('[data-gallery-image]')!==image||image.style.transform!==transform)throw Error('theme reset zoom or pan');
+   return 'pass';
+  })()`); got != "pass" {
+			t.Fatalf("gallery refresh: %s", got)
 		}
 	})
 	// A fresh page tests automatic retry, exhausted retry recovery, and queue progress.

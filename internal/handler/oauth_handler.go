@@ -23,6 +23,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
@@ -672,7 +673,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 		tokenReq.Header.Set("anthropic-version", anthropicAPIVersion)
 	}
 
-	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	tokenResp, err := httpretry.DoRequest(httpclient.New(httpclient.OAuthTimeout), tokenReq)
 	if err != nil {
 		return 0, err
 	}
@@ -796,7 +797,7 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 		return 0, fmt.Errorf("invalid custom OAuth token URL: %w", err)
 	}
 	customHTTPClient := llmcustomauth.NewHTTPClient(httpclient.OAuthTimeout, cfg.AllowPrivateEndpoints)
-	resp, err := customHTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(customHTTPClient, req)
 	if err != nil {
 		return 0, err
 	}
@@ -828,7 +829,7 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 		if err := llmcustomauth.PrepareRequest(profileReq, nil, cfg, customState, tokens.AccessToken); err != nil {
 			return 0, err
 		}
-		profileResp, reqErr := customHTTPClient.Do(profileReq)
+		profileResp, reqErr := httpretry.DoRequest(customHTTPClient, profileReq)
 		if reqErr != nil {
 			return 0, reqErr
 		}

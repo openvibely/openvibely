@@ -445,19 +445,18 @@ templ automationYAMLSharedScript() {
 				if (!indent) return '';
 				var dots = [];
 				for (var column = 0; column < indent; column++) {
-					dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-dot aria-hidden="true"></span>');
+						dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:var(--ov-yaml-indent-dot, oklch(var(--bc) / 0.3))" data-automation-yaml-indent-dot aria-hidden="true"></span>');
 				}
 				return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
 			}
 			function highlightLine(line, lineNumber, diagnosticLine) {
 				var indentation = line.match(/^\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);
-				if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50">' + escapeYAMLHTML(content) + '</span>';
-				else if (match) {
-					var value = match[4], valueClass = 'text-base-content/80';
-					if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
-					rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
-				}
-				if (diagnosticLine && lineNumber === diagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: oklch(var(--er)); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
+					if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50" data-automation-yaml-comment>' + escapeYAMLHTML(content) + '</span>';
+					else if (match) {
+						var value = match[4], scalar = /^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value);
+						rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + (scalar ? 'text-secondary' : 'text-base-content/80') + '" data-automation-yaml-value' + (scalar ? ' data-automation-yaml-scalar' : '') + '>' + escapeYAMLHTML(value) + '</span>';
+					}
+					if (diagnosticLine && lineNumber === diagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: var(--ov-error, oklch(var(--er))); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
 				return rendered;
 			}
 			// renderLineSpan renders one complete, self-contained highlighted line
@@ -1498,9 +1497,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							return {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};
 						}
 						function yamlRailColor(active) {
-							if (!active) return 'oklch(var(--bc) / 0.3)';
 							var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-							return isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';
+                            if (document.documentElement.getAttribute('data-ov-theme-layer') !== 'custom') return active ? (isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)') : 'oklch(var(--bc) / 0.3)';
+							return active ? (isDark ? 'var(--ov-yaml-indent-active, var(--ov-focus, rgba(212, 212, 212, 0.8)))' : 'var(--ov-yaml-indent-active, var(--ov-focus, rgba(64, 64, 64, 0.6)))') : 'var(--ov-yaml-indent-rail, var(--ov-border-strong, rgba(127, 127, 127, 0.45)))';
 						}
 						function yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {
 						var rails = [], maxIndent = 0, candidates = [];
@@ -1550,7 +1549,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							});
 							rails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });
 						}
-						function layoutYAMLIndentationRails() {
+	                    var yamlThemeObserver = new MutationObserver(function() {
+                        if (!builder.isConnected) { yamlThemeObserver.disconnect(); return; }
+                        updateYAMLActiveRail();
+                    });
+                    yamlThemeObserver.observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'data-color-theme', 'data-ov-theme-layer']});
+					function layoutYAMLIndentationRails() {
 						if (!yamlHighlight) return;
 						yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {
 							var start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="' + rail.dataset.yamlRailStart + '"]');
@@ -2041,7 +2045,7 @@ yamlViewport.scrollTop = 0;
 					renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();
 				});
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
-						if (event.target === builder) clearActiveConnection();
+						if (event.target === builder) { clearActiveConnection(); yamlThemeObserver.disconnect(); }
 					});
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
@@ -2324,9 +2328,59 @@ templ automationGraphThemeStyles() {
 			.automation-edge-delete:focus-visible, .automation-node-delete:focus-visible { outline: none; }
 			.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }
 			.automation-graph-link:focus-visible .automation-graph-node,
-		.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
-	</style>
-}
+			.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
+				[data-ov-theme-layer="custom"] .automation-canvas-shell { background: var(--ov-surface) !important; border-color: var(--ov-subtle-border) !important; }
+				[data-ov-theme-layer="custom"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-edge--highlighted,
+				[data-ov-theme-layer="custom"] .automation-graph-edge--preview { stroke: var(--ov-focus); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-preview-arrow { fill: var(--ov-focus); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }			[data-ov-theme-layer="custom"] .automation-graph-node--failed { fill: var(--ov-diff-delete-bg); stroke: var(--ov-error); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--blocked { fill: var(--ov-diff-modify-bg); stroke: var(--ov-warning); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--waiting { fill: var(--ov-selection-bg); stroke: var(--ov-info); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--running { fill: var(--ov-selection-bg); stroke: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-graph-node--completed { fill: var(--ov-diff-add-bg); stroke: var(--ov-success); }
+			[data-ov-theme-layer="custom"] .automation-graph-label,
+			[data-ov-theme-layer="custom"] .automation-graph-label--primary { fill: var(--ov-text); }
+			[data-ov-theme-layer="custom"] .automation-graph-label--secondary,
+			[data-ov-theme-layer="custom"] .automation-graph-label--muted { fill: var(--ov-text-muted); }
+			[data-ov-theme-layer="custom"] .automation-node-content { color: var(--ov-text); }
+			[data-ov-theme-layer="custom"] .automation-node-content small { color: var(--ov-text-muted); }
+			[data-ov-theme-layer="custom"] .automation-state-dot { border-color: var(--ov-subtle-border); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--failed,
+			[data-ov-theme-layer="custom"] .automation-node-state--failed { border-color: var(--ov-error); color: var(--ov-error); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--blocked,
+			[data-ov-theme-layer="custom"] .automation-node-state--blocked { border-color: var(--ov-warning); color: var(--ov-warning); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--waiting,
+			[data-ov-theme-layer="custom"] .automation-node-state--waiting { border-color: var(--ov-info); color: var(--ov-info); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--running,
+			[data-ov-theme-layer="custom"] .automation-node-state--running { border-color: var(--ov-focus); color: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--recently_completed,
+			[data-ov-theme-layer="custom"] .automation-node-state--recently_completed { border-color: var(--ov-success); color: var(--ov-success); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--failed { background: var(--ov-diff-delete-bg); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--blocked { background: var(--ov-diff-modify-bg); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--waiting,
+			[data-ov-theme-layer="custom"] .automation-state-dot--running { background: var(--ov-selection-bg); }
+			[data-ov-theme-layer="custom"] .automation-state-dot--recently_completed { background: var(--ov-diff-add-bg); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle,
+			[data-ov-theme-layer="custom"] .automation-connect-handle:focus-visible { stroke: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle--input { fill: var(--ov-surface-raised); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle--output,
+			[data-ov-theme-layer="custom"] .automation-connect-handle--selected,
+			[data-ov-theme-layer="custom"] .automation-edge-endpoint { fill: var(--ov-focus); }
+			[data-ov-theme-layer="custom"] .automation-edge-endpoint { stroke: var(--ov-surface); }
+			[data-ov-theme-layer="custom"] .automation-connect-handle--eligible { fill: var(--ov-success); stroke: var(--ov-success); }
+				[data-ov-theme-layer="custom"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-edge-foreground-arrow { fill: var(--ov-automation-edge); opacity: 1; }
+				[data-ov-theme-layer="custom"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }			[data-ov-theme-layer="custom"] .automation-edge-delete circle,
+			[data-ov-theme-layer="custom"] .automation-node-delete circle { fill: var(--ov-error); stroke: var(--ov-surface); }
+			[data-ov-theme-layer="custom"] .automation-edge-delete .automation-delete-x,
+			[data-ov-theme-layer="custom"] .automation-node-delete .automation-delete-x { stroke: var(--ov-error-foreground); }
+			[data-ov-theme-layer="custom"] .automation-edge-delete:focus-visible circle,
+			[data-ov-theme-layer="custom"] .automation-node-delete:focus-visible circle,
+			[data-ov-theme-layer="custom"] .automation-graph-link:focus-visible .automation-graph-node,
+			[data-ov-theme-layer="custom"] .automation-graph-focus:focus-visible .automation-graph-node { stroke: var(--ov-focus); }
+				[data-ov-theme-layer="custom"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }		</style>}
 
 templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
 	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {

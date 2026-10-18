@@ -745,3 +745,30 @@ func TestSendCompletions_ImageLoadFailure(t *testing.T) {
 		t.Fatalf("SendCompletions = %v, %v; want nil response and wrapped read error", resp, err)
 	}
 }
+
+func TestCompletionsCancellationRetainsCompletedTools(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"skill-call\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+	client := NewWithCompatibleAPIKey("test", srv.URL+"/v1", "", "")
+	_, err := client.SendCompletions(ctx, "load skill", &CompletionsOptions{ExtraTools: []ToolDefinition{{Name: "skill_view", Type: "function", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+		cancel()
+		return "loaded instructions", false, nil
+	}})
+	if err == nil {
+		t.Fatal("expected cancellation")
+	}
+	found := false
+	for _, m := range client.LastCompletionsTranscript() {
+		if m.Role == "tool" && m.ToolCallID == "skill-call" && m.Content == "loaded instructions" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("lost completed skill result on cancellation")
+	}
+}

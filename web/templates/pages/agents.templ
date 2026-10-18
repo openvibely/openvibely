@@ -245,7 +245,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									for _, tool := range models.AllAgentTools {
 										<label class="label cursor-pointer gap-1 px-2 py-1 border border-base-300 rounded-lg">
 											<input type="checkbox" class="checkbox checkbox-sm agent-tool-checkbox" value={ tool } onchange="updateScopedFilesControlsVisibility()"/>
-											<span class="label-text text-sm">{ tool }</span>
+											if tool == "Bash" {
+												<span class="label-text text-sm" title="Run shell commands and use Process to read output, send input, or stop running sessions.">Shell &amp; Process</span>
+											} else {
+												<span class="label-text text-sm">{ tool }</span>
+											}
 										</label>
 									}
 								</div>
@@ -361,14 +365,14 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<p class="text-sm opacity-70">Lifecycle hooks are implementation hooks, usually for system/lifecycle agents. Normal assigned agents usually need skills, not custom hooks.</p>
 										<div class="alert alert-info text-sm">Task execution is separate from hooks: route_task selects skills, before_run can add context, after_complete observes and learns. task_mode is internal and is not configurable here.</div>
 									<div id="lifecycle_hooks_protected_banner" class="hidden alert alert-warning text-sm">
-										This agent is protected. Lifecycle hooks are shown read-only.
+										You can turn lifecycle hooks on or off. Other hook settings are managed by the system.
 									</div>
 									<div id="lifecycle_hooks_list" class="space-y-2"></div>
 									<button type="button" class="btn btn-outline btn-sm" id="lifecycle_hooks_add_btn" onclick="addLifecycleHookRow()">+ Add Hook</button>
 									<p id="lifecycle_hooks_status" class="hidden text-xs mt-2"></p>
 									<div class="divider text-sm opacity-50">Lifecycle Policy Defaults</div>
 									<p class="text-sm opacity-70">Defaults applied to this agent's lifecycle hooks unless an individual hook overrides them. These do not grant callable tools; use Allowed Tools on Agent Details for concrete tool access.</p>
-									<div class="alert alert-info text-sm">Tool scope: skill_view reads selected skills for the current task scope; skills_list lists standalone skills; skill_manage writes standalone skills; agent_skill_manage is an after-complete learning tool scoped to the task's assigned agent.</div>
+									<div class="alert alert-info text-sm">Tool scope: skill_view reads permitted skills for the assigned agent. Task memory_view, memory_save, and memory_delete grants also require the project’s Skills &amp; Memory permissions. Skill writing is reserved for authorized background maintenance.</div>
 									<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
 									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
 										<input type="checkbox" id="perm_read_task_prompt" class="checkbox checkbox-sm"/>
@@ -449,7 +453,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									<label class="label"><span class="label-text">Source evidence URLs (one per line)</span></label>
 									<textarea id="advanced_source_refs" class="textarea textarea-bordered h-16" placeholder="e.g. https://example.com/runbook"></textarea>
 								</div>
-									<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Prompt, tools, skills, hooks, identity, and scope are repaired from bundled declarations; only the model and eligible enabled state can be changed.</p>
+									<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Prompt, tools, skills, hooks, identity, and scope are repaired from bundled declarations; the model, lifecycle hook enabled states, and eligible agent enabled state can be changed.</p>
 									<p id="advanced_required_system_notice" class="hidden alert alert-warning text-sm">Goal Agent is required for goal evaluation and loop continuation safety, so it cannot be disabled.</p>
 							</div>
 						</div>
@@ -637,9 +641,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		}
 
 			function setAgentTools(tools) {
-				const allowed = Array.isArray(tools) ? tools : [];
+				const allowed = Array.isArray(tools) ? tools.map(tool => String(tool).trim().toLowerCase()) : [];
 				document.querySelectorAll('.agent-tool-checkbox').forEach(cb => {
-					cb.checked = allowed.includes(cb.value);
+					cb.checked = allowed.includes(cb.value.toLowerCase()) || (cb.value === 'Bash' && allowed.includes('shell'));
 				});
 				updateScopedFilesControlsVisibility();
 			}
@@ -1598,7 +1602,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 			function resetLifecycleFormFields() {
 				['perm_read_task_prompt','perm_read_task_execution','perm_read_project_memory','perm_write_project_memory','perm_read_agents','perm_write_agents','perm_read_skills','perm_write_skills','perm_read_repository_files','perm_write_repository_files','perm_use_shell_or_tools'].forEach(id => {
-					const el = document.getElementById(id); if (el) el.checked = false;
+					const el = document.getElementById(id); if (el) { el.checked = false; el.closest('label')?.classList.remove('hidden'); }
 				});
 						['advanced_key','advanced_source_refs'].forEach(id => {					const el = document.getElementById(id); if (el) el.value = '';
 					});
@@ -1695,6 +1699,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (banner) banner.classList.toggle('hidden', !isProtected);
 					setProtectedAgentControlState(!!isProtected, !!requiredSystemAgent);
 					lifecycleProtectedAgent = !!isProtected;
+                    ['perm_read_skills','perm_write_skills','perm_read_project_memory','perm_write_project_memory'].forEach(id => {
+                        const input = document.getElementById(id);
+                        if (input) input.closest('label').classList.toggle('hidden', !!isProtected && (data.system_kind === 'skill_curator' || data.system_kind === 'memory_curator'));
+                    });
+
 			}
 
 			let lifecycleHooksState = [];
@@ -1756,11 +1765,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							'<input type="text" class="input input-bordered input-sm" data-hook-field="skill_key" value="' + escapeHtml(hook.skill_key || '') + '" placeholder="load_project_context" ' + disabled + '/></label>' +
 						'<label class="form-control"><span class="label-text text-xs">Output contract</span>' +
 							'<select class="select select-bordered select-sm" data-hook-field="output_contract" ' + disabled + '>' +
-								['','selected_skills','context_block','activity_summary','learning_summary','library_update_summary'].map(c => '<option value="' + c + '"' + ((hook.output_contract || '') === c ? ' selected' : '') + '>' + (c || '(none)') + '</option>').join('') +
+								['','selected_skills','selected_memories','context_block','activity_summary','learning_summary','library_update_summary'].map(c => '<option value="' + c + '"' + ((hook.output_contract || '') === c ? ' selected' : '') + '>' + (c || '(none)') + '</option>').join('') +
 							'</select></label>' +
 						'<div class="flex items-end gap-3">' +
 							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="blocking"' + (hook.blocking ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Blocking</span></label>' +
-							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="enabled"' + ((hook.enabled !== false) ? ' checked' : '') + ' ' + disabled + '/><span class="label-text text-sm">Enabled</span></label>' +
+							'<label class="label cursor-pointer gap-2 justify-start"><input type="checkbox" class="checkbox checkbox-sm" data-hook-field="enabled"' + ((hook.enabled !== false) ? ' checked' : '') + '/><span class="label-text text-sm">Enabled</span></label>' +
 							(lifecycleProtectedAgent ? '' : '<button type="button" class="btn btn-ghost btn-xs ml-auto text-error" onclick="removeLifecycleHookRow(' + idx + ')">Remove</button>') +
 						'</div>' +
 					'</div>' +
@@ -1815,7 +1824,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							if (notice) notice.classList.toggle('hidden', !state.protected);
 						if (summary) {
 							summary.textContent = activeAgentID
-								? `When assigned to a task, route_task selects from ${routed.length} indexed skill(s) owned by agent ${state.agent_key || '(unknown)'}. Project skills override global skills.`
+								? `When assigned to a task, the model selects from ${routed.length} indexed skill(s) owned by agent ${state.agent_key || '(unknown)'}. Project skills override global skills.`
 								: 'Save this agent to preview routed skills.';
 						}
 						if (index) {

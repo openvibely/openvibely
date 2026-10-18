@@ -219,9 +219,10 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
    assert(bounds.bottom<=trigger.getBoundingClientRect().top,'favorite growth keeps menu anchored above trigger');
  }
  for(let i=0;i<40;i++) { const saved=await (await fetch('/ui/model-favorites')).json(); if(Object.keys(saved).length===9) break; await wait(); }
- window.ovModelPicker.close(false);localStorage.clear();trigger.click();await wait();
+ const favoritesSettled=async()=>{for(let i=0;i<200&&panel.querySelector('.ov-mp-star:disabled');i++)await wait();};
+ window.ovModelPicker.close(false);localStorage.clear();trigger.click();await favoritesSettled();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===9,'favorites load from server after local storage is cleared');
- window.ovModelPicker.close(false);localStorage.setItem('openvibely-model-favorites',JSON.stringify({m10:true}));trigger.click();await wait();
+ window.ovModelPicker.close(false);localStorage.setItem('openvibely-model-favorites',JSON.stringify({m10:true}));trigger.click();await favoritesSettled();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'legacy browser favorite merges into shared list');
  assert(localStorage.getItem('openvibely-model-favorites')===null,'legacy favorite is removed after import');
  const originalFetch=window.fetch.bind(window);let failFavoriteWrite;
@@ -234,12 +235,12 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  };
  panel.querySelector('.ov-mp-star[aria-pressed=true]').click();
  window.ovModelPicker.close(false);trigger.click();
- await wait();failFavoriteWrite();await wait();
+ await wait();failFavoriteWrite();await favoritesSettled();
  assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'failed write is rolled back from server');
  assert([...panel.querySelectorAll('.ov-mp-star')].every(star=>!star.disabled),'successful reopen enables favorites after a pending write fails');
  const atFavoritesEnd=()=>Math.abs(list.scrollHeight-list.clientHeight-list.scrollTop)<2;
  list.style.maxHeight='120px';list.scrollTop=0;
- window.ovModelPicker.close(false);trigger.click();await wait();
+ window.ovModelPicker.close(false);trigger.click();await favoritesSettled();
  assert(list.scrollHeight>list.clientHeight&&atFavoritesEnd(),'overflowing picker opens at favorites end');
  let heldFavorites;
  const holdNextFavorites=()=>new Promise(r=>{heldFavorites=r;});

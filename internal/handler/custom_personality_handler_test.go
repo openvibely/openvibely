@@ -813,7 +813,10 @@ func TestHandler_PersonalityPage_DoesNotRenderFullPromptBodiesInCardAttributes(t
 	assert.Contains(t, body, "VISIBLE_PREVIEW_TEXT_")
 	assert.NotContains(t, body, promptTail)
 	assert.NotContains(t, body, "data-personality-prompt=")
-	assert.Less(t, len(body), 512*1024, "personality section should be bounded by card metadata and previews")
+	// The full-page shell includes the compact exact-theme bootstrap catalog in
+	// addition to the personality card projection; keep a small allowance for
+	// that legitimate metadata while retaining the no-full-prompt guard.
+	assert.Less(t, len(body), (512+128)*1024, "personality page should be bounded by card metadata, previews, and compact theme metadata")
 	assert.Contains(t, body, "fetch(personalityMutationURL('/personality/custom/'")
 }
 

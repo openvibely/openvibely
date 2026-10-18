@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -31,6 +32,7 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
+	taskRuntimeProvider       func(context.Context, models.Task, string, map[string]bool) *llmcontracts.RuntimeTools
 	llmConfigRepo             persistence.LLMConfigStore
 	execRepo                  persistence.ExecutionStore
 	taskRepo                  persistence.TaskStore
@@ -245,8 +247,13 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 	}
 }
 
-func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
-	if s == nil {
+// SetTaskRuntimeProvider supplies application handlers missing from the service-only runtime.
+func (s *LLMService) SetTaskRuntimeProvider(provider func(context.Context, models.Task, string, map[string]bool) *llmcontracts.RuntimeTools) {
+	s.taskRuntimeProvider = provider
+}
+
+func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Task, executionIDs ...string) *llmcontracts.RuntimeTools {
+	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
 	}
 	_, automationBound := AutomationContextFromContext(ctx)
@@ -263,7 +270,65 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 		SuppressIssueComments:    automationBound,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	runtime := llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	if s.taskRuntimeProvider != nil {
+		missing := chatcontrol.TaskToolNames(task.CreatedVia)
+		// Automation deliberately suppresses status comments; the application fallback
+		// must not reintroduce a tool removed by its specialized GitHub runtime.
+		if automationBound {
+			delete(missing, "github_comment_on_issue")
+		}
+		if runtime != nil {
+			for _, def := range runtime.Definitions {
+				delete(missing, def.Name)
+			}
+		}
+		execID := ""
+		if len(executionIDs) > 0 {
+			execID = executionIDs[0]
+		}
+		runtime = llmcontracts.CompositeRuntimeTools(runtime, s.taskRuntimeProvider(ctx, task, execID, missing))
+	}
+	// Every service/application bundle is subordinate to the shared task policy.
+	// Non-registry tools (selected skills and bootstrap tools) retain their own gates.
+	if runtime != nil {
+		policy := chatcontrol.TaskToolNames(task.CreatedVia)
+		if automationBound {
+			delete(policy, "github_comment_on_issue")
+		}
+		definitions := make([]llmcontracts.RuntimeToolDefinition, 0, len(runtime.Definitions))
+		for _, def := range runtime.Definitions {
+			if chatcontrol.Get(def.Name) == nil || policy[def.Name] {
+				definitions = append(definitions, def)
+			}
+		}
+		runtime.Definitions = definitions
+		base := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			normalized := strings.ToLower(strings.TrimSpace(name))
+			if chatcontrol.Get(normalized) != nil && !policy[normalized] {
+				return "", false, false, nil
+			}
+			return base(ctx, name, input)
+		}
+	}
+
+	if runtime != nil && runtime.HasDefinition("list_capabilities") {
+		baseExecutor := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name == "list_capabilities" {
+				var summaries []chatcontrol.ActionSummary
+				for _, summary := range chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb) {
+					if runtime.HasDefinition(summary.Name) {
+						summaries = append(summaries, summary)
+					}
+				}
+				return formatChannelCapabilities(summaries), true, false, nil
+			}
+			return baseExecutor(ctx, name, input)
+		}
+	}
+	return runtime
 }
 
 func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
@@ -400,58 +465,16 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	}
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
-	allowed := map[string]bool{
-		"list_tasks":                             true,
-		"create_task":                            true,
-		"create_swarm_task":                      true,
-		"execute_tasks":                          true,
-		"set_task_goal":                          true,
-		"clear_task_goal":                        true,
-		"get_task_goal":                          true,
-		"pause_task_goal":                        true,
-		"resume_task_goal":                       true,
-		"list_schedules":                         true,
-		"view_usage_analytics":                   true,
-		"view_pulse":                             true,
-		"schedule_task":                          true,
-		"delete_schedule":                        true,
-		"modify_schedule":                        true,
-		"create_alert":                           true,
-		"create_notification":                    true,
-		"list_existing_automation_notifications": true,
-		"list_alerts":                            true,
-		"get_alert":                              true,
-		"claim_alert":                            true,
-		"create_alert_implementation_task":       true,
-		"link_alert_implementation_task":         true,
-		"complete_alert_processing":              true,
-		"fail_alert_processing":                  true,
-		"release_alert_claim":                    true,
-		"list_capabilities":                      true,
-	}
-	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
-		delete(allowed, "create_task")
-		delete(allowed, "create_swarm_task")
-		delete(allowed, "execute_tasks")
-		delete(allowed, "create_alert_implementation_task")
-		delete(allowed, "link_alert_implementation_task")
-	}
-	for _, def := range defs {
-		name := strings.ToLower(strings.TrimSpace(def.Name))
-		if !allowed[name] {
-			continue
-		}
-		if name == "list_alerts" && task.Category == models.CategoryScheduled {
-			def.Schema = def.Schema.WithoutProperties("project_id", "read")
-			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
-		}
-		filtered = append(filtered, def)
-	}
-	if len(filtered) == 0 {
-		return nil
+	allowed := chatcontrol.TaskToolNames(task.CreatedVia)
+
+	taskUploadsDir := "uploads"
+	if s.taskSvc != nil && strings.TrimSpace(s.taskSvc.uploadsDir) != "" {
+		taskUploadsDir = s.taskSvc.uploadsDir
 	}
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:          task.ProjectID,
+		AttachmentRepo:     s.attachmentRepo,
+		UploadsDir:         taskUploadsDir,
 		TaskSvc:            s.taskSvc,
 		SwarmSvc:           nil,
 		TaskRepo:           s.taskRepo,
@@ -496,6 +519,29 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
 		},
 	}))
+	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		var summaries []chatcontrol.ActionSummary
+		for _, summary := range chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb) {
+			if allowed[summary.Name] {
+				summaries = append(summaries, summary)
+			}
+		}
+		return formatChannelCapabilities(summaries), nil
+	}
+	for _, def := range defs {
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if !allowed[name] || handlers[name] == nil {
+			continue
+		}
+		if name == "list_alerts" && task.Category == models.CategoryScheduled {
+			def.Schema = def.Schema.WithoutProperties("project_id", "read")
+			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
+		}
+		filtered = append(filtered, def)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
 	if task.Category == models.CategoryScheduled {
 		if listAlerts := handlers["list_alerts"]; listAlerts != nil {
 			handlers["list_alerts"] = func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -511,9 +557,12 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 			}
 		}
 	}
-	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
+	for name := range allowed {
+		if handlers[name] == nil {
+			delete(allowed, name)
+		}
 	}
+
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
 		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
@@ -1091,6 +1140,7 @@ func applyPlannerFollowupEffort(task models.Task, agent *models.LLMConfig, model
 }
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	modelDefaultEffort := agent.ReasoningEffort
 	if s.taskRepo != nil {
 		if err := s.taskRepo.ApplyModelEffort(ctx, task.ID, &agent); err != nil {
@@ -1485,7 +1535,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
 	if runtimeToolsSupported {
-		taskActionTools = s.taskActionRuntimeTools(callCtx, task)
+		taskActionTools = s.taskActionRuntimeTools(callCtx, task, exec.ID)
 	}
 	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
 		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
@@ -1982,24 +2032,8 @@ func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput)
 			if err != nil {
 				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
 			}
-			if taskSteeringImageMediaType(entry.Name()) != "" {
-				attachments = append(attachments, models.Attachment{
-					FileName: entry.Name(), FilePath: path,
-					MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size(),
-				})
-				continue
-			}
-			if info.Size() > 100*1024 {
-				inputs[i].Content = combineProjectInstructions(inputs[i].Content,
-					fmt.Sprintf("File: %s (attached, %d bytes - too large to include inline)", entry.Name(), info.Size()))
-				continue
-			}
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
-			}
-			inputs[i].Content = combineProjectInstructions(inputs[i].Content,
-				fmt.Sprintf("--- Attached Files ---\nFile: %s\n```\n%s\n```", entry.Name(), string(content)))
+			attachments = append(attachments, models.Attachment{FileName: entry.Name(), FilePath: path, MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size()})
+
 		}
 	}
 	return attachments, nil
@@ -2467,6 +2501,7 @@ func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *mod
 // workDir is the project's repo path used as the working directory for model calls.
 // isTaskFollowup when true uses the coding agent system prompt instead of task management prompt.
 func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, agentDef *models.Agent, isTaskFollowup ...bool) (llmcontracts.AgentResult, error) {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	followup := len(isTaskFollowup) > 0 && isTaskFollowup[0]
 	applog.Infof("[agent-svc] CallAgentDirectStreaming agent=%s model=%s message_len=%d exec=%s history=%d workDir=%s isTaskFollowup=%v", agent.Name, agent.Model, len(message), execID, len(chatHistory), workDir, followup)
 	chatMode := llmcontracts.ChatModeFromContext(ctx)

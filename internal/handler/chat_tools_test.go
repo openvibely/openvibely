@@ -629,3 +629,101 @@ func mustParseTime(s string) time.Time {
 	}
 	return t
 }
+
+func TestExecuteChatTaskEditRequestsChatAttachmentMergeSettingsAndScope(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Wrapper Edit Project")
+	agent := createAgent(t, llmConfigRepo)
+	chatHost := createTask(t, h, project.ID, "Wrapper chat host", func(task *models.Task) {
+		task.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHost.ID, agent.ID)
+	target := createTask(t, h, project.ID, "Wrapper edit target", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+	})
+
+	origUploadsDir := uploadsDir
+	uploadsDir = t.TempDir()
+	defer func() { uploadsDir = origUploadsDir }()
+	chatDir := filepath.Join(uploadsDir, "chat", exec.ID)
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+	filePath := filepath.Join(chatDir, "notes.txt")
+	if err := os.WriteFile(filePath, []byte("attachment notes"), 0o644); err != nil {
+		t.Fatalf("write chat attachment: %v", err)
+	}
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: exec.ID, FileName: "notes.txt", FilePath: filePath, MediaType: "text/plain", FileSize: 16}))
+
+	for _, enabled := range []bool{true, false} {
+		branch := "develop"
+		if !enabled {
+			branch = ""
+		}
+		for _, edit := range []service.TaskEditRequest{
+			{AutoMerge: &enabled},
+			{AutoMergeOnGoalAchieved: &enabled},
+			{MergeTargetBranch: &branch},
+		} {
+			edit.ID = target.ID
+			edit.Attachments = []string{"chat"}
+			out := h.executeChatTaskEditRequests(ctx, exec.ID, project.ID, []service.TaskEditRequest{edit})
+			require.Contains(t, out, "Edited 1 task(s)")
+			updated, err := h.taskRepo.GetByID(ctx, target.ID)
+			require.NoError(t, err)
+			if edit.AutoMerge != nil {
+				require.Equal(t, enabled, updated.AutoMerge)
+			}
+			if edit.AutoMergeOnGoalAchieved != nil {
+				require.Equal(t, enabled, updated.AutoMergeOnGoalAchieved)
+			}
+			if edit.MergeTargetBranch != nil {
+				require.Equal(t, branch, updated.MergeTargetBranch)
+			}
+		}
+	}
+	attachments, err := h.attachmentRepo.ListByTask(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 6)
+}
+
+func TestExecuteChatTaskEditRequestsRejectsForeignChatAttachment(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Wrapper Edit Project")
+	agent := createAgent(t, llmConfigRepo)
+	chatHost := createTask(t, h, project.ID, "Wrapper chat host", func(task *models.Task) {
+		task.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHost.ID, agent.ID)
+
+	origUploadsDir := uploadsDir
+	uploadsDir = t.TempDir()
+	defer func() { uploadsDir = origUploadsDir }()
+	chatDir := filepath.Join(uploadsDir, "chat", exec.ID)
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+	filePath := filepath.Join(chatDir, "notes.txt")
+	if err := os.WriteFile(filePath, []byte("attachment notes"), 0o644); err != nil {
+		t.Fatalf("write chat attachment: %v", err)
+	}
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: exec.ID, FileName: "notes.txt", FilePath: filePath, MediaType: "text/plain", FileSize: 16}))
+
+	foreignProject := createProject(t, h, "Foreign attachment project")
+	foreign := createTask(t, h, foreignProject.ID, "Foreign target", func(task *models.Task) { task.Category = models.CategoryBacklog })
+	for _, title := range []string{"", "Must not change"} {
+		out := h.executeChatTaskEditRequests(ctx, exec.ID, project.ID, []service.TaskEditRequest{{ID: foreign.ID, Title: title, Attachments: []string{"chat"}}})
+		require.Contains(t, out, "Failed to edit")
+		updated, err := h.taskRepo.GetByID(ctx, foreign.ID)
+		require.NoError(t, err)
+		require.Equal(t, foreign.Prompt, updated.Prompt)
+		require.Equal(t, foreign.Title, updated.Title)
+		attachments, err := h.attachmentRepo.ListByTask(ctx, foreign.ID)
+		require.NoError(t, err)
+		require.Empty(t, attachments)
+		_, err = os.Stat(filepath.Join(uploadsDir, "tasks", foreign.ID))
+		require.True(t, os.IsNotExist(err))
+	}
+}

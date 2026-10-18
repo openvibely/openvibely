@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
+	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
@@ -31,7 +32,10 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/executionenv"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
@@ -347,7 +351,7 @@ func providerTransport(req llmcontracts.AgentRequest) string {
 	case models.ProviderAnthropic:
 		return "anthropic_messages_http"
 	case models.ProviderOllama:
-		return "ollama_http"
+		return "chat_completions"
 	case models.ProviderTest:
 		return "test"
 	default:
@@ -426,14 +430,16 @@ func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 		reserved = agent.GetDefaultMaxTokens(defaultReservedOutputTokens)
 	}
 	safety := limits.ContextWindow / 50
+	if agent.Provider == models.ProviderOllama {
+		// Match the shared Chat Completions final-payload admission margin.
+		safety = max(1024, safety)
+	}
 	switch agent.Provider {
 	case models.ProviderAnthropic:
 		reserved = anthropicclient.CompactionOutputReserve(llmanthropic.OutputTokenBudget(agent.Model))
 		safety = limits.ContextWindow - limits.EffectiveHardLimit - reserved
-	case models.ProviderOllama:
-		reserved = agent.GetDefaultMaxTokens(4096)
 	}
-	if limits.ContextWindow < 32768 && reserved > limits.ContextWindow/4 {
+	if limits.ContextWindow < 32768 && reserved > limits.ContextWindow/4 && !(agent.Provider == models.ProviderOllama && agent.DefaultMaxTokens > 0) {
 		// Keep deliberately tiny synthetic/test windows useful while preserving
 		// the concrete provider reservation for production-sized windows.
 		reserved = limits.ContextWindow / 4
@@ -460,7 +466,7 @@ func estimateDefaultProviderToolTokens(provider models.LLMProvider) int {
 	switch provider {
 	case models.ProviderAnthropic:
 		defs = anthropicclient.DefaultTools()
-	case models.ProviderOpenAI, models.ProviderOpenAICompatible:
+	case models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
 		defs = openaiclient.DefaultTools()
 	default:
 		return 0
@@ -488,9 +494,13 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	for _, att := range req.Attachments {
-		budget.AttachmentTokens += estimateAttachmentTokens(req.Agent.Provider, att)
+		budget.AttachmentTokens += estimateRequestAttachmentTokens(req, att)
 	}
 	return budget
+}
+
+func estimateRequestAttachmentTokens(req llmcontracts.AgentRequest, att models.Attachment) int {
+	return estimateAttachmentTokens(req.Agent.Provider, att)
 }
 
 // Image payload bytes are not text tokens. Match the harness estimates for
@@ -499,24 +509,13 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 // Attachment does not currently expose OpenAI original-detail images.
 func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment) int {
 	metadata := estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
-	switch provider {
-	case models.ProviderOpenAI:
-		if openaiclient.IsImageMediaType(att.MediaType) {
-			return metadata + 1844
-		}
-	case models.ProviderAnthropic:
-		if anthropicclient.IsImageMediaType(att.MediaType) {
-			return metadata + 2000
-		}
-	case models.ProviderOpenAICompatible:
-		if openaiclient.IsImageMediaType(att.MediaType) {
-			return metadata + 2000
-		}
+	if !llmattachment.DirectImage(att) {
+		return estimatedUTF8Tokens(llmattachment.Reference(att)) + estimatedUTF8Tokens(att.FileName)*2 + 32
 	}
-	if att.FileSize > 0 {
-		return metadata + tokenestimate.FromByteCount(int(att.FileSize))
+	if provider == models.ProviderOpenAI {
+		return metadata + 1844
 	}
-	return metadata
+	return metadata + 2000
 }
 
 func estimateExecutionTokens(exec models.Execution) int {
@@ -528,6 +527,9 @@ func estimateExecutionTokens(exec models.Execution) int {
 }
 
 func estimateHistoryTokens(provider models.LLMProvider, history []models.Execution) int {
+	if provider == models.ProviderOpenAICompatible || provider == models.ProviderOllama {
+		return llmopenai_compatible.EstimateHistoryTokens(history)
+	}
 	if provider == models.ProviderOpenAI {
 		return llmopenai.EstimateHistoryTokens(history)
 	}
@@ -537,8 +539,40 @@ func estimateHistoryTokens(provider models.LLMProvider, history []models.Executi
 	total := 0
 	for _, exec := range history {
 		total += estimateExecutionTokens(exec)
+		for _, replay := range exec.ReplayMessages {
+			imageType, imageTokens := "image_url", 2000
+			if provider == models.ProviderAnthropic {
+				imageType = "image"
+			}
+			if replay.TranscriptJSON != "" {
+				if tokens, err := estimateReplayTranscriptImageTokens(replay.TranscriptJSON, imageType, imageTokens); err == nil {
+					total += tokens - estimatedUTF8Tokens(replay.TranscriptJSON)
+				}
+			}
+		}
 	}
 	return total
+}
+
+// Stored completion transcripts are message arrays, while provider admission
+// expects a request object. Normalize only that envelope and image content field.
+func estimateReplayTranscriptImageTokens(raw, imageType string, imageTokens int) (int, error) {
+	encoded := []byte(raw)
+	var messages []map[string]json.RawMessage
+	if json.Unmarshal(encoded, &messages) == nil && messages != nil {
+		for _, message := range messages {
+			if imageContent := message["image_content"]; len(imageContent) > 0 {
+				message["content"] = imageContent
+				delete(message, "image_content")
+			}
+		}
+		var err error
+		encoded, err = json.Marshal(map[string]any{"messages": messages})
+		if err != nil {
+			return 0, err
+		}
+	}
+	return tokenestimate.FromMessagesJSON(encoded, imageType, imageTokens)
 }
 
 func historyNeedsCompaction(b requestBudget, triggerLimit int) bool {
@@ -565,7 +599,7 @@ func providerSupportsArtifactReader(req llmcontracts.AgentRequest) bool {
 		return false
 	}
 	switch req.Agent.Provider {
-	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible:
+	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama:
 		return true
 	default:
 		return false
@@ -622,7 +656,7 @@ func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest
 		return req, false, func() {}, nil
 	}
 	if !providerSupportsArtifactReader(req) {
-		return req, false, func() {}, llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "request preflight", fmt.Errorf("pending input requires %d tokens but safe input limit is %d and no authorized artifact reader is available", budget.PendingTokens, budget.SafeInputLimit))
+		return req, false, func() {}, llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "request preflight", fmt.Errorf("current request requires %d tokens (instructions/tools=%d, message=%d, attachments=%d); safe input limit is %d and no authorized artifact reader is available", budget.FixedTokens+budget.PendingTokens+budget.AttachmentTokens, budget.FixedTokens, budget.PendingTokens, budget.AttachmentTokens, budget.SafeInputLimit))
 	}
 	root := ""
 	if s != nil {
@@ -688,6 +722,8 @@ func openAIContextWindow(model string) int {
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+	total += estimatedUTF8Tokens(attachmentcontext.Text(req.Ctx))
+	total += estimatedUTF8Tokens(managedcontext.Text(req.Ctx))
 	total += estimateProviderSystemPromptTokens(req)
 	if !req.RawDirectPrompt && !req.LifecycleHookCall {
 		total += estimatedUTF8Tokens(executionenv.Context(req.WorkDir))
@@ -695,7 +731,7 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))
 	total += estimateAgentDefinitionTokens(req.AgentDefinition)
 	for _, att := range req.Attachments {
-		total += estimateAttachmentTokens(req.Agent.Provider, att)
+		total += estimateRequestAttachmentTokens(req, att)
 	}
 	total += estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	return total
@@ -851,7 +887,31 @@ func resolveProviderRequestForBudget(req llmcontracts.AgentRequest) llmcontracts
 }
 
 func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if req.Ctx == nil {
+		req.Ctx = context.Background()
+	}
+
+	req.Ctx = attachment.WithToolImages(req.Ctx)
+	req.Ctx = s.withDependencyProgress(req)
+	if files := s.fileRuntime(req); files != nil {
+		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(req.Ctx), files))
+	}
 	req = resolveProviderRequestForBudget(req)
+	if turn, ok := req.Ctx.Value(managedTurnKey{}).(managedTurn); ok {
+		var agent *models.Agent
+		if turn.task.AgentDefinitionID != nil && s.agentRepo != nil {
+			agent, _ = s.agentRepo.GetByID(req.Ctx, *turn.task.AgentDefinitionID)
+		}
+		req.Ctx = context.WithValue(req.Ctx, managedWorkDirKey{}, req.WorkDir)
+		req.Ctx = withManagedFileReadAuthorization(req.Ctx, s.projectRepo, turn.task, turn.chat, agent)
+		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, guardManagedTools(req.Ctx, llmcontracts.RuntimeToolsFromContext(req.Ctx), s.projectRepo, turn.task, turn.chat, agent))
+		if !projectManagedPermissions(req.Ctx, s.projectRepo, turn.task.ProjectID).ReadSkills && req.AgentDefinition != nil {
+			definition := *req.AgentDefinition
+			definition.Skills = nil
+			req.AgentDefinition = &definition
+		}
+	}
+
 	req = trackSteeringRecovery(req)
 	var replayErr error
 	req, replayErr = s.loadProviderReplayHistory(req)
@@ -962,7 +1022,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	logContextDecisionWithBudget(originalHistory, req, compactionStrategy, externalized, nil, budget)
 	res, err := adapter.Call(req)
-	recordAnthropicRecovery(req, err)
+	recordProviderRecovery(req, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(req, err, budget)
@@ -1032,7 +1092,25 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		return req
 	}
 	restored := req
-	if checkpoint.Strategy == "local_summary" {
+	if checkpoint.Strategy == "local_summary_inflight" {
+		for i, execution := range req.ChatHistory {
+			if execution.ID != checkpoint.SourceExecutionID {
+				continue
+			}
+			for _, replay := range execution.ReplayMessages {
+				var saved struct {
+					Input []any `json:"responses_input"`
+				}
+				if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Input) > 0 {
+					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
+					restored.NativeCompactionStateJSON = ""
+					restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
+					return restored
+				}
+			}
+		}
+	}
+	if checkpoint.Strategy == "local_summary" || checkpoint.Strategy == "local_summary_inflight" {
 		// Retained prompts are synthetic context, not executions to hydrate.
 		// Also repair checkpoints written before IDs were stripped.
 		for i := range checkpoint.History {
@@ -1133,6 +1211,9 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	if len(originalReq.ChatHistory) > 0 {
 		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
 	}
+	if strategy == "local_summary" && sourceID != "" && sourceID == originalReq.ExecID {
+		strategy = "local_summary_inflight"
+	}
 	if err := s.execRepo.UpsertChatCompactionCheckpoint(originalReq.Ctx, models.ChatCompactionCheckpoint{
 		ScopeType:         scope.Type,
 		ScopeID:           scope.ID,
@@ -1214,7 +1295,7 @@ func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, ori
 	}
 	logContextDecisionWithBudget(originalReq.ChatHistory, prepared, "local_summary_retry", externalized, trigger, budget)
 	res, err := adapter.Call(prepared)
-	recordAnthropicRecovery(prepared, err)
+	recordProviderRecovery(prepared, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(prepared, err, budget)
@@ -1264,7 +1345,7 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	logContextDecisionWithBudget(req.ChatHistory, truncated, "last_resort", externalized, cause, budget)
 	applog.Infof("[agent-svc] using token-budgeted last-resort truncation provider=%s model=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, contextFailureCategory(cause))
 	res, err := adapter.Call(truncated)
-	recordAnthropicRecovery(truncated, err)
+	recordProviderRecovery(truncated, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(truncated, err, budget)
@@ -1276,7 +1357,7 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 
 // Hydrate once at the budget boundary, never after history has been trimmed.
 func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
+	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOpenAICompatible && req.Agent.Provider != models.ProviderOllama) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
 		return req, nil
 	}
 	ids := make([]string, 0, len(req.ChatHistory))
@@ -1293,10 +1374,20 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 	if err != nil {
 		return req, err
 	}
+	var reasoning map[string]string
+	if req.Agent.Provider == models.ProviderOpenAICompatible || req.Agent.Provider == models.ProviderOllama {
+		reasoning, err = s.execRepo.ReasoningContentByIDs(ctx, ids)
+		if err != nil {
+			return req, err
+		}
+	}
 	req.ChatHistory = append([]models.Execution(nil), req.ChatHistory...)
 	for i := range req.ChatHistory {
 		if req.ChatHistory[i].ReplayMessages == nil {
 			req.ChatHistory[i].ReplayMessages = replays[req.ChatHistory[i].ID]
+			if reasoning != nil {
+				req.ChatHistory[i].ReasoningContent = reasoning[req.ChatHistory[i].ID]
+			}
 		}
 	}
 	return req, nil
@@ -1393,6 +1484,7 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.NativeCompactionStateJSON = ""
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
 	summaryReq.Ctx = llmcontracts.WithInitialSteeringCommit(summaryReq.Ctx, nil)
+	summaryReq.Ctx = llmcontracts.WithResponsesRecovery(summaryReq.Ctx, nil)
 	summaryReq.Ctx = llmcontracts.WithoutHistoryContinuation(summaryReq.Ctx)
 	summaryReq.Ctx = llmcontracts.WithSteeringPendingCheck(summaryReq.Ctx, nil)
 	summaryReq.Ctx = llmcontracts.WithLocalSteeringCallback(summaryReq.Ctx, func(context.Context) (llmcontracts.LocalSteeringInput, error) {
@@ -1500,6 +1592,8 @@ func environmentReplayMissingAnswer(replays []models.ExecutionReplayMessage) boo
 
 func writeExecutionReplayForCompaction(sb *strings.Builder, exec models.Execution) {
 	for _, replay := range exec.ReplayMessages {
+		replay.TranscriptJSON = completionsSummaryText(replay.TranscriptJSON)
+
 		if strings.TrimSpace(replay.TranscriptJSON) != "" {
 			sb.WriteString("Structured tool/message replay transcript JSON (preserve tool-call/tool-result relationships):\n")
 			sb.WriteString(strings.TrimSpace(replay.TranscriptJSON))

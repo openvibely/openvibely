@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/skilldeps"
+	"github.com/openvibely/openvibely/internal/util"
 	"gopkg.in/yaml.v3"
 )
 
@@ -197,7 +199,7 @@ func (i *Importer) ImportSkillPackage(ctx context.Context, content, packageName,
 	if err := decl.Validate(); err != nil {
 		return nil, err
 	}
-	root := i.roots.RootForScope(decl.Skill.Scope)
+	root := i.roots.ExactRootForScope(decl.Skill.Scope)
 	if root == "" {
 		return nil, fmt.Errorf("importer: no root configured for scope %q", decl.Skill.Scope)
 	}
@@ -662,7 +664,7 @@ func (i *Importer) WriteSkill(ctx context.Context, decl *SkillDeclaration, body 
 	if decl.IsAgentRootDeclaration() {
 		return nil, errors.New("importer: WriteSkill requires skill.key; use WriteAgentRootDeclaration for agent SKILLS.md metadata")
 	}
-	root := i.roots.RootForScope(decl.Skill.Scope)
+	root := i.roots.ExactRootForScope(decl.Skill.Scope)
 	if root == "" {
 		return nil, fmt.Errorf("importer: no root configured for scope %q", decl.Skill.Scope)
 	}
@@ -678,6 +680,12 @@ func (i *Importer) WriteSkill(ctx context.Context, decl *SkillDeclaration, body 
 	if err != nil {
 		return nil, err
 	}
+	if err := safeMutationPath(root, filepath.Join(skillDir, "SKILL.md")); err != nil {
+		return nil, err
+	}
+	if err := safeMutationPath(root, filepath.Join(root, "skills", "SKILLS.md")); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return nil, fmt.Errorf("importer: mkdir %s: %w", skillDir, err)
 	}
@@ -690,7 +698,7 @@ func (i *Importer) WriteSkill(ctx context.Context, decl *SkillDeclaration, body 
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		created = true
 	}
-	if err := writeFileReplacing(path, []byte(rendered), 0o644); err != nil {
+	if err := util.WriteFileAtomic(path, []byte(rendered), 0o644); err != nil {
 		return nil, fmt.Errorf("importer: write %s: %w", path, err)
 	}
 	result := &ImportResult{
@@ -753,8 +761,14 @@ func (i *Importer) WriteAgentOwnedSkill(ctx context.Context, scope, agentKey str
 	}
 	decl.Agent.Key = ""
 	decl.Skill.Scope = ""
+	if err := safeMutationPath(root, filepath.Join(root, "agents", agentKey, "SKILLS.md")); err != nil {
+		return nil, err
+	}
 	skillDir, err := AgentSkillDir(root, agentKey, decl.Skill.Key)
 	if err != nil {
+		return nil, err
+	}
+	if err := safeMutationPath(root, filepath.Join(skillDir, "SKILL.md")); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
@@ -847,6 +861,9 @@ func (i *Importer) WriteAgentRootDeclaration(ctx context.Context, decl *SkillDec
 		return nil, fmt.Errorf("importer: mkdir %s: %w", agentDir, err)
 	}
 	path := filepath.Join(agentDir, "SKILLS.md")
+	if err := safeMutationPath(root, path); err != nil {
+		return nil, err
+	}
 	if existing, err := os.ReadFile(path); err == nil {
 		_, existingBody, _ := SplitFrontmatter(string(existing))
 		body = mergeRootSkillIndexBodies(decl.Agent.Key, existingBody, body)
@@ -925,7 +942,7 @@ func writeResolvedSupportFile(abs string, kind SupportFileKind, content []byte, 
 	if kind == SupportScripts {
 		perm = 0o755
 	}
-	if err := writeFileReplacing(abs, content, perm); err != nil {
+	if err := util.WriteFileAtomic(abs, content, perm); err != nil {
 		return nil, fmt.Errorf("importer: write %s: %w", abs, err)
 	}
 	if kind == SupportScripts {
@@ -989,6 +1006,9 @@ func (i *Importer) resolveAgentOwnedSupportFilePath(ctx context.Context, scope, 
 		return "", "", "", err
 	}
 	abs := filepath.Join(skillDir, string(kind), rel)
+	if err := safeMutationPath(root, abs); err != nil {
+		return "", "", "", err
+	}
 	skillDirAbs, err := filepath.Abs(skillDir)
 	if err != nil {
 		return "", "", "", err
@@ -1004,7 +1024,7 @@ func (i *Importer) resolveAgentOwnedSupportFilePath(ctx context.Context, scope, 
 }
 
 func (i *Importer) resolveSupportFilePath(ctx context.Context, scope, handle string, kind SupportFileKind, relPath string) (string, string, error) {
-	root := i.roots.RootForScope(scope)
+	root := i.roots.ExactRootForScope(scope)
 	if root == "" {
 		return "", "", fmt.Errorf("importer: no root configured for scope %q", scope)
 	}
@@ -1031,6 +1051,9 @@ func (i *Importer) resolveSupportFilePath(ctx context.Context, scope, handle str
 		return "", "", err
 	}
 	abs := filepath.Join(skillDir, string(kind), rel)
+	if err := safeMutationPath(root, abs); err != nil {
+		return "", "", err
+	}
 	skillDirAbs, err := filepath.Abs(skillDir)
 	if err != nil {
 		return "", "", err
@@ -1168,7 +1191,11 @@ func SkillDir(root, skillKey string) (string, error) {
 	if !isSlug(skillKey) {
 		return "", fmt.Errorf("invalid skill key %q", skillKey)
 	}
-	return filepath.Join(root, "skills", skillKey), nil
+	path := filepath.Join(root, "skills", skillKey)
+	if err := safeMutationPath(root, path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // AgentSkillDir returns the legacy/agent-owned skill directory. It is used for
@@ -1181,7 +1208,11 @@ func AgentSkillDir(root, agentKey, skillKey string) (string, error) {
 	if !isSlug(skillKey) {
 		return "", fmt.Errorf("invalid skill key %q", skillKey)
 	}
-	return filepath.Join(root, "agents", agentKey, "skills", skillKey), nil
+	path := filepath.Join(root, "agents", agentKey, "skills", skillKey)
+	if err := safeMutationPath(root, path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // SplitHandle parses a standalone skill handle. Legacy "<agent>/<skill>" handles
@@ -1212,10 +1243,11 @@ func RenderSkillMarkdown(decl *SkillDeclaration, body string) (string, error) {
 	renderDecl := any(decl)
 	if !decl.IsAgentRootDeclaration() {
 		renderDecl = standaloneSkillFrontmatter{
-			Kind:    decl.Kind,
-			Version: decl.Version,
-			Skill:   standaloneSkillBlockFrom(decl.Skill),
-			Routing: standaloneRoutingBlockFrom(decl.Routing),
+			Dependencies: decl.Dependencies,
+			Kind:         decl.Kind,
+			Version:      decl.Version,
+			Skill:        standaloneSkillBlockFrom(decl.Skill),
+			Routing:      standaloneRoutingBlockFrom(decl.Routing),
 		}
 	}
 	raw, err := yaml.Marshal(renderDecl)
@@ -1239,10 +1271,11 @@ func RenderSkillMarkdown(decl *SkillDeclaration, body string) (string, error) {
 }
 
 type standaloneSkillFrontmatter struct {
-	Kind    string                  `yaml:"kind"`
-	Version int                     `yaml:"version"`
-	Skill   standaloneSkillBlock    `yaml:"skill"`
-	Routing *standaloneRoutingBlock `yaml:"routing,omitempty"`
+	Dependencies []skilldeps.Dependency  `yaml:"dependencies,omitempty"`
+	Kind         string                  `yaml:"kind"`
+	Version      int                     `yaml:"version"`
+	Skill        standaloneSkillBlock    `yaml:"skill"`
+	Routing      *standaloneRoutingBlock `yaml:"routing,omitempty"`
 }
 
 type standaloneSkillBlock struct {
@@ -1298,6 +1331,12 @@ func (i *Importer) markArchivedSkillOnDisk(handle, absorbedInto, reason string) 
 			continue
 		}
 		skillPath := filepath.Join(root, "skills", skillKey, "SKILL.md")
+		if err := safeMutationPath(root, skillPath); err != nil {
+			return changed, err
+		}
+		if err := safeMutationPath(root, filepath.Join(root, "skills", "SKILLS.md")); err != nil {
+			return changed, err
+		}
 		data, readErr := os.ReadFile(skillPath)
 		if readErr != nil {
 			if errors.Is(readErr, os.ErrNotExist) {
@@ -1343,6 +1382,9 @@ func (i *Importer) ensureAgentRootIndexEntry(root string, decl *SkillDeclaration
 		return "", false, fmt.Errorf("importer: mkdir %s: %w", agentsDir, err)
 	}
 	path := filepath.Join(agentsDir, "AGENTS.md")
+	if err := safeMutationPath(root, path); err != nil {
+		return path, false, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return path, false, fmt.Errorf("importer: read %s: %w", path, err)
@@ -1370,6 +1412,9 @@ func (i *Importer) ensureAgentSkillIndexEntry(root, agentKey string, decl *Skill
 		return "", false, fmt.Errorf("importer: mkdir %s: %w", agentDir, err)
 	}
 	path := filepath.Join(agentDir, "SKILLS.md")
+	if err := safeMutationPath(root, path); err != nil {
+		return path, false, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return path, false, fmt.Errorf("importer: read %s: %w", path, err)
@@ -1409,6 +1454,9 @@ func (i *Importer) ensureStandaloneSkillIndexEntry(root string, decl *SkillDecla
 		return "", false, fmt.Errorf("importer: mkdir %s: %w", skillsDir, err)
 	}
 	path := filepath.Join(skillsDir, "SKILLS.md")
+	if err := safeMutationPath(root, path); err != nil {
+		return path, false, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return path, false, fmt.Errorf("importer: read %s: %w", path, err)
@@ -1421,40 +1469,10 @@ func (i *Importer) ensureStandaloneSkillIndexEntry(root string, decl *SkillDecla
 	if strings.TrimSpace(merged) == strings.TrimSpace(body) && err == nil {
 		return path, false, nil
 	}
-	if err := writeFileReplacing(path, []byte(merged), 0o644); err != nil {
+	if err := util.WriteFileAtomic(path, []byte(merged), 0o644); err != nil {
 		return path, false, fmt.Errorf("importer: write %s: %w", path, err)
 	}
 	return path, true, nil
-}
-
-func writeFileReplacing(path string, content []byte, perm os.FileMode) error {
-	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-		perm = info.Mode().Perm()
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("stat %s: %w", path, err)
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".openvibely-skill-write-")
-	if err != nil {
-		return fmt.Errorf("create temporary file for %s: %w", path, err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(perm); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod temporary file for %s: %w", path, err)
-	}
-	if _, err := tmp.Write(content); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write temporary file for %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temporary file for %s: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
-	}
-	return nil
 }
 
 func mergeRootSkillIndexBodies(agentKey, existingBody, newBody string) string {
@@ -1744,4 +1762,29 @@ func titleFromSlug(slug string) string {
 		parts[i] = strings.ToUpper(part[:1]) + part[1:]
 	}
 	return strings.Join(parts, " ")
+}
+
+// Reject symlink components from the configured library root through the target.
+// Existing ancestors above the configured root (e.g. macOS /tmp) are not library aliases.
+func safeMutationPath(root, target string) error {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("mutation escapes library root")
+	}
+	path := root
+	parts := append([]string{""}, strings.Split(rel, string(filepath.Separator))...)
+	for _, part := range parts {
+		path = filepath.Join(path, part)
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("mutation path contains symlink: %s", path)
+		}
+	}
+	return nil
 }

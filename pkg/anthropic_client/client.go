@@ -91,8 +91,9 @@ type OAuthUnauthorizedHandler func(ctx context.Context, tokenUsed string) (OAuth
 
 // Message is a single message in a conversation.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role          string          `json:"role"`
+	Content       string          `json:"content"`
+	ContentBlocks json.RawMessage `json:"content_blocks,omitempty"`
 }
 
 // MessagesRequest is sent to the Anthropic Messages API.
@@ -615,7 +616,7 @@ func RefreshTokenContext(ctx context.Context, refreshTok string) (*StoredAuth, e
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", AnthropicAPIVersion)
 
-	resp, err := oauthHTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}

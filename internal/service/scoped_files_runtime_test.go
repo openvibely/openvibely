@@ -125,6 +125,53 @@ func TestScopedFilesRuntimeWriteEditListDeleteAndExplicitScopes(t *testing.T) {
 	}
 }
 
+func TestScopedFilesRuntimeEditPreservesMemoryFileModeAndCleansTempFiles(t *testing.T) {
+	repo := t.TempDir()
+	memoryDir := filepath.Join(repo, ".openvibely", "memories")
+	if err := os.MkdirAll(memoryDir, 0o755); err != nil {
+		t.Fatalf("create memory scope: %v", err)
+	}
+	path := filepath.Join(memoryDir, "topic.md")
+	if err := os.WriteFile(path, []byte("before"), 0o600); err != nil {
+		t.Fatalf("seed memory file: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("set memory file mode: %v", err)
+	}
+
+	_, rt, err := buildScopedFilesRuntimeTools(context.Background(), "p1", repo, models.AgentToolConfig{
+		ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely/memories", Permissions: []string{"read_write"}}},
+	})
+	if err != nil {
+		t.Fatalf("build scoped runtime: %v", err)
+	}
+	if _, _, _, err := rt.Executor(context.Background(), "read_file", json.RawMessage(`{"file_path":"topic.md"}`)); err != nil {
+		t.Fatal(err)
+	}
+	out, handled, isErr, err := rt.Executor(context.Background(), "edit_file", json.RawMessage(`{"file_path":"topic.md","old_string":"before","new_string":"after"}`))
+	if err != nil || isErr || !handled {
+		t.Fatalf("edit failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "after" {
+		t.Fatalf("edited memory file = %q, err=%v", data, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat edited memory file: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o644 {
+		t.Fatalf("edited memory file mode = %04o, want 0644", mode)
+	}
+	entries, err := os.ReadDir(memoryDir)
+	if err != nil {
+		t.Fatalf("read memory directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "topic.md" {
+		t.Fatalf("unexpected memory directory entries after edit: %v", entries)
+	}
+}
+
 func TestScopedFilesRuntimeReadFileUsesCompactLinePrefixes(t *testing.T) {
 	repo := t.TempDir()
 	_, rt, err := buildScopedFilesRuntimeTools(context.Background(), "p1", repo, models.AgentToolConfig{

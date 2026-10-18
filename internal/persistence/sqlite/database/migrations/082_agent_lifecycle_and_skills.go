@@ -302,7 +302,7 @@ INSERT INTO agent_lifecycle_hooks (
  ('hk_skill_curator_after_complete_01',
   'sys_skill_curator_00000000000000000001', 'after_complete',
   'observe_task_for_learning', '', 'learning_summary',
-  0, 1, '{"read_agents":true,"read_skills":true,"write_skills":true,"read_task_execution":true}', '{"when":"throttled","batch_size":5}', NULL)
+  0, 0, '{"read_agents":true,"read_skills":true,"write_skills":true,"read_task_execution":true}', '{"when":"throttled","batch_size":5}', NULL)
 ON CONFLICT(id) DO NOTHING;
 
 UPDATE agents
