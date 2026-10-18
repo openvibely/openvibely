@@ -368,46 +368,6 @@ func (w *WorkerService) goalAgentID(ctx context.Context) string {
 	return agent.ID
 }
 
-func (w *WorkerService) isChatMemoryRecallHook(ctx context.Context) func(models.AgentLifecycleHook) bool {
-	memoryAgentID := ""
-	if w != nil && w.agentRepo != nil {
-		if agent, err := w.agentRepo.GetByKey(ctx, models.AgentSystemKindMemoryCurator); err == nil && agent != nil {
-			memoryAgentID = agent.ID
-		}
-	}
-	return func(hook models.AgentLifecycleHook) bool {
-		if hook.SkillKey != "recall_memory" {
-			return false
-		}
-		if !(hook.When == models.LifecycleRouteTask && hook.OutputContract == models.OutputContractSelectedMemories) && !(hook.When == models.LifecycleBeforeRun && hook.OutputContract == models.OutputContractContextBlock) {
-			return false
-		}
-		if memoryAgentID == "" {
-			return w == nil || w.agentRepo == nil
-		}
-		return hook.AgentID == memoryAgentID
-	}
-}
-
-func bestSelectedMemories(outputs []lifecycle.HookOutput) (lifecycle.SelectedMemories, bool) {
-	var best lifecycle.SelectedMemories
-	haveBest := false
-	for _, out := range outputs {
-		if out.OutputContract != models.OutputContractSelectedMemories || len(out.Payload) == 0 || out.Error != "" {
-			continue
-		}
-		selected, err := lifecycle.ValidateSelectedMemories(out.Payload)
-		if err != nil || selected.NeedsClarification {
-			continue
-		}
-		if !haveBest || selected.Confidence > best.Confidence {
-			best = selected
-			haveBest = true
-		}
-	}
-	return best, haveBest
-}
-
 func memoryEntriesFromLifecycle(selected lifecycle.SelectedMemories) []memory.SelectedMemory {
 	if len(selected.Memories) == 0 {
 		return nil

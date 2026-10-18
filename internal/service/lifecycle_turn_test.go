@@ -855,7 +855,9 @@ func TestPrepareLifecycleTurn_ScheduledSkillMaintenanceTaskUsesScopedSkillLibrar
 		t.Fatalf("route_task should receive Skill Curator skill index only, got:\n%s", availableText)
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(turn.Ctx)
-	assertTaskRuntimeIsSelectedSkillOnly(t, rt)
+	if !rt.HasDefinition("skill_view") || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("agent_skill_manage") {
+		t.Fatal("maintenance must expose skill readers and writers")
+	}
 	instructions := managedcontext.Text(turn.Ctx)
 	if !strings.Contains(instructions, "maintain_skill_library") || strings.Contains(instructions, "other_skill") {
 		t.Fatalf("maintenance prompt should include only router-selected maintainer skill, got:\n%s", instructions)

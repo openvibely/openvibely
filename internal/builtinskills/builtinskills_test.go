@@ -19,13 +19,12 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 	mustExist := []string{
 		filepath.Join(root, "agents", "AGENTS.md"),
 		filepath.Join(root, "agents", "skill_curator", "SKILLS.md"),
-		filepath.Join(root, "agents", "skill_curator", "skills", "route_task", "SKILL.md"),
+		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
 		filepath.Join(root, "agents", "skill_curator", "skills", "observe_task_for_learning", "SKILL.md"),
 		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
 		filepath.Join(root, "agents", "goal", "SKILLS.md"),
 		filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"),
 		filepath.Join(root, "agents", "memory_curator", "SKILLS.md"),
-		filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"),
 		filepath.Join(root, "skills", "SKILLS.md"),
 		filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md"),
 		filepath.Join(root, "skills", "openvibely_native_autonomous_sdlc_bootstrap", "SKILL.md"),
@@ -170,7 +169,6 @@ func TestSyncTo_BundledSystemPromptsAvoidUnnecessaryInternalLabelInjection(t *te
 		filepath.Join(root, "agents", "skill_curator", "skills", "observe_task_for_learning", "SKILL.md"),
 		filepath.Join(root, "agents", "memory_curator", "SKILLS.md"),
 		filepath.Join(root, "agents", "memory_curator", "skills", "consolidate_memory", "SKILL.md"),
-		filepath.Join(root, "agents", "memory_curator", "skills", "update_memory", "SKILL.md"),
 		filepath.Join(root, "agents", "goal", "SKILLS.md"),
 	}
 	for _, p := range paths {
@@ -269,60 +267,13 @@ func TestSyncTo_PreservesUserManagedIndexesButRefreshesSystemDeclaration(t *test
 	}
 }
 
-func TestSyncTo_MemoryRecallSkillUsesIndexSelectionContract(t *testing.T) {
-	root := t.TempDir()
-	if err := SyncTo(root); err != nil {
-		t.Fatalf("SyncTo: %v", err)
-	}
-
-	recall, err := os.ReadFile(filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read recall_memory SKILL.md: %v", err)
-	}
-	decl, err := os.ReadFile(filepath.Join(root, "agents", "memory_curator", "SKILLS.md"))
-	if err != nil {
-		t.Fatalf("read memory_curator SKILLS.md: %v", err)
-	}
-	declBody := string(decl)
-	for _, want := range []string{"- ScopedFiles", "- memory_view", "consolidate_memory"} {
-		if !strings.Contains(declBody, want) {
-			t.Fatalf("memory_curator declaration missing route selected-memory hook %q:\n%s", want, declBody)
-		}
-	}
-	if strings.Contains(declBody, "output_contract: context_block") {
-		t.Fatalf("memory_curator recall should not install as before_run context_block:\n%s", declBody)
-	}
-
-	body := string(recall)
-	for _, want := range []string{
-		"route_task",
-		"selected_memories",
-		"extras.available_memories",
-		"compact project memory index from `MEMORIES.md`",
-		"analogous to the Skill Curator's `available_skills` index",
-		"If no listed memory is relevant",
-		"Use root-relative memory filenames from the index as `file` handles",
-		"Leave `content`, `summary`, and `snippet` empty",
-		"memory_view",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("recall_memory skill missing index-selection instruction %q:\n%s", want, body)
-		}
-	}
-	for _, forbidden := range []string{"read only the topic files", "bounded `read_file`", "read all memory files", "read every memory file", "dump all memory"} {
-		if strings.Contains(strings.ToLower(body), forbidden) {
-			t.Fatalf("recall_memory skill should not encourage broad memory dumps via %q:\n%s", forbidden, body)
-		}
-	}
-}
-
 func TestSyncTo_OverwritesSkillBodies(t *testing.T) {
 	root := t.TempDir()
 	if err := SyncTo(root); err != nil {
 		t.Fatalf("initial SyncTo: %v", err)
 	}
 
-	skillPath := filepath.Join(root, "agents", "skill_curator", "skills", "route_task", "SKILL.md")
+	skillPath := filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md")
 	if err := os.WriteFile(skillPath, []byte("stale content"), 0o644); err != nil {
 		t.Fatalf("write stale SKILL.md: %v", err)
 	}
@@ -475,7 +426,7 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsDisabledStandaloneSkillsOutOfRou
 
 	// Sanity: agent-owned SKILL.md bodies are present so lifecycle hooks can read them.
 	for _, p := range []string{
-		filepath.Join(root, "agents", "skill_curator", "skills", "route_task", "SKILL.md"),
+		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
 		filepath.Join(root, "agents", "skill_curator", "skills", "observe_task_for_learning", "SKILL.md"),
 		filepath.Join(root, "agents", "skill_curator", "skills", "maintain_skill_library", "SKILL.md"),
 		filepath.Join(root, "agents", "goal", "skills", "evaluate_task_goal", "SKILL.md"),
