@@ -91,16 +91,9 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
 				hx-swap="none"
 			>
-                <fieldset class="mb-3">
-                    <legend class="font-bold">Skills &amp; Memory</legend>
-                    <input type="hidden" name="skill_memory_settings_present" value="true"/>
-                    <label class="label cursor-pointer"><span class="label-text">Read skills</span><input type="checkbox" class="checkbox checkbox-sm" name="read_skills" checked?={ project.ManagedPermissions().ReadSkills }/></label>
-                    <label class="label cursor-pointer"><span class="label-text">Write skills</span><input type="checkbox" class="checkbox checkbox-sm" name="write_skills" checked?={ project.ManagedPermissions().WriteSkills }/></label>
-                    <label class="label cursor-pointer"><span class="label-text">Allow global skill writes (shared across projects)</span><input type="checkbox" class="checkbox checkbox-sm" name="allow_global_skill_writes" checked?={ project.ManagedPermissions().AllowGlobalSkillWrites }/></label>
-                    <label class="label cursor-pointer"><span class="label-text">Read memories</span><input type="checkbox" class="checkbox checkbox-sm" name="read_memories" checked?={ project.ManagedPermissions().ReadMemories }/></label>
-                    <label class="label cursor-pointer"><span class="label-text">Write memories</span><input type="checkbox" class="checkbox checkbox-sm" name="write_memories" checked?={ project.ManagedPermissions().WriteMemories }/></label>
-                    <p class="text-xs opacity-60">Reading applies to chat and tasks. Memory writing applies to tasks and maintenance; skill writing applies to tasks, task-thread follow-ups, and library maintenance. Ordinary chat cannot write skills. Disabling reading does not erase previously loaded conversation context.</p>
-                </fieldset>
+				@ProjectSettingsTabs("edit-project")
+<div style="max-height: 60vh; overflow-y: auto;">
+				<section id="edit-project-general" role="tabpanel" aria-labelledby="edit-project-general-tab" data-project-panel="general">
 
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
@@ -216,6 +209,9 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<p class="text-xs text-warning mt-1">The current project limit exceeds the global limit of { fmt.Sprintf("%d", globalMaxWorkers) }. Lower it before saving.</p>
 					}
 				</div>
+				</section>
+				@ProjectKnowledgePanel("edit-project", project.ManagedPermissions())
+</div>
 				<div class="modal-action">
 					if !project.IsDefault {
 						<button
@@ -363,7 +359,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					hx-swap="none"
 					hx-indicator="#new-project-create-progress"
 				>
-				<div class="form-control mb-3">
+				@ProjectSettingsTabs("new-project")
+<div style="max-height: 60vh; overflow-y: auto;">
+<section id="new-project-general" role="tabpanel" aria-labelledby="new-project-general-tab" data-project-panel="general">
+<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
 					<input type="text" id="new-project-name" name="name" class="input input-bordered" required placeholder="My Project"/>
 				</div>
@@ -460,6 +459,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 						data-tooltip-disabled
 					/>
 				</div>
+				</section>
+				@ProjectKnowledgePanel("new-project", (&models.Project{}).ManagedPermissions())
+</div>
 				<div id="new-project-error" class="alert alert-error mb-4 hidden">
 					<svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 					<span id="new-project-error-text"></span>
@@ -650,4 +652,67 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 			}
 		})();
 	</script>
+}
+
+
+templ ProjectSettingsTabs(prefix string) {
+ <div role="tablist" aria-label="Project settings" class="tabs tabs-bordered mb-4" onkeydown="window.projectSettingsTabKey(event)">
+  <button type="button" role="tab" id={ prefix + "-general-tab" } aria-controls={ prefix + "-general" } aria-selected="true" tabindex="0" class="tab tab-active" data-project-tab="general" onclick="window.selectProjectSettingsTab(this)">General</button>
+  <button type="button" role="tab" id={ prefix + "-knowledge-tab" } aria-controls={ prefix + "-knowledge" } aria-selected="false" tabindex="-1" class="tab" data-project-tab="knowledge" onclick="window.selectProjectSettingsTab(this)">Skills &amp; Memory</button>
+ </div>
+ <script>
+ window.selectProjectSettingsTab = function(button) {
+  var form = button.closest('form');
+  form.querySelectorAll('[data-project-tab]').forEach(function(tab) {
+   var active = tab === button;
+   tab.classList.toggle('tab-active', active);
+   tab.setAttribute('aria-selected', String(active));
+   tab.tabIndex = active ? 0 : -1;
+  });
+  form.querySelectorAll('[data-project-panel]').forEach(function(panel) { panel.hidden = panel.dataset.projectPanel !== button.dataset.projectTab; });
+ };
+ window.projectSettingsTabKey = function(event) {
+  var tabs = Array.from(event.currentTarget.querySelectorAll('[role="tab"]'));
+  var index = tabs.indexOf(document.activeElement);
+  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  window.selectProjectSettingsTab(tabs[index]);
+  tabs[index].focus();
+ };
+ // Reveal General before the browser focuses an invalid field in a hidden panel.
+ (function() {
+  var form = document.currentScript.closest('form');
+  form.addEventListener('reset', function() {
+   var global = form.querySelector('[data-global-skill-switch]');
+   global.disabled = !form.elements.write_skills.defaultChecked;
+   form.elements.allow_global_skill_writes.value = global.defaultChecked ? 'on' : 'off';
+  });
+  form.addEventListener('invalid', function(event) {
+   var panel = event.target.closest('[data-project-panel]');
+   if (panel && panel.hidden) window.selectProjectSettingsTab(form.querySelector('[data-project-tab="' + panel.dataset.projectPanel + '"]'));
+  }, true);
+  form.closest('dialog').addEventListener('close', function() { window.selectProjectSettingsTab(form.querySelector('[data-project-tab="general"]')); });
+ })();
+ </script>
+}
+
+templ ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissions) {
+ <section id={ prefix + "-knowledge" } role="tabpanel" aria-labelledby={ prefix + "-knowledge-tab" } data-project-panel="knowledge" hidden>
+  <input type="hidden" name="skill_memory_settings_present" value="true"/>
+  <table class="table w-full">
+   <thead><tr><th></th><th class="text-center"><span title="Chat and tasks can read. Turning reading off does not erase information already loaded into the conversation.">Read ⓘ</span></th><th class="text-center"><span title="Permitted tasks, task-thread follow-ups, and maintenance only. Ordinary chat cannot write.">Write ⓘ</span></th></tr></thead>
+   <tbody>
+    <tr><th scope="row">Skills</th><td class="text-center"><input type="checkbox" class="toggle toggle-sm" name="read_skills" aria-label="Read skills" checked?={ permissions.ReadSkills }/></td><td class="text-center"><input type="checkbox" class="toggle toggle-sm" name="write_skills" aria-label="Write skills" checked?={ permissions.WriteSkills } onchange="this.form.querySelector('[data-global-skill-switch]').disabled = !this.checked"/></td></tr>
+    <tr><th scope="row">Memories</th><td class="text-center"><input type="checkbox" class="toggle toggle-sm" name="read_memories" aria-label="Read memories" checked?={ permissions.ReadMemories }/></td><td class="text-center"><input type="checkbox" class="toggle toggle-sm" name="write_memories" aria-label="Write memories" checked?={ permissions.WriteMemories }/></td></tr>
+    <tr><th scope="row"><span title="Allows changes to skills shared across projects. Requires Write skills.">Allow global skill writes ⓘ</span></th><td></td><td class="text-center"><input type="checkbox" class="toggle toggle-sm" data-global-skill-switch aria-label="Allow global skill writes" checked?={ permissions.AllowGlobalSkillWrites } disabled?={ !permissions.WriteSkills } onchange="this.form.elements.allow_global_skill_writes.value = this.checked ? 'on' : 'off'"/></td></tr>
+   </tbody>
+  </table>
+  <input type="hidden" name="allow_global_skill_writes" value={ projectGlobalSkillWriteValue(permissions) }/>
+ </section>
+}
+
+func projectGlobalSkillWriteValue(permissions models.SkillMemoryPermissions) string {
+ if permissions.AllowGlobalSkillWrites { return "on" }
+ return "off"
 }
