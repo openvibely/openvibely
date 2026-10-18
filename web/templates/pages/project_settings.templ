@@ -576,11 +576,14 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 
 templ ProjectSettingsTabs(prefix string) {
  <style>
-  [data-project-panel] .project-execution-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1.5rem; align-items: start; }
-  [data-project-panel] .project-execution-fields .form-control { min-width: 0; }
-  [data-project-panel] .project-execution-fields :is(.input, .select) { width: 100%; min-width: 0; }
-  [data-project-panel] .project-execution-fields .label { justify-content: flex-start; gap: 0.375rem; }
-  @media (max-width: 640px) { [data-project-panel] .project-execution-fields { grid-template-columns: minmax(0, 1fr); } }
+  [data-project-panel="execution"] .project-execution-fields .form-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 0.5rem; padding: 0.75rem 0; }
+  [data-project-panel="execution"] .project-execution-fields :is(.input, .select) { width: 100%; max-width: 22rem; min-width: 0; justify-self: end; }
+  [data-project-panel="execution"] .project-execution-fields .label { justify-content: flex-start; gap: 0.375rem; padding: 0; }
+  [data-project-panel="execution"] .project-execution-fields .text-warning { grid-column: 1 / -1; }
+  [data-project-panel="execution"] .table { table-layout: fixed; }
+  [data-project-panel="execution"] .table :is(th, td) { padding: 0.75rem 0; }
+  [data-project-panel="execution"] .table th:first-child { width: 50%; }
+
  </style>
  <div role="tablist" aria-label="Project settings" class="tabs tabs-bordered mb-4" onkeydown="window.projectSettingsTabKey(event)">
   <button type="button" role="tab" id={ prefix + "-general-tab" } aria-controls={ prefix + "-general" } aria-selected="true" tabindex="0" class="tab tab-active" data-project-tab="general" onclick="window.selectProjectSettingsTab(this)">General</button>
@@ -625,7 +628,6 @@ templ ProjectSettingsTabs(prefix string) {
 
 templ ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissions) {
  <div id={ prefix + "-knowledge" }>
-  <h4 class="text-sm font-medium mb-2">Skills &amp; Memory</h4>
   <input type="hidden" name="skill_memory_settings_present" value="true"/>
   <table class="table w-full text-sm">
    <thead><tr><th scope="col" class="text-sm font-medium">Resource</th><th class="text-center"><span class="inline-flex items-center gap-1 text-sm font-medium">Read @projectPermissionHelp("Read", "Chat and tasks can read. Turning reading off does not erase information already loaded into the conversation.")</span></th><th class="text-center"><span class="inline-flex items-center gap-1 text-sm font-medium">Write @projectPermissionHelp("Write", "Permitted tasks, task-thread follow-ups, and maintenance only. Ordinary chat cannot write.")</span></th></tr></thead>
@@ -660,10 +662,10 @@ templ ProjectExecutionPanel(prefix string, project *models.Project, agents []mod
   <div class="project-execution-fields">
    <div class="form-control">
     <div class="label">
-     <label for={ prefix + "-default-model" } class="label-text">Default Model</label>
+     <label for={ prefix + "-default-model" } class="text-sm font-medium">Default Model</label>
      @projectPermissionHelp("Default Model", "Used when no model is specified on a task. Leave set to Global default to inherit the global model.")
     </div>
-    <select id={ prefix + "-default-model" } name="default_agent_config_id" class="select select-bordered">
+    <select id={ prefix + "-default-model" } name="default_agent_config_id" class="select select-bordered select-sm">
      <option value="">Global default</option>
      for _, agent := range agents {
       <option value={ agent.ID } selected?={ isProjectDefaultModel(project, agent.ID) }>
@@ -677,10 +679,10 @@ templ ProjectExecutionPanel(prefix string, project *models.Project, agents []mod
    </div>
    <div class="form-control">
     <div class="label">
-     <label for={ prefix + "-max-workers" } class="label-text">Worker limit</label>
+     <label for={ prefix + "-max-workers" } class="text-sm font-medium">Worker limit</label>
      @projectPermissionHelp("Worker limit", "Maximum concurrent workers for this project. Leave blank to inherit the global limit. Positive values cannot exceed the current global limit.")
     </div>
-    <input type="number" name="max_workers" id={ prefix + "-max-workers" } value={ projectMaxWorkersValue(project) } min="0" if globalMaxWorkers > 0 { max={ fmt.Sprintf("%d", globalMaxWorkers) } } step="1" placeholder="Inherit" class="input input-bordered" data-tooltip-disabled/>
+    <input type="number" name="max_workers" id={ prefix + "-max-workers" } value={ projectMaxWorkersValue(project) } min="0" if globalMaxWorkers > 0 { max={ fmt.Sprintf("%d", globalMaxWorkers) } } step="1" placeholder="Inherit" class="input input-bordered input-sm" data-tooltip-disabled/>
     if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
      <p class="text-xs text-warning mt-1">The current project limit exceeds the global limit of { fmt.Sprintf("%d", globalMaxWorkers) }. Lower it before saving.</p>
     }
