@@ -1710,7 +1710,6 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						if (generation !== openAICompatibleDiscoveryGeneration || document.getElementById('model_provider').value !== 'ollama') return;
 						var previous = select.value;
 						var names = Array.from(new Set(models.map(function(model) {return model.name || model.model;}).filter(Boolean)));
-						if (previous && names.indexOf(previous) === -1) names.unshift(previous);
                         select.replaceChildren();
 						names.forEach(function(name) {select.add(new Option(name, name));});
 						if (!select.options.length) select.add(new Option('No models installed', ''));
