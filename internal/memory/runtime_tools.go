@@ -111,6 +111,12 @@ func executeMemory(ctx context.Context, repoPath, name string, input json.RawMes
 	if name == "memory_save" && (strings.TrimSpace(params.Content) == "" || strings.TrimSpace(params.Summary) == "") {
 		return "", fmt.Errorf("content and summary are required")
 	}
+	entry := "- " + handle + " — " + strings.Join(strings.Fields(params.Summary), " ")
+	// A successful save must be addressable through the same index parser used
+	// by memory_view and subsequent updates/deletes. Validate before any writes.
+	if name == "memory_save" && indexedMemoryLineHandle(entry) != handle {
+		return "", fmt.Errorf("memory handle or summary cannot be represented in the index; use a simple markdown filename (for example user_preferences.md) and a plain-text summary")
+	}
 	var lines []string
 	for _, line := range strings.Split(string(index), "\n") {
 		if indexedMemoryLineHandle(line) != handle {
@@ -121,7 +127,7 @@ func executeMemory(ctx context.Context, repoPath, name string, input json.RawMes
 		lines = []string{"# Project Memory", ""}
 	}
 	if name == "memory_save" {
-		lines = append(lines, "- "+handle+" — "+strings.Join(strings.Fields(params.Summary), " "))
+		lines = append(lines, entry)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return "", err
