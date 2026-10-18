@@ -1089,7 +1089,25 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		return req
 	}
 	restored := req
-	if checkpoint.Strategy == "local_summary" {
+	if checkpoint.Strategy == "local_summary_inflight" {
+		for i, execution := range req.ChatHistory {
+			if execution.ID != checkpoint.SourceExecutionID {
+				continue
+			}
+			for _, replay := range execution.ReplayMessages {
+				var saved struct {
+					Input []any `json:"responses_input"`
+				}
+				if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Input) > 0 {
+					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
+					restored.NativeCompactionStateJSON = ""
+					restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
+					return restored
+				}
+			}
+		}
+	}
+	if checkpoint.Strategy == "local_summary" || checkpoint.Strategy == "local_summary_inflight" {
 		// Retained prompts are synthetic context, not executions to hydrate.
 		// Also repair checkpoints written before IDs were stripped.
 		for i := range checkpoint.History {
@@ -1189,6 +1207,9 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	sourceID := ""
 	if len(originalReq.ChatHistory) > 0 {
 		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
+	}
+	if strategy == "local_summary" && sourceID != "" && sourceID == originalReq.ExecID {
+		strategy = "local_summary_inflight"
 	}
 	if err := s.execRepo.UpsertChatCompactionCheckpoint(originalReq.Ctx, models.ChatCompactionCheckpoint{
 		ScopeType:         scope.Type,
@@ -1308,6 +1329,9 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	truncated.Agent.ForceNativeCompaction = false
 	truncated.DisableNativeCompaction = true
 	truncated.Agent.DisableNativeCompaction = true
+	if len(retainedCompletionsImages(req.ChatHistory)) > 0 {
+		return llmcontracts.AgentResult{}, cause
+	}
 	truncated.ChatHistory = historyWithinRequestBudget(truncated, llmprompt.LimitChatHistory(req.ChatHistory))
 	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && len(truncated.ChatHistory) == 0 {
 		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "steering recovery", fmt.Errorf("current conversation cannot fit without discarding consumed steering and tool results: %w", cause))
@@ -1333,7 +1357,7 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 
 // Hydrate once at the budget boundary, never after history has been trimmed.
 func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
+	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOpenAICompatible && req.Agent.Provider != models.ProviderOllama) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
 		return req, nil
 	}
 	ids := make([]string, 0, len(req.ChatHistory))
@@ -1427,7 +1451,7 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 			// Claude retries with the successful summary intact. Let request
 			// preflight reject an oversized retry rather than erase its summary
 			// (and the completed-work context it is the only remaining record of).
-			if compacted.Agent.Provider != models.ProviderAnthropic {
+			if compacted.Agent.Provider != models.ProviderAnthropic && len(retainedCompletionsImages(compacted.ChatHistory)) == 0 {
 				compacted.ChatHistory = historyWithinRequestBudget(compacted, compacted.ChatHistory)
 			}
 			compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
@@ -1558,6 +1582,8 @@ func environmentReplayMissingAnswer(replays []models.ExecutionReplayMessage) boo
 
 func writeExecutionReplayForCompaction(sb *strings.Builder, exec models.Execution) {
 	for _, replay := range exec.ReplayMessages {
+		replay.TranscriptJSON = completionsSummaryText(replay.TranscriptJSON)
+
 		if strings.TrimSpace(replay.TranscriptJSON) != "" {
 			sb.WriteString("Structured tool/message replay transcript JSON (preserve tool-call/tool-result relationships):\n")
 			sb.WriteString(strings.TrimSpace(replay.TranscriptJSON))
@@ -1585,6 +1611,7 @@ func buildCompactedReplacementHistory(history []models.Execution, summary string
 	retained := retainedUserMessageHistory(history, retainedUserMessageTokenBudget)
 	out := make([]models.Execution, 0, len(retained)+1)
 	out = append(out, retained...)
+	out = append(out, retainedCompletionsImages(history)...)
 	out = append(out, models.Execution{
 		Status: models.ExecCompleted,
 		Output: compactedHistorySummaryPrefix + "\n\n" + strings.TrimSpace(summary),

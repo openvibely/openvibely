@@ -156,7 +156,7 @@ type CompletionsToolCall struct {
 // CompletionsHistoryMessage is a conversation message for Chat Completions
 // providers that require reasoning content to be replayed verbatim.
 type CompletionsHistoryMessage struct {
-	ImageContent     []map[string]interface{} `json:"image_content,omitempty"`
+	ImageContent     []map[string]interface{} `json:"-"`
 	Role             string                   `json:"role"`
 	Content          string                   `json:"content"`
 	ReasoningContent string                   `json:"reasoning_content,omitempty"`
