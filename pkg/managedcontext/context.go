@@ -13,11 +13,19 @@ const Marker = "<managed_knowledge_index>"
 func With(ctx context.Context, index string) context.Context {
 	return context.WithValue(ctx, key{}, index)
 }
+
+// WithSource resolves current permissions and cached indexes at each request boundary.
+func WithSource(ctx context.Context, source func(context.Context) string) context.Context {
+	return context.WithValue(ctx, key{}, source)
+}
 func Text(ctx context.Context) string {
 	if ctx == nil {
 		return ""
 	}
 	text, _ := ctx.Value(key{}).(string)
+	if source, ok := ctx.Value(key{}).(func(context.Context) string); ok {
+		text = source(ctx)
+	}
 	if text == "" {
 		return ""
 	}

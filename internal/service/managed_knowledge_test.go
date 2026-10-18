@@ -245,3 +245,25 @@ func TestObsoletePersistedCuratorHooksNeverInvokeModels(t *testing.T) {
 	require.Zero(t, calls)
 	require.Empty(t, hooks.created, "retired hooks must not even create lifecycle executions")
 }
+
+func TestKnowledgeChangesWithinSameTurn(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	worker := NewWorkerService(nil, 0, stores.Projects)
+	task := models.Task{ID: "live-index", ProjectID: project.ID}
+	turn := worker.prepareMainModelKnowledge(ctx, task, false)
+	require.NotContains(t, managedcontext.Text(turn), "fresh.md")
+	rt := llmcontracts.RuntimeToolsFromContext(turn)
+	_, handled, failed, err := rt.Executor(turn, "memory_save", json.RawMessage(`{"handle":"fresh.md","content":"New fact","summary":"New memory"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, failed)
+	require.Contains(t, managedcontext.Text(turn), "fresh.md")
+	project.SkillMemoryPermissions = &models.SkillMemoryPermissions{ReadSkills: true, WriteMemories: true}
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	require.NotContains(t, managedcontext.Text(turn), "fresh.md")
+	_, _, failed, err = rt.Executor(turn, "memory_view", json.RawMessage(`{"handle":"fresh.md"}`))
+	require.NoError(t, err)
+	require.True(t, failed)
+}

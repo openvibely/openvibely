@@ -109,3 +109,23 @@ func TestSeedReplayMatchesFirstInsertionWithoutPinningAttachments(t *testing.T) 
 		require.Equal(t, replay, SeedReplay(With(ctx, ""), visible, replay, read, makeMessage))
 	}
 }
+
+func TestLiveIndexSourcePreservesPositionAndRestoresAfterCompaction(t *testing.T) {
+	type message struct{ role, content string }
+	read := func(m message) (string, string) { return m.role, m.content }
+	makeMessage := func(s string) message { return message{"user", s} }
+	index := "skills and memory v1"
+	ctx := WithSource(context.Background(), func(context.Context) string { return index })
+	items := Ensure(ctx, []message{{"user", "first request"}}, read, makeMessage)
+	items = append(items, message{"assistant", "tool result"}, message{"user", "followup"})
+	original := append([]message(nil), items...)
+	require.Equal(t, original, Ensure(ctx, items, read, makeMessage))
+	index = "skills and memory v2"
+	items = Ensure(ctx, items, read, makeMessage)
+	require.Contains(t, items[0].content, "v2")
+	require.Equal(t, original[1:], items[1:])
+	restored := Ensure(ctx, []message{{"user", "compacted summary"}}, read, makeMessage)
+	require.Contains(t, restored[0].content, "v2")
+	index = ""
+	require.Equal(t, original[1:], Ensure(ctx, items, read, makeMessage))
+}

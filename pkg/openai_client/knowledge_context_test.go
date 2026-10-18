@@ -14,7 +14,8 @@ import (
 )
 
 func TestResponsesKnowledgeIndexPreservesPrefixAndRestoresAfterCompaction(t *testing.T) {
-	ctx := managedcontext.With(context.Background(), "document_word: Word documents")
+	index := "document_word: Word documents"
+	ctx := managedcontext.WithSource(context.Background(), func(context.Context) string { return index })
 	items := []any{
 		map[string]any{"type": "message", "role": "user", "content": "Summarize this document"},
 		map[string]any{"type": "message", "role": "user", "content": managedcontext.Text(ctx)},
@@ -27,7 +28,8 @@ func TestResponsesKnowledgeIndexPreservesPrefixAndRestoresAfterCompaction(t *tes
 	// A pending configuration update must still be the final item.
 	items = append(items, map[string]any{"type": "configuration_update"})
 	require.Equal(t, items, ensureAttachmentContext(ctx, items))
-	changed := managedcontext.With(ctx, "document_word: updated description")
+	index = "document_word: updated description"
+	changed := ctx
 	refreshed := ensureAttachmentContext(changed, items)
 	require.Equal(t, managedcontext.Text(changed), refreshed[1].(map[string]any)["content"])
 	require.Equal(t, items[2:], refreshed[2:])
@@ -75,6 +77,58 @@ func TestCompletionsKnowledgeIndexReplaysAtOriginalPosition(t *testing.T) {
 	}))
 	defer server.Close()
 	options := &CompletionsOptions{ExtraTools: []ToolDefinition{{Type: "function", Name: "skill_view", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+		return "Word instructions", false, nil
+	}}
+	first := NewWithCompatibleAPIKey("test", server.URL+"/v1", "", "")
+	_, err := first.SendCompletions(ctx, "Summarize this document", options)
+	require.NoError(t, err)
+	saved := first.LastCompletionsTranscript()
+	second := NewWithCompatibleAPIKey("test", server.URL+"/v1", "", "")
+	second.SetCompletionsHistory(saved)
+	_, err = second.SendCompletions(ctx, "Change the title", options)
+	require.NoError(t, err)
+	require.Equal(t, 3, calls)
+	for _, m := range second.LastCompletionsTranscript() {
+		require.NotContains(t, m.Content, managedcontext.Marker, "later executions must not accumulate duplicate indexes")
+	}
+}
+
+func TestCompletionsIndexChangesDuringToolLoop(t *testing.T) {
+	index := "document_word: initial"
+	ctx := managedcontext.WithSource(context.Background(), func(context.Context) string { return index })
+	calls := 0
+	var prefix []completionsMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []completionsMessage `json:"messages"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		count, at := 0, -1
+		for i, m := range request.Messages {
+			if s, ok := m.Content.(string); ok && strings.HasPrefix(s, managedcontext.Marker+"\n") {
+				count++
+				at = i
+			}
+		}
+		require.Equal(t, 1, count)
+		if count == 1 {
+			if prefix == nil {
+				prefix = append([]completionsMessage(nil), request.Messages[:at+1]...)
+			}
+			require.Equal(t, prefix[:len(prefix)-1], request.Messages[:at])
+			require.Equal(t, managedcontext.Text(ctx), request.Messages[at].Content)
+		}
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls == 1 {
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"skill-1\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+			return
+		}
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	options := &CompletionsOptions{ExtraTools: []ToolDefinition{{Type: "function", Name: "skill_view", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+		index = "document_word: updated"
 		return "Word instructions", false, nil
 	}}
 	first := NewWithCompatibleAPIKey("test", server.URL+"/v1", "", "")
