@@ -217,7 +217,7 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("navigation removes stale preview", `String(document.getElementById('image-gallery').open)`, "false")
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/new?tab=attachments", "draft-gallery", func(b *composerFocusCDP) {
-		b.waitFor("composer loaded", `String(!!document.getElementById('task-thread-form-file-input'))`, "true")
+		b.waitFor("composer loaded", `String(!!document.getElementById('task-thread-form-file-input') && typeof window['task-thread-formClearAttachments']==='function')`, "true")
 		b.evaluate(`document.getElementById('task-message-input').value='Keep my draft';document.getElementById('task-message-input').dispatchEvent(new Event('input',{bubbles:true}));var dt=new DataTransfer();dt.items.add(new File(['image'],'draft.svg',{type:'image/svg+xml'}));var input=document.getElementById('task-thread-form-file-input');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));'uploaded'`)
 		b.waitFor("draft image in panel", `String(!!document.querySelector('#draft-panel-attachments [data-image-gallery-item]'))`, "true")
 		b.waitFor("file thumbnail uses standard content inset", `String(Math.abs(document.querySelector("#draft-panel-attachments .attachment-gallery-open img").getBoundingClientRect().top-document.querySelector("#draft-panel-attachments").getBoundingClientRect().top-4)<1)`, "true")
