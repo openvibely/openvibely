@@ -48,6 +48,16 @@ func TestMainSkillWritesScopeAndOwnership(t *testing.T) {
 			p.AllowGlobalSkillWrites = true
 			project.SkillMemoryPermissions = &p
 			require.NoError(t, stores.Projects.Update(ctx, project))
+			if mode == "chat" {
+				for _, scope := range []string{"global", "project"} {
+					args["scope"] = scope
+					for _, tool := range []string{"skill_manage", "agent_skill_manage"} {
+						require.False(t, rt.HasDefinition(tool))
+						call(tool, args, true)
+					}
+				}
+				return
+			}
 			for _, scope := range []string{"global", "project"} {
 				args["scope"] = scope
 				call("skill_manage", args, false)

@@ -99,7 +99,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
                     <label class="label cursor-pointer"><span class="label-text">Allow global skill writes (shared across projects)</span><input type="checkbox" class="checkbox checkbox-sm" name="allow_global_skill_writes" checked?={ project.ManagedPermissions().AllowGlobalSkillWrites }/></label>
                     <label class="label cursor-pointer"><span class="label-text">Read memories</span><input type="checkbox" class="checkbox checkbox-sm" name="read_memories" checked?={ project.ManagedPermissions().ReadMemories }/></label>
                     <label class="label cursor-pointer"><span class="label-text">Write memories</span><input type="checkbox" class="checkbox checkbox-sm" name="write_memories" checked?={ project.ManagedPermissions().WriteMemories }/></label>
-                    <p class="text-xs opacity-60">Reading applies to chat and tasks. Memory writing applies to tasks and maintenance; skill writing applies to chat, tasks, and library maintenance. Disabling reading does not erase previously loaded conversation context.</p>
+                    <p class="text-xs opacity-60">Reading applies to chat and tasks. Memory writing applies to tasks and maintenance; skill writing applies to tasks, task-thread follow-ups, and library maintenance. Ordinary chat cannot write skills. Disabling reading does not erase previously loaded conversation context.</p>
                 </fieldset>
 
 				<div class="form-control mb-3">

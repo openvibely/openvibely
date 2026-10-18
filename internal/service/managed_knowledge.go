@@ -98,7 +98,7 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 			p = models.SkillMemoryPermissions{}
 		}
 		text := knowledgeInstructions
-		if p.WriteSkills && (currentAgent == nil || agentExplicitlyAllowsAnyTool(currentAgent, "skill_manage", "agent_skill_manage")) {
+		if !chat && p.WriteSkills && (currentAgent == nil || agentExplicitlyAllowsAnyTool(currentAgent, "skill_manage", "agent_skill_manage")) {
 			text += "\nUse skill_manage for standalone skills and agent_skill_manage for agent-owned skills. Explicitly specify scope (project or global), and the owning agent for agent skills. Global writes require the separate global-write permission. Create, correct, or archive skills and maintain support files. Reuse existing skills instead of duplicating them; never store secrets or routine chatter."
 		}
 		if p.ReadSkills {
@@ -145,7 +145,7 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 			return !chat && p.WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, name))
 		case "skill_manage", "agent_skill_manage":
 			maintenance := !chat && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
-			return p.WriteSkills && (maintenance || projectSkillRoot(callCtx, repo, task.ProjectID) != "" && (agent == nil || agentExplicitlyAllowsTool(agent, name)))
+			return !chat && p.WriteSkills && (maintenance || projectSkillRoot(callCtx, repo, task.ProjectID) != "" && (agent == nil || agentExplicitlyAllowsTool(agent, name)))
 		case "skill_import", "agent_import":
 			return !chat && p.WriteSkills && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
 		}
