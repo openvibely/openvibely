@@ -74,6 +74,28 @@ func TestGrepSearchCapsAtFirst100Matches(t *testing.T) {
 	}
 }
 
+func TestGrepSearchSkipsBinaryFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, fileName, content string
+	}{
+		{name: "binary extension", fileName: "image.png", content: "hit\n"},
+		{name: "NUL byte", fileName: "nul.txt", content: "hit\x00\nhit\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestFile(t, filepath.Join(root, tc.fileName), tc.content)
+
+			got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("hit", "", ""))
+			if err != nil {
+				t.Fatalf("grep_search: %v", err)
+			}
+			if want := `No matches found for pattern "hit"`; got != want {
+				t.Fatalf("output = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestGrepSearchPathIncludeAndSkippedEntries(t *testing.T) {
 	root := t.TempDir()
 	searchDir := filepath.Join(root, "search")
