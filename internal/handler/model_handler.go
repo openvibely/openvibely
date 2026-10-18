@@ -19,6 +19,7 @@ import (
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
+	"github.com/openvibely/openvibely/internal/modeldiscovery"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -1755,7 +1756,7 @@ func (h *Handler) fetchCustomOpenAICompatibleModels(ctx context.Context, client 
 	if err := llmcustomauth.PrepareRequest(req, nil, cfg, state, agent.OAuthAccessToken); err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := modeldiscovery.Do(client, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1809,7 +1810,7 @@ func fetchOpenAICompatibleModels(ctx context.Context, client *http.Client, model
 			return nil, err
 		}
 	}
-	resp, err := client.Do(req)
+	resp, err := modeldiscovery.Do(client, req)
 	if err != nil {
 		return nil, err
 	}
