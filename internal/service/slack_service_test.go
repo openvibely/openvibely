@@ -138,6 +138,7 @@ func TestSlackService_ConnectURLStoresState(t *testing.T) {
 }
 
 func TestSlackService_HandleOAuthCallback(t *testing.T) {
+	attempts := 0
 	env := teststores.New(t)
 	settingsRepo := env.Settings
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
@@ -156,6 +157,11 @@ func TestSlackService_HandleOAuthCallback(t *testing.T) {
 		_ = r.ParseForm()
 		require.Equal(t, "cid", r.FormValue("client_id"))
 		require.Equal(t, "secret", r.FormValue("client_secret"))
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		fmt.Fprint(w, `{"ok":true,"access_token":"xoxb-123","bot_user_id":"U123","team":{"id":"T123","name":"OpenVibely"}}`)
 	}))
 	defer oauthSrv.Close()

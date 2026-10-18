@@ -15,6 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 const (
@@ -42,7 +45,7 @@ type OpenAIOAuthIdentityVerifier struct {
 }
 
 func NewOpenAIOAuthIdentityVerifier() *OpenAIOAuthIdentityVerifier {
-	return &OpenAIOAuthIdentityVerifier{issuer: openAIOAuthIssuer, audience: openAIOAuthAudience, jwksURL: openAIOAuthJWKSURL, client: http.DefaultClient}
+	return &OpenAIOAuthIdentityVerifier{issuer: openAIOAuthIssuer, audience: openAIOAuthAudience, jwksURL: openAIOAuthJWKSURL, client: httpclient.New(httpclient.OAuthTimeout)}
 }
 
 var defaultOpenAIOAuthIdentityVerifier = NewOpenAIOAuthIdentityVerifier()
@@ -163,7 +166,7 @@ func (v *OpenAIOAuthIdentityVerifier) loadKeys(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	resp, err := v.client.Do(req)
+	resp, err := httpretry.DoRequest(v.client, req)
 	if err != nil {
 		return fmt.Errorf("fetch OpenAI OAuth signing keys: %w", err)
 	}

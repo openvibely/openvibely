@@ -16,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 type Result struct {
@@ -280,7 +283,7 @@ func health(ctx context.Context, path string, args []string) error {
 	return nil
 }
 func (m *Manager) download(ctx context.Context, p Package, destination, name string) error {
-	client := http.Client{Timeout: 15 * time.Minute}
+	client := *httpclient.New(15 * time.Minute)
 	if m.Client != nil {
 		client = *m.Client
 	}
@@ -301,7 +304,7 @@ func (m *Manager) download(ctx context.Context, p Package, destination, name str
 	if err != nil {
 		return err
 	}
-	resp, err := client.Do(req)
+	resp, err := httpretry.DoRequest(&client, req)
 	if err != nil {
 		return errors.New("dependency download failed; check network access")
 	}

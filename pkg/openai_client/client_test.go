@@ -70,6 +70,7 @@ func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
 }
 
 func TestRefreshToken(t *testing.T) {
+	attempts := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", r.Method)
@@ -92,6 +93,11 @@ func TestRefreshToken(t *testing.T) {
 			t.Fatalf("client_id = %q, want %q", values.Get("client_id"), openAIOAuthClientID)
 		}
 
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":3600}`))
 	}))

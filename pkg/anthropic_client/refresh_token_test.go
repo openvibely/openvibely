@@ -40,6 +40,7 @@ func TestRefreshTokenFailureRedactsResponseBody(t *testing.T) {
 }
 
 func TestTokenStorageAndRefreshSuccessPaths(t *testing.T) {
+	attempts := 0
 	t.Setenv("HOME", t.TempDir())
 	path, err := TokenFilePath()
 	if err != nil {
@@ -66,6 +67,11 @@ func TestTokenStorageAndRefreshSuccessPaths(t *testing.T) {
 		gotBody = string(body)
 		if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("anthropic-version") != AnthropicAPIVersion {
 			t.Fatalf("headers content-type=%q anthropic-version=%q", r.Header.Get("Content-Type"), r.Header.Get("anthropic-version"))
+		}
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":60}`))

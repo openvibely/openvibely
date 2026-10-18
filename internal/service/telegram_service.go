@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -907,11 +908,20 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 
 	// Download file
 	fileURL := tgFile.Link(s.bot.Token)
-	req, err := http.NewRequest(http.MethodGet, fileURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
 	if err != nil {
 		return "", nil, nil, safeTelegramHTTPError("downloadFile", s.bot.Token, err)
 	}
-	resp, err := (telegramHTTPClient{client: http.DefaultClient, token: s.bot.Token}).Do(req)
+	// Reuse the bot's shared client (or its injected test client) without
+	// stacking two retry wrappers.
+	downloadClient := s.bot.Client
+	if wrapped, ok := downloadClient.(telegramHTTPClient); ok {
+		downloadClient = wrapped.client
+	}
+	if downloadClient == nil {
+		downloadClient = httpclient.New(httpclient.MessagingTimeout)
+	}
+	resp, err := (telegramHTTPClient{client: downloadClient, token: s.bot.Token}).Do(req)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("failed to download file: %w", err)
 	}

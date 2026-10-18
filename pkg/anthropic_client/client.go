@@ -615,7 +615,7 @@ func RefreshTokenContext(ctx context.Context, refreshTok string) (*StoredAuth, e
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", AnthropicAPIVersion)
 
-	resp, err := oauthHTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}

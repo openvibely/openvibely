@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -1224,7 +1225,7 @@ func (s *DiscordService) downloadDiscordFile(ctx context.Context, downloadURL st
 	}
 	client := s.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = httpclient.New(httpclient.MessagingTimeout)
 	}
 	downloadClient := *client
 	downloadClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -1238,7 +1239,7 @@ func (s *DiscordService) downloadDiscordFile(ctx context.Context, downloadURL st
 			return err
 		}
 		req.Header.Set("User-Agent", "OpenVibely Discord file downloader")
-		resp, err := downloadClient.Do(req)
+		resp, err := httpretry.DoRequest(&downloadClient, req)
 		if err != nil {
 			return err
 		}
