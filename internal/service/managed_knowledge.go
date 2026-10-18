@@ -69,13 +69,9 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 		catalog = w.cachedKnowledgeCatalog(ctx, task)
 	}
 
-	skillTools := w.buildTaskSkillRuntimeTools(ctx, task, catalog)
-	skillTools.Executor = func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-		if !strings.EqualFold(strings.TrimSpace(name), "skill_view") {
-			return "", false, false, nil
-		}
-		return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task)).Executor(callCtx, name, input)
-	}
+	skillTools := refreshingSkillReaders(w.buildTaskSkillRuntimeTools(ctx, task, catalog), func(callCtx context.Context) *llmcontracts.RuntimeTools {
+		return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task))
+	})
 	tools = append(tools, skillTools)
 	tools = append(tools, w.mainSkillWriters(task))
 	var memoryHandles []string

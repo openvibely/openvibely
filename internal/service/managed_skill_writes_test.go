@@ -176,3 +176,49 @@ func TestLifecycleLearningWritersRespectGlobalPermission(t *testing.T) {
 	require.True(t, handled)
 	require.True(t, failed)
 }
+
+func TestMaintenanceComposedReaderRefreshesAfterWrites(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	global := t.TempDir()
+	writeLifecycleStandaloneSkill(t, global, "existing", "Original global instructions")
+	agent, err := stores.Agents.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	worker := NewWorkerService(nil, 0, stores.Projects)
+	worker.SetLifecycleSkillRoot(global)
+	worker.SetLifecycleAgentRepo(stores.Agents)
+	worker.SetLifecycleRepo(stores.Lifecycle)
+	task := models.Task{ID: "refresh-maintenance", ProjectID: project.ID, Category: models.CategoryScheduled, AgentDefinitionID: &agent.ID}
+	turn := worker.PrepareLifecycleTurn(ctx, task)
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	svc.projectRepo = stores.Projects
+	svc.SetGlobalSkillRoot(global)
+	svc.SetAgentRepo(stores.Agents)
+	svc.SetLifecycleRepo(stores.Lifecycle)
+	rt := guardManagedTools(turn.Ctx, llmcontracts.CompositeRuntimeTools(svc.agentDeclaredSkillRuntimeTools(turn.Ctx, task, agent, ""), llmcontracts.RuntimeToolsFromContext(turn.Ctx)), stores.Projects, task, false, agent)
+	call := func(name string, args map[string]any, failed bool) string {
+		t.Helper()
+		input, err := json.Marshal(args)
+		require.NoError(t, err)
+		output, handled, isErr, err := rt.Executor(turn.Ctx, name, input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.Equal(t, failed, isErr, output)
+		return output
+	}
+	require.Contains(t, call("skill_view", map[string]any{"handle": "existing"}, false), "Original global instructions")
+	for _, key := range []string{"new_skill", "existing"} {
+		body := "Current project instructions for " + key
+		call("skill_manage", map[string]any{"action": "create", "scope": "project", "declaration": "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: " + key + "\n  scope: project\n---\n" + body}, false)
+		require.Contains(t, call("skills_list", map[string]any{}, false), key)
+		output := call("skill_view", map[string]any{"handle": "standalone:" + key}, false)
+		require.Contains(t, output, body)
+		require.NotContains(t, output, "Original global instructions")
+	}
+	call("skill_view", map[string]any{"handle": "standalone:unavailable"}, true)
+	project.SkillMemoryPermissions = &models.SkillMemoryPermissions{}
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	call("skill_view", map[string]any{"handle": "standalone:new_skill"}, true)
+}
