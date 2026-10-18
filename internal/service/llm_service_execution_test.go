@@ -2518,6 +2518,13 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	projectRepo := env.Projects
 	ctx := context.Background()
 
+	project, err := projectRepo.GetByID(ctx, "default")
+	require.NoError(t, err)
+	permissions := project.ManagedPermissions()
+	permissions.AllowGlobalSkillWrites = true
+	project.SkillMemoryPermissions = &permissions
+	require.NoError(t, projectRepo.Update(ctx, project))
+
 	root := t.TempDir()
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, env.Attachments)
 	svc.SetAgentRepo(agentRepo)
@@ -2556,7 +2563,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
 		return routePayload([]string{"maintain_skill_library"}, 0.9), nil
 	}), nil)
-	worker := NewWorkerService(nil, 0, nil)
+	worker := NewWorkerService(nil, 0, projectRepo)
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
@@ -2631,7 +2638,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	} {
 		params := fmt.Sprintf(`{"action":"write_file","agent":%q,"scope":"global","handle":%q,"support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`, tc.agent, tc.skill)
 		out, handled, isErr, err = rt.Executor(context.Background(), "agent_skill_manage", json.RawMessage(params))
-		if !handled || err != nil || !isErr || !strings.Contains(out, tc.want) {
+		if !handled || err != nil || !isErr || !strings.Contains(out, "target agent is unavailable or outside the requested scope") {
 			t.Fatalf("final runtime agent_skill_manage must block %s agent skills handled=%v isErr=%v err=%v out=%q", tc.want, handled, isErr, err, out)
 		}
 	}

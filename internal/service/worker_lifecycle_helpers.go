@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -131,6 +132,26 @@ func (w *WorkerService) buildLifecycleRuntimeTools(task models.Task, catalog *ag
 		}
 	}
 	tools := lifecycleRuntimeTools(catalog, inspector, importer, recorder, w.globalSkillRoot, projectRoot, assignedAgentKey, agentScope)
+	// Detached lifecycle hooks do not inherit the main turn's permission guard.
+	// Rebuild their mutation importer on each call so revocations take effect and
+	// a disabled global-write grant never leaves a writable global root available.
+	tools.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		permissions := projectManagedPermissions(ctx, w.projectRepo, task.ProjectID)
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "skill_manage", "skill_import", "agent_skill_manage":
+			if !permissions.WriteSkills {
+				return "skill writing is not permitted", true, true, nil
+			}
+			roots := agentlibrary.SkillRoots{Project: projectRoot}
+			if permissions.AllowGlobalSkillWrites {
+				roots.Global = w.globalSkillRoot
+			}
+			scopedImporter := agentlibrary.NewImporter(roots, agentlibrary.NewRepoApplier(w.agentRepo, w.lifecycleRepo))
+			return lifecycleRuntimeTools(catalog, inspector, scopedImporter, recorder, w.globalSkillRoot, projectRoot, assignedAgentKey, agentScope).Executor(ctx, name, input)
+		default:
+			return lifecycleRuntimeTools(catalog, inspector, importer, recorder, w.globalSkillRoot, projectRoot, assignedAgentKey, agentScope).Executor(ctx, name, input)
+		}
+	}
 	return instrumentSkillEditRuntimeTools(w.skillAnalyticsRepo, tools, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, AgentID: agentIDFromAgent(assignedAgent), Source: models.SkillEventSourceLifecycleHook, Surface: models.SkillSurfaceLifecycleHook})
 }
 
