@@ -800,7 +800,7 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 	require.Equal(t, "Token opaque-token", customToken)
 }
 
-func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
+func TestPrepareClientHistoryUsesSuppliedReasoningOnlyForKimi(t *testing.T) {
 	ctx := context.Background()
 	storeEnv := teststores.New(t)
 	taskRepo := storeEnv.Stores.Tasks
@@ -831,6 +831,7 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, lightHistory, 1)
 	require.Empty(t, lightHistory[0].ReasoningContent)
+	lightHistory[0].ReasoningContent = "private thought"
 
 	adapter := New(execRepo, nil)
 	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
@@ -884,6 +885,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 
 	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+	require.NoError(t, err)
+	lightHistory[0].ReplayMessages = replay[execution.ID]
 	adapter := New(execRepo, nil)
 
 	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
@@ -951,6 +955,9 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 
 	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+	require.NoError(t, err)
+	lightHistory[0].ReplayMessages = replay[execution.ID]
 	adapter := New(execRepo, nil)
 	got, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
 	require.NoError(t, err)
@@ -1247,6 +1254,8 @@ func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, replay[execution.ID], 1)
 				require.Contains(t, replay[execution.ID][0].TranscriptJSON, "loaded skill instructions")
+				// The service supplies persisted replay before the adapter runs.
+				execution.ReplayMessages = replay[execution.ID]
 				_, err = New(stores.Executions, nil).Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "continue", Followup: true, ChatHistory: []models.Execution{*execution}, Agent: agent}, ".")
 				require.NoError(t, err)
 				data, err := json.Marshal(last["messages"])

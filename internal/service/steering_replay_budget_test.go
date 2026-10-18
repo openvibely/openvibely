@@ -45,12 +45,13 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	require.False(t, called, "oversized saved replay must be caught before the provider request")
 
 	imageReplay := []models.ExecutionReplayMessage{{TranscriptJSON: `[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,RETAINED"}}]}]`}}
-	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "steered", "", imageReplay))
+	require.NoError(t, repo.ReplaceReasoningReplay(ctx, "steered", "saved reasoning", imageReplay))
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
 		req.Agent.Provider = provider
 		loaded, err := svc.loadProviderReplayHistory(req)
 		require.NoError(t, err)
 		require.Equal(t, imageReplay, loaded.ChatHistory[0].ReplayMessages)
+		require.Equal(t, "saved reasoning", loaded.ChatHistory[0].ReasoningContent)
 		for _, execution := range buildCompactedReplacementHistory(loaded.ChatHistory, "summary") {
 			require.Empty(t, execution.ReplayMessages, "text compaction must discard media replay")
 		}
