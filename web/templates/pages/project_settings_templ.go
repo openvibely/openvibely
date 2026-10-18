@@ -323,7 +323,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "></label><p class=\"text-xs opacity-60\">Reading applies to chat and tasks. Memory writing applies to tasks and maintenance; skill writing applies to chat, tasks, and library maintenance. Disabling reading does not erase previously loaded conversation context.</p></fieldset><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" name=\"name\" class=\"input input-bordered\" required value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "></label><p class=\"text-xs opacity-60\">Reading applies to chat and tasks. Memory writing applies to tasks and maintenance; skill writing applies to tasks, task-thread follow-ups, and library maintenance. Ordinary chat cannot write skills. Disabling reading does not erase previously loaded conversation context.</p></fieldset><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" name=\"name\" class=\"input input-bordered\" required value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

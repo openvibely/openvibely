@@ -63,15 +63,23 @@ func TestMainModelKnowledgeChatAndTaskPermissions(t *testing.T) {
 				require.False(t, rt.HasDefinition(name))
 				call(name, `{}`, true)
 			}
-			require.True(t, rt.HasDefinition("skill_manage"))
-			for _, body := range []string{"First instructions", "Corrected instructions"} {
-				input, marshalErr := json.Marshal(map[string]any{"action": "create", "declaration": "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: reusable\n  scope: project\n---\n" + body})
-				require.NoError(t, marshalErr)
-				call("skill_manage", string(input), false)
-				require.Contains(t, call("skill_view", `{"handle":"reusable"}`, false), body)
+			require.Equal(t, !chat, rt.HasDefinition("skill_manage"))
+			if chat {
+				for _, name := range []string{"skill_manage", "agent_skill_manage", "agent_import"} {
+					require.False(t, rt.HasDefinition(name))
+					call(name, `{}`, true)
+				}
+				require.NotContains(t, managedcontext.Text(turn.Ctx), "Use skill_manage")
+			} else {
+				for _, body := range []string{"First instructions", "Corrected instructions"} {
+					input, marshalErr := json.Marshal(map[string]any{"action": "create", "declaration": "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: reusable\n  scope: project\n---\n" + body})
+					require.NoError(t, marshalErr)
+					call("skill_manage", string(input), false)
+					require.Contains(t, call("skill_view", `{"handle":"reusable"}`, false), body)
+				}
+				call("skill_manage", `{"action":"archive","handle":"reusable"}`, false)
+				call("skill_view", `{"handle":"reusable"}`, true)
 			}
-			call("skill_manage", `{"action":"archive","handle":"reusable"}`, false)
-			call("skill_view", `{"handle":"reusable"}`, true)
 			input, marshalErr := json.Marshal(map[string]any{"action": "create", "scope": "global", "declaration": "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: escaped\n---\nForbidden"})
 			require.NoError(t, marshalErr)
 			call("skill_manage", string(input), true)
@@ -161,7 +169,7 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 			require.Equal(t, []string{history[0], managedcontext.Text(turnCtx), history[2], history[3]}, updated)
 			require.Equal(t, p.ReadSkills, strings.Contains(updated[1], "documents"), "disabled skill index must leave history")
 			require.Equal(t, p.ReadMemories, strings.Contains(updated[1], "chat_memory.md"), "disabled memory index must leave history")
-			for name, allowed := range map[string]bool{"skill_view": p.ReadSkills, "memory_view": p.ReadMemories, "memory_save": !chat && p.WriteMemories, "memory_delete": !chat && p.WriteMemories, "skill_manage": p.WriteSkills} {
+			for name, allowed := range map[string]bool{"skill_view": p.ReadSkills, "memory_view": p.ReadMemories, "memory_save": !chat && p.WriteMemories, "memory_delete": !chat && p.WriteMemories, "skill_manage": !chat && p.WriteSkills} {
 				require.Equal(t, allowed, rt.HasDefinition(name), "mask=%d chat=%t tool=%s", mask, chat, name)
 				if !allowed {
 					_, handled, isErr, err := rt.Executor(ctx, name, json.RawMessage(`{}`))
