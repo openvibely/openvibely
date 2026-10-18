@@ -450,7 +450,8 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	p.MaxWorkers = settings.MaxWorkers
 	if c.FormValue("skill_memory_settings_present") == "true" {
 		p.SkillMemoryPermissions = &models.SkillMemoryPermissions{
-			ReadSkills: c.FormValue("read_skills") == "on", WriteSkills: c.FormValue("write_skills") == "on",
+			AllowGlobalSkillWrites: c.FormValue("allow_global_skill_writes") == "on",
+			ReadSkills:             c.FormValue("read_skills") == "on", WriteSkills: c.FormValue("write_skills") == "on",
 			ReadMemories: c.FormValue("read_memories") == "on", WriteMemories: c.FormValue("write_memories") == "on",
 		}
 	}

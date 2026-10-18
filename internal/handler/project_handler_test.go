@@ -903,18 +903,19 @@ func (e errorString) Error() string { return string(e) }
 func TestUpdateProjectSkillMemoryChoicesSurviveUnrelatedUpdates(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Knowledge permissions").Build()
-	form := url.Values{"name": {project.Name}, "repo_source": {"local"}, "skill_memory_settings_present": {"true"}, "read_skills": {"on"}, "write_memories": {"on"}}
+	form := url.Values{"name": {project.Name}, "repo_source": {"local"}, "skill_memory_settings_present": {"true"}, "allow_global_skill_writes": {"on"}, "read_skills": {"on"}, "write_memories": {"on"}}
 	response := tc.HTTP().Put("/projects/" + project.ID).WithForm(form).Execute()
 	require.Equal(t, http.StatusSeeOther, response.Code, response.Body.String())
 	saved, err := tc.handler.projectSvc.GetByID(context.Background(), project.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.SkillMemoryPermissions{ReadSkills: true, WriteMemories: true}, saved.ManagedPermissions())
+	require.Equal(t, models.SkillMemoryPermissions{ReadSkills: true, WriteMemories: true, AllowGlobalSkillWrites: true}, saved.ManagedPermissions())
 	// A request from another project form must not reset unchecked choices.
 	response = tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{"name": {"Renamed"}, "repo_source": {"local"}}).Execute()
 	require.Equal(t, http.StatusSeeOther, response.Code, response.Body.String())
 	saved, err = tc.handler.projectSvc.GetByID(context.Background(), project.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.SkillMemoryPermissions{ReadSkills: true, WriteMemories: true}, saved.ManagedPermissions())
+	require.Equal(t, models.SkillMemoryPermissions{ReadSkills: true, WriteMemories: true, AllowGlobalSkillWrites: true}, saved.ManagedPermissions())
+	form.Del("allow_global_skill_writes")
 	form.Del("read_skills")
 	form.Del("write_memories")
 	response = tc.HTTP().Put("/projects/" + project.ID).WithForm(form).Execute()

@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
@@ -21,6 +20,7 @@ import (
 )
 
 type managedAgentResolverKey struct{}
+type managedSkillAuthorizationKey struct{}
 type managedWorkDirKey struct{}
 type managedTurnKey struct{}
 type managedTurn struct {
@@ -44,6 +44,10 @@ const memoryWritingInstructions = `Use memory_save to retain durable preferences
 
 func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task models.Task, chat bool) context.Context {
 	ctx = context.WithValue(ctx, managedTurnKey{}, managedTurn{task, chat})
+	ctx = context.WithValue(ctx, managedSkillAuthorizationKey{}, func(c context.Context, name string, input json.RawMessage) error {
+		_, err := w.authorizeSkillWrite(c, task, name, input)
+		return err
+	})
 	ctx = context.WithValue(ctx, managedAgentResolverKey{}, func(c context.Context) *models.Agent { return w.taskAgentDefinition(c, task) })
 	// A new user turn is a fallback for dropped filesystem events.
 	if root := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); root != "" {
@@ -73,16 +77,7 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 		return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task)).Executor(callCtx, name, input)
 	}
 	tools = append(tools, skillTools)
-	// Main turns can maintain standalone skills only within the current project.
-	if root := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); root != "" {
-		var recorder agentlibrary.MutationRecorder
-		if w.mutationRecorder != nil {
-			recorder = w.mutationRecorder(task)
-		}
-		writers := agentlibrary.SkillMutationTools(agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: root}, nil), recorder)
-		writers.Definitions = writers.Definitions[:1] // skill_manage; importing remains maintenance-only.
-		tools = append(tools, writers)
-	}
+	tools = append(tools, w.mainSkillWriters(task))
 	var memoryHandles []string
 	if permissions.ReadMemories && w.taskAgentAllowsMemoryView(ctx, task) {
 		memoryIndex := w.cachedKnowledgeMemories(ctx, task)
@@ -107,8 +102,8 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 			p = models.SkillMemoryPermissions{}
 		}
 		text := knowledgeInstructions
-		if p.WriteSkills && (currentAgent == nil || agentExplicitlyAllowsTool(currentAgent, "skill_manage")) {
-			text += "\nUse skill_manage to create or update reusable project skills and their support files, or archive obsolete skills. Use project scope. Reuse existing skills instead of duplicating them; never store secrets or routine chatter."
+		if p.WriteSkills && (currentAgent == nil || agentExplicitlyAllowsAnyTool(currentAgent, "skill_manage", "agent_skill_manage")) {
+			text += "\nUse skill_manage for standalone skills and agent_skill_manage for agent-owned skills. Explicitly specify scope (project or global), and the owning agent for agent skills. Global writes require the separate global-write permission. Create, correct, or archive skills and maintain support files. Reuse existing skills instead of duplicating them; never store secrets or routine chatter."
 		}
 		if p.ReadSkills {
 			text += "\n\n" + w.cachedKnowledgeSkills(callCtx, task).index
@@ -152,10 +147,10 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 			return p.ReadMemories && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_view"))
 		case "memory_save", "memory_delete":
 			return !chat && p.WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, name))
-		case "skill_manage":
+		case "skill_manage", "agent_skill_manage":
 			maintenance := !chat && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
 			return p.WriteSkills && (maintenance || projectSkillRoot(callCtx, repo, task.ProjectID) != "" && (agent == nil || agentExplicitlyAllowsTool(agent, name)))
-		case "skill_import", "agent_skill_manage", "agent_import":
+		case "skill_import", "agent_import":
 			return !chat && p.WriteSkills && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
 		}
 		if agent != nil && agent.SystemKind == models.AgentSystemKindMemoryCurator {
@@ -189,6 +184,13 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 		}
 		if !allowed(callCtx, name) || !managedFileOperationAllowed(callCtx, repo, task, chat, currentAgent(callCtx), name, input) {
 			return "Managed skill/memory operation is not permitted for this turn", true, true, nil
+		}
+		if name == "skill_manage" || name == "agent_skill_manage" || name == "skill_import" {
+			if check, ok := ctx.Value(managedSkillAuthorizationKey{}).(func(context.Context, string, json.RawMessage) error); ok {
+				if err := check(callCtx, name, input); err != nil {
+					return err.Error(), true, true, nil
+				}
+			}
 		}
 		if rt != nil && rt.Executor != nil {
 			callCtx = withManagedFileReadAuthorization(callCtx, repo, task, chat, currentAgent(callCtx))

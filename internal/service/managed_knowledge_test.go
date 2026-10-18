@@ -59,7 +59,7 @@ func TestMainModelKnowledgeChatAndTaskPermissions(t *testing.T) {
 			}
 			require.Contains(t, call("skill_view", `{"handle":"documents"}`, false), "Document editing instructions")
 			require.Contains(t, call("memory_view", `{"handle":"chat_memory.md"}`, false), "durable fact")
-			for _, name := range []string{"skill_import", "agent_skill_manage"} {
+			for _, name := range []string{"skill_import"} {
 				require.False(t, rt.HasDefinition(name))
 				call(name, `{}`, true)
 			}

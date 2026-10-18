@@ -61,10 +61,11 @@ type ProjectRepoPathHealth struct {
 
 // SkillMemoryPermissions controls managed-library access independently of other tools.
 type SkillMemoryPermissions struct {
-	ReadSkills    bool `json:"read_skills"`
-	WriteSkills   bool `json:"write_skills"`
-	ReadMemories  bool `json:"read_memories"`
-	WriteMemories bool `json:"write_memories"`
+	AllowGlobalSkillWrites bool `json:"allow_global_skill_writes"`
+	ReadSkills             bool `json:"read_skills"`
+	WriteSkills            bool `json:"write_skills"`
+	ReadMemories           bool `json:"read_memories"`
+	WriteMemories          bool `json:"write_memories"`
 }
 
 func (p *Project) ManagedPermissions() SkillMemoryPermissions {
@@ -72,7 +73,7 @@ func (p *Project) ManagedPermissions() SkillMemoryPermissions {
 		return SkillMemoryPermissions{}
 	}
 	if p.SkillMemoryPermissions == nil {
-		return SkillMemoryPermissions{true, true, true, true}
+		return SkillMemoryPermissions{ReadSkills: true, WriteSkills: true, ReadMemories: true, WriteMemories: true}
 	}
 	return *p.SkillMemoryPermissions
 }
