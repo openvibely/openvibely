@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
@@ -45,4 +46,52 @@ func TestBrowserProjectKnowledgeDialog(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestBrowserProjectDialogStableTabHeight(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, mode := range []string{"new", "edit"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				fmt.Fprintf(w, `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="%s"><link rel="stylesheet" href="%s"><style>*,*::before,*::after { animation: none !important; transition: none !important; }</style></head><body>`, static.URL("app.css"), static.URL("app-utilities.css"))
+				dialog := NewProjectDialog(nil, true, 4)
+				if mode == "edit" {
+					dialog = EditProjectDialog(&models.Project{ID: "test", Name: "Test project", RepoPath: "/tmp/project", IsDefault: true}, nil, true, 4, models.ProjectRepoPathHealth{})
+				}
+				if err := dialog.Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+				fmt.Fprint(w, "</body></html>")
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL, "project-tab-height-"+mode, func(b *composerFocusCDP) {
+				b.waitFor("dialog ready", `String(document.readyState === 'complete' && document.querySelector('dialog').open)`, "true")
+				for _, viewport := range []struct{ width, height int }{{1280, 900}, {390, 640}} {
+					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": viewport.width, "height": viewport.height, "deviceScaleFactor": 1, "mobile": false}, nil)
+					result := b.evaluate(`(() => {
+					 const box = document.querySelector('.modal-box');
+					 const footer = box.querySelector('.modal-action');
+					 const content = box.querySelector('[data-project-tab-content]');
+					 const before = box.getBoundingClientRect();
+					 const footerBefore = footer.getBoundingClientRect();
+					 for (const tab of ['knowledge', 'general', 'knowledge', 'general']) {
+					   box.querySelector('[data-project-tab="' + tab + '"]').click();
+					   const after = box.getBoundingClientRect();
+					   if (Math.abs(after.height - before.height) > 1 || Math.abs(after.top - before.top) > 1 || Math.abs(footer.getBoundingClientRect().top - footerBefore.top) > 1) return 'modal moved on ' + tab;
+					 }
+					 content.scrollTop = content.scrollHeight;
+					 if (content.scrollHeight > content.clientHeight && content.scrollTop === 0) return 'content cannot scroll';
+					 return 'stable';
+					})()`)
+					if result != "stable" {
+						t.Fatalf("%dx%d: %s", viewport.width, viewport.height, result)
+					}
+				}
+			})
+		})
+	}
 }
