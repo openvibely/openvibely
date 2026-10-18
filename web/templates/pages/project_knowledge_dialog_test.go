@@ -11,7 +11,7 @@ import (
 	templateui "github.com/openvibely/openvibely/web/templates"
 )
 
-func TestBrowserProjectKnowledgeDialog(t *testing.T) {
+func TestBrowserFunctional_ProjectKnowledgeDialog(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "<!doctype html><html><body><dialog open><form>")
@@ -54,7 +54,7 @@ func TestBrowserProjectKnowledgeDialog(t *testing.T) {
 	})
 }
 
-func TestBrowserProjectDialogStableTabHeight(t *testing.T) {
+func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	for _, mode := range []string{"new", "edit"} {
 		t.Run(mode, func(t *testing.T) {
