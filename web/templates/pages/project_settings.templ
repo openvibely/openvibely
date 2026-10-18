@@ -97,16 +97,16 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
-					<input type="text" name="name" class="input input-bordered" required value={ project.Name }/>
+					<input type="text" name="name" class="input input-bordered input-sm" required value={ project.Name }/>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Description</span></label>
-					<textarea name="description" class="textarea textarea-bordered">{ project.Description }</textarea>
+					<textarea name="description" class="textarea textarea-bordered textarea-sm" rows="2">{ project.Description }</textarea>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Repository Source</span></label>
 					if localRepoPathEnabled {
-						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered select-sm">
 							<option value="local" if projectRepoSource(project) == "local" { selected }>Local Path</option>
 							<option value="github" if projectRepoSource(project) == "github" { selected }>GitHub URL</option>
 						</select>
@@ -114,7 +114,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<input type="hidden" id="edit-project-repo-source" name="repo_source" value="github"/>
 						<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
 					} else {
-						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered select-sm">
 							<option value="local" selected>Local Path (existing)</option>
 							<option value="github">GitHub URL</option>
 						</select>
@@ -128,7 +128,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<div id="edit-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
-							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
+							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered input-sm flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
 							<button
 								type="button"
 								id="edit-project-browse-btn"
@@ -142,30 +142,31 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else if projectRepoSource(project) == "github" {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
 					<div id="edit-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path (current local)</span></label>
-						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
+						<input type="text" class="input input-bordered input-sm" value={ project.RepoPath } readonly/>
 						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label>
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
 				}
+				@ProjectDefaultsFields("edit-project", project, agents, globalMaxWorkers)
 				</section>
-				@ProjectExecutionPanel("edit-project", project, agents, globalMaxWorkers)
+				@ProjectKnowledgePanel("edit-project", project.ManagedPermissions())
 </div>
 				<div class="modal-action">
 					if !project.IsDefault {
@@ -319,16 +320,16 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 <section id="new-project-general" role="tabpanel" aria-labelledby="new-project-general-tab" data-project-panel="general">
 <div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
-					<input type="text" id="new-project-name" name="name" class="input input-bordered" required placeholder="My Project"/>
+					<input type="text" id="new-project-name" name="name" class="input input-bordered input-sm" required placeholder="My Project"/>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Description</span></label>
-					<textarea name="description" class="textarea textarea-bordered" placeholder="Project description"></textarea>
+					<textarea name="description" class="textarea textarea-bordered textarea-sm" rows="2" placeholder="Project description"></textarea>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Repository Source</span></label>
 					if localRepoPathEnabled {
-						<select id="new-project-repo-source" name="repo_source" class="select select-bordered">
+						<select id="new-project-repo-source" name="repo_source" class="select select-bordered select-sm">
 							<option value="local" selected>Local Path</option>
 							<option value="github">GitHub URL</option>
 						</select>
@@ -344,7 +345,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					<div id="new-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
-							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered flex-1" placeholder="/path/to/repo"/>
+							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered input-sm flex-1" placeholder="/path/to/repo"/>
 							<button
 								type="button"
 								id="new-project-browse-btn"
@@ -358,7 +359,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					</div>
 					<div id="new-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
 						<label class="label cursor-pointer justify-start gap-3">
@@ -375,11 +376,12 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 				} else {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>				}
+				@ProjectDefaultsFields("new-project", &models.Project{}, agents, globalMaxWorkers)
 				</section>
-				@ProjectExecutionPanel("new-project", &models.Project{SkillMemoryPermissions: projectNewPermissions()}, agents, globalMaxWorkers)
+				@ProjectKnowledgePanel("new-project", models.NewProjectPermissions())
 </div>
 				<div id="new-project-error" class="alert alert-error mb-4 hidden">
 					<svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -576,18 +578,23 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 
 templ ProjectSettingsTabs(prefix string) {
  <style>
-  [data-project-panel="execution"] .project-execution-fields .form-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 0.5rem; padding: 0.75rem 0; }
-  [data-project-panel="execution"] .project-execution-fields :is(.input, .select) { width: 100%; max-width: 22rem; min-width: 0; justify-self: end; }
-  [data-project-panel="execution"] .project-execution-fields .label { justify-content: flex-start; gap: 0.375rem; padding: 0; }
-  [data-project-panel="execution"] .project-execution-fields .text-warning { grid-column: 1 / -1; }
-  [data-project-panel="execution"] .table { table-layout: fixed; }
-  [data-project-panel="execution"] .table :is(th, td) { padding: 0.75rem 0; }
-  [data-project-panel="execution"] .table th:first-child { width: 50%; }
+  [data-project-panel="general"] .label { padding: 0.125rem 0; }
+  [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
+  [data-project-panel="general"] .flex > .btn { flex-shrink: 0; }
+  [data-project-panel="general"] .textarea { min-height: 3.5rem; }
+  [data-project-panel="general"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+  [data-project-panel="general"] .project-defaults-fields .form-control { min-width: 0; }
+  [data-project-panel="general"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }
+  [data-project-panel="general"] .project-defaults-fields .label { justify-content: flex-start; gap: 0.375rem; }
+  [data-project-panel="knowledge"] .table { table-layout: fixed; }
+  [data-project-panel="knowledge"] .table :is(th, td) { padding: 0.75rem 0; }
+  [data-project-panel="knowledge"] .table th:first-child { width: 50%; }
+  @media (max-width: 640px) { [data-project-panel="general"] .project-defaults-fields { grid-template-columns: minmax(0, 1fr); } }
 
  </style>
  <div role="tablist" aria-label="Project settings" class="tabs tabs-bordered mb-4" onkeydown="window.projectSettingsTabKey(event)">
   <button type="button" role="tab" id={ prefix + "-general-tab" } aria-controls={ prefix + "-general" } aria-selected="true" tabindex="0" class="tab tab-active" data-project-tab="general" onclick="window.selectProjectSettingsTab(this)">General</button>
-  <button type="button" role="tab" id={ prefix + "-execution-tab" } aria-controls={ prefix + "-execution" } aria-selected="false" tabindex="-1" class="tab" data-project-tab="execution" onclick="window.selectProjectSettingsTab(this)">Execution</button>
+  <button type="button" role="tab" id={ prefix + "-knowledge-tab" } aria-controls={ prefix + "-knowledge" } aria-selected="false" tabindex="-1" class="tab" data-project-tab="knowledge" onclick="window.selectProjectSettingsTab(this)">Skills &amp; Memory</button>
  </div>
  <script>
  window.selectProjectSettingsTab = function(button) {
@@ -627,7 +634,7 @@ templ ProjectSettingsTabs(prefix string) {
 }
 
 templ ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissions) {
- <div id={ prefix + "-knowledge" }>
+ <section id={ prefix + "-knowledge" } role="tabpanel" aria-labelledby={ prefix + "-knowledge-tab" } data-project-panel="knowledge" hidden>
   <input type="hidden" name="skill_memory_settings_present" value="true"/>
   <table class="table w-full text-sm">
    <thead><tr><th scope="col" class="text-sm font-medium">Resource</th><th class="text-center"><span class="inline-flex items-center gap-1 text-sm font-medium">Read @projectPermissionHelp("Read", "Chat and tasks can read. Turning reading off does not erase information already loaded into the conversation.")</span></th><th class="text-center"><span class="inline-flex items-center gap-1 text-sm font-medium">Write @projectPermissionHelp("Write", "Permitted tasks, task-thread follow-ups, and maintenance only. Ordinary chat cannot write.")</span></th></tr></thead>
@@ -638,7 +645,7 @@ templ ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermiss
    </tbody>
   </table>
   <input type="hidden" name="allow_global_skill_writes" value={ projectGlobalSkillWriteValue(permissions) }/>
- </div>
+ </section>
 }
 
 func projectGlobalSkillWriteValue(permissions models.SkillMemoryPermissions) string {
@@ -652,14 +659,8 @@ templ projectPermissionHelp(label, help string) {
  </button>
  }
 
-func projectNewPermissions() *models.SkillMemoryPermissions {
- permissions := models.NewProjectPermissions()
- return &permissions
-}
-
-templ ProjectExecutionPanel(prefix string, project *models.Project, agents []models.LLMConfig, globalMaxWorkers int) {
- <section id={ prefix + "-execution" } role="tabpanel" aria-labelledby={ prefix + "-execution-tab" } data-project-panel="execution" hidden>
-  <div class="project-execution-fields">
+templ ProjectDefaultsFields(prefix string, project *models.Project, agents []models.LLMConfig, globalMaxWorkers int) {
+  <div class="project-defaults-fields">
    <div class="form-control">
     <div class="label">
      <label for={ prefix + "-default-model" } class="text-sm font-medium">Default Model</label>
@@ -688,6 +689,4 @@ templ ProjectExecutionPanel(prefix string, project *models.Project, agents []mod
     }
    </div>
   </div>
-  @ProjectKnowledgePanel(prefix, project.ManagedPermissions())
- </section>
 }
