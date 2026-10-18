@@ -970,7 +970,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, " onchange=\"this.form.querySelector('[data-global-skill-switch]').disabled = !this.checked\"></td></tr><tr><th scope=\"row\">Memories</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_memories\" aria-label=\"Read memories\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, " onchange=\"var global = this.form.querySelector('[data-global-skill-switch]'); global.disabled = !this.checked; if (!this.checked) { global.checked = false; this.form.elements.allow_global_skill_writes.value = 'off'; }\"></td></tr><tr><th scope=\"row\">Memories</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_memories\" aria-label=\"Read memories\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -994,7 +994,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if permissions.AllowGlobalSkillWrites {
+		if permissions.WriteSkills && permissions.AllowGlobalSkillWrites {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1028,7 +1028,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 }
 
 func projectGlobalSkillWriteValue(permissions models.SkillMemoryPermissions) string {
-	if permissions.AllowGlobalSkillWrites {
+	if permissions.WriteSkills && permissions.AllowGlobalSkillWrites {
 		return "on"
 	}
 	return "off"

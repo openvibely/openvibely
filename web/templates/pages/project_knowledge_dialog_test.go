@@ -27,8 +27,8 @@ func TestBrowserProjectKnowledgeDialog(t *testing.T) {
 		b.waitFor("ready", `String(document.readyState === 'complete')`, "true")
 		for _, expression := range []string{
 			`document.querySelector('[data-project-tab="knowledge"]').click(); String(document.getElementById('test-general').hidden && !document.getElementById('test-knowledge').hidden)`,
-			`document.querySelector('[name="write_skills"]').click(); String(document.querySelector('[data-global-skill-switch]').disabled && new FormData(document.querySelector('form')).get('allow_global_skill_writes') === 'on')`,
-			`document.querySelector('[name="write_skills"]').click(); String(!document.querySelector('[data-global-skill-switch]').disabled && document.querySelector('[data-global-skill-switch]').checked)`,
+			`document.querySelector('[name="write_skills"]').click(); String(document.querySelector('[data-global-skill-switch]').disabled && !document.querySelector('[data-global-skill-switch]').checked && new FormData(document.querySelector('form')).get('allow_global_skill_writes') === 'off')`,
+			`document.querySelector('[name="write_skills"]').click(); String(!document.querySelector('[data-global-skill-switch]').disabled && !document.querySelector('[data-global-skill-switch]').checked)`,
 			`document.querySelector('[data-global-skill-switch]').click(); document.querySelector('form').reset(); String(new FormData(document.querySelector('form')).get('allow_global_skill_writes') === 'on')`,
 			`document.querySelector('form').reportValidity(); String(!document.getElementById('test-general').hidden)`,
 		} {
