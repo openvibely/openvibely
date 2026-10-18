@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 	"github.com/stretchr/testify/require"
 )
@@ -309,4 +311,70 @@ func TestManagedKnowledgePermissionsEnabledDuringTurn(t *testing.T) {
 			require.False(t, failed, out)
 		}
 	}
+}
+
+func TestManagedAgentPermissionsChangeWithinTurn(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	agent := &models.Agent{ID: "live-agent", Key: "live_agent", Name: "Live", Enabled: true, ProjectID: project.ID, Tools: []string{"memory_view"}}
+	require.NoError(t, stores.Agents.Create(ctx, agent))
+	worker := NewWorkerService(nil, 0, stores.Projects)
+	worker.SetLifecycleAgentRepo(stores.Agents)
+	turn := worker.prepareMainModelKnowledge(ctx, models.Task{ID: "live", ProjectID: project.ID, AgentDefinitionID: &agent.ID}, false)
+	rt := llmcontracts.RuntimeToolsFromContext(turn)
+	for _, enabled := range []bool{false, true, false, true} {
+		agent.Tools = nil
+		if enabled {
+			agent.Tools = []string{"memory_view", "memory_save", "memory_delete"}
+		}
+		require.NoError(t, stores.Agents.Update(ctx, agent))
+		for _, name := range []string{"memory_view", "memory_save", "memory_delete"} {
+			require.Equal(t, enabled, rt.HasDefinition(name))
+		}
+		_, handled, failed, err := rt.Executor(turn, "memory_save", json.RawMessage(`{"handle":"live.md","content":"Durable fact","summary":"Fact"}`))
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.Equal(t, !enabled, failed)
+	}
+	agent.Enabled = false
+	require.NoError(t, stores.Agents.Update(ctx, agent))
+	require.False(t, rt.HasDefinition("memory_view"))
+	agent.Enabled = true
+	now := time.Now()
+	agent.ArchivedAt = &now
+	require.NoError(t, stores.Agents.Update(ctx, agent))
+	require.False(t, rt.HasDefinition("memory_save"))
+	_, _, failed, err := rt.Executor(turn, "memory_view", json.RawMessage(`{"handle":"live.md"}`))
+	require.NoError(t, err)
+	require.True(t, failed)
+}
+
+func TestManagedFileGuardResolvesSymlinkAncestors(t *testing.T) {
+	root := t.TempDir()
+	managed := filepath.Join(root, ".openvibely", "memories")
+	require.NoError(t, os.MkdirAll(managed, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(managed, "fact.md"), []byte("fact"), 0600))
+	require.NoError(t, os.Symlink(managed, filepath.Join(root, "notes")))
+	require.NoError(t, os.Symlink(filepath.Join(managed, "missing.md"), filepath.Join(root, "dangling.md")))
+	ctx := context.WithValue(context.Background(), managedWorkDirKey{}, root)
+	rt := guardManagedTools(ctx, &llmcontracts.RuntimeTools{Executor: func(c context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		out, err := agenttools.Execute(c, root, name, input)
+		return out, true, err != nil, err
+	}}, nil, models.Task{}, true, nil)
+	_, handled, failed, err := rt.Executor(ctx, "write_file", json.RawMessage(`{"file_path":"notes/fact.md","content":"overwritten"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, failed)
+	content, err := os.ReadFile(filepath.Join(managed, "fact.md"))
+	require.NoError(t, err)
+	require.Equal(t, "fact", string(content))
+
+	for _, path := range []string{"notes/fact.md", "notes/new.md", "notes/new/nested.md", "dangling.md"} {
+		input, _ := json.Marshal(map[string]string{"file_path": path})
+		for _, tool := range []string{"read_file", "write_file", "edit_file"} {
+			require.False(t, managedFileOperationAllowed(ctx, nil, models.Task{}, true, nil, tool, input), path)
+		}
+	}
+	require.True(t, managedFileOperationAllowed(ctx, nil, models.Task{}, true, nil, "write_file", json.RawMessage(`{"file_path":"report.md"}`)))
 }

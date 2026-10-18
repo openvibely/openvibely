@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // Wrap the HTTP client, not its transport: http.Client adds the credential-bearing
@@ -18,8 +20,12 @@ type telegramHTTPClient struct {
 }
 
 func newSafeTelegramBot(token string) (*tgbotapi.BotAPI, error) {
+	return newSafeTelegramBotWithClient(token, httpclient.New(httpclient.MessagingPollTimeout))
+}
+
+func newSafeTelegramBotWithClient(token string, client tgbotapi.HTTPClient) (*tgbotapi.BotAPI, error) {
 	bot, err := tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint,
-		telegramHTTPClient{client: &http.Client{}, token: token})
+		telegramHTTPClient{client: client, token: token})
 	if err != nil {
 		return nil, safeTelegramHTTPError("getMe", token, err)
 	}
@@ -27,7 +33,7 @@ func newSafeTelegramBot(token string) (*tgbotapi.BotAPI, error) {
 }
 
 func (c telegramHTTPClient) Do(req *http.Request) (*http.Response, error) {
-	resp, err := c.client.Do(req)
+	resp, err := httpretry.DoRequest(c.client, req)
 	if err == nil {
 		return resp, nil
 	}

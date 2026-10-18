@@ -364,6 +364,7 @@ func TestRedactedConfigRemovesRefreshParameters(t *testing.T) {
 }
 
 func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
+	calls := 0
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	var gotHeaders http.Header
 	var gotBody map[string]string
@@ -371,6 +372,11 @@ func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
 		gotHeaders = r.Header.Clone()
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &gotBody)
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"fresh","refresh_token":"rotated"}`))
 	}))

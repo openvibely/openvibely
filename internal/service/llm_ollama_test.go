@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -68,5 +69,160 @@ func TestListOllamaModelsCancelsStalledRequest(t *testing.T) {
 	_, err := ListOllamaModels(ctx, "http://ollama.invalid")
 	if !errors.Is(err, context.DeadlineExceeded) || attempts != 1 || time.Since(started) > time.Second {
 		t.Fatalf("stalled discovery: err=%v attempts=%d elapsed=%v", err, attempts, time.Since(started))
+	}
+}
+
+func TestDetectOllamaContextWindow(t *testing.T) {
+	original := OllamaHTTPClient
+	t.Cleanup(func() { OllamaHTTPClient = original })
+	for _, tc := range []struct {
+		name, model, body string
+		status, want      int
+	}{
+		{"loaded", "qwen", `{"models":[{"name":"other:latest","context_length":999},{"model":"qwen:latest","context_length":65536}]}`, 200, 65536},
+		{"exact tag", "qwen:small", `{"models":[{"name":"qwen:latest","context_length":65536},{"name":"qwen:small","context_length":8192}]}`, 200, 8192},
+		{"unloaded", "qwen", `{"models":[{"name":"other:latest","context_length":999}]}`, 200, 0},
+		{"missing metadata", "qwen", `{"models":[{"name":"qwen:latest"}]}`, 200, 0},
+		{"failed", "qwen", `private response`, 500, 0},
+		{"malformed", "qwen", `not json`, 200, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Path != "/api/ps" {
+					t.Fatalf("path %s", req.URL.Path)
+				}
+				if _, ok := req.Context().Deadline(); !ok {
+					t.Fatal("missing discovery deadline")
+				}
+				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			got, err := DetectOllamaContextWindow(context.Background(), "http://fixture/v1/", tc.model)
+			if got != tc.want {
+				t.Fatalf("got %d want %d", got, tc.want)
+			}
+			if tc.name == "failed" || tc.name == "malformed" {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDetectOllamaContextCancellation(t *testing.T) {
+	original := OllamaHTTPClient
+	t.Cleanup(func() { OllamaHTTPClient = original })
+	ctx, cancel := context.WithCancel(context.Background())
+	OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+		cancel()
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})
+	_, err := DetectOllamaContextWindow(ctx, "http://fixture", "qwen")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestOllamaModelMetadataSeparatesCapacityFromActiveWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, ps, show   string
+		active, capacity int
+	}{
+		{"loaded", `{"models":[{"name":"fixture:latest","context_length":8192}]}`, `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`, 8192, 131072},
+		{"unloaded", `{"models":[]}`, `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`, 0, 131072},
+		{"ps failure", `invalid`, `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`, 0, 131072},
+		{"show failure", `{"models":[{"name":"fixture","context_length":8192}]}`, `invalid`, 8192, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := OllamaHTTPClient
+			t.Cleanup(func() { OllamaHTTPClient = original })
+			var calls atomic.Int32
+			OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+				calls.Add(1)
+				body := tc.ps
+				if req.URL.Path == "/api/show" {
+					if req.Method != http.MethodPost {
+						t.Errorf("method %s", req.Method)
+					}
+					payload, _ := io.ReadAll(req.Body)
+					if string(payload) != `{"model":"fixture"}` {
+						t.Errorf("payload %s", payload)
+					}
+					body = tc.show
+				} else if req.URL.Path != "/api/ps" {
+					t.Errorf("path %s", req.URL.Path)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})
+			got := DiscoverOllamaModelMetadata(context.Background(), "http://fixture.invalid/v1/", "fixture")
+			if calls.Load() != 2 || got.ContextLength != tc.active || got.ModelContextLength != tc.capacity {
+				t.Fatalf("calls=%d metadata=%+v", calls.Load(), got)
+			}
+		})
+	}
+}
+
+func TestOllamaMetadataParallelRetriesAndCancellation(t *testing.T) {
+	original := OllamaHTTPClient
+	t.Cleanup(func() { OllamaHTTPClient = original })
+	enteredPS, enteredShow := make(chan struct{}), make(chan struct{})
+	var ps, show atomic.Int32
+	OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+		var attempt int32
+		if req.URL.Path == "/api/ps" {
+			attempt = ps.Add(1)
+			if attempt == 1 {
+				close(enteredPS)
+			}
+			select {
+			case <-enteredShow:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+		} else {
+			attempt = show.Add(1)
+			if attempt == 1 {
+				close(enteredShow)
+			}
+			select {
+			case <-enteredPS:
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
+			body, _ := io.ReadAll(req.Body)
+			if string(body) != `{"model":"fixture"}` {
+				t.Errorf("replayed body = %s", body)
+			}
+		}
+		status, body := 200, `{"models":[{"name":"fixture","context_length":8192}]}`
+		if req.URL.Path == "/api/show" {
+			body = `{"model_info":{"general.architecture":"llama","llama.context_length":131072}}`
+		}
+		if attempt == 1 {
+			status = 503
+			body = `{}`
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	got := DiscoverOllamaModelMetadata(ctx, "http://fixture.invalid", "fixture")
+	if got.ContextLength != 8192 || got.ModelContextLength != 131072 || ps.Load() != 2 || show.Load() != 2 {
+		t.Fatalf("metadata=%+v ps=%d show=%d", got, ps.Load(), show.Load())
+	}
+	var cancelled atomic.Int32
+	OllamaHTTPClient = ollamaListDoerFunc(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		cancelled.Add(1)
+		return nil, req.Context().Err()
+	})
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	got = DiscoverOllamaModelMetadata(ctx, "http://fixture.invalid", "fixture")
+	if got != (OllamaModelMetadata{}) || cancelled.Load() != 2 {
+		t.Fatalf("cancellation: %+v calls=%d", got, cancelled.Load())
 	}
 }

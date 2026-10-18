@@ -25,6 +25,7 @@ import (
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"golang.org/x/mod/semver"
 )
 
@@ -261,7 +262,7 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.cfg.HTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(c.cfg.HTTPClient, req)
 	if err != nil {
 		c.recordFailure(&state, now)
 		return c.cachedReleaseForCurrent(state, current, now), true, err
@@ -581,7 +582,7 @@ func (c *Client) Download(ctx context.Context, release VerifiedRelease, dst io.W
 		req.Header.Del("Authorization")
 		return nil
 	}
-	resp, err := client.Do(req)
+	resp, err := httpretry.DoRequest(&client, req)
 	if err != nil {
 		if errors.Is(err, errArtifactRedirectPolicy) {
 			return err
@@ -628,7 +629,7 @@ func (c *Client) Fetch(ctx context.Context, release VerifiedRelease, destination
 		req.Header.Del("Authorization")
 		return nil
 	}
-	resp, err := client.Do(req)
+	resp, err := httpretry.DoRequest(&client, req)
 	if err != nil {
 		if errors.Is(err, errArtifactRedirectPolicy) {
 			return nil, err

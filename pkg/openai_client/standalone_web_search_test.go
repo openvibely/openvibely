@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 func TestStandaloneWebSearchReservedSchema(t *testing.T) {
@@ -93,7 +94,7 @@ func TestStandaloneWebSearchRecentInputKeepsOnlyRecentVisibleText(t *testing.T) 
 		map[string]any{"type": "function_call", "name": "read_file", "arguments": "{}"},
 		map[string]any{"type": "function_call_output", "output": "secret tool output"},
 		map[string]any{"type": "message", "role": "assistant", "content": longAssistant},
-		map[string]any{"type": "message", "role": "user", "content": "<environment_context>ignored</environment_context>"},
+		map[string]any{"type": "message", "role": "user", "content": "<openvibely_execution_environment>ignored</openvibely_execution_environment>"},
 		map[string]any{"type": "message", "role": "user", "content": []any{
 			map[string]any{"type": "input_text", "text": "# Context from my IDE setup:\n\n## Open tabs:\n- private.go\n\n## My request:\ncurrent user"},
 			map[string]any{"type": "input_image", "image_url": "data:image/png;base64,AA=="},
@@ -115,7 +116,7 @@ func TestStandaloneWebSearchRecentInputKeepsOnlyRecentVisibleText(t *testing.T) 
 			t.Errorf("recent input omitted %q: %s", want, text)
 		}
 	}
-	for _, omitted := range []string{"old user", "secret tool output", "environment_context", "input_image", "commentary after current user", "private.go", "Context from my IDE"} {
+	for _, omitted := range []string{"old user", "secret tool output", "openvibely_execution_environment", "input_image", "commentary after current user", "private.go", "Context from my IDE"} {
 		if strings.Contains(text, omitted) {
 			t.Errorf("recent input retained %q: %s", omitted, text)
 		}
@@ -127,7 +128,7 @@ func TestStandaloneWebSearchRecentInputKeepsOnlyRecentVisibleText(t *testing.T) 
 }
 
 func TestVisibleSearchUserTextRetainsRequestAfterContextBlocks(t *testing.T) {
-	input := "<environment_context>private</environment_context>\n<permissions instructions>secret</permissions instructions>\nfind the latest release"
+	input := "<openvibely_execution_environment>private</openvibely_execution_environment>\n<permissions instructions>secret</permissions instructions>\nfind the latest release"
 	if got := visibleSearchUserText(input); got != "find the latest release" {
 		t.Fatalf("visibleSearchUserText() = %q", got)
 	}
@@ -196,13 +197,21 @@ func TestAttachmentContextExcludedFromSearch(t *testing.T) {
 		map[string]any{"type": "message", "role": "assistant", "content": "I will compare them"},
 	}
 	history = ensureAttachmentContext(ctx, history)
+	history = ensureExecutionEnvironment(history, "/private/workdir")
+	ctx = managedcontext.With(ctx, "## Skills\nprivate_skill\n## Memories\nprivate_memory.md")
+	history = managedcontext.Ensure(ctx, history, func(item any) (string, string) {
+		m := item.(map[string]any)
+		r, _ := m["role"].(string)
+		c, _ := m["content"].(string)
+		return r, c
+	}, func(text string) any { return map[string]any{"type": "message", "role": "user", "content": text} })
 	history = append(history, map[string]any{"type": "message", "role": "user", "content": "Find their latest pricing"})
 	got := standaloneWebSearchRecentInput(history)
 	data, _ := json.Marshal(got)
-	if strings.Contains(string(data), "/uploads/private-report.docx") {
+	if strings.Contains(string(data), "/uploads/private-report.docx") || strings.Contains(string(data), "private_skill") || strings.Contains(string(data), "/private/workdir") {
 		t.Errorf("search received private attachment metadata: %s", data)
 	}
-	if !strings.Contains(string(data), "Compare Acme") {
+	if !strings.Contains(string(data), "Compare Acme") || !strings.Contains(string(data), "Find their latest pricing") {
 		t.Errorf("attachment context displaced previous user request: %s", data)
 	}
 }

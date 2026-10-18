@@ -113,11 +113,17 @@ func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*openaicl
 	default:
 		return nil, nil, fmt.Errorf("OpenAI-compatible model %q uses unsupported auth_method=%q", agent.Name, agent.AuthMethod)
 	}
-	requestPrivate := cfg.AllowPrivateEndpoints || presetUsesPrivateEndpoints(agent.PresetSlug)
-	if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
-		return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
+	if agent.Provider == models.ProviderOllama {
+		// Saved Ollama endpoints have always supported local HTTP servers.
+		// Keep that connection policy without relaxing custom-provider policy.
+		client.SetHTTPClient(httpclient.NewModel(nil))
+	} else {
+		requestPrivate := cfg.AllowPrivateEndpoints || presetUsesPrivateEndpoints(agent.PresetSlug)
+		if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
+			return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
+		}
+		client.SetHTTPClient(llmcustomauth.NewModelHTTPClient(requestPrivate))
 	}
-	client.SetHTTPClient(llmcustomauth.NewModelHTTPClient(requestPrivate))
 	finalize := func(req *http.Request, body []byte) error {
 		if agent.AuthMethod == models.AuthMethodOAuth {
 			if err := a.verifyOAuthRevision(req.Context(), agent); err != nil {

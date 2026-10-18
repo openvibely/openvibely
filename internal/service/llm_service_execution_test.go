@@ -2248,7 +2248,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrant
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLeavesMarkersInert(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorSharesToolsAndLeavesMarkersInert(t *testing.T) {
 	env := teststores.New(t)
 	llmConfigRepo := env.LLMConfigs
 	execRepo := env.Executions
@@ -2259,7 +2259,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -2269,9 +2269,9 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"This marker-looking text must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"This marker-looking text must remain inert.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
@@ -2281,15 +2281,15 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 	ollamaAdapter := svc.providerAdapters[models.ProviderOllama]
 	svc.providerAdapters[models.ProviderTest] = recorder
 	svc.providerAdapters[models.ProviderOllama] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
-			t.Fatalf("runtime-tool-incapable aggregator inherited tools: %#v", rt)
+		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt == nil || !rt.HasDefinition("agent_allowed") {
+			t.Fatalf("Ollama aggregator lost granted tools: %#v", rt)
 		}
 		return ollamaAdapter.Call(req)
 	})
 
 	ref := createMixtureTestConfig(t, llmConfigRepo, "Initial Ollama Reference", models.ProviderTest, "ref")
 	recorder.responses[ref.ID] = llmcontracts.AgentResult{Output: "private advice", TextOnlyOutput: "private advice"}
-	aggregator := &models.LLMConfig{Name: "Initial Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: providerServer.URL}
+	aggregator := &models.LLMConfig{Name: "Initial Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: providerServer.URL, ContextWindow: 65536}
 	if err := llmConfigRepo.Create(ctx, aggregator); err != nil {
 		t.Fatalf("create Ollama aggregator: %v", err)
 	}
@@ -2322,8 +2322,8 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 	}
 	select {
 	case providerRequest := <-providerRequests:
-		if _, exists := providerRequest["tools"]; exists {
-			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
+		if _, exists := providerRequest["tools"]; !exists {
+			t.Fatal("Ollama payload omitted runtime tools")
 		}
 		messages, _ := providerRequest["messages"].([]any)
 		for _, raw := range messages {

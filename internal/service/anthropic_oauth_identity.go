@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
@@ -37,7 +39,7 @@ func ResolveAnthropicOAuthIdentity(ctx context.Context, accessToken string) (Ant
 	req.Header.Set("anthropic-beta", anthropicclient.OAuthBetaHeader)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpretry.DoRequest(httpclient.New(httpclient.OAuthTimeout), req)
 	if err != nil {
 		return AnthropicOAuthIdentity{}, fmt.Errorf("Anthropic OAuth profile request failed")
 	}

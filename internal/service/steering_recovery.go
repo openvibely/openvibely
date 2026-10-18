@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
@@ -117,11 +116,8 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 	}
 	var raw string
 	var anthropicFailure *anthropicclient.ConversationError
-	var ollamaFailure *llmollama.ConversationError
 	if errors.As(err, &anthropicFailure) {
 		raw = anthropicFailure.MessagesJSON
-	} else if errors.As(err, &ollamaFailure) {
-		raw = ollamaFailure.MessagesJSON
 	} else {
 		return
 	}

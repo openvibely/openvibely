@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/httpclient"
 )
 
 type AppBundleUpdateHelperConfig struct {
@@ -157,13 +159,15 @@ func waitForHealthEndpointExit(ctx context.Context, healthURL string, healthClie
 		ctx = context.Background()
 	}
 	if healthClient == nil {
-		healthClient = http.DefaultClient
+		healthClient = httpclient.New(httpclient.HealthTimeout)
 	}
 	for {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 		if err != nil {
 			return err
 		}
+		// A disconnected endpoint is the successful exit observation, not a
+		// transient request failure. Retrying here delays rollback/shutdown.
 		response, err := healthClient.Do(request)
 		if err != nil {
 			if ctx.Err() != nil {

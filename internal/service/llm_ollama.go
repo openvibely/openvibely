@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/modeldiscovery"
 )
 
 // ---- Ollama Model Listing Types ----
@@ -42,7 +44,7 @@ type OllamaModelDetails struct {
 
 // OllamaHTTPClient is an interface for making HTTP requests to Ollama.
 // Can be overridden in tests.
-var OllamaHTTPClient HTTPDoer = httpclient.NewModel(nil)
+var OllamaHTTPClient HTTPDoer = httpclient.New(ModelDiscoveryTimeout)
 
 // HTTPDoer is an interface for making HTTP requests.
 type HTTPDoer interface {
@@ -61,7 +63,7 @@ func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, e
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
-	url := strings.TrimRight(baseURL, "/") + "/api/tags"
+	url := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1") + "/api/tags"
 
 	type bufferedResponse struct {
 		statusCode int
@@ -107,4 +109,119 @@ func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, e
 	}
 
 	return modelList.Models, nil
+}
+
+// DetectOllamaContextWindow reports only the selected model's active server
+// window. Zero means unloaded or unavailable; no model is loaded by this call.
+func DetectOllamaContextWindow(ctx context.Context, baseURL, model string) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, ModelDiscoveryTimeout)
+	defer cancel()
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/v1")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/ps", nil)
+	if err != nil {
+		return 0, fmt.Errorf("invalid Ollama endpoint")
+	}
+	resp, err := modeldiscovery.Do(OllamaHTTPClient, req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		return 0, fmt.Errorf("Ollama context discovery unavailable")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("Ollama context discovery status %d", resp.StatusCode)
+	}
+	var result struct {
+		Models []struct {
+			Name          string `json:"name"`
+			Model         string `json:"model"`
+			ContextLength int    `json:"context_length"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&result); err != nil {
+		return 0, fmt.Errorf("invalid Ollama context discovery response")
+	}
+	canonical := func(name string) string {
+		name = strings.TrimSpace(name)
+		if name != "" && !strings.Contains(name[strings.LastIndex(name, "/")+1:], ":") {
+			name += ":latest"
+		}
+		return name
+	}
+	if strings.TrimSpace(model) == "" {
+		return 0, nil
+	}
+	for _, entry := range result.Models {
+		if canonical(entry.Name) == canonical(model) || canonical(entry.Model) == canonical(model) {
+			return max(0, entry.ContextLength), nil
+		}
+	}
+	return 0, nil
+}
+
+// OllamaModelMetadata separates model capacity from the active server allocation.
+type OllamaModelMetadata struct {
+	ContextLength      int `json:"context_length"`
+	ModelContextLength int `json:"model_context_length"`
+}
+
+// DiscoverOllamaModelMetadata is modal-only discovery. Each endpoint can fail
+// independently; static capacity must never substitute for an active window.
+func DiscoverOllamaModelMetadata(ctx context.Context, baseURL, model string) OllamaModelMetadata {
+	result := OllamaModelMetadata{}
+	ctx, cancel := context.WithTimeout(ctx, ModelDiscoveryTimeout)
+	defer cancel()
+	if strings.TrimSpace(model) == "" {
+		return result
+	}
+	var pending sync.WaitGroup
+	pending.Add(1)
+	go func() {
+		defer pending.Done()
+		result.ContextLength, _ = DetectOllamaContextWindow(ctx, baseURL, model)
+	}()
+	capacity := discoverOllamaModelCapacity(ctx, baseURL, model)
+	pending.Wait()
+	result.ModelContextLength = capacity
+	return result
+}
+
+func discoverOllamaModelCapacity(ctx context.Context, baseURL, model string) int {
+	var capacity int
+	baseURL = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "/v1")
+	if baseURL == "" {
+		baseURL = "http://localhost:11434"
+	}
+	body, _ := json.Marshal(map[string]string{"model": model})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/show", strings.NewReader(string(body)))
+	if err != nil {
+		return capacity
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := modeldiscovery.Do(OllamaHTTPClient, req)
+	if err != nil {
+		return capacity
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return capacity
+	}
+	var show struct {
+		ModelInfo map[string]json.RawMessage `json:"model_info"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&show) != nil {
+		return capacity
+	}
+	var architecture string
+	_ = json.Unmarshal(show.ModelInfo["general.architecture"], &architecture)
+	if architecture != "" {
+		_ = json.Unmarshal(show.ModelInfo[architecture+".context_length"], &capacity)
+	}
+	capacity = max(0, capacity)
+	return capacity
 }

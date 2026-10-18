@@ -123,11 +123,9 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
 					switch provider {
-					case models.ProviderOllama:
-						fmt.Fprintln(w, `{"message":{"role":"assistant","content":"Done"},"done":true}`)
 					case models.ProviderOpenAI:
 						fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"done\",\"status\":\"completed\",\"output\":[]}}\n\n")
-					case models.ProviderOpenAICompatible:
+					case models.ProviderOpenAICompatible, models.ProviderOllama:
 						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 					case models.ProviderAnthropic:
 						for _, event := range []string{

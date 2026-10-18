@@ -582,7 +582,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -592,15 +592,15 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "HTTP Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -626,14 +626,14 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Ollama mixture aggregator request")
 	}
-	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable aggregator must not receive tool definitions")
+	require.Contains(t, providerRequest, "tools", "Ollama aggregator must receive shared runtime tools")
 	messages, _ := providerRequest["messages"].([]any)
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable aggregator must not receive marker guidance")
+	}), "aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
 		return err == nil && active == nil
@@ -653,7 +653,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -663,15 +663,15 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "HTTP Ollama Plan Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -693,7 +693,8 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 
 	select {
 	case providerRequest := <-providerRequests:
-		require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable Plan aggregator must not receive tool definitions")
+		raw, _ := json.Marshal(providerRequest["tools"])
+		require.NotContains(t, string(raw), `"name":"create_task"`, "Plan must exclude write tools")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Ollama Plan mixture aggregator request")
 	}
