@@ -77,3 +77,8 @@ func (p *Project) ManagedPermissions() SkillMemoryPermissions {
 	}
 	return *p.SkillMemoryPermissions
 }
+
+// NewProjectPermissions supplies creation defaults without changing existing projects.
+func NewProjectPermissions() SkillMemoryPermissions {
+	return SkillMemoryPermissions{ReadSkills: true, ReadMemories: true, WriteMemories: true}
+}

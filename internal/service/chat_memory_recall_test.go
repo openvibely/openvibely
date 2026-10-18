@@ -31,7 +31,10 @@ func createChatMemoryProject(t *testing.T, ctx context.Context, projectRepo pers
 	if err := os.WriteFile(filepath.Join(memoryDir, "MEMORIES.md"), []byte("# Project Memory\n\n- chat_memory.md: chat should use repo-local project memory.\n"), 0o644); err != nil {
 		t.Fatalf("write memory index: %v", err)
 	}
-	project := &models.Project{Name: "Project", RepoPath: repoPath}
+	// Knowledge fixtures explicitly opt in to skill writes; new projects default to read-only skills.
+	permissions := models.NewProjectPermissions()
+	permissions.WriteSkills = true
+	project := &models.Project{Name: "Project", RepoPath: repoPath, SkillMemoryPermissions: &permissions}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
