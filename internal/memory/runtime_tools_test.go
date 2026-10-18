@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -78,4 +79,67 @@ func TestMemoryRuntimeUpdatesAndDeletesExistingNestedTopics(t *testing.T) {
 	_, _, isErr, err = rt.Executor(context.Background(), "memory_view", json.RawMessage(`{"handle":"preferences/output.md"}`))
 	require.NoError(t, err)
 	require.True(t, isErr)
+}
+
+func TestMemorySaveRejectsUnindexableEntriesWithoutMutation(t *testing.T) {
+	for _, tc := range []struct{ handle, summary string }{
+		{"user preferences.md", "Preferences"},
+		{"preferences/user\tname.md", "Preferences"},
+		{"préférences.md", "Preferences"},
+		{"topic.md.backup.md", "Preferences"},
+		{"preferences.md", "See [another topic](other.md)"},
+	} {
+		t.Run(tc.handle+tc.summary, func(t *testing.T) {
+			root := t.TempDir()
+			rt := RuntimeTools(root, true, true)
+			dir, err := SharedRepoMemoryDir(root)
+			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(dir, 0700))
+			original := "- existing.md — Existing fact\n"
+			require.NoError(t, os.WriteFile(filepath.Join(dir, IndexFileName), []byte(original), 0600))
+			input, err := json.Marshal(map[string]string{"handle": tc.handle, "summary": tc.summary, "content": "Durable fact"})
+			require.NoError(t, err)
+			out, handled, isErr, err := rt.Executor(context.Background(), "memory_save", input)
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.True(t, isErr, out)
+			require.Contains(t, out, "cannot be represented")
+			require.NoFileExists(t, filepath.Join(dir, tc.handle))
+			raw, err := os.ReadFile(filepath.Join(dir, IndexFileName))
+			require.NoError(t, err)
+			require.Equal(t, original, string(raw))
+		})
+	}
+}
+
+func TestMemorySaveIndexRoundTrip(t *testing.T) {
+	for _, handle := range []string{"user_preferences.md", "preferences/user-preferences.md"} {
+		t.Run(handle, func(t *testing.T) {
+			root := t.TempDir()
+			rt := RuntimeTools(root, true, true)
+			call := func(tool, content string) string {
+				input, err := json.Marshal(map[string]string{"handle": handle, "summary": "User preferences", "content": content})
+				require.NoError(t, err)
+				out, handled, isErr, err := rt.Executor(context.Background(), tool, input)
+				require.NoError(t, err)
+				require.True(t, handled)
+				require.False(t, isErr, out)
+				return out
+			}
+			dir, err := SharedRepoMemoryDir(root)
+			require.NoError(t, err)
+			for _, content := range []string{"Original preference", "Corrected preference"} {
+				call("memory_save", content)
+				require.Contains(t, call("memory_view", ""), content)
+				raw, err := os.ReadFile(filepath.Join(dir, IndexFileName))
+				require.NoError(t, err)
+				require.Equal(t, 1, strings.Count(string(raw), handle))
+			}
+			call("memory_delete", "")
+			require.NoFileExists(t, filepath.Join(dir, handle))
+			raw, err := os.ReadFile(filepath.Join(dir, IndexFileName))
+			require.NoError(t, err)
+			require.Empty(t, IndexedMemoryHandles(string(raw)))
+		})
+	}
 }
