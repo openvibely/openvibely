@@ -600,6 +600,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+		OnHistory:                      a.responsesHistoryRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -743,6 +744,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+		OnHistory:                      a.responsesHistoryRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -840,19 +842,20 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
-		Model:            agent.Model,
-		ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
-		FirstPartyOpenAI: true,
-		Temperature:      agent.Temperature,
-		ContextWindow:    agent.ContextWindow,
-		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
-		WorkDir:          effectiveWorkDir,
-		Attachments:      oaAttachments,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
-		SkipDefaultTools: skipDefaultTools,
+		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:               agent.Model,
+		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		FirstPartyOpenAI:    true,
+		Temperature:         agent.Temperature,
+		ContextWindow:       agent.ContextWindow,
+		MaxOutputTokens:     openAIAgenticOutputBudget,
+		System:              llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
+		WorkDir:             effectiveWorkDir,
+		Attachments:         oaAttachments,
+		ExtraTools:          extraTools,
+		ToolExecutor:        toolExecutor,
+		ToolFilter:          toolFilter,
+		SkipDefaultTools:    skipDefaultTools,
 		OnText: func(text string) {
 			if isStreamingMarkerChunk(text) {
 				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)
@@ -868,6 +871,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 	})
+	err = a.saveCompletionsHistory(ctx, execID, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("completions API: %w", err)
@@ -895,7 +899,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	defer releaseTransport()
 
-	client.History = append(client.History, buildClientHistory(chatHistory)...)
+	client.SetCompletionsHistory(buildCompletionsHistory(chatHistory))
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	if !isTaskFollowup {
@@ -924,20 +928,21 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, message, &openaiclient.CompletionsOptions{
-		Model:            agent.Model,
-		ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
-		FirstPartyOpenAI: true,
-		Temperature:      agent.Temperature,
-		ContextWindow:    agent.ContextWindow,
-		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           systemPromptStr,
-		DisableTools:     disableTools,
-		WorkDir:          effectiveWorkDir,
-		Attachments:      oaAttachments,
-		ExtraTools:       extraTools,
-		ToolExecutor:     toolExecutor,
-		ToolFilter:       toolFilter,
-		SkipDefaultTools: skipDefaultTools,
+		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:               agent.Model,
+		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		FirstPartyOpenAI:    true,
+		Temperature:         agent.Temperature,
+		ContextWindow:       agent.ContextWindow,
+		MaxOutputTokens:     openAIAgenticOutputBudget,
+		System:              systemPromptStr,
+		DisableTools:        disableTools,
+		WorkDir:             effectiveWorkDir,
+		Attachments:         oaAttachments,
+		ExtraTools:          extraTools,
+		ToolExecutor:        toolExecutor,
+		ToolFilter:          toolFilter,
+		SkipDefaultTools:    skipDefaultTools,
 		OnText: func(text string) {
 			if isStreamingMarkerChunk(text) {
 				llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)
@@ -953,6 +958,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 	})
+	err = a.saveCompletionsHistory(ctx, execID, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", llmusage.FromTotal(0), fmt.Errorf("completions API: %w", err)
@@ -1153,6 +1159,11 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 			}
 			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.ResponsesInput) > 0 {
 				messages = []openaiclient.Message{{ResponsesInputItems: saved.ResponsesInput}}
+				checkpoint = true
+			} else if items := completionsReplayInput(replay.TranscriptJSON); len(items) > 0 {
+				// Completions records contain this execution only; preserve the prefix.
+				prefix := historyMessageItems(messages)
+				messages = []openaiclient.Message{{ResponsesInputItems: append(prefix, items...)}}
 				checkpoint = true
 			} else if checkpoint {
 				// Text continuations after the native checkpoint are newer history,
