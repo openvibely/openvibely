@@ -306,6 +306,8 @@ func TestHostedAmbiguousLeaseRenewalReplaysStableKeyAndAdoptsAuthoritativeLease(
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"schema_version":`))
 		default:
+			// Issue a fresh authoritative lease after HTTP retry backoff.
+			authoritativeLease = time.Now().Add(500 * time.Millisecond).UTC()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"schema_version":1,"state":"draining","lease_expires_at":%q}`, authoritativeLease.Format(time.RFC3339Nano))
 		}
@@ -381,6 +383,7 @@ func TestHostedRestartReplaysPendingLeaseRenewalPastPreviousDeadline(t *testing.
 			call := calls.Add(1)
 			if call == 1 {
 				firstKey.Store(key)
+				w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -1212,6 +1215,7 @@ func TestHostedRestartClaimingReadyReplaysSameClaim(t *testing.T) {
 			key := r.Header.Get("Idempotency-Key")
 			if readyCalls.Add(1) == 1 {
 				firstKey.Store(key)
+				w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -1519,6 +1523,7 @@ func TestHostedReadyPersistenceFailureRemainsSupervisedWithoutDirectivePolling(t
 			_, _ = fmt.Fprintf(w, `{"schema_version":1,"accepted":true,"lease_expires_at":%q}`, leaseExpiresAt.Format(time.RFC3339Nano))
 		case strings.HasSuffix(r.URL.Path, "/lease"):
 			if leaseCalls.Add(1) == 1 {
+				w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -1675,14 +1680,11 @@ func TestDockerAgentAmbiguousCreateAndStatusFailuresRemainRecoveryPending(t *tes
 		installer := &DockerAgentInstaller{API: api, Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, Drain: drain, StatePath: filepath.Join(root, "docker.json"), PollInterval: time.Millisecond}
 		target := Target{ID: "docker-test-target", Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}
 		release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}}, Target: target}
-		if err := installer.Apply(context.Background(), release); !errors.Is(err, ErrUpdateRecoveryPending) {
-			t.Fatalf("ambiguous create error=%v", err)
+		if err := installer.Apply(context.Background(), release); err != nil {
+			t.Fatalf("HTTP retry did not recover accepted create: %v", err)
 		}
-		if installer.state.Status != "creating" || installer.state.RequestID != "" || installer.state.CreateIdempotencyKey == "" {
-			t.Fatalf("durable create state=%#v", installer.state)
-		}
-		if err := installer.Resume(context.Background()); err != nil {
-			t.Fatal(err)
+		if installer.state.Status != "succeeded" || installer.state.RequestID != "request-1" {
+			t.Fatalf("durable recovered state=%#v", installer.state)
 		}
 		if len(createKeys) != 2 || createKeys[0] == "" || createKeys[0] != createKeys[1] {
 			t.Fatalf("create keys=%q", createKeys)
@@ -1695,6 +1697,7 @@ func TestDockerAgentAmbiguousCreateAndStatusFailuresRemainRecoveryPending(t *tes
 	t.Run("status unavailable", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
+				w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -1739,9 +1742,11 @@ func TestHostedLostReadinessResponseReplaysClaimAndUsesAuthoritativeLease(t *tes
 				_, _ = w.Write([]byte(`{"schema_version":`))
 				return
 			}
+			authoritativeLease = time.Now().Add(350 * time.Millisecond).UTC()
 			_, _ = fmt.Fprintf(w, `{"schema_version":1,"accepted":true,"lease_expires_at":%q}`, authoritativeLease.Format(time.RFC3339Nano))
 		case strings.HasSuffix(r.URL.Path, "/lease"):
 			if time.Now().Before(authoritativeLease) {
+				w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
@@ -1749,6 +1754,7 @@ func TestHostedLostReadinessResponseReplaysClaimAndUsesAuthoritativeLease(t *tes
 			_, _ = w.Write([]byte(`{"schema_version":1,"state":"cancelled","lease_expires_at":"0001-01-01T00:00:00Z"}`))
 		default:
 			t.Errorf("unexpected control-plane request %s %s", r.Method, r.URL.Path)
+			w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	}))
@@ -1775,7 +1781,7 @@ func TestHostedLostReadinessResponseReplaysClaimAndUsesAuthoritativeLease(t *tes
 	go func() {
 		done <- controller.coordinate(context.Background(), HostedDirective{UpdateID: "assigned"}, state)
 	}()
-	deadline := time.Now().Add(time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for readyCalls.Load() < 3 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
@@ -1815,6 +1821,7 @@ func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testi
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/ready") {
 			t.Errorf("unexpected control-plane request %s %s", r.Method, r.URL.Path)
+			w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
@@ -1868,7 +1875,7 @@ func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testi
 	select {
 	case <-drain.Reopened():
 		t.Fatal("admission reopened while readiness acceptance remained ambiguous")
-	case <-time.After(120 * time.Millisecond):
+	case <-time.After(1200 * time.Millisecond):
 	}
 	if readyCalls.Load() < 2 || !drain.Owns(status.Generation) {
 		t.Fatalf("readyCalls=%d owns=%v", readyCalls.Load(), drain.Owns(status.Generation))

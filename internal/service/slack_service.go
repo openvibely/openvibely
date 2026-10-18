@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -429,7 +430,12 @@ func (s *SlackService) HandleOAuthCallback(ctx context.Context, code, state, red
 	form.Set("client_secret", clientSecret)
 	form.Set("redirect_uri", redirectURI)
 
-	resp, err := s.httpClient.PostForm(strings.TrimRight(s.oauthBaseURL, "/")+"/oauth.v2.access", form)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.oauthBaseURL, "/")+"/oauth.v2.access", strings.NewReader(form.Encode()))
+	if err != nil {
+		return fmt.Errorf("create oauth request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpretry.DoRequest(s.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("exchange oauth code: %w", err)
 	}
@@ -1967,7 +1973,7 @@ func (s *SlackService) downloadSlackPrivateFile(ctx context.Context, botToken, d
 	}
 	client := s.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = httpclient.New(httpclient.MessagingTimeout)
 	}
 	downloadClient := *client
 	downloadClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -1991,7 +1997,7 @@ func (s *SlackService) downloadSlackPrivateFile(ctx context.Context, botToken, d
 		req.Header.Set("Authorization", "Bearer "+botToken)
 		req.Header.Set("User-Agent", "OpenVibely Slack file downloader")
 
-		resp, err := downloadClient.Do(req)
+		resp, err := httpretry.DoRequest(&downloadClient, req)
 		if err != nil {
 			return err
 		}

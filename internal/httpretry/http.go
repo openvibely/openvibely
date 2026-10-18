@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -135,6 +136,12 @@ func IsRetryableStatus(statusCode int) bool {
 func IsRetryableNetworkError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
+	}
+	// net/http wraps redirect and endpoint-policy failures in url.Error,
+	// which implements net.Error even when its cause is permanent.
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return IsRetryableNetworkError(urlErr.Err)
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true

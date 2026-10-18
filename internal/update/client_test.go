@@ -30,6 +30,7 @@ func TestCanonicalJSONUsesRFC8785NumberSerialization(t *testing.T) {
 }
 
 func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
+	calls := 0
 	unsetEnvForTest(t, installIDOptOutEnvForTest)
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +39,11 @@ func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
+		}
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
 		}
 		_ = json.NewEncoder(w).Encode(CheckResponse{SchemaVersion: 1, UpdateAvailable: true, LatestVersion: "9.9.9", Action: "manual", Message: "upgrade"})
 	}))
@@ -319,6 +325,7 @@ func TestClientPausesForDayAfterThreeFailures(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++
 				if fail {
+					w.Header().Set("Retry-After", "121") // Exercise update cooldown after HTTP retries decline the delay.
 					w.WriteHeader(status)
 					return
 				}

@@ -18,7 +18,7 @@ func TestTelegramHTTPFailuresOmitCredentials(t *testing.T) {
 	for _, operation := range []string{"getMe", "getUpdates", "sendMessage", "editMessageText", "getFile", "downloadFile"} {
 		t.Run(operation, func(t *testing.T) {
 			client := telegramHTTPClient{token: token, client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				return nil, context.DeadlineExceeded
+				return nil, context.Canceled
 			})}}
 			var err error
 			if operation == "downloadFile" {
@@ -29,7 +29,7 @@ func TestTelegramHTTPFailuresOmitCredentials(t *testing.T) {
 				bot.SetAPIEndpoint(tgbotapi.APIEndpoint)
 				_, err = bot.MakeRequest(operation, tgbotapi.Params{})
 			}
-			if err == nil || !strings.Contains(err.Error(), operation) || !strings.Contains(err.Error(), "deadline exceeded") {
+			if err == nil || !strings.Contains(err.Error(), operation) || !strings.Contains(err.Error(), "context canceled") {
 				t.Fatalf("missing useful error context: %v", err)
 			}
 			for _, forbidden := range []string{token, "https://", "private.txt"} {
@@ -37,8 +37,8 @@ func TestTelegramHTTPFailuresOmitCredentials(t *testing.T) {
 					t.Fatalf("unsafe error: %v", err)
 				}
 			}
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatal("deadline identity lost")
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal("cancellation identity lost")
 			}
 			var unsafe *url.Error
 			if errors.As(err, &unsafe) {
@@ -49,19 +49,18 @@ func TestTelegramHTTPFailuresOmitCredentials(t *testing.T) {
 }
 
 func TestSafeTelegramBotInitialization(t *testing.T) {
-	oldTransport := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = oldTransport })
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, errors.New("connection reset by peer")
+	client := &http.Client{}
+	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, context.Canceled
 	})
-	_, err := newSafeTelegramBot("123:initialization-secret")
+	_, err := newSafeTelegramBotWithClient("123:initialization-secret", client)
 	if err == nil || strings.Contains(err.Error(), "initialization-secret") || !strings.Contains(err.Error(), "getMe") {
 		t.Fatalf("unsafe or missing initialization error: %v", err)
 	}
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"id":123,"is_bot":true,"first_name":"Test"}}`))}, nil
 	})
-	bot, err := newSafeTelegramBot("123:initialization-secret")
+	bot, err := newSafeTelegramBotWithClient("123:initialization-secret", client)
 	if err != nil || bot.Self.ID != 123 {
 		t.Fatalf("successful initialization failed: %v", err)
 	}

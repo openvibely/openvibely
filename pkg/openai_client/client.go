@@ -460,7 +460,7 @@ func RefreshTokenContext(ctx context.Context, refreshToken string) (*StoredAuth,
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := oauthHTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", wrapNetworkError(err))
 	}

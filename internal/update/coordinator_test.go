@@ -791,7 +791,7 @@ type blockingUpdateCheckTransport struct {
 func (transport *blockingUpdateCheckTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	close(transport.started)
 	<-transport.release
-	return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Header: make(http.Header), Body: http.NoBody, Request: req}, nil
+	return &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable", Header: http.Header{"Retry-After": []string{"121"}}, Body: http.NoBody, Request: req}, nil
 }
 
 func TestCoordinatorStopChecksWaitsForInFlightStartupCheck(t *testing.T) {
