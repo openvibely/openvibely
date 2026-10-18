@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/modeldiscovery"
 )
 
 // ---- Ollama Model Listing Types ----
@@ -42,7 +44,7 @@ type OllamaModelDetails struct {
 
 // OllamaHTTPClient is an interface for making HTTP requests to Ollama.
 // Can be overridden in tests.
-var OllamaHTTPClient HTTPDoer = httpclient.NewModel(nil)
+var OllamaHTTPClient HTTPDoer = httpclient.New(ModelDiscoveryTimeout)
 
 // HTTPDoer is an interface for making HTTP requests.
 type HTTPDoer interface {
@@ -123,7 +125,7 @@ func DetectOllamaContextWindow(ctx context.Context, baseURL, model string) (int,
 	if err != nil {
 		return 0, fmt.Errorf("invalid Ollama endpoint")
 	}
-	resp, err := OllamaHTTPClient.Do(req)
+	resp, err := modeldiscovery.Do(OllamaHTTPClient, req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
@@ -172,12 +174,25 @@ type OllamaModelMetadata struct {
 // independently; static capacity must never substitute for an active window.
 func DiscoverOllamaModelMetadata(ctx context.Context, baseURL, model string) OllamaModelMetadata {
 	result := OllamaModelMetadata{}
-	result.ContextLength, _ = DetectOllamaContextWindow(ctx, baseURL, model)
 	ctx, cancel := context.WithTimeout(ctx, ModelDiscoveryTimeout)
 	defer cancel()
 	if strings.TrimSpace(model) == "" {
 		return result
 	}
+	var pending sync.WaitGroup
+	pending.Add(1)
+	go func() {
+		defer pending.Done()
+		result.ContextLength, _ = DetectOllamaContextWindow(ctx, baseURL, model)
+	}()
+	capacity := discoverOllamaModelCapacity(ctx, baseURL, model)
+	pending.Wait()
+	result.ModelContextLength = capacity
+	return result
+}
+
+func discoverOllamaModelCapacity(ctx context.Context, baseURL, model string) int {
+	var capacity int
 	baseURL = strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(baseURL), "/"), "/v1")
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
@@ -185,28 +200,28 @@ func DiscoverOllamaModelMetadata(ctx context.Context, baseURL, model string) Oll
 	body, _ := json.Marshal(map[string]string{"model": model})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/show", strings.NewReader(string(body)))
 	if err != nil {
-		return result
+		return capacity
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := OllamaHTTPClient.Do(req)
+	resp, err := modeldiscovery.Do(OllamaHTTPClient, req)
 	if err != nil {
-		return result
+		return capacity
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return result
+		return capacity
 	}
 	var show struct {
 		ModelInfo map[string]json.RawMessage `json:"model_info"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&show) != nil {
-		return result
+		return capacity
 	}
 	var architecture string
 	_ = json.Unmarshal(show.ModelInfo["general.architecture"], &architecture)
 	if architecture != "" {
-		_ = json.Unmarshal(show.ModelInfo[architecture+".context_length"], &result.ModelContextLength)
+		_ = json.Unmarshal(show.ModelInfo[architecture+".context_length"], &capacity)
 	}
-	result.ModelContextLength = max(0, result.ModelContextLength)
-	return result
+	capacity = max(0, capacity)
+	return capacity
 }
