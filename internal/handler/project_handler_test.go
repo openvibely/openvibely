@@ -936,13 +936,15 @@ func TestCreateProjectKnowledgePermissions(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			tc := NewStoreTestContext(t)
 			form := url.Values{"name": {"Knowledge create"}, "repo_source": {"local"}}
-			expected := (&models.Project{}).ManagedPermissions()
+			expected := models.NewProjectPermissions()
 			if mode != "defaults" {
 				form.Set("skill_memory_settings_present", "true")
 				expected = models.SkillMemoryPermissions{}
 			}
 			if mode == "custom" {
 				form.Set("read_memories", "on")
+				form.Set("write_skills", "on")
+				expected.WriteSkills = true
 				form.Set("allow_global_skill_writes", "on")
 				expected.ReadMemories = true
 				expected.AllowGlobalSkillWrites = true

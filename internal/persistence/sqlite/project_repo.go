@@ -222,12 +222,16 @@ func (r *ProjectRepo) GetDefaultAgentConfigID(ctx context.Context, id string) (*
 }
 
 func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
+	if p.SkillMemoryPermissions == nil {
+		permissions := models.NewProjectPermissions()
+		p.SkillMemoryPermissions = &permissions
+	}
 	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
 		return err
 	}
 	return queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers, skill_memory_permissions)
-			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, COALESCE(?, '{"read_skills":true,"write_skills":true,"read_memories":true,"write_memories":true}'))
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, COALESCE(?, '{"read_skills":true,"write_skills":false,"read_memories":true,"write_memories":true}'))
 			 RETURNING id, repo_path, repo_url, created_at, updated_at`,
 		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p)).
 		Scan(&p.ID, &p.RepoPath, &p.RepoURL, &p.CreatedAt, &p.UpdatedAt)

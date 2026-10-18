@@ -810,7 +810,7 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ProjectKnowledgePanel("new-project", (&models.Project{}).ManagedPermissions()).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ProjectKnowledgePanel("new-project", models.NewProjectPermissions()).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -950,63 +950,87 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "\" data-project-panel=\"knowledge\" hidden><input type=\"hidden\" name=\"skill_memory_settings_present\" value=\"true\"><table class=\"table w-full\"><thead><tr><th></th><th class=\"text-center\"><span title=\"Chat and tasks can read. Turning reading off does not erase information already loaded into the conversation.\">Read ⓘ</span></th><th class=\"text-center\"><span title=\"Permitted tasks, task-thread follow-ups, and maintenance only. Ordinary chat cannot write.\">Write ⓘ</span></th></tr></thead> <tbody><tr><th scope=\"row\">Skills</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_skills\" aria-label=\"Read skills\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "\" data-project-panel=\"knowledge\" hidden><input type=\"hidden\" name=\"skill_memory_settings_present\" value=\"true\"><table class=\"table w-full text-sm\"><thead><tr><th></th><th class=\"text-center\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Read ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = projectPermissionHelp("Read", "Chat and tasks can read. Turning reading off does not erase information already loaded into the conversation.").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "</span></th><th class=\"text-center\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Write ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = projectPermissionHelp("Write", "Permitted tasks, task-thread follow-ups, and maintenance only. Ordinary chat cannot write.").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "</span></th></tr></thead> <tbody><tr><th scope=\"row\" class=\"text-sm font-medium\">Skills</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_skills\" aria-label=\"Read skills\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if permissions.ReadSkills {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, " checked")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_skills\" aria-label=\"Write skills\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if permissions.WriteSkills {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, " onchange=\"var global = this.form.querySelector('[data-global-skill-switch]'); global.disabled = !this.checked; if (!this.checked) { global.checked = false; this.form.elements.allow_global_skill_writes.value = 'off'; }\"></td></tr><tr><th scope=\"row\">Memories</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_memories\" aria-label=\"Read memories\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_skills\" aria-label=\"Write skills\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if permissions.ReadMemories {
+		if permissions.WriteSkills {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_memories\" aria-label=\"Write memories\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, " onchange=\"var global = this.form.querySelector('[data-global-skill-switch]'); global.disabled = !this.checked; if (!this.checked) { global.checked = false; this.form.elements.allow_global_skill_writes.value = 'off'; }\"></td></tr><tr><th scope=\"row\" class=\"text-sm font-medium\">Memories</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_memories\" aria-label=\"Read memories\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if permissions.WriteMemories {
+		if permissions.ReadMemories {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "></td></tr><tr><th scope=\"row\"><span title=\"Allows changes to skills shared across projects. Requires Write skills.\">Allow global skill writes ⓘ</span></th><td></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" data-global-skill-switch aria-label=\"Allow global skill writes\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_memories\" aria-label=\"Write memories\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if permissions.WriteSkills && permissions.AllowGlobalSkillWrites {
+		if permissions.WriteMemories {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if !permissions.WriteSkills {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, " disabled")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "></td></tr><tr><th scope=\"row\" class=\"text-sm font-medium\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Allow global skill writes ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = projectPermissionHelp("Allow global skill writes", "Allows changes to skills shared across projects. Requires Write skills.").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "</span></th><td></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" data-global-skill-switch aria-label=\"Allow global skill writes\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if permissions.WriteSkills && permissions.AllowGlobalSkillWrites {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, " onchange=\"this.form.elements.allow_global_skill_writes.value = this.checked ? 'on' : 'off'\"></td></tr></tbody></table><input type=\"hidden\" name=\"allow_global_skill_writes\" value=\"")
+		if !permissions.WriteSkills {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, " disabled")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, " onchange=\"this.form.elements.allow_global_skill_writes.value = this.checked ? 'on' : 'off'\"></td></tr></tbody></table><input type=\"hidden\" name=\"allow_global_skill_writes\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1019,7 +1043,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "\"></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "\"></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1032,6 +1056,61 @@ func projectGlobalSkillWriteValue(permissions models.SkillMemoryPermissions) str
 		return "on"
 	}
 	return "off"
+}
+
+func projectPermissionHelp(label, help string) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var44 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var44 == nil {
+			templ_7745c5c3_Var44 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<button type=\"button\" class=\"btn btn-ghost btn-circle btn-xs shrink-0\" data-model-help=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var45 string
+		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(help)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 721, Col: 94}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "\" aria-label=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var46 string
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue("About " + label)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 721, Col: 126}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path stroke-linecap=\"round\" d=\"M12 11v6\"></path><path stroke-linecap=\"round\" d=\"M12 7h.01\"></path></svg></button>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
 }
 
 var _ = templruntime.GeneratedTemplate
