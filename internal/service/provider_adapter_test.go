@@ -1312,33 +1312,6 @@ func TestProviderContextCompactionFallback_NativeFailureFallsBackAndCachesUnsupp
 	}
 }
 
-func TestProviderContextCompactionFallback_LastResortTruncationAfterStrategiesFail(t *testing.T) {
-	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
-	var requests []llmcontracts.AgentRequest
-	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		requests = append(requests, req)
-		if req.Operation == llmcontracts.OperationDirect {
-			return llmcontracts.AgentResult{}, fmt.Errorf("summary authentication failed")
-		}
-		if len(requests) == 3 {
-			return llmcontracts.AgentResult{Output: "truncated ok"}, nil
-		}
-		return llmcontracts.AgentResult{}, fmt.Errorf("context length exceeded")
-	})
-	history := make([]models.Execution, 25)
-	for i := range history {
-		history[i] = models.Execution{PromptSent: fmt.Sprintf("prompt-%02d", i), Output: "out", Status: models.ExecCompleted}
-	}
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 100000}, ChatHistory: history}
-	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
-	if err != nil || res.Output != "truncated ok" {
-		t.Fatalf("result=%#v err=%v", res, err)
-	}
-	if len(requests) != 3 || len(requests[2].ChatHistory) != 20 || requests[2].ChatHistory[0].PromptSent != "prompt-05" {
-		t.Fatalf("last resort request = %#v", requests)
-	}
-}
-
 func TestProviderContextCompactionFallback_PreservesReplayAndAuthorizationBoundary(t *testing.T) {
 	history := []models.Execution{{
 		PromptSent: "inspect tool output",
@@ -2273,11 +2246,11 @@ func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
 		b.ReportMetric(float64(len(req.ChatHistory[0].PromptSent)), "history_bytes/op")
 	})
 
-	b.Run("last_resort_truncation", func(b *testing.B) {
+	b.Run("summary_failure", func(b *testing.B) {
 		svc := &LLMService{}
 		calls := 0
 		adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-			phase := calls % 3
+			phase := calls % 2
 			calls++
 			if phase == 0 {
 				return llmcontracts.AgentResult{}, errors.New("context length exceeded")
@@ -2299,8 +2272,8 @@ func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
-				b.Fatal(err)
+			if _, err := svc.callProviderWithCompaction(adapter, req); !llmcontracts.ErrorIs(err, llmcontracts.ErrorLocalCompactionFailed) {
+				b.Fatalf("expected summary failure, got %v", err)
 			}
 		}
 		b.StopTimer()

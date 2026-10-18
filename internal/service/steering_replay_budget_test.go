@@ -28,10 +28,11 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	require.Equal(t, replay, loaded.ChatHistory[0].ReplayMessages)
 	require.Greater(t, calculateRequestBudget(loaded).HistoryTokens, before.HistoryTokens+40000)
 	require.Nil(t, req.ChatHistory[0].ReplayMessages, "loading must not mutate caller history")
-	trimmed := historyWithinRequestBudget(loaded, loaded.ChatHistory)
-	require.Len(t, trimmed, 1)
-	require.Empty(t, trimmed[0].ReplayMessages)
-	require.Equal(t, "small prompt", trimmed[0].PromptSent)
+	_, err = svc.localSummaryCompaction(providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		t.Fatal("must not send when no summary history can fit")
+		return llmcontracts.AgentResult{}, nil
+	}), loaded, loaded.ChatHistory)
+	require.True(t, llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible))
 	// The actual provider entry point must count persisted replay, not just
 	// the small prompt supplied by its caller.
 	guarded := req
@@ -67,9 +68,11 @@ func TestOpenAIRequestBudgetUsesEffectiveReplay(t *testing.T) {
 	canonical.ChatHistory = []models.Execution{latest}
 	require.Equal(t, budget, calculateRequestBudget(canonical))
 	require.Equal(t, estimateModelVisibleRequestTokens(req), estimateModelVisibleRequestTokens(canonical))
-	trimmed := historyWithinRequestBudget(req, req.ChatHistory)
-	require.Len(t, trimmed, 1)
-	require.Equal(t, latest, trimmed[0], "do not truncate an image checkpoint that fits")
+	input, err := summaryHistoryInput(req.Agent.Provider, req.ChatHistory)
+	require.NoError(t, err)
+	expected, err := summaryHistoryInput(req.Agent.Provider, canonical.ChatHistory)
+	require.NoError(t, err)
+	require.Equal(t, expected, input, "keep the effective image checkpoint for summarization")
 }
 
 func TestAnthropicEnvironmentReplayLoadedBeforeBudget(t *testing.T) {

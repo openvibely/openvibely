@@ -118,23 +118,18 @@ func TestSummaryReplacementPreservesOversizedSummaryAcrossProviders(t *testing.T
 	}
 }
 
-func TestSummaryRetriesTransientFailureWithoutChangingHistory(t *testing.T) {
+func TestSummaryReturnsExhaustedClientFailureWithoutRetry(t *testing.T) {
 	req := llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 20000}}
 	history := []models.Execution{{PromptSent: "request", Output: "completed", Status: models.ExecCompleted}}
 	calls := 0
-	var first string
 	summary, err := (&LLMService{}).localSummaryCompaction(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		calls++
-		if calls == 1 {
-			first = summaryInputText(r.SummaryInput)
-			return llmcontracts.AgentResult{}, io.ErrUnexpectedEOF
-		}
-		require.Equal(t, first, summaryInputText(r.SummaryInput))
-		return llmcontracts.AgentResult{Output: "summary"}, nil
+		return llmcontracts.AgentResult{}, io.ErrUnexpectedEOF
 	}), req, history)
-	require.NoError(t, err)
-	require.Equal(t, "summary", summary)
-	require.Equal(t, 2, calls)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.True(t, llmcontracts.ErrorIs(err, llmcontracts.ErrorLocalCompactionFailed))
+	require.Empty(t, summary)
+	require.Equal(t, 1, calls, "the client owns transient retries")
 	ctx, cancel := context.WithCancel(context.Background())
 	req.Ctx = ctx
 	calls = 0
@@ -145,6 +140,77 @@ func TestSummaryRetriesTransientFailureWithoutChangingHistory(t *testing.T) {
 	}), req, history)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, 1, calls)
+}
+
+func TestSummaryFailureStopsCompactionAcrossProviders(t *testing.T) {
+	for _, agent := range []models.LLMConfig{
+		{Provider: models.ProviderOpenAI, Model: "gpt-6-sol"},
+		{Provider: models.ProviderAnthropic, Model: "claude-opus-5-5"},
+		{Provider: models.ProviderOpenAICompatible, Model: "test"},
+		{Provider: models.ProviderOllama, Model: "test"},
+	} {
+		agent.AuthMethod = models.AuthMethodAPIKey
+		agent.ContextWindow = 200000
+		for _, path := range []string{"proactive", "context_overflow", "native_failure"} {
+			if path == "native_failure" && !providerSupportsNativeCompaction(agent) {
+				continue
+			}
+			for _, failure := range []string{"exhausted_client_retries", "authentication", "empty_summary", "overflow_exhausted"} {
+				t.Run(string(agent.Provider)+"/"+path+"/"+failure, func(t *testing.T) {
+					req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "continue", Agent: agent, ChatHistory: []models.Execution{{PromptSent: "request", Output: "completed", Status: models.ExecCompleted}}}
+					original, err := json.Marshal(req.ChatHistory)
+					require.NoError(t, err)
+					wantGenerationCalls := 1
+					if path == "proactive" {
+						req.ContextTokenEstimate = 190000
+						req.DisableNativeCompaction = true
+						wantGenerationCalls = 0
+					}
+					generationCalls, summaryCalls, previousInputSize := 0, 0, 0
+					cause := io.ErrUnexpectedEOF
+					if failure == "authentication" {
+						cause = errors.New("authentication failed")
+					}
+					_, err = (&LLMService{}).callProviderWithCompaction(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+						if r.Operation != llmcontracts.OperationDirect {
+							generationCalls++
+							require.LessOrEqual(t, generationCalls, wantGenerationCalls, "must not resume with truncated history")
+							if path == "native_failure" {
+								return llmcontracts.AgentResult{}, errors.New("pre-turn compaction: failed")
+							}
+							return llmcontracts.AgentResult{}, errors.New("context length exceeded")
+						}
+						summaryCalls++
+						if failure == "overflow_exhausted" {
+							if previousInputSize > 0 {
+								require.Less(t, len(r.SummaryInput), previousInputSize)
+							}
+							previousInputSize = len(r.SummaryInput)
+							return llmcontracts.AgentResult{}, errors.New("context length exceeded")
+						}
+						if failure == "empty_summary" {
+							return llmcontracts.AgentResult{}, nil
+						}
+						return llmcontracts.AgentResult{}, cause
+					}), req)
+					if failure == "overflow_exhausted" {
+						require.True(t, llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible), "%v", err)
+						require.Greater(t, summaryCalls, 1)
+					} else {
+						require.True(t, llmcontracts.ErrorIs(err, llmcontracts.ErrorLocalCompactionFailed), "%v", err)
+						require.Equal(t, 1, summaryCalls, "the client owns transient retries")
+						if failure != "empty_summary" {
+							require.ErrorIs(t, err, cause)
+						}
+					}
+					require.Equal(t, wantGenerationCalls, generationCalls)
+					after, err := json.Marshal(req.ChatHistory)
+					require.NoError(t, err)
+					require.JSONEq(t, string(original), string(after))
+				})
+			}
+		}
+	}
 }
 
 func TestSummaryRestoredContextRefreshesOrKeepsSavedReferences(t *testing.T) {

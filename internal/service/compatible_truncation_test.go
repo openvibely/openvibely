@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
@@ -17,7 +16,7 @@ import (
 	"testing"
 )
 
-func TestTruncatedImagesStayOutOfCompatibleProviderRequest(t *testing.T) {
+func TestSummaryTrimmedImagesStayOutOfCompatibleProviderRequest(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	ctx := context.Background()
 	stores := teststores.New(t).Stores
@@ -29,7 +28,7 @@ func TestTruncatedImagesStayOutOfCompatibleProviderRequest(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		blocks = append(blocks, map[string]any{"type": "image_url", "image_url": map[string]any{"url": fmt.Sprintf("data:image/png;base64,IMAGE%d", i)}})
 	}
-	raw, err := json.Marshal([]map[string]any{{"role": "user", "content": blocks}})
+	raw, err := json.Marshal([]map[string]any{{"role": "user", "content": blocks}, {"role": "user", "content": "inspect the images"}})
 	require.NoError(t, err)
 	execution.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}
 	require.NoError(t, stores.Executions.ReplaceReasoningReplay(ctx, execution.ID, "", execution.ReplayMessages))
@@ -43,13 +42,15 @@ func TestTruncatedImagesStayOutOfCompatibleProviderRequest(t *testing.T) {
 	defer server.Close()
 	req := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "continue", Followup: true, DisableTools: true, Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", PresetSlug: "vllm", BaseURL: server.URL + "/v1", Model: "test", ContextWindow: 50000}, ChatHistory: []models.Execution{execution}}
 	a := compatible.New(stores.Executions, nil)
-	_, err = (&LLMService{}).callProviderWithLastResortTruncation(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		require.Empty(t, r.ChatHistory[0].ReplayMessages, "budget layer should have discarded oversized images")
+	_, err = (&LLMService{}).localSummaryCompaction(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		input, err := json.Marshal(r.SummaryInput)
+		require.NoError(t, err)
+		require.NotContains(t, string(input), "data:image/png")
 		return a.Call(r.Ctx, r, t.TempDir())
-	}), req, errors.New("summary failed"))
+	}), req, req.ChatHistory)
 	require.NoError(t, err)
 	require.Contains(t, body, "inspect the images")
-	require.Contains(t, body, "continue")
+	require.Contains(t, body, "summar")
 	if strings.Contains(body, "data:image/png") {
 		t.Fatalf("provider request reloaded %d trimmed image payloads", strings.Count(body, "data:image/png"))
 	}
