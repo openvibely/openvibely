@@ -59,10 +59,22 @@ func TestMainModelKnowledgeChatAndTaskPermissions(t *testing.T) {
 			}
 			require.Contains(t, call("skill_view", `{"handle":"documents"}`, false), "Document editing instructions")
 			require.Contains(t, call("memory_view", `{"handle":"chat_memory.md"}`, false), "durable fact")
-			for _, name := range []string{"skill_manage", "skill_import", "agent_skill_manage"} {
+			for _, name := range []string{"skill_import", "agent_skill_manage"} {
 				require.False(t, rt.HasDefinition(name))
 				call(name, `{}`, true)
 			}
+			require.True(t, rt.HasDefinition("skill_manage"))
+			for _, body := range []string{"First instructions", "Corrected instructions"} {
+				input, marshalErr := json.Marshal(map[string]any{"action": "create", "declaration": "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: reusable\n  scope: project\n---\n" + body})
+				require.NoError(t, marshalErr)
+				call("skill_manage", string(input), false)
+				require.Contains(t, call("skill_view", `{"handle":"reusable"}`, false), body)
+			}
+			call("skill_manage", `{"action":"archive","handle":"reusable"}`, false)
+			call("skill_view", `{"handle":"reusable"}`, true)
+			input, marshalErr := json.Marshal(map[string]any{"action": "create", "scope": "global", "declaration": "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: escaped\n---\nForbidden"})
+			require.NoError(t, marshalErr)
+			call("skill_manage", string(input), true)
 			require.Equal(t, !chat, rt.HasDefinition("memory_save"))
 			call("memory_save", `{"handle":"preference.md","content":"Use concise output","summary":"Output preference"}`, chat)
 			if !chat {
@@ -149,7 +161,7 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 			require.Equal(t, []string{history[0], managedcontext.Text(turnCtx), history[2], history[3]}, updated)
 			require.Equal(t, p.ReadSkills, strings.Contains(updated[1], "documents"), "disabled skill index must leave history")
 			require.Equal(t, p.ReadMemories, strings.Contains(updated[1], "chat_memory.md"), "disabled memory index must leave history")
-			for name, allowed := range map[string]bool{"skill_view": p.ReadSkills, "memory_view": p.ReadMemories, "memory_save": !chat && p.WriteMemories, "memory_delete": !chat && p.WriteMemories, "skill_manage": false} {
+			for name, allowed := range map[string]bool{"skill_view": p.ReadSkills, "memory_view": p.ReadMemories, "memory_save": !chat && p.WriteMemories, "memory_delete": !chat && p.WriteMemories, "skill_manage": p.WriteSkills} {
 				require.Equal(t, allowed, rt.HasDefinition(name), "mask=%d chat=%t tool=%s", mask, chat, name)
 				if !allowed {
 					_, handled, isErr, err := rt.Executor(ctx, name, json.RawMessage(`{}`))
@@ -162,7 +174,7 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 			require.True(t, managedFileOperationAllowed(ctx, stores.Projects, task, chat, nil, "edit_file", json.RawMessage(`{"file_path":"report.docx"}`)))
 			require.False(t, managedFileOperationAllowed(ctx, stores.Projects, task, chat, nil, "write_file", json.RawMessage(`{"file_path":".openvibely/memories/topic.md"}`)))
 		}
-		// Scheduled maintenance obeys the same project choices, with no skill writers in task followups.
+		// Scheduled maintenance obeys project choices; followups require explicit tool grants.
 		agent := &models.Agent{Enabled: true, SystemKind: models.AgentSystemKindSkillCurator}
 		scheduled := task
 		scheduled.Category = models.CategoryScheduled
@@ -200,6 +212,17 @@ func TestManagedKnowledgeAssignedAgentGrantsAndIndexRefresh(t *testing.T) {
 	require.True(t, rt.HasDefinition("memory_view"))
 	require.True(t, rt.HasDefinition("memory_save"))
 	require.False(t, rt.HasDefinition("memory_delete"))
+	require.False(t, rt.HasDefinition("skill_manage"))
+	agent.Tools = append(agent.Tools, "skill_manage")
+	require.NoError(t, stores.Agents.Update(ctx, agent))
+	require.True(t, rt.HasDefinition("skill_manage"))
+	agent.Tools = []string{"memory_view", "memory_save"}
+	require.NoError(t, stores.Agents.Update(ctx, agent))
+	require.False(t, rt.HasDefinition("skill_manage"))
+	_, skillHandled, skillDenied, skillErr := rt.Executor(ctx, "skill_manage", json.RawMessage(`{"action":"archive","handle":"documents"}`))
+	require.NoError(t, skillErr)
+	require.True(t, skillHandled)
+	require.True(t, skillDenied)
 	_, _, isErr, err := rt.Executor(ctx, "memory_save", json.RawMessage(`{"handle":"new.md","content":"durable fact","summary":"New topic"}`))
 	require.NoError(t, err)
 	require.False(t, isErr)
