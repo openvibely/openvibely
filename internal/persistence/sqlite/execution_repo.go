@@ -1087,7 +1087,8 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 // Checkpoint replay is private persistence data, excluded from public Execution JSON.
 type checkpointExecution struct {
 	models.Execution
-	Replay []models.ExecutionReplayMessage `json:"replay_messages,omitempty"`
+	Replay              []models.ExecutionReplayMessage `json:"replay_messages,omitempty"`
+	RetainedUserMessage json.RawMessage                 `json:"retained_user_message,omitempty"`
 }
 
 func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
@@ -1096,7 +1097,7 @@ func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, chec
 	}
 	history := make([]checkpointExecution, len(checkpoint.History))
 	for i, execution := range checkpoint.History {
-		history[i] = checkpointExecution{Execution: execution, Replay: execution.ReplayMessages}
+		history[i] = checkpointExecution{Execution: execution, Replay: execution.ReplayMessages, RetainedUserMessage: execution.RetainedUserMessage}
 	}
 	historyJSON, err := json.Marshal(history)
 	if err != nil {
@@ -1151,6 +1152,7 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 	for i, execution := range history {
 		checkpoint.History[i] = execution.Execution
 		checkpoint.History[i].ReplayMessages = execution.Replay
+		checkpoint.History[i].RetainedUserMessage = execution.RetainedUserMessage
 	}
 	return &checkpoint, nil
 }

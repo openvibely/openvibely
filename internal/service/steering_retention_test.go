@@ -32,7 +32,7 @@ func TestCompactionRetainsNativeUserInstructionsSeparately(t *testing.T) {
 		require.Empty(t, compacted[i].ReplayMessages)
 		require.Empty(t, compacted[i].Output)
 	}
-	require.Contains(t, compacted[4].Output, "work completed")
+	require.Contains(t, compacted[4].PromptSent, "work completed")
 	require.Len(t, history[1].ReplayMessages, 3, "do not mutate original replay")
 }
 
@@ -53,5 +53,5 @@ func TestNativeUserRetentionAppliesNewestFirstBudget(t *testing.T) {
 func TestNonNativeRetentionRemainsUnchanged(t *testing.T) {
 	history := []models.Execution{{ID: "old", PromptSent: "original", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"messages":[{"role":"user","content":"provider-specific replay"}]}`}}}}
 	retained := retainedUserMessageHistory(history, 100)
-	require.Equal(t, []models.Execution{{PromptSent: "original", Status: models.ExecCompleted}}, retained)
+	require.Equal(t, []models.Execution{{ID: "old", ContextKind: "user", PromptSent: "original", Status: models.ExecCompleted}}, retained)
 }

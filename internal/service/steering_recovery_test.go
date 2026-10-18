@@ -35,7 +35,7 @@ func TestMidTurnCompactionFailureDoesNotRestartSteeringTurn(t *testing.T) {
 			// The same terminal policy applies if failure occurs during an
 			// otherwise safe pre-turn compaction fallback's model retry.
 			calls = 0
-			_, err = svc.callCompactedRetryOrLastResort(adapter, req, req, errors.New("pre-turn compaction"))
+			_, err = svc.callCompactedRetry(adapter, req, req, errors.New("pre-turn compaction"))
 			require.ErrorIs(t, err, failure)
 			require.Equal(t, 1, calls)
 		})
@@ -44,7 +44,7 @@ func TestMidTurnCompactionFailureDoesNotRestartSteeringTurn(t *testing.T) {
 
 func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 	for _, secondOverflow := range []bool{false, true} {
-		t.Run(map[bool]string{false: "summary retry", true: "last resort retry"}[secondOverflow], func(t *testing.T) {
+		t.Run(map[bool]string{false: "summary retry", true: "compacted retry overflow"}[secondOverflow], func(t *testing.T) {
 			ctx := llmcontracts.WithInitialSteeringCommit(context.Background(), func(context.Context, []any) error { return nil })
 			ctx = llmcontracts.WithLocalSteeringCallback(ctx, func(context.Context) (llmcontracts.LocalSteeringInput, error) {
 				return llmcontracts.LocalSteeringInput{Text: "new steer", Commit: func(context.Context, []any) error { return nil }}, nil
@@ -77,18 +77,15 @@ func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 					require.Empty(t, req.Message, "do not replay the consumed prompt")
 					require.True(t, llmcontracts.HistoryContinuationFromContext(req.Ctx))
 					require.Contains(t, summaryHistoryText(t, req.Agent.Provider, req.ChatHistory), "new steer")
-					require.Len(t, req.ChatHistory, 3)
+					require.Len(t, req.ChatHistory, 4)
 					require.Equal(t, "late steer", req.ChatHistory[0].PromptSent)
-					require.Equal(t, "new steer", req.ChatHistory[1].PromptSent)
-					require.NotContains(t, req.ChatHistory[2].Output, "steer")
+					require.Equal(t, "new steer", req.ChatHistory[2].PromptSent)
+					require.NotContains(t, req.ChatHistory[3].PromptSent, "steer")
 					if secondOverflow {
 						commit := llmcontracts.InitialSteeringCommitFromContext(req.Ctx)
 						require.NoError(t, commit(req.Ctx, []any{map[string]any{"type": "message", "role": "assistant", "content": "retry progress"}}))
 						return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "retry", errors.New("context length exceeded"))
 					}
-				case 4:
-					require.Contains(t, summaryHistoryText(t, req.Agent.Provider, req.ChatHistory), "retry progress")
-					require.Empty(t, req.Message)
 				default:
 					t.Fatal("unexpected recovery request")
 				}
@@ -96,8 +93,12 @@ func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 			})
 			svc := &LLMService{}
 			_, err := svc.callProviderWithCompaction(adapter, req)
-			require.NoError(t, err)
-			require.Equal(t, map[bool]int{false: 3, true: 4}[secondOverflow], calls)
+			if secondOverflow {
+				require.True(t, recognizedContextLengthError(err))
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, 3, calls)
 		})
 	}
 }

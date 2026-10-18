@@ -11,6 +11,7 @@ import (
 )
 
 func summaryHistoryInput(provider models.LLMProvider, history []models.Execution) ([]json.RawMessage, error) {
+	history = normalizeSummaryReplay(provider, history)
 	var messages any
 	switch provider {
 	case models.ProviderOpenAI:

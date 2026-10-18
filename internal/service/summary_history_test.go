@@ -109,8 +109,8 @@ func TestSummaryOverflowRetriesMessagesWithinOneExecution(t *testing.T) {
 	}), req)
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
-	require.Equal(t, "retain this instruction", result.ChatHistory[0].PromptSent)
-	require.Contains(t, result.ChatHistory[len(result.ChatHistory)-1].Output, "recent work summary")
+	require.Equal(t, "retain this instruction", result.ChatHistory[1].PromptSent)
+	require.Contains(t, result.ChatHistory[len(result.ChatHistory)-1].PromptSent, "recent work summary")
 }
 
 func TestSummaryExhaustionAndNonContextErrors(t *testing.T) {

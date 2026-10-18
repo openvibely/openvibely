@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -65,7 +66,7 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 	var users []models.Execution
 	for _, raw := range HistoryInputItems(history) {
 		item, ok := raw.(map[string]any)
-		if !ok || item["type"] != "message" || item["role"] != "user" {
+		if !ok || (item["type"] != nil && item["type"] != "message") || item["role"] != "user" {
 			continue
 		}
 		var text string
@@ -85,10 +86,26 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 			}
 			text = strings.Join(parts, "\n")
 		}
-		if strings.TrimSpace(text) != "" {
+		if strings.TrimSpace(text) != "" && !llmprompt.IsApplicationContext(text) && !llmprompt.IsCompactionContext(text) {
 			// No execution ID or replay: these are retained user messages, not
 			// database executions whose full history should be hydrated again.
-			users = append(users, models.Execution{PromptSent: text, Status: models.ExecCompleted})
+			// Preserve text annotations and provider message IDs. Drop media from
+			// retained user context, as it is not part of the 20k text budget.
+			retained := make(map[string]any, len(item))
+			for key, value := range item {
+				retained[key] = value
+			}
+			if parts, ok := item["content"].([]any); ok {
+				for _, value := range parts {
+					part, ok := value.(map[string]any)
+					if !ok || part["type"] != "input_text" {
+						retained["content"] = []any{map[string]any{"type": "input_text", "text": text}}
+						break
+					}
+				}
+			}
+			raw, _ := json.Marshal(retained)
+			users = append(users, models.Execution{PromptSent: text, Status: models.ExecCompleted, ContextKind: "user", RetainedUserMessage: raw})
 		}
 	}
 	return users
