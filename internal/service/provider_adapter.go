@@ -18,7 +18,6 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/httpretry"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/contextlimits"
@@ -994,7 +993,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
 		if compactErr != nil {
 			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d failure_category=%s", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, contextFailureCategory(compactErr))
-			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
+			return llmcontracts.AgentResult{}, compactErr
 		}
 		s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
 		req = compacted
@@ -1061,7 +1060,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, compactedReq, err)
 		if compactErr != nil {
 			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
-			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
+			return llmcontracts.AgentResult{}, compactErr
 		}
 		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
 		applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
@@ -1071,7 +1070,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req, err)
 		if compactErr != nil {
 			applog.Infof("[agent-svc] context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
-			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
+			return llmcontracts.AgentResult{}, compactErr
 		}
 		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
 		applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
@@ -1329,50 +1328,6 @@ func (s *LLMService) callCompactedRetry(adapter ProviderAdapter, originalReq, co
 	return res, err
 }
 
-func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapter, req llmcontracts.AgentRequest, cause error) (llmcontracts.AgentResult, error) {
-	// Claude ends the turn when compaction recovery fails or is exhausted.
-	// Dropping tool results and resuming generation can repeat completed work.
-	if req.Agent.Provider == models.ProviderAnthropic {
-		return llmcontracts.AgentResult{}, cause
-	}
-	req = restoreCurrentSteeringForRecovery(req)
-	budget := calculateRequestBudget(req)
-	truncated, externalized, cleanupArtifact, prepErr := s.preparePendingInputWithBudget(req, budget)
-	if prepErr != nil {
-		logContextFailureWithBudget(req, prepErr, budget)
-		return llmcontracts.AgentResult{}, prepErr
-	}
-	defer cleanupArtifact()
-	if externalized {
-		budget = calculateRequestBudget(truncated)
-	}
-	truncated.ForceNativeCompaction = false
-	truncated.Agent.ForceNativeCompaction = false
-	truncated.DisableNativeCompaction = true
-	truncated.Agent.DisableNativeCompaction = true
-	truncated.ChatHistory = retainCompleteToolGroups(req.ChatHistory, historyWithinRequestBudget(truncated, llmprompt.LimitChatHistory(req.ChatHistory)))
-	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && len(truncated.ChatHistory) == 0 {
-		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "steering recovery", fmt.Errorf("current conversation cannot fit without discarding consumed steering and tool results: %w", cause))
-	}
-	budget = calculateRequestBudget(truncated)
-	if err := ensureRequestFitsWithBudget(truncated, budget, "last-resort request"); err != nil {
-		combined := llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "last-resort request", fmt.Errorf("%v; original recovery error: %w", err, cause))
-		logContextFailureWithBudget(truncated, combined, budget)
-		return llmcontracts.AgentResult{}, combined
-	}
-	logContextDecisionWithBudget(req.ChatHistory, truncated, "last_resort", externalized, cause, budget)
-	applog.Infof("[agent-svc] using token-budgeted last-resort truncation provider=%s model=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, contextFailureCategory(cause))
-	res, err := adapter.Call(truncated)
-	recordProviderRecovery(truncated, err)
-	err = categorizeProviderError(err)
-	if err != nil {
-		logContextFailureWithBudget(truncated, err, budget)
-	} else {
-		s.persistNativeCompactionCheckpoint(truncated, res)
-	}
-	return res, err
-}
-
 // Hydrate once at the budget boundary, never after history has been trimmed.
 func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
 	if (req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOpenAICompatible && req.Agent.Provider != models.ProviderOllama) || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
@@ -1409,54 +1364,6 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 		}
 	}
 	return req, nil
-}
-
-func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
-	if req.Agent.Provider == models.ProviderOpenAI {
-		history = llmopenai.EffectiveReplayHistory(history)
-	}
-	base := req
-	base.ChatHistory = nil
-	baseBudget := calculateRequestBudget(base)
-	remaining := baseBudget.SafeInputLimit - baseBudget.TotalInputTokens()
-	if remaining <= 0 {
-		return nil
-	}
-	out := make([]models.Execution, 0, len(history))
-	for i := len(history) - 1; i >= 0 && remaining > 0; i-- {
-		exec := history[i]
-		tokens := estimateHistoryTokens(req.Agent.Provider, []models.Execution{exec})
-		if tokens > remaining {
-			// Tool exchanges must be removed whole. Plain user text can still
-			// be retained after dropping oversized image attachments.
-			hasTools := false
-			for _, replay := range exec.ReplayMessages {
-				if len(replayToolIDs(replay.TranscriptJSON)) > 0 {
-					hasTools = true
-					break
-				}
-			}
-			if hasTools {
-				continue
-			}
-			exec.Output = ""
-			exec.ErrorMessage = ""
-			exec.ReasoningContent = ""
-			exec.ReplayMessages = nil
-			exec.RetainedUserMessage = nil
-			exec.PromptSent = truncateMiddleByEstimatedTokens(exec.PromptSent, remaining)
-			tokens = estimateHistoryTokens(req.Agent.Provider, []models.Execution{exec})
-		}
-		if tokens <= 0 || tokens > remaining {
-			continue
-		}
-		out = append(out, exec)
-		remaining -= tokens
-	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
-	}
-	return out
 }
 
 func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest, triggerErrors ...error) (compactedRequest llmcontracts.AgentRequest, compactErr error) {
@@ -1551,7 +1458,6 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.Agent.DisableNativeCompaction = true
 	summaryReq.Agent.ForceNativeCompaction = false
 	summaryReq.Agent.CompactionThreshold = 0
-	retries := 0
 	for len(summaryReq.SummaryInput) > 0 {
 		if err := summaryReq.Ctx.Err(); err != nil {
 			return "", err
@@ -1575,27 +1481,13 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 					return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "summary request", err)
 				}
 				summaryReq.SummaryInput = remaining
-				retries = 0
 				continue
 			}
 			if summaryReq.Ctx.Err() != nil {
 				return "", summaryReq.Ctx.Err()
 			}
-			if retries < httpretry.StreamTurnMaxRetries && (httpretry.IsRetryableError(err) || llmcontracts.ErrorIs(err, llmcontracts.ErrorTransportFailure)) {
-				retries++
-				delay := httpretry.StreamTurnRetryDelay(retries, err)
-				if delay <= httpretry.DefaultMaxBackoff {
-					applog.Infof("[agent-svc] retrying summary request attempt=%d/%d failure_category=%s", retries, httpretry.StreamTurnMaxRetries, contextFailureCategory(err))
-					timer := time.NewTimer(delay)
-					select {
-					case <-summaryReq.Ctx.Done():
-						timer.Stop()
-						return "", summaryReq.Ctx.Err()
-					case <-timer.C:
-					}
-					continue
-				}
-			}
+			// Provider clients own transient retries. A returned failure ends
+			// compaction; only context overflow retries with a smaller request.
 			return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", err)
 		}
 		summary := strings.TrimSpace(res.TextOnlyOutput)

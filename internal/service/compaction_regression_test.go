@@ -3,45 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
-	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"strings"
 	"testing"
 )
 
-func TestSummaryRegressionFallbackDoesNotOrphanToolResult(t *testing.T) {
-	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
-		t.Run(string(provider), func(t *testing.T) {
-			req := trackSteeringRecovery(llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Agent: models.LLMConfig{Provider: provider, ContextWindow: 200000}})
-			rows := []any{map[string]any{"role": "user", "content": "inspect"}, map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": "call1", "type": "function", "function": map[string]any{"name": "read_file", "arguments": "{}"}}}}, map[string]any{"role": "tool", "tool_call_id": "call1", "content": "FILE_CONTENT"}}
-			for i := 0; i < 19; i++ {
-				role := "user"
-				if i%2 == 1 {
-					role = "assistant"
-				}
-				rows = append(rows, map[string]any{"role": role, "content": "recent message"})
-			}
-			raw, _ := json.Marshal(rows)
-			recordProviderRecovery(req, &openaiclient.ConversationError{Err: errors.New("context too long"), MessagesJSON: string(raw)})
-			_, err := (&LLMService{}).callProviderWithLastResortTruncation(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-				input, e := summaryHistoryInput(provider, r.ChatHistory)
-				if e != nil {
-					t.Fatal(e)
-				}
-				encoded, _ := json.Marshal(input)
-				if strings.Contains(string(encoded), `"tool_call_id":"call1"`) && !strings.Contains(string(encoded), `"tool_calls"`) {
-					t.Errorf("last resort sent %d messages starting with orphan: %s", len(input), input[0])
-				}
-				return llmcontracts.AgentResult{Output: "done"}, nil
-			}), req, errors.New("summary unavailable"))
-			if err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
 func TestSummaryRegressionAnthropicPartialOutputSurvivesStructuredReplay(t *testing.T) {
 	history := []models.Execution{{Status: models.ExecFailed, PromptSent: "inspect", Output: "PARTIAL_PROGRESS_ONLY_IN_PERSISTED_OUTPUT", ErrorMessage: "stream disconnected", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"anthropic_execution_environment":"<openvibely_execution_environment>\nsaved","messages":[{"role":"user","content":"inspect"},{"role":"assistant","content_blocks":[{"type":"tool_use","id":"a","name":"read_file","input":{}}]},{"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"a","content":"file"}]}]}`}}}}
 	_, err := (&LLMService{}).localSummaryCompaction(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -112,13 +79,19 @@ func TestSummaryProviderSwitchPreservesAllReplayTurns(t *testing.T) {
 	}
 }
 
-func TestSummaryTruncationKeepsCompleteExchangeInNewerCheckpoint(t *testing.T) {
+func TestSummaryKeepsCompleteExchangeInNewerCheckpoint(t *testing.T) {
 	pair := `{"type":"function_call","call_id":"a","name":"read_file","arguments":"{}"},{"type":"function_call_output","call_id":"a","output":"file content"}`
 	old := models.Execution{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[` + pair + `]}`}}}
 	latest := models.Execution{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[` + pair + `,{"type":"message","role":"user","content":"continue"}]}`}}}
-	retained := retainCompleteToolGroups([]models.Execution{old, latest}, []models.Execution{latest})
-	if len(retained) != 1 {
-		t.Fatal("discarded a complete exchange still present in the newer checkpoint")
+	input, err := summaryHistoryInput(models.ProviderOpenAI, []models.Execution{old, latest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(input) != 3 {
+		t.Fatalf("expected the latest complete checkpoint, got %s", summaryInputText(input))
+	}
+	if !strings.Contains(summaryInputText(input), "file content") {
+		t.Fatal("lost tool result")
 	}
 }
 
