@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
@@ -72,6 +73,16 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 		return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task)).Executor(callCtx, name, input)
 	}
 	tools = append(tools, skillTools)
+	// Main turns can maintain standalone skills only within the current project.
+	if root := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); root != "" {
+		var recorder agentlibrary.MutationRecorder
+		if w.mutationRecorder != nil {
+			recorder = w.mutationRecorder(task)
+		}
+		writers := agentlibrary.SkillMutationTools(agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: root}, nil), recorder)
+		writers.Definitions = writers.Definitions[:1] // skill_manage; importing remains maintenance-only.
+		tools = append(tools, writers)
+	}
 	var memoryHandles []string
 	if permissions.ReadMemories && w.taskAgentAllowsMemoryView(ctx, task) {
 		memoryIndex := w.cachedKnowledgeMemories(ctx, task)
@@ -96,6 +107,9 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 			p = models.SkillMemoryPermissions{}
 		}
 		text := knowledgeInstructions
+		if p.WriteSkills && (currentAgent == nil || agentExplicitlyAllowsTool(currentAgent, "skill_manage")) {
+			text += "\nUse skill_manage to create or update reusable project skills and their support files, or archive obsolete skills. Use project scope. Reuse existing skills instead of duplicating them; never store secrets or routine chatter."
+		}
 		if p.ReadSkills {
 			text += "\n\n" + w.cachedKnowledgeSkills(callCtx, task).index
 		}
@@ -138,7 +152,10 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 			return p.ReadMemories && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_view"))
 		case "memory_save", "memory_delete":
 			return !chat && p.WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, name))
-		case "skill_manage", "skill_import", "agent_skill_manage", "agent_import":
+		case "skill_manage":
+			maintenance := !chat && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
+			return p.WriteSkills && (maintenance || projectSkillRoot(callCtx, repo, task.ProjectID) != "" && (agent == nil || agentExplicitlyAllowsTool(agent, name)))
+		case "skill_import", "agent_skill_manage", "agent_import":
 			return !chat && p.WriteSkills && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
 		}
 		if agent != nil && agent.SystemKind == models.AgentSystemKindMemoryCurator {
