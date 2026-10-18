@@ -174,10 +174,10 @@ func TestBrowserFunctional_OllamaActiveContextDiscovery(t *testing.T) {
   field('model_ollama_base_url').value='http://different:11434';ollamaEndpointChanged();
   stale.resolve(99999);await wait();expect(display().includes('Not detected'),'stale endpoint response changed detection');
   var edit=document.createElement('button');
-  Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved Ollama',modelProvider:'ollama',modelModel:'not-installed:latest',modelTemperature:'0',modelOllamaBaseUrl:'http://saved:11434',modelContextWindowCap:'65536',modelDefaultMaxTokens:'10000',modelProviderContextWindow:'99999'});
+  Object.assign(edit.dataset,{modelId:'saved',modelName:'Saved Ollama',modelProvider:'ollama',modelModel:'loaded:latest',modelTemperature:'0',modelOllamaBaseUrl:'http://saved:11434',modelContextWindowCap:'65536',modelDefaultMaxTokens:'10000',modelProviderContextWindow:'99999'});
   populateModelEditForm(edit);await wait();
-  expect(field('model_id').value==='not-installed:latest','edit replaced saved model');
-  expect(pendingContext.at(-1).url.includes('not-installed'),'edit did not discover saved model');
+  expect(field('model_id').value==='loaded:latest','edit replaced saved model');
+  expect(pendingContext.at(-1).url.includes('loaded%3Alatest'),'edit did not discover saved model');
   expect(display().includes('Not detected'),'saved budget treated as detection');
   pendingContext.at(-1).resolve(8192);await wait();
   expect(display().includes('8,192'),'edit detection missing');
