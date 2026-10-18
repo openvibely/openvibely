@@ -16,6 +16,14 @@ const (
 	MaxBashTimeoutSeconds     = 600
 )
 
+type fileReadAuthorizationKey struct{}
+
+// WithFileReadAuthorization applies the caller's access policy to files discovered
+// by recursive searches, in addition to authorization of the requested directory.
+func WithFileReadAuthorization(ctx context.Context, allow func(context.Context, string) bool) context.Context {
+	return context.WithValue(ctx, fileReadAuthorizationKey{}, allow)
+}
+
 // Execute runs a local built-in coding tool and returns the output string.
 // It resolves relative paths against workDir.
 func Execute(ctx context.Context, workDir, name string, input json.RawMessage) (string, error) {
@@ -483,6 +491,12 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 			return nil
 		}
 
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if allow, ok := ctx.Value(fileReadAuthorizationKey{}).(func(context.Context, string) bool); ok && !allow(ctx, path) {
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil

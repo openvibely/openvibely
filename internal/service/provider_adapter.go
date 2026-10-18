@@ -900,6 +900,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			agent, _ = s.agentRepo.GetByID(req.Ctx, *turn.task.AgentDefinitionID)
 		}
 		req.Ctx = context.WithValue(req.Ctx, managedWorkDirKey{}, req.WorkDir)
+		req.Ctx = withManagedFileReadAuthorization(req.Ctx, s.projectRepo, turn.task, turn.chat, agent)
 		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, guardManagedTools(req.Ctx, llmcontracts.RuntimeToolsFromContext(req.Ctx), s.projectRepo, turn.task, turn.chat, agent))
 		if !projectManagedPermissions(req.Ctx, s.projectRepo, turn.task.ProjectID).ReadSkills && req.AgentDefinition != nil {
 			definition := *req.AgentDefinition

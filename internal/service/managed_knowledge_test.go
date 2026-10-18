@@ -378,3 +378,37 @@ func TestManagedFileGuardResolvesSymlinkAncestors(t *testing.T) {
 	}
 	require.True(t, managedFileOperationAllowed(ctx, nil, models.Task{}, true, nil, "write_file", json.RawMessage(`{"file_path":"report.md"}`)))
 }
+
+func TestManagedSearchAuthorizesDiscoveredSymlinks(t *testing.T) {
+	root := t.TempDir()
+	for _, library := range []string{"memories", "skills", "agents"} {
+		target := filepath.Join(root, ".openvibely", library, "private.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(target), 0755))
+		require.NoError(t, os.WriteFile(target, []byte("needle private"), 0600))
+		require.NoError(t, os.Symlink(target, filepath.Join(root, library+"-alias.md")))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(root, "public.md"), []byte("needle public"), 0600))
+	require.NoError(t, os.Symlink(filepath.Join(root, "public.md"), filepath.Join(root, "public-alias.md")))
+	input := json.RawMessage(`{"path":".","pattern":"needle"}`)
+	for _, chat := range []bool{true, false} {
+		ctx := context.WithValue(context.Background(), managedWorkDirKey{}, root)
+		// Provider-local default tools execute with the provider request context.
+		ctx = withManagedFileReadAuthorization(ctx, nil, models.Task{}, chat, nil)
+		out, err := agenttools.Execute(ctx, root, "grep_search", input)
+		require.NoError(t, err)
+		require.NotContains(t, out, "private")
+		require.Contains(t, out, "public.md")
+		require.Contains(t, out, "public-alias.md")
+		// Runtime-provided file tools receive the same policy from the executor guard.
+		rt := guardManagedTools(ctx, &llmcontracts.RuntimeTools{Executor: func(c context.Context, name string, args json.RawMessage) (string, bool, bool, error) {
+			out, err := agenttools.Execute(c, root, name, args)
+			return out, true, err != nil, err
+		}}, nil, models.Task{}, chat, nil)
+		out, handled, failed, err := rt.Executor(context.Background(), "grep_search", input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, failed)
+		require.NotContains(t, out, "private")
+		require.Contains(t, out, "public-alias.md")
+	}
+}
