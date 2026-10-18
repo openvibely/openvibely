@@ -5036,7 +5036,8 @@ templ ChatAutoScrollScript() {
 				// Hydration may have rendered sections beyond the boundary into this tail.
 				// Snapshot them before replacing it with only the committed prefix.
 				var thinkingStates = boundary ? Array.from(state.tail.querySelectorAll('details.stream-thinking'), function(d) { return d.open; }) : [];
-				var options = { offset: state.renderOffset, ordinal: state.ordinal };
+				var toolScrollRestorations = [];
+				var options = { offset: state.renderOffset, ordinal: state.ordinal, toolScrollRestorations: toolScrollRestorations };
 				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
 				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
 				if (boundary) {
@@ -5054,9 +5055,13 @@ templ ChatAutoScrollScript() {
 					state.tail._chatToolStateKey = _thinkingStateKey(container);
 					state.tail._chatThinkingOwner = container;
 					if (remainingThinkingStates.length) window._thinkingOpenStates[state.tail._chatStreamStateKey] = remainingThinkingStates;
-					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
+					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal, toolScrollRestorations: toolScrollRestorations });
 				}
-				return rendered !== false && container._incrementalChat === state && state.generation === generation;
+				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
+				// Both the committed prefix and provisional tail must be in the DOM before
+				// restoring scroll positions: scrollTop can force layout of the whole bubble.
+				window.restoreStreamingToolScroll(toolScrollRestorations);
+				return true;
 			};
 			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches, final) {
 				var renderRevision = window.setChatRawContent ? window.setChatRawContent(container, textBuffer || '') : (textBuffer || '');
@@ -5197,6 +5202,11 @@ templ ChatAutoScrollScript() {
 				return true;
 			};
 
+			window.restoreStreamingToolScroll = function(rows) {
+				rows.forEach(function(row) {
+					row.element.scrollTop = row.pinned ? Number.MAX_SAFE_INTEGER : row.scrollTop;
+				});
+			};
 			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options) {
 				// Live callers also pass a terminal boolean when this is their fallback.
 				if (!options || typeof options !== 'object') options = null;
@@ -6063,18 +6073,16 @@ templ ChatAutoScrollScript() {
 
 			// Restore per-tool output scroll positions without synchronously measuring
 			// every tool body. CSS overflow:auto handles non-overflowing bodies.
+			var toolScrollRestorations = options && options.toolScrollRestorations || [];
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
 				var toolID = el.getAttribute('data-tool-render-id') || '';
 				var rowKind = el.getAttribute('data-tool-row') || '';
 				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
-				if (!state || state.pinned) {
-					el.scrollTop = Number.MAX_SAFE_INTEGER;
-					el.setAttribute('data-scroll-pinned', 'true');
-				} else {
-					el.scrollTop = state.scrollTop;
-					el.setAttribute('data-scroll-pinned', 'false');
-				}
+				var pinned = !state || state.pinned;
+				el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false');
+				toolScrollRestorations.push({ element: el, pinned: pinned, scrollTop: state ? state.scrollTop : 0 });
 			});
+			if (!options || !options.toolScrollRestorations) window.restoreStreamingToolScroll(toolScrollRestorations);
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
 				window.convertTaskLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));

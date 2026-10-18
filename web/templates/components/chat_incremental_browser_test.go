@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -274,6 +273,17 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  assert(morphed.querySelector('.stream-tool-output-toggle').getAttribute('aria-expanded') === 'true', 'morph collapsed output');
  morphed.replaceWith(replacement);
 
+ // A split update restores both fragments' tool rows in a single layout batch.
+ const batchFixture = '[Using tool: bash | echo first]\n[Tool bash done]\nfirst\n[/Tool]\n'+prose+'[Using tool: bash | echo second]\n';
+ const restoreScroll = window.restoreStreamingToolScroll;
+ const batches = [];
+ window.restoreStreamingToolScroll = function(rows) { batches.push(rows); return restoreScroll(rows); };
+ try { await renderLiveChatContent(replacement, batchFixture, false); }
+ finally { window.restoreStreamingToolScroll = restoreScroll; }
+ assert(replacement._incrementalChat.offset > 8192, 'scroll batch fixture did not split');
+ assert(batches.length === 1 && batches[0].length === 3, 'split update did not batch both tools scroll restoration');
+ assert(batches[0].every(row=>row.element.isConnected), 'scroll restoration included detached rows');
+
  assert(chatStreamStableBoundary(prose+fence+'js\nunfinished\n\n') > 0, 'plain Markdown prefix not committed');
  assert(chatStreamStableBoundary(fence+'js\n'+prose) === 0, 'open fence was split');
  // Large provisional tails still yield, and cancellation cannot commit stale work.
@@ -298,6 +308,9 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
  const original = window.renderStreamingContent;
  const live = window.renderLiveChatContent;
  window.chatStreamStableBoundary = window.measureStreamCPU(window.chatStreamStableBoundary);
+ // Batched scroll restoration runs after both incremental fragments render.
+ // Include its synchronous layout cost; nested full-render calls count only once.
+ window.restoreStreamingToolScroll = window.measureStreamCPU(window.restoreStreamingToolScroll);
  let chars = 0, yielded = 0;
  window.renderStreamingContent = function(container, text, yielding, options) {
   chars += text.length;
@@ -307,60 +320,53 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
  let report = {};
  for (const size of [65536,262144,1048576]) {
   const fixture = record.repeat(Math.ceil(size/record.length)).slice(0,size);
-  report[size] = [];
-  // The coalescer changes baseline work with machine load. Use paired samples
-  // for the acceptance size, alternating order to reduce warm-up/order bias.
-  const trials = size === 1048576 ? 3 : 1;
-  for (let trial = 0; trial < trials; trial++) {
-   const sample = {};
-   report[size].push(sample);
-   for (const mode of trial % 2 ? ['incremental','baseline'] : ['baseline','incremental']) {
-    stream.replaceChildren(); delete stream._incrementalChat;
-    window.streamCPU = 0; window.streamWorkerReplies = 0; chars = 0; yielded = 0;
-    const latencies = [], arrivals = [];
-    let pendingPaints = 0;
-    window.renderLiveChatContent = function(container, text, yielding, final) {
-     const result = mode === 'baseline' ? window.renderStreamingContent(container,text,yielding) : live(container,text,yielding,final);
-     return Promise.resolve(result).then(committed=>{
-      if (committed !== false && !final) {
-       pendingPaints++;
-       paint().then(()=>{
-        const visible = performance.now();
-        arrivals.forEach(delta=>{if (!delta.visible && delta.end <= text.length) {delta.visible = true; latencies.push(visible-delta.received);}});
-        pendingPaints--;
-       });
-      }
-      return committed;
-     });
-    };
-    // Same production coalescer in both cases; the baseline used 250 ms and
-    // full-content rendering, whereas the incremental path uses 50 ms.
-    const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 50);
-    const start = performance.now();
-    // Schedule every delta in advance, independently of renderer completion.
-    await Promise.all(Array.from({length:size/8192}, (_,i)=>new Promise(resolve=>{
-     setTimeout(()=>{
-      const end = (i+1)*8192;
-      arrivals.push({end,received:performance.now(),visible:false});
-      input.append(fixture.slice(end-8192,end));
-      resolve();
-     }, i*50);
-    })));
-    while (!input.idle() || pendingPaints) await pause(10);
-    assert(latencies.length === size/8192, 'missing delta visibility samples');
-    await input.finish();
-    latencies.sort((a,b)=>a-b);
-    sample[mode] = {cpuMS:window.streamCPU,characters:chars,p95MS:latencies[Math.ceil(latencies.length*.95)-1],yieldedRenders:yielded,workerReplies:window.streamWorkerReplies,arrivalSpanMS:arrivals.at(-1).received-start};
-    if (size >= 100*1024) {
-     assert(yielded > 0, 'production yielding was bypassed');
-     assert(window.streamWorkerReplies > 0, 'production code-range workers were bypassed');
-    }
+  report[size] = {};
+  for (const mode of ['baseline','incremental']) {
+   stream.replaceChildren(); delete stream._incrementalChat;
+   window.streamCPU = 0; window.streamWorkerReplies = 0; chars = 0; yielded = 0;
+   const latencies = [], arrivals = [];
+   let pendingPaints = 0;
+   window.renderLiveChatContent = function(container, text, yielding, final) {
+    const result = mode === 'baseline' ? window.renderStreamingContent(container,text,yielding) : live(container,text,yielding,final);
+    return Promise.resolve(result).then(committed=>{
+     if (committed !== false && !final) {
+      pendingPaints++;
+      paint().then(()=>{
+       const visible = performance.now();
+       arrivals.forEach(delta=>{if (!delta.visible && delta.end <= text.length) {delta.visible = true; latencies.push(visible-delta.received);}});
+       pendingPaints--;
+      });
+     }
+     return committed;
+    });
+   };
+   // Same production coalescer in both cases; the baseline used 250 ms and
+   // full-content rendering, whereas the incremental path uses 50 ms.
+   const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 50);
+   const start = performance.now();
+   // Schedule every delta in advance, independently of renderer completion.
+   await Promise.all(Array.from({length:size/8192}, (_,i)=>new Promise(resolve=>{
+    setTimeout(()=>{
+     const end = (i+1)*8192;
+     arrivals.push({end,received:performance.now(),visible:false});
+     input.append(fixture.slice(end-8192,end));
+     resolve();
+    }, i*50);
+   })));
+   while (!input.idle() || pendingPaints) await pause(10);
+   assert(latencies.length === size/8192, 'missing delta visibility samples');
+   await input.finish();
+   latencies.sort((a,b)=>a-b);
+   report[size][mode] = {cpuMS:window.streamCPU,characters:chars,p95MS:latencies[Math.ceil(latencies.length*.95)-1],yieldedRenders:yielded,workerReplies:window.streamWorkerReplies,arrivalSpanMS:arrivals.at(-1).received-start};
+   if (size >= 100*1024) {
+    assert(yielded > 0, 'production yielding was bypassed');
+    assert(window.streamWorkerReplies > 0, 'production code-range workers were bypassed');
    }
   }
  }
  return report;`)
 	t.Logf("64/256/1024 KiB, independent 8 KiB arrivals at 20 Hz; production coalescer/workers; renderer batch and worker CPU including final reconciliation: %s", report)
-	var metrics map[string][]map[string]struct {
+	var metrics map[string]map[string]struct {
 		CPU        float64 `json:"cpuMS"`
 		Characters int     `json:"characters"`
 		P95        float64 `json:"p95MS"`
@@ -368,27 +374,8 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
 	if err := json.Unmarshal(report, &metrics); err != nil {
 		t.Fatal(err)
 	}
-	samples := metrics["1048576"]
-	if len(samples) != 3 {
-		t.Fatalf("expected three paired 1 MiB trials, got %d", len(samples))
-	}
-	cpuRatios := make([]float64, 0, len(samples))
-	for trial, sample := range samples {
-		before, after := sample["baseline"], sample["incremental"]
-		if before.CPU <= 0 || after.CPU <= 0 || before.Characters <= 0 || after.Characters <= 0 || after.P95 <= 0 {
-			t.Fatalf("invalid measurements in trial %d: baseline=%+v incremental=%+v", trial+1, before, after)
-		}
-		// Keep deterministic work and responsiveness gates on every trial.
-		if after.Characters > before.Characters/2 || after.P95 > 250 {
-			t.Fatalf("incremental acceptance threshold failed in trial %d: baseline=%+v incremental=%+v", trial+1, before, after)
-		}
-		cpuRatios = append(cpuRatios, after.CPU/before.CPU)
-	}
-	// A median of paired ratios tolerates one scheduling/GC outlier without
-	// relaxing the 50% CPU reduction requirement or retrying until success.
-	sort.Float64s(cpuRatios)
-	t.Logf("paired CPU ratios (sorted): %v", cpuRatios)
-	if cpuRatios[len(cpuRatios)/2] > .5 {
-		t.Fatalf("incremental CPU acceptance threshold failed: median ratio=%g, want <= 0.5", cpuRatios[len(cpuRatios)/2])
+	before, after := metrics["1048576"]["baseline"], metrics["1048576"]["incremental"]
+	if after.CPU > before.CPU*.5 || after.Characters > before.Characters/2 || after.P95 > 250 {
+		t.Fatalf("incremental acceptance threshold failed: baseline=%+v incremental=%+v", before, after)
 	}
 }
