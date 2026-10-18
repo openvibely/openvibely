@@ -472,7 +472,7 @@ func supportsReasoningContentReplay(agent models.LLMConfig) bool {
 }
 
 func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
-	if !supportsReasoningContentReplay(agent) || a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
+	if a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
 		return callErr
 	}
 	transcript := client.LastCompletionsTranscript()

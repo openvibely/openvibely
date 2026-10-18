@@ -241,6 +241,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		return CompletionsHistoryMessage{Role: "user", Content: text}
 	})
 
+	// Publish completed exchanges even when a subsequent request is cancelled.
+	defer func() {
+		c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
+		c.lastCompletionsReasoning = finalReasoningContent
+		c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
+	}()
+
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		messages = ensureCompletionsAttachments(ctx, messages)
 		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
@@ -392,9 +399,6 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
-	c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
-	c.lastCompletionsReasoning = finalReasoningContent
-	c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
 
 	return result, nil
 }
@@ -532,6 +536,17 @@ func completionsSupportsTemperature(model, reasoningEffort string) bool {
 }
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
+	if opts.ToolFilter != nil {
+		permitted := make([]map[string]interface{}, 0, len(tools))
+		for _, tool := range tools {
+			function, _ := tool["function"].(map[string]interface{})
+			name, _ := function["name"].(string)
+			if opts.ToolFilter(name) {
+				permitted = append(permitted, tool)
+			}
+		}
+		tools = permitted
+	}
 	payload := map[string]interface{}{
 		"model":    opts.Model,
 		"messages": messages,

@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
@@ -37,6 +38,13 @@ const memoryWritingInstructions = `Use memory_save to retain durable preferences
 
 func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task models.Task, chat bool) context.Context {
 	ctx = context.WithValue(ctx, managedTurnKey{}, managedTurn{task, chat})
+	// A new user turn is a fallback for dropped filesystem events.
+	if root := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); root != "" {
+		knowledgecache.Invalidate(root)
+	}
+	if w.globalSkillRoot != "" {
+		knowledgecache.Invalidate(w.globalSkillRoot)
+	}
 	permissions := projectManagedPermissions(ctx, w.projectRepo, task.ProjectID)
 	agent := w.taskAgentDefinition(ctx, task)
 	if task.AgentDefinitionID != nil && (agent == nil || !agent.Enabled || agent.ArchivedAt != nil || agent.ProjectID != "" && agent.ProjectID != task.ProjectID) {
@@ -44,17 +52,24 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 	}
 
 	catalog := agentskills.NewCatalog(task.ID, nil)
-	index := knowledgeInstructions
+
 	var tools []*llmcontracts.RuntimeTools
 	if permissions.ReadSkills {
-		catalog = w.buildSkillCatalog(ctx, task)
-		index += "\n\n" + agentskills.RenderCatalogMarkdown(catalog)
-		tools = append(tools, w.buildTaskSkillRuntimeTools(ctx, task, catalog))
+		catalog = w.cachedKnowledgeCatalog(ctx, task)
+
+		skillTools := w.buildTaskSkillRuntimeTools(ctx, task, catalog)
+		skillTools.Executor = func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if !strings.EqualFold(strings.TrimSpace(name), "skill_view") {
+				return "", false, false, nil
+			}
+			return w.buildTaskSkillRuntimeTools(callCtx, task, w.cachedKnowledgeCatalog(callCtx, task)).Executor(callCtx, name, input)
+		}
+		tools = append(tools, skillTools)
 	}
 	var memoryHandles []string
 	if permissions.ReadMemories && w.taskAgentAllowsMemoryView(ctx, task) {
-		memoryIndex := w.availableMemoryIndex(ctx, task)
-		index += "\n\n## Available memories\n" + memoryIndex
+		memoryIndex := w.cachedKnowledgeMemories(ctx, task)
+
 		for handle := range memory.IndexedMemoryHandles(memoryIndex) {
 			memoryHandles = append(memoryHandles, handle)
 		}
@@ -62,15 +77,30 @@ func (w *WorkerService) prepareMainModelKnowledge(ctx context.Context, task mode
 	}
 	ctx = WithSelectedMemoryHandles(ctx, memoryHandles)
 	canWrite := !chat && permissions.WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_save") || agentExplicitlyAllowsTool(agent, "memory_delete"))
-	if canWrite {
-		index += "\n\n" + memoryWritingInstructions
-	}
+
 	tools = append(tools, memory.RuntimeTools(projectRepoPath(ctx, w.projectRepo, task.ProjectID), permissions.ReadMemories && w.taskAgentAllowsMemoryView(ctx, task), canWrite))
 	turn := lifecycleTurnFromContext(ctx)
 	turn.Catalog = catalog
 	turn.SkillIndex = "" // Indexes travel as conversation messages, not provider instructions.
 	ctx = withLifecycleTurnContext(ctx, turn)
-	ctx = managedcontext.With(ctx, index)
+	ctx = managedcontext.WithSource(ctx, func(callCtx context.Context) string {
+		p := projectManagedPermissions(callCtx, w.projectRepo, task.ProjectID)
+		currentAgent := w.taskAgentDefinition(callCtx, task)
+		if task.AgentDefinitionID != nil && (currentAgent == nil || !currentAgent.Enabled || currentAgent.ArchivedAt != nil || currentAgent.ProjectID != "" && currentAgent.ProjectID != task.ProjectID) {
+			p = models.SkillMemoryPermissions{}
+		}
+		text := knowledgeInstructions
+		if p.ReadSkills {
+			text += "\n\n" + w.cachedKnowledgeSkills(callCtx, task).index
+		}
+		if p.ReadMemories && w.taskAgentAllowsMemoryView(callCtx, task) {
+			text += "\n\n## Available memories\n" + w.cachedKnowledgeMemories(callCtx, task)
+		}
+		if !chat && p.WriteMemories && (currentAgent == nil || agentExplicitlyAllowsAnyTool(currentAgent, "memory_save", "memory_delete")) {
+			text += "\n\n" + memoryWritingInstructions
+		}
+		return text
+	})
 	tools = append(tools, llmcontracts.RuntimeToolsFromContext(ctx))
 	rt := llmcontracts.CompositeRuntimeTools(tools...)
 	return llmcontracts.WithRuntimeTools(ctx, guardManagedTools(ctx, rt, w.projectRepo, task, chat, agent))
@@ -135,7 +165,12 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 			return "Managed skill/memory operation is not permitted for this turn", true, true, nil
 		}
 		if rt != nil && rt.Executor != nil {
-			return rt.Executor(callCtx, name, input)
+			output, handled, failed, err := rt.Executor(callCtx, name, input)
+			if handled && !failed && err == nil && (name == "write_file" || name == "edit_file" || name == "delete_file") && agent != nil && agent.SystemKind == models.AgentSystemKindMemoryCurator {
+				root, _ := memory.SharedRepoMemoryDir(projectRepoPath(callCtx, repo, task.ProjectID))
+				knowledgecache.Invalidate(root)
+			}
+			return output, handled, failed, err
 		}
 		return "", false, false, nil
 	}
@@ -178,4 +213,35 @@ func managedFileOperationAllowed(ctx context.Context, repo persistence.ProjectSt
 		return false
 	}
 	return true
+}
+
+type knowledgeSkills struct {
+	catalog *agentskills.Catalog
+	index   string
+}
+
+func (w *WorkerService) cachedKnowledgeCatalog(ctx context.Context, task models.Task) *agentskills.Catalog {
+	return w.cachedKnowledgeSkills(ctx, task).catalog
+}
+func (w *WorkerService) cachedKnowledgeSkills(ctx context.Context, task models.Task) knowledgeSkills {
+	root := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
+	agentID := ""
+	if task.AgentDefinitionID != nil {
+		agentID = *task.AgentDefinitionID
+	}
+	key := "skills:" + task.ProjectID + ":" + root + ":" + w.globalSkillRoot + ":" + agentID
+	var roots []string
+	for _, r := range []string{root, w.globalSkillRoot} {
+		if r != "" {
+			roots = append(roots, filepath.Join(r, "skills"), filepath.Join(r, "agents"))
+		}
+	}
+	return knowledgecache.Shared().Get(key, roots, func() any {
+		catalog := w.buildSkillCatalog(ctx, task)
+		return knowledgeSkills{catalog, agentskills.RenderCatalogMarkdown(catalog)}
+	}).(knowledgeSkills)
+}
+func (w *WorkerService) cachedKnowledgeMemories(ctx context.Context, task models.Task) string {
+	root, _ := memory.SharedRepoMemoryDir(projectRepoPath(ctx, w.projectRepo, task.ProjectID))
+	return knowledgecache.Shared().Get("memories:"+task.ProjectID+":"+root, []string{root}, func() any { return w.availableMemoryIndex(ctx, task) }).(string)
 }

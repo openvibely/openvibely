@@ -15,6 +15,11 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 		return nil
 	}
 	if agent.SystemKind != models.AgentSystemKindSkillCurator || task.Category != models.CategoryScheduled || lifecycleTurnFromContext(ctx).TaskThreadTurn {
+		if _, prepared := ctx.Value(managedTurnKey{}).(managedTurn); prepared {
+			// The prepared reader resolves the current cached catalog on each call.
+			// Do not shadow it with a reader bound to the initial turn catalog.
+			return nil
+		}
 		return agentskills.SelectedSkillRuntimeTools(lifecycleTurnFromContext(ctx).Catalog)
 	}
 	selectedCatalog := lifecycleTurnFromContext(ctx).Catalog

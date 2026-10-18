@@ -2565,6 +2565,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
+	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,

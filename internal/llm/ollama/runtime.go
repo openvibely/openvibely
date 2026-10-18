@@ -88,7 +88,13 @@ func (a *Adapter) callRuntime(ctx context.Context, req llmcontracts.AgentRequest
 		}
 		messages = managedcontext.Ensure(ctx, messages, read, makeMessage)
 		messages = attachmentcontext.Ensure(ctx, messages, read, makeMessage)
-		body, err := json.Marshal(chatRequest{Model: req.Agent.Model, Messages: messages, Options: ollamaRequestOptions(req.Agent), Tools: tools})
+		permitted := make([]Tool, 0, len(tools))
+		for _, tool := range tools {
+			if filter(tool.Function.Name) {
+				permitted = append(permitted, tool)
+			}
+		}
+		body, err := json.Marshal(chatRequest{Model: req.Agent.Model, Messages: messages, Options: ollamaRequestOptions(req.Agent), Tools: permitted})
 		if err != nil {
 			return result, err
 		}

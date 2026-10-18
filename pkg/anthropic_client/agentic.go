@@ -1240,6 +1240,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
 	compactionStrategy, nativeCompactionEnabled := NativeCompactionStrategy(opts.Model)
 	nativeCompactionEnabled = opts.AutoCompaction && nativeCompactionEnabled
 

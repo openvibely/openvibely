@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -67,6 +68,14 @@ func agentSkillMutationTools(importer *Importer, recorder MutationRecorder, assi
 			return "", false, false, nil
 		}
 		res, err := runAgentSkillManage(ctx, importer, recorder, assignedAgentKey, scope, allowExplicitAgent, input)
+		if err == nil && importer != nil {
+			if importer.roots.Global != "" {
+				knowledgecache.Invalidate(importer.roots.Global)
+			}
+			if importer.roots.Project != "" {
+				knowledgecache.Invalidate(importer.roots.Project)
+			}
+		}
 		return marshalToolResult(res, err)
 	}
 	description := agentSkillManageDescription(assignedAgentKey)
@@ -102,9 +111,25 @@ func SkillMutationTools(importer *Importer, recorder MutationRecorder) *llmcontr
 		switch strings.ToLower(strings.TrimSpace(name)) {
 		case "skill_manage":
 			res, err := runSkillManage(ctx, importer, recorder, input)
+			if err == nil && importer != nil {
+				if importer.roots.Global != "" {
+					knowledgecache.Invalidate(importer.roots.Global)
+				}
+				if importer.roots.Project != "" {
+					knowledgecache.Invalidate(importer.roots.Project)
+				}
+			}
 			return marshalToolResult(res, err)
 		case "skill_import":
 			res, err := runSkillImport(ctx, importer, recorder, input)
+			if err == nil && importer != nil {
+				if importer.roots.Global != "" {
+					knowledgecache.Invalidate(importer.roots.Global)
+				}
+				if importer.roots.Project != "" {
+					knowledgecache.Invalidate(importer.roots.Project)
+				}
+			}
 			return marshalToolResult(res, err)
 		default:
 			return "", false, false, nil

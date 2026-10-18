@@ -11,6 +11,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -148,5 +149,6 @@ func executeMemory(ctx context.Context, repoPath, name string, input json.RawMes
 		}
 		return "", err
 	}
+	knowledgecache.Invalidate(dir)
 	return "Memory updated: " + handle, nil
 }

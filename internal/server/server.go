@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"io"
 	"net"
 	"net/http"
@@ -1326,6 +1327,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		h.StopXService()
 		e.Close()
 		agenttools.ShutdownProcesses()
+		knowledgecache.CloseShared()
 		closeDatabase()
 		close(shutdownDone)
 	}
