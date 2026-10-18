@@ -18,8 +18,12 @@ func TestBrowserProjectKnowledgeDialog(t *testing.T) {
 		if err := ProjectSettingsTabs("test").Render(r.Context(), w); err != nil {
 			t.Error(err)
 		}
-		fmt.Fprint(w, `<section id="test-general" data-project-panel="general"><input name="name" required></section>`)
-		if err := ProjectExecutionPanel("test", &models.Project{SkillMemoryPermissions: &models.SkillMemoryPermissions{ReadSkills: true, WriteSkills: true, AllowGlobalSkillWrites: true}}, nil, 4).Render(r.Context(), w); err != nil {
+		fmt.Fprint(w, `<section id="test-general" data-project-panel="general"><input name="name" required>`)
+		if err := ProjectDefaultsFields("test", &models.Project{}, nil, 4).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, "</section>")
+		if err := ProjectKnowledgePanel("test", models.SkillMemoryPermissions{ReadSkills: true, WriteSkills: true, AllowGlobalSkillWrites: true}).Render(r.Context(), w); err != nil {
 			t.Error(err)
 		}
 		fmt.Fprint(w, "</form></dialog>")
@@ -32,7 +36,7 @@ func TestBrowserProjectKnowledgeDialog(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL, "knowledge-dialog", func(b *composerFocusCDP) {
 		b.waitFor("ready", `String(document.readyState === 'complete')`, "true")
 		for _, expression := range []string{
-			`document.querySelector('[data-project-tab="execution"]').click(); String(document.getElementById('test-general').hidden && !document.getElementById('test-execution').hidden)`,
+			`document.querySelector('[data-project-tab="knowledge"]').click(); String(document.getElementById('test-general').hidden && !document.getElementById('test-knowledge').hidden)`,
 			`String(document.querySelectorAll('[data-model-help] svg.h-4.w-4').length === 5)`,
 			`document.querySelector('[aria-label="About Write"]').click(); String(document.getElementById('ov-shared-tooltip').matches(':popover-open') && document.getElementById('ov-shared-tooltip').textContent.includes('Ordinary chat cannot write'))`,
 			`document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); String(!document.getElementById('ov-shared-tooltip').matches(':popover-open'))`,
@@ -40,8 +44,8 @@ func TestBrowserProjectKnowledgeDialog(t *testing.T) {
 			`document.querySelector('[name="write_skills"]').click(); String(!document.querySelector('[data-global-skill-switch]').disabled && !document.querySelector('[data-global-skill-switch]').checked)`,
 			`document.querySelector('[data-global-skill-switch]').click(); document.querySelector('form').reset(); String(new FormData(document.querySelector('form')).get('allow_global_skill_writes') === 'on')`,
 			`document.querySelector('form').reportValidity(); String(!document.getElementById('test-general').hidden)`,
-			`document.querySelector('[name="max_workers"]').value = '5'; document.querySelector('[name="max_workers"]').reportValidity(); String(!document.getElementById('test-execution').hidden)`,
-			`document.querySelector('[name="max_workers"]').value = '2'; document.querySelector('[data-project-tab="general"]').click(); String(new FormData(document.querySelector('form')).get('max_workers') === '2')`,
+			`document.querySelector('[data-project-tab="knowledge"]').click(); document.querySelector('[name="max_workers"]').value = '5'; document.querySelector('[name="max_workers"]').reportValidity(); String(!document.getElementById('test-general').hidden)`,
+			`document.querySelector('[name="max_workers"]').value = '2'; document.querySelector('[data-project-tab="knowledge"]').click(); String(new FormData(document.querySelector('form')).get('max_workers') === '2')`,
 		} {
 			if got := b.evaluate(expression); got != "true" {
 				t.Fatalf("%s returned %s", expression, got)
@@ -80,20 +84,22 @@ func TestBrowserProjectDialogStableTabHeight(t *testing.T) {
 					 const content = box.querySelector('[data-project-tab-content]');
 					 const before = box.getBoundingClientRect();
 					 const footerBefore = footer.getBoundingClientRect();
-					 for (const tab of ['execution', 'general', 'execution', 'general']) {
+					 for (const tab of ['knowledge', 'general', 'knowledge', 'general']) {
 					   box.querySelector('[data-project-tab="' + tab + '"]').click();
-					   if (tab === 'execution') {
+					   if (tab === 'general') {
 					     const model = box.querySelector('[name="default_agent_config_id"]');
 					     const workers = box.querySelector('[name="max_workers"]');
-					     if (model.closest('[data-project-panel]').dataset.projectPanel !== 'execution' || workers.closest('[data-project-panel]').dataset.projectPanel !== 'execution') return 'controls outside execution';
+					     if (model.closest('[data-project-panel]').dataset.projectPanel !== 'general' || workers.closest('[data-project-panel]').dataset.projectPanel !== 'general') return 'defaults outside general';
 					     const m = model.getBoundingClientRect(), w = workers.getBoundingClientRect();
-					     if (w.top <= m.top || Math.abs(m.right - w.right) > 1) return 'controls not in aligned rows';
-					     const label = box.querySelector('label[for="' + model.id + '"]').getBoundingClientRect();
-					     const resource = box.querySelector('thead th').getBoundingClientRect();
-					     if (Math.abs(label.left - resource.left) > 1 || label.right > m.left || Math.abs((label.top + label.bottom) / 2 - (m.top + m.bottom) / 2) > 1) return 'labels not aligned';
-					     if (m.width > content.clientWidth * 0.51 || content.scrollWidth > content.clientWidth) return 'controls overflow';
-					     if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
+					     if (innerWidth > 640 ? Math.abs(m.top - w.top) > 1 || w.left <= m.left : w.top <= m.top) return 'incorrect field layout';
+					     for (const field of box.querySelectorAll('[data-project-panel="general"] input:not([type="hidden"]):not([type="checkbox"]), [data-project-panel="general"] select')) {
+					       const bounds = field.getBoundingClientRect();
+					       if (bounds.height && Math.abs(bounds.height - w.height) > 1) return 'inconsistent control heights';
+					     }
+					     if (content.scrollWidth > content.clientWidth) return 'controls overflow';
+					     if (innerWidth > 640 && content.scrollHeight > content.clientHeight) return 'general still needs desktop scrolling';
 					   }
+					   if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
 					   const after = box.getBoundingClientRect();
 					   if (Math.abs(after.height - before.height) > 1 || Math.abs(after.top - before.top) > 1 || Math.abs(footer.getBoundingClientRect().top - footerBefore.top) > 1) return 'modal moved on ' + tab;
 					 }
