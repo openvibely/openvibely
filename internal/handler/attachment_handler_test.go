@@ -875,20 +875,28 @@ func (r *countingReadCloser) Read(p []byte) (int, error) {
 
 func (r *countingReadCloser) Close() error { return nil }
 
+// limitReadChunkSize splits multipart headers across reads; the bulk payload after
+// the leading bytes is read normally so a 30MB body does not take ~30M reads.
 func (r *countingReadCloser) limitReadChunkSize(max int) {
-	r.r = &maxChunkReader{r: r.r, max: max}
+	r.r = &maxChunkReader{r: r.r, max: max, remaining: 64 << 10}
 }
 
 type maxChunkReader struct {
-	r   io.Reader
-	max int
+	r         io.Reader
+	max       int
+	remaining int64
 }
 
 func (r *maxChunkReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return r.r.Read(p)
+	}
 	if len(p) > r.max {
 		p = p[:r.max]
 	}
-	return r.r.Read(p)
+	n, err := r.r.Read(p)
+	r.remaining -= int64(n)
+	return n, err
 }
 
 type repeatedByteReader struct {

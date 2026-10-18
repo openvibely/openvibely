@@ -126,7 +126,7 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.click("[data-gallery-prev]")
 		b.waitFor("image renderer resets on return", `String(!document.querySelector('[data-image-controls]').hidden && !document.querySelector('[data-pdf-viewer]') && document.querySelector('[data-gallery-fit]').getAttribute('aria-label')==='Fit image (100%)')`, "true")
 		b.click("[data-gallery-close]")
-		b.waitFor("mixed gallery restores opener focus", `String(document.activeElement.id==='mixed-image')`, "true")
+		b.waitFor("pointer-opened mixed gallery leaves no active opener", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href') && document.activeElement.id!=='mixed-image')`, "true")
 		b.evaluate(`window.OVFileViewer.open('/fixture-list'); 'ok'`)
 		b.waitFor("Files list in shared window", `String(!!document.querySelector('[data-files-list]'))`, "true")
 		b.click("[data-files-list] [data-file-preview]")
@@ -216,6 +216,6 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.waitFor("KaTeX math", `String(!!document.querySelector('[data-file-markdown] .katex'))`, "true")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": 90, "y": 450, "button": "left", "clickCount": 1}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 90, "y": 450, "button": "left", "clickCount": 1}, nil)
-		b.waitFor("empty gallery space closes document", `String(!document.getElementById('image-gallery').open && document.activeElement.id==='math')`, "true")
+		b.waitFor("empty gallery space closes document without pointer focus", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href') && document.activeElement.id!=='math')`, "true")
 	})
 }
