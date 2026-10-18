@@ -469,33 +469,6 @@ func isKimiModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "kimi-")
 }
 
-func supportsReasoningContentReplay(agent models.LLMConfig) bool {
-	switch strings.ToLower(strings.TrimSpace(agent.Model)) {
-	case "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed":
-		return true
-	case "kimi-k2.6":
-		body, err := parseObjectJSON(agent.ExtraBodyJSON)
-		if err != nil {
-			return false
-		}
-		thinking, _ := body["thinking"].(map[string]interface{})
-		if thinking == nil {
-			return true
-		}
-		thinkingType, _ := thinking["type"].(string)
-		if strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
-			return false
-		}
-		if keep, exists := thinking["keep"]; exists {
-			keepValue, ok := keep.(string)
-			return ok && strings.EqualFold(strings.TrimSpace(keepValue), "all")
-		}
-		return true
-	default:
-		return false
-	}
-}
-
 func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
 	if client != nil {
 		callErr = client.ConversationError(callErr)
@@ -719,7 +692,7 @@ func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMo
 	})
 }
 
-func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {
+func buildClientHistory(chatHistory []models.Execution) []openaiclient.CompletionsHistoryMessage {
 	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(chatHistory)*2)
 	for _, exec := range chatHistory {
 		replay := exec.ReplayMessages
@@ -727,9 +700,6 @@ func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent
 			for _, turn := range replay {
 				if transcript, ok := decodeReplayTranscript(turn.TranscriptJSON); ok {
 					for _, message := range transcript {
-						if !preserveReasoningContent {
-							message.ReasoningContent = ""
-						}
 						messages = append(messages, message)
 					}
 					continue
@@ -737,11 +707,8 @@ func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent
 				if turn.UserContent != "" {
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: turn.UserContent})
 				}
-				if turn.AssistantContent != "" || (preserveReasoningContent && turn.ReasoningContent != "") {
-					reasoningContent := ""
-					if preserveReasoningContent {
-						reasoningContent = turn.ReasoningContent
-					}
+				if turn.AssistantContent != "" || turn.ReasoningContent != "" {
+					reasoningContent := turn.ReasoningContent
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{
 						Role:             "assistant",
 						Content:          turn.AssistantContent,
@@ -755,10 +722,7 @@ func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
 		}
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
-			reasoningContent := ""
-			if preserveReasoningContent {
-				reasoningContent = exec.ReasoningContent
-			}
+			reasoningContent := exec.ReasoningContent
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{
 				Role:             "assistant",
 				Content:          replay,
@@ -783,7 +747,7 @@ func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessag
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
 	// The service hydrates history before budgeting and compaction. Never reload
 	// from storage here: that would restore content deliberately discarded there.
-	return buildClientHistory(chatHistory, supportsReasoningContentReplay(agent)), nil
+	return buildClientHistory(chatHistory), nil
 }
 
 func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
