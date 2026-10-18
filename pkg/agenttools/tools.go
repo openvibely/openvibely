@@ -505,7 +505,9 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 		lineBuffer = lineBuffer[:0]
 		lineNumber := 0
 		lastWasNewline := true // strings.Split treats an empty file as one empty line.
-		matchedLimit := false
+		var fileResults strings.Builder
+		fileMatches := 0
+		remainingMatches := maxResults - count
 		for {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				_ = file.Close()
@@ -513,6 +515,10 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 			}
 
 			fragment, readErr := reader.ReadSlice('\n')
+			if bytes.IndexByte(fragment, 0) >= 0 {
+				_ = file.Close()
+				return nil
+			}
 			switch readErr {
 			case nil:
 				line := fragment[:len(fragment)-1]
@@ -521,12 +527,9 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 					line = lineBuffer
 				}
 				lineNumber++
-				if re.Match(line) {
-					fmt.Fprintf(&results, "%s:%d: %s\n", rel, lineNumber, truncateLine(string(line), 200))
-					count++
-					if count >= maxResults {
-						matchedLimit = true
-					}
+				if fileMatches < remainingMatches && re.Match(line) {
+					fmt.Fprintf(&fileResults, "%s:%d: %s\n", rel, lineNumber, truncateLine(string(line), 200))
+					fileMatches++
 				}
 				lineBuffer = lineBuffer[:0]
 				lastWasNewline = true
@@ -544,27 +547,23 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 						line = fragment
 					}
 					lineNumber++
-					if re.Match(line) {
-						fmt.Fprintf(&results, "%s:%d: %s\n", rel, lineNumber, truncateLine(string(line), 200))
-						count++
-						if count >= maxResults {
-							matchedLimit = true
-						}
+					if fileMatches < remainingMatches && re.Match(line) {
+						fmt.Fprintf(&fileResults, "%s:%d: %s\n", rel, lineNumber, truncateLine(string(line), 200))
+						fileMatches++
 					}
 				}
 				_ = file.Close()
-				if matchedLimit {
+				if fileMatches > 0 {
+					results.WriteString(fileResults.String())
+					count += fileMatches
+				}
+				if count >= maxResults {
 					return filepath.SkipAll
 				}
 				return nil
 			default:
 				_ = file.Close()
 				return nil
-			}
-
-			if matchedLimit {
-				_ = file.Close()
-				return filepath.SkipAll
 			}
 		}
 	})

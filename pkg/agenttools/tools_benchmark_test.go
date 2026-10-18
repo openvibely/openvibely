@@ -19,9 +19,9 @@ import (
 //
 // Results (ns/op, B/op, allocs/op):
 //   NoMatch:      before 55,762,917; 242,823,360; 21,684
-//                 after  32,752,958;     754,696;  9,068
+//                 after  38,906,541;     765,352; 10,561
 //   PreCancelled: before 52,774,333; 242,466,896; 21,606
-//                 after       3,334;           0;      0
+//                 after       4,125;           0;      0
 //
 // Run with: go test ./pkg/agenttools -run '^$' -bench '^BenchmarkGrepSearchFixture$' -benchmem -benchtime=1x -count=3
 func BenchmarkGrepSearchFixture(b *testing.B) {
