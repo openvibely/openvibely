@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/agentskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
@@ -126,4 +127,52 @@ func TestScheduledSkillWritersCannotBypassGlobalPermission(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, failed)
 	require.True(t, invoked)
+}
+
+func TestLifecycleLearningWritersRespectGlobalPermission(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	worker := NewWorkerService(nil, 0, stores.Projects)
+	worker.SetLifecycleAgentRepo(stores.Agents)
+	worker.SetLifecycleRepo(stores.Lifecycle)
+	worker.globalSkillRoot = t.TempDir()
+	actor := &models.Agent{ID: "learning-owner", Key: "learning_owner", Name: "Learning owner", Enabled: true, Scope: models.AgentScopeGlobal}
+	require.NoError(t, stores.Agents.Create(ctx, actor))
+	task := models.Task{ID: "learning", ProjectID: project.ID, AgentDefinitionID: &actor.ID}
+	rt := worker.buildLifecycleRuntimeTools(task, agentskills.NewCatalog(task.ID, nil))
+	declaration := "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n  key: learned\n  name: Learned\n  scope: global\n---\nDurable learning"
+	for _, name := range []string{"skill_manage", "agent_skill_manage"} {
+		t.Run(name, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]string{"action": "create", "declaration": declaration})
+			for _, allow := range []bool{false, true, false} {
+				permissions := project.ManagedPermissions()
+				permissions.AllowGlobalSkillWrites = allow
+				project.SkillMemoryPermissions = &permissions
+				require.NoError(t, stores.Projects.Update(ctx, project))
+				output, handled, failed, err := rt.Executor(ctx, name, input)
+				require.NoError(t, err)
+				require.True(t, handled)
+				require.Equal(t, !allow, failed, output)
+			}
+		})
+	}
+	projectInput, _ := json.Marshal(map[string]string{"action": "create", "scope": "project", "declaration": declaration})
+	output, handled, failed, err := rt.Executor(ctx, "skill_manage", projectInput)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, failed, output)
+	importInput, _ := json.Marshal(map[string]string{"scope": "global", "content": declaration})
+	_, _, failed, err = rt.Executor(ctx, "skill_import", importInput)
+	require.NoError(t, err)
+	require.True(t, failed)
+	permissions := project.ManagedPermissions()
+	permissions.WriteSkills = false
+	permissions.AllowGlobalSkillWrites = true
+	project.SkillMemoryPermissions = &permissions
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	_, handled, failed, err = rt.Executor(ctx, "skill_manage", json.RawMessage(`{"action":"archive","scope":"global","handle":"learned"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, failed)
 }
