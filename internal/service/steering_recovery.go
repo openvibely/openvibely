@@ -9,6 +9,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 type steeringRecoveryKey struct{}
@@ -22,14 +23,19 @@ type steeringRecovery struct {
 // Track successful commits from this invocation, not an older database snapshot
 // that cannot prove the current prompt was consumed.
 func trackSteeringRecovery(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
-	if req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOllama {
+	if req.Agent.Provider != models.ProviderOpenAI && req.Agent.Provider != models.ProviderAnthropic && req.Agent.Provider != models.ProviderOllama && req.Agent.Provider != models.ProviderOpenAICompatible {
 		return req
 	}
 	if req.Ctx == nil {
 		req.Ctx = context.Background()
 	}
 	state := &steeringRecovery{}
-	if req.Agent.Provider == models.ProviderAnthropic || req.Agent.Provider == models.ProviderOllama {
+	req.Ctx = llmcontracts.WithResponsesRecovery(req.Ctx, func(raw string) {
+		state.mu.Lock()
+		state.transcript = raw
+		state.mu.Unlock()
+	})
+	if req.Agent.Provider == models.ProviderAnthropic || req.Agent.Provider == models.ProviderOllama || req.Agent.Provider == models.ProviderOpenAICompatible {
 		req.Ctx = context.WithValue(req.Ctx, steeringRecoveryKey{}, state)
 		return req
 	}
@@ -116,8 +122,11 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 	}
 	var raw string
 	var anthropicFailure *anthropicclient.ConversationError
+	var completionsFailure *openaiclient.ConversationError
 	if errors.As(err, &anthropicFailure) {
 		raw = anthropicFailure.MessagesJSON
+	} else if errors.As(err, &completionsFailure) {
+		raw = completionsFailure.MessagesJSON
 	} else {
 		return
 	}

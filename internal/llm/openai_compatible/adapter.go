@@ -277,6 +277,14 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
+	if llmcontracts.HistoryContinuationFromContext(ctx) {
+		history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
+		if err != nil {
+			return "", llmusage.FromTotal(0), err
+		}
+		client.SetCompletionsHistory(history)
+	}
+
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
@@ -301,6 +309,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	}
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
+		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
 		MaxOutputTokens:          maxOutput,
@@ -330,6 +339,14 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
+	if llmcontracts.HistoryContinuationFromContext(ctx) {
+		history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
+		if err != nil {
+			return "", "", llmusage.FromTotal(0), err
+		}
+		client.SetCompletionsHistory(history)
+	}
+
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
@@ -349,6 +366,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
+		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
 		MaxOutputTokens:          maxOutput,
@@ -409,24 +427,25 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
-		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    contextWindow,
-		MaxOutputTokens:  maxOutput,
-		Temperature:      compatibleTemperature(req.Agent),
-		System:           systemPrompt,
-		WorkDir:          effectiveWorkDir(workDir),
-		DisableTools:     disableTools,
-		SkipDefaultTools: chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		Attachments:      attachments,
-		ExtraTools:       runtimeTools(ctx),
-		ExtraHeaders:     extraHeaders,
-		FinalizeRequest:  finalizeRequest,
-		ExtraBody:        extraBody,
-		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		OnText:           streamText(sw),
-		OnToolUse:        streamToolUse(sw),
-		OnToolResult:     streamToolResult(sw),
+		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:               strings.TrimSpace(req.Agent.Model),
+		ContextWindow:       contextWindow,
+		MaxOutputTokens:     maxOutput,
+		Temperature:         compatibleTemperature(req.Agent),
+		System:              systemPrompt,
+		WorkDir:             effectiveWorkDir(workDir),
+		DisableTools:        disableTools,
+		SkipDefaultTools:    chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		Attachments:         attachments,
+		ExtraTools:          runtimeTools(ctx),
+		ExtraHeaders:        extraHeaders,
+		FinalizeRequest:     finalizeRequest,
+		ExtraBody:           extraBody,
+		ToolExecutor:        toolExecutor(ctx, workDir),
+		ToolFilter:          toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		OnText:              streamText(sw),
+		OnToolUse:           streamToolUse(sw),
+		OnToolResult:        streamToolResult(sw),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
@@ -478,6 +497,9 @@ func supportsReasoningContentReplay(agent models.LLMConfig) bool {
 }
 
 func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
+	if client != nil {
+		callErr = client.ConversationError(callErr)
+	}
 	if a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
 		return callErr
 	}

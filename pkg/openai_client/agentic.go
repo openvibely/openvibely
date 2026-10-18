@@ -142,6 +142,8 @@ type AgenticOptions struct {
 	// InitialInputCommit persists a prepared late steer before sampling and
 	// continues recording its tool/results history throughout this invocation.
 	InitialInputCommit func(context.Context, []any) error
+	// OnHistory persists conversation state independently of steering.
+	OnHistory func(context.Context, []any) error
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -480,14 +482,25 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	var allText strings.Builder
 	persistSteeringHistory := opts.InitialInputCommit
+	persistHistory := func(ctx context.Context, items []any) error {
+		if persistSteeringHistory != nil {
+			if err := persistSteeringHistory(ctx, items); err != nil {
+				return err
+			}
+		}
+		if opts.OnHistory != nil {
+			return opts.OnHistory(ctx, items)
+		}
+		return nil
+	}
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		inputItems = ensureAttachmentContext(ctx, inputItems)
 		if !opts.OmitExecutionEnvironment {
 			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 		}
-		if persistSteeringHistory != nil {
-			if err := persistSteeringHistory(ctx, inputItems); err != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil {
+			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
 		}
@@ -580,8 +593,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
 		inputItems = append(inputItems, outputItems...)
-		if persistSteeringHistory != nil {
-			if err := persistSteeringHistory(ctx, inputItems); err != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil {
+			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
 		}
@@ -721,8 +734,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 		// Preserve completed tool results even when cancellation or compaction
 		// prevents the next model request from starting.
-		if persistSteeringHistory != nil {
-			if err := persistSteeringHistory(context.WithoutCancel(ctx), inputItems); err != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil {
+			if err := persistHistory(context.WithoutCancel(ctx), inputItems); err != nil {
 				return nil, err
 			}
 		}
@@ -769,8 +782,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 		}
 	}
-	if persistSteeringHistory != nil {
-		if err := persistSteeringHistory(ctx, inputItems); err != nil {
+	if persistSteeringHistory != nil || opts.OnHistory != nil {
+		if err := persistHistory(ctx, inputItems); err != nil {
 			return nil, err
 		}
 	}

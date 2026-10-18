@@ -40,6 +40,7 @@ type CompletionsOptions struct {
 	System                   string
 	WorkDir                  string
 	MaxTurns                 int
+	ContinueFromHistory      bool // Resume recovered history without repeating the consumed prompt.
 	OmitExecutionEnvironment bool // Raw utility requests may omit coding environment context.
 	DisableTools             bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
@@ -185,7 +186,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 
 	// Add current prompt with optional attachments
-	if len(opts.Attachments) > 0 {
+	if len(opts.Attachments) > 0 && !opts.ContinueFromHistory {
 		content := make([]map[string]interface{}, 0, 1+len(opts.Attachments))
 		if prompt != "" {
 			content = append(content, map[string]interface{}{
@@ -220,7 +221,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			Role:    "user",
 			Content: content,
 		})
-	} else {
+	} else if !opts.ContinueFromHistory {
 		messages = append(messages, completionsMessage{
 			Role:    "user",
 			Content: prompt,
@@ -233,7 +234,10 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
 	finalReasoningContent := ""
-	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
+	var currentTranscript []CompletionsHistoryMessage
+	if !opts.ContinueFromHistory {
+		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
+	}
 	currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
 		text, _ := m.Content.(string)
 		return m.Role, text
