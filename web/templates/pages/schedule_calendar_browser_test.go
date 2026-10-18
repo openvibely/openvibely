@@ -389,7 +389,8 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 	if mobile {
 		windowSize = "--window-size=500,900"
 	}
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", windowSize, "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/schedule?project_id="+project.ID)
+	// --test-type suppresses the --no-sandbox warning infobar, which can appear mid-test and resize the viewport.
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--test-type", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", windowSize, "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/schedule?project_id="+project.ID)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := startBrowserProcess(cmd); err != nil {
