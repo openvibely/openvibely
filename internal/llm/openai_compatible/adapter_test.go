@@ -674,28 +674,23 @@ func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
 		Status:           models.ExecCompleted,
 	}}
 
-	kimiHistory := buildClientHistory(executions, true)
+	kimiHistory := buildClientHistory(executions)
 	require.Len(t, kimiHistory, 2)
 	require.Equal(t, "assistant", kimiHistory[1].Role)
 	require.Equal(t, "answer", kimiHistory[1].Content)
 	require.Equal(t, "private thought", kimiHistory[1].ReasoningContent)
 
-	otherHistory := buildClientHistory(executions, false)
+	otherHistory := buildClientHistory(executions)
 	require.Len(t, otherHistory, 2)
-	require.Empty(t, otherHistory[1].ReasoningContent)
+	require.Equal(t, "private thought", otherHistory[1].ReasoningContent)
 }
 
-func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k3"}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.6 "}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"keep":"all"}}`}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"type":"disabled"}}`}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"type":"enabled","keep":null}}`}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code"}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code-highspeed"}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.5"}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "glm-5"}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "gpt-5.6"}))
+func TestReasoningReplayForAllCompatibleModels(t *testing.T) {
+	for _, model := range []string{"kimi-k3", "glm-5", "deepseek-reasoner", "custom-model"} {
+		history, err := New(nil, nil).prepareClientHistory(context.Background(), models.LLMConfig{Model: model}, []models.Execution{{Output: "answer", ReasoningContent: "original reasoning", Status: models.ExecCompleted}})
+		require.NoError(t, err)
+		require.Equal(t, "original reasoning", history[0].ReasoningContent)
+	}
 }
 
 func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
@@ -800,7 +795,7 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 	require.Equal(t, "Token opaque-token", customToken)
 }
 
-func TestPrepareClientHistoryUsesSuppliedReasoningOnlyForKimi(t *testing.T) {
+func TestPrepareClientHistoryUsesSuppliedReasoning(t *testing.T) {
 	ctx := context.Background()
 	storeEnv := teststores.New(t)
 	taskRepo := storeEnv.Stores.Tasks
@@ -842,7 +837,7 @@ func TestPrepareClientHistoryUsesSuppliedReasoningOnlyForKimi(t *testing.T) {
 	glmHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
 	require.NoError(t, err)
 	require.Len(t, glmHistory, 2)
-	require.Empty(t, glmHistory[1].ReasoningContent)
+	require.Equal(t, "private thought", glmHistory[1].ReasoningContent)
 }
 
 func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
@@ -903,9 +898,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []openaiclient.CompletionsHistoryMessage{
 		{Role: "user", Content: "first question"},
-		{Role: "assistant", Content: "first answer"},
+		{Role: "assistant", Content: "first answer", ReasoningContent: "first thought"},
 		{Role: "user", Content: "steer"},
-		{Role: "assistant", Content: "second answer"},
+		{Role: "assistant", Content: "second answer", ReasoningContent: "second thought"},
 	}, glmHistory)
 }
 
@@ -1229,7 +1224,7 @@ func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&last))
 					w.Header().Set("Content-Type", "text/event-stream")
 					if calls == 1 {
-						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"skill-call\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"original thinking sentinel\",\"tool_calls\":[{\"index\":0,\"id\":\"skill-call\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
 						return
 					}
 					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
@@ -1262,6 +1257,7 @@ func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
 				require.NoError(t, err)
 				require.Contains(t, string(data), "loaded skill instructions")
 				require.Contains(t, string(data), "skill-call")
+				require.Contains(t, string(data), "original thinking sentinel")
 			})
 		}
 	}

@@ -527,6 +527,9 @@ func estimateExecutionTokens(exec models.Execution) int {
 }
 
 func estimateHistoryTokens(provider models.LLMProvider, history []models.Execution) int {
+	if provider == models.ProviderOpenAICompatible || provider == models.ProviderOllama {
+		return llmopenai_compatible.EstimateHistoryTokens(history)
+	}
 	if provider == models.ProviderOpenAI {
 		return llmopenai.EstimateHistoryTokens(history)
 	}
