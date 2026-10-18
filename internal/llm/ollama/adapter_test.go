@@ -141,6 +141,11 @@ func TestSkillAndImageToolsPersistAndReplay(t *testing.T) {
 	req.Operation = contracts.OperationStreaming
 	req.Followup = true
 	req.Message = "follow up"
+	replay, err := env.Executions.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+	require.NoError(t, err)
+	for i := range history {
+		history[i].ReplayMessages = replay[history[i].ID]
+	}
 	req.ChatHistory = history
 	_, err = adapter.Call(ctx, req, t.TempDir(), nil)
 	require.NoError(t, err)

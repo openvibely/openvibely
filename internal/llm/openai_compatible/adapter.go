@@ -720,20 +720,9 @@ func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMo
 }
 
 func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {
-	return buildClientHistoryWithReplay(chatHistory, preserveReasoningContent, nil)
-}
-
-func buildClientHistoryWithReplay(
-	chatHistory []models.Execution,
-	preserveReasoningContent bool,
-	replayByExecutionID map[string][]models.ExecutionReplayMessage,
-) []openaiclient.CompletionsHistoryMessage {
 	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(chatHistory)*2)
 	for _, exec := range chatHistory {
-		replay := replayByExecutionID[exec.ID]
-		if len(replay) == 0 {
-			replay = exec.ReplayMessages
-		}
+		replay := exec.ReplayMessages
 		if len(replay) > 0 {
 			for _, turn := range replay {
 				if transcript, ok := decodeReplayTranscript(turn.TranscriptJSON); ok {
@@ -792,34 +781,9 @@ func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessag
 }
 
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
-	preserveReasoningContent := supportsReasoningContentReplay(agent)
-	if a.execRepo == nil {
-		return buildClientHistory(chatHistory, preserveReasoningContent), nil
-	}
-
-	history := append([]models.Execution(nil), chatHistory...)
-	ids := make([]string, 0, len(history))
-	for _, exec := range history {
-		if strings.TrimSpace(exec.ID) != "" {
-			ids = append(ids, exec.ID)
-		}
-	}
-	if preserveReasoningContent {
-		reasoningByID, err := a.execRepo.ReasoningContentByIDs(ctx, ids)
-		if err != nil {
-			return nil, fmt.Errorf("load Kimi reasoning history: %w", err)
-		}
-		for i := range history {
-			if reasoningContent, ok := reasoningByID[history[i].ID]; ok {
-				history[i].ReasoningContent = reasoningContent
-			}
-		}
-	}
-	replayByExecutionID, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("load execution replay history: %w", err)
-	}
-	return buildClientHistoryWithReplay(history, preserveReasoningContent, replayByExecutionID), nil
+	// The service hydrates history before budgeting and compaction. Never reload
+	// from storage here: that would restore content deliberately discarded there.
+	return buildClientHistory(chatHistory, supportsReasoningContentReplay(agent)), nil
 }
 
 func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {

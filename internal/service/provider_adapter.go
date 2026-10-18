@@ -1371,10 +1371,20 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 	if err != nil {
 		return req, err
 	}
+	var reasoning map[string]string
+	if req.Agent.Provider == models.ProviderOpenAICompatible || req.Agent.Provider == models.ProviderOllama {
+		reasoning, err = s.execRepo.ReasoningContentByIDs(ctx, ids)
+		if err != nil {
+			return req, err
+		}
+	}
 	req.ChatHistory = append([]models.Execution(nil), req.ChatHistory...)
 	for i := range req.ChatHistory {
 		if req.ChatHistory[i].ReplayMessages == nil {
 			req.ChatHistory[i].ReplayMessages = replays[req.ChatHistory[i].ID]
+			if reasoning != nil {
+				req.ChatHistory[i].ReasoningContent = reasoning[req.ChatHistory[i].ID]
+			}
 		}
 	}
 	return req, nil
