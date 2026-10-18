@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -450,79 +449,27 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 		searchDir = resolvePath(workDir, params.Path)
 	}
 
-	re, err := regexp.Compile(params.Pattern)
-	if err != nil {
-		return "", fmt.Errorf("invalid pattern %q: %w", params.Pattern, err)
-	}
-
-	var results strings.Builder
-	count := 0
-	maxResults := 100
-
-	err = filepath.Walk(searchDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			if info != nil && info.IsDir() {
-				name := info.Name()
-				if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if count >= maxResults {
-			return filepath.SkipAll
-		}
-
-		if params.Include != "" {
-			matched, _ := filepath.Match(params.Include, info.Name())
-			if !matched {
-				return nil
-			}
-		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-		binaryExts := map[string]bool{
-			".exe": true, ".bin": true, ".so": true, ".dylib": true,
-			".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
-			".zip": true, ".tar": true, ".gz": true, ".pdf": true,
-			".wasm": true, ".o": true, ".a": true,
-		}
-		if binaryExts[ext] {
-			return nil
-		}
-
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if allow, ok := ctx.Value(fileReadAuthorizationKey{}).(func(context.Context, string) bool); ok && !allow(ctx, path) {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		rel, _ := filepath.Rel(workDir, path)
-		lines := strings.Split(string(data), "\n")
-		for i, line := range lines {
-			if count >= maxResults {
-				break
-			}
-			if re.MatchString(line) {
-				fmt.Fprintf(&results, "%s:%d: %s\n", rel, i+1, truncateLine(line, 200))
-				count++
-			}
-		}
-		return nil
+	matches, err := SearchFiles(ctx, searchDir, params.Pattern, SearchOptions{
+		Include: params.Include, MaxResults: 100, MaxLineLength: 200,
+		SkipDirectory: func(path string) bool {
+			name := filepath.Base(path)
+			return strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor"
+		},
+		AllowFile:        func(path string) bool { return !searchBinaryExtensions[strings.ToLower(filepath.Ext(path))] },
+		DisplayPath:      func(path string) string { rel, _ := filepath.Rel(workDir, path); return rel },
+		IgnoreWalkErrors: true,
 	})
-
-	if count == 0 {
+	if err != nil {
+		return "", err
+	}
+	if len(matches) == 0 {
 		return fmt.Sprintf("No matches found for pattern %q", params.Pattern), nil
 	}
-	if count >= maxResults {
-		results.WriteString(fmt.Sprintf("\n... (showing first %d matches)", maxResults))
+	output := strings.Join(matches, "\n") + "\n"
+	if len(matches) >= 100 {
+		output += "\n... (showing first 100 matches)"
 	}
-	return results.String(), err
+	return output, nil
 }
 
 func truncateLine(line string, maxLen int) string {
