@@ -115,7 +115,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			toolDefs = append(toolDefs, DefaultTools()...)
 		}
 		toolDefs = append(toolDefs, opts.ExtraTools...)
-		toolDefs = filterToolDefinitions(toolDefs, opts.ToolFilter)
+		// Retain candidates; filter immediately before each request.
 	}
 
 	tools := make([]map[string]interface{}, 0, len(toolDefs))

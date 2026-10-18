@@ -27,10 +27,13 @@ func TestIndexAndPermissionsRefreshAfterToolResult(t *testing.T) {
 		body, _ := json.Marshal(request.Messages)
 		if requests == 1 {
 			require.Contains(t, string(body), "initial skills and memories")
+			require.Len(t, request.Tools, 1)
+			require.Equal(t, "memory_save", request.Tools[0].Name)
 		} else {
 			require.NotContains(t, string(body), "initial skills and memories")
 			require.Contains(t, string(body), "updated memory index")
-			require.Empty(t, request.Tools)
+			require.Len(t, request.Tools, 1)
+			require.Equal(t, "memory_view", request.Tools[0].Name)
 			require.Contains(t, string(body), "saved memory")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -49,7 +52,12 @@ func TestIndexAndPermissionsRefreshAfterToolResult(t *testing.T) {
 	old := AnthropicAPIHost
 	AnthropicAPIHost = server.URL
 	defer func() { AnthropicAPIHost = old }()
-	_, err := NewWithAPIKey("test").SendAgentic(ctx, "save memory", &AgenticOptions{Model: "claude-sonnet-4-6", SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "memory_save", InputSchema: json.RawMessage(`{"type":"object"}`)}}, ToolFilter: func(string) bool { return allowed }, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+	_, err := NewWithAPIKey("test").SendAgentic(ctx, "save memory", &AgenticOptions{Model: "claude-sonnet-4-6", SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "memory_save", InputSchema: json.RawMessage(`{"type":"object"}`)}, {Name: "memory_view", InputSchema: json.RawMessage(`{"type":"object"}`)}}, ToolFilter: func(name string) bool {
+		if name == "memory_view" {
+			return !allowed
+		}
+		return allowed
+	}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
 		index = "updated memory index"
 		allowed = false
 		return "saved memory", false, nil

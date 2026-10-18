@@ -254,7 +254,15 @@ func assertTaskFollowupSelectedMemoryContext(t *testing.T, chatContext string) {
 func assertChatMemoryViewToolAvailable(t *testing.T, ctx context.Context) {
 	t.Helper()
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	if rt == nil || !rt.HasDefinition("memory_view") {
+	// The handler has cancelled this captured context after completion. Inspect
+	// candidate definitions here; the executor checks below use a live context.
+	found := false
+	if rt != nil {
+		for _, def := range rt.Definitions {
+			found = found || def.Name == "memory_view"
+		}
+	}
+	if !found {
 		t.Fatalf("expected chat provider request to expose selected memory_view runtime tool, got %#v", rt)
 	}
 	for _, toolName := range []string{"memory_view"} {

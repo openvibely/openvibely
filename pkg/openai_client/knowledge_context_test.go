@@ -101,8 +101,15 @@ func TestCompletionsIndexChangesDuringToolLoop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Messages []completionsMessage `json:"messages"`
+			Tools    []json.RawMessage    `json:"tools"`
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		encoded, _ := json.Marshal(request.Tools)
+		if calls == 0 {
+			require.NotContains(t, string(encoded), "memory_view")
+		} else {
+			require.Contains(t, string(encoded), "memory_view")
+		}
 		count, at := 0, -1
 		for i, m := range request.Messages {
 			if s, ok := m.Content.(string); ok && strings.HasPrefix(s, managedcontext.Marker+"\n") {
@@ -127,7 +134,7 @@ func TestCompletionsIndexChangesDuringToolLoop(t *testing.T) {
 		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
-	options := &CompletionsOptions{ExtraTools: []ToolDefinition{{Type: "function", Name: "skill_view", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+	options := &CompletionsOptions{ToolFilter: func(name string) bool { return name != "memory_view" || index == "document_word: updated" }, ExtraTools: []ToolDefinition{{Type: "function", Name: "memory_view", Parameters: json.RawMessage(`{"type":"object"}`)}, {Type: "function", Name: "skill_view", Parameters: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
 		index = "document_word: updated"
 		return "Word instructions", false, nil
 	}}
@@ -143,4 +150,47 @@ func TestCompletionsIndexChangesDuringToolLoop(t *testing.T) {
 	for _, m := range second.LastCompletionsTranscript() {
 		require.NotContains(t, m.Content, managedcontext.Marker, "later executions must not accumulate duplicate indexes")
 	}
+}
+
+func TestResponsesPermissionEnabledAfterToolResult(t *testing.T) {
+	enabled := false
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []ToolDefinition `json:"tools"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		names := []string{}
+		for _, tool := range request.Tools {
+			names = append(names, tool.Name)
+		}
+		if calls == 0 {
+			require.NotContains(t, names, "memory_view")
+		} else {
+			require.Contains(t, names, "memory_view")
+		}
+		calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if calls == 1 {
+			fmt.Fprint(w, "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"echo\",\"arguments\":\"{}\"}}\n\n")
+		} else {
+			fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Done\"}\n\n")
+		}
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\"}}\n\n")
+	}))
+	defer server.Close()
+	old := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = server.URL + "/"
+	defer func() { OpenAIAPIBaseURL = old }()
+	_, err := newHTTPTestAPIKeyClient("test").SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model: "gpt-5.3-codex", SkipDefaultTools: true,
+		ExtraTools: []ToolDefinition{{Type: "function", Name: "echo"}, {Type: "function", Name: "memory_view"}},
+		ToolFilter: func(name string) bool { return name != "memory_view" || enabled },
+		ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+			enabled = true
+			return "permissions changed", false, nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
 }

@@ -436,7 +436,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}
-		tools = prepareStrictTools(filterToolDefinitions(tools, opts.ToolFilter))
+		tools = prepareStrictTools(tools)
 	}
 
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.

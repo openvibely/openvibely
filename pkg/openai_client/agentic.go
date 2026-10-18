@@ -2499,7 +2499,7 @@ func agenticToolDefinitions(opts *AgenticOptions, includeStandaloneWebSearch boo
 			tools = DefaultTools()
 		}
 		tools = append(tools, opts.ExtraTools...)
-		tools = filterToolDefinitions(tools, opts.ToolFilter)
+		// Retain candidates; filter immediately before each request.
 	}
 	if includeStandaloneWebSearch {
 		tools = append(tools, standaloneWebSearchTool())

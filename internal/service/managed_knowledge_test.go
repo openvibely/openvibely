@@ -96,8 +96,8 @@ func TestMainModelKnowledgeChatAndTaskPermissions(t *testing.T) {
 	turn = worker.PrepareLifecycleTurn(ctx, task)
 	require.NotContains(t, managedcontext.Text(turn.Ctx), "documents")
 	require.NotContains(t, managedcontext.Text(turn.Ctx), "chat_memory.md")
-	for _, def := range llmcontracts.RuntimeToolsFromContext(turn.Ctx).Definitions {
-		require.NotContains(t, []string{"skill_view", "memory_view", "memory_save", "memory_delete"}, def.Name)
+	for _, name := range llmcontracts.RuntimeToolsFromContext(turn.Ctx).DefinitionNames() {
+		require.NotContains(t, []string{"skill_view", "memory_view", "memory_save", "memory_delete"}, name)
 	}
 }
 
@@ -266,4 +266,47 @@ func TestKnowledgeChangesWithinSameTurn(t *testing.T) {
 	_, _, failed, err = rt.Executor(turn, "memory_view", json.RawMessage(`{"handle":"fresh.md"}`))
 	require.NoError(t, err)
 	require.True(t, failed)
+}
+
+func TestManagedKnowledgePermissionsEnabledDuringTurn(t *testing.T) {
+	for _, chat := range []bool{false, true} {
+		ctx := context.Background()
+		stores := teststores.New(t).Stores
+		project := createChatMemoryProject(t, ctx, stores.Projects)
+		writeLifecycleStandaloneSkill(t, filepath.Join(project.RepoPath, ".openvibely"), "documents", "Document instructions")
+		project.SkillMemoryPermissions = &models.SkillMemoryPermissions{}
+		require.NoError(t, stores.Projects.Update(ctx, project))
+		worker := NewWorkerService(nil, 0, stores.Projects)
+		task := models.Task{ID: "enable-in-turn", ProjectID: project.ID}
+		turn := worker.prepareMainModelKnowledge(ctx, task, chat)
+		rt := llmcontracts.RuntimeToolsFromContext(turn)
+		for _, name := range []string{"skill_view", "memory_view", "memory_save", "memory_delete"} {
+			require.False(t, rt.HasDefinition(name))
+		}
+		project.SkillMemoryPermissions = &models.SkillMemoryPermissions{ReadSkills: true, ReadMemories: true, WriteMemories: true}
+		require.NoError(t, stores.Projects.Update(ctx, project))
+		require.Contains(t, managedcontext.Text(turn), "documents")
+		for _, name := range []string{"skill_view", "memory_view"} {
+			require.True(t, rt.HasDefinition(name))
+		}
+		out, handled, failed, err := rt.Executor(turn, "skill_view", json.RawMessage(`{"handle":"documents"}`))
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, failed, out)
+		require.Contains(t, out, "Document instructions")
+		require.Equal(t, !chat, rt.HasDefinition("memory_save"))
+		out, handled, failed, err = rt.Executor(turn, "memory_save", json.RawMessage(`{"handle":"new.md","content":"Durable fact","summary":"Fact"}`))
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.Equal(t, chat, failed, out)
+		if !chat {
+			out, _, failed, err = rt.Executor(turn, "memory_view", json.RawMessage(`{"handle":"new.md"}`))
+			require.NoError(t, err)
+			require.False(t, failed, out)
+			require.Contains(t, out, "Durable fact")
+			out, _, failed, err = rt.Executor(turn, "memory_delete", json.RawMessage(`{"handle":"new.md"}`))
+			require.NoError(t, err)
+			require.False(t, failed, out)
+		}
+	}
 }

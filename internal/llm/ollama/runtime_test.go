@@ -127,7 +127,12 @@ func TestRuntimeIndexChangesDuringToolLoop(t *testing.T) {
 	phase, step, skillCalls, edits := 0, 0, 0, 0
 	var indexPrefix []chatMessage
 	workDir := t.TempDir()
-	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view", Access: llmcontracts.RuntimeToolAccessRead}, {Name: "edit_file", Access: llmcontracts.RuntimeToolAccessWrite}}, Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+	rt := &llmcontracts.RuntimeTools{Filter: func(name string) (bool, bool) {
+		if name == "edit_file" {
+			return skillCalls > 0, true
+		}
+		return false, false
+	}, Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view", Access: llmcontracts.RuntimeToolAccessRead}, {Name: "edit_file", Access: llmcontracts.RuntimeToolAccessWrite}}, Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		switch name {
 		case "skill_view":
 			skillCalls++
@@ -144,6 +149,12 @@ func TestRuntimeIndexChangesDuringToolLoop(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req chatRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		toolsJSON, _ := json.Marshal(req.Tools)
+		if skillCalls == 0 {
+			require.NotContains(t, string(toolsJSON), "edit_file")
+		} else {
+			require.Contains(t, string(toolsJSON), "edit_file")
+		}
 		data, _ := json.Marshal(req.Messages)
 		require.Contains(t, string(data), "/uploads/report.docx")
 		indexCount, indexAt := 0, -1
