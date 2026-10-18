@@ -412,3 +412,28 @@ func TestManagedSearchAuthorizesDiscoveredSymlinks(t *testing.T) {
 		require.Contains(t, out, "public-alias.md")
 	}
 }
+
+func TestManagedScopedSearchChecksEachFile(t *testing.T) {
+	root := t.TempDir()
+	_, scoped, err := buildScopedFilesRuntimeTools(context.Background(), "p1", root, models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely", Permissions: []string{"read"}}}})
+	require.NoError(t, err)
+	for _, library := range []string{"memories", "skills", "agents"} {
+		target := filepath.Join(root, ".openvibely", library, "private.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(target), 0755))
+		require.NoError(t, os.WriteFile(target, []byte("needle private"), 0600))
+		require.NoError(t, os.Symlink(target, filepath.Join(root, ".openvibely", library+"-alias.md")))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".openvibely", "public.md"), []byte("needle public"), 0600))
+	require.NoError(t, os.Symlink(filepath.Join(root, ".openvibely", "public.md"), filepath.Join(root, ".openvibely", "public-alias.md")))
+	for _, chat := range []bool{true, false} {
+		ctx := context.WithValue(context.Background(), managedWorkDirKey{}, root)
+		rt := guardManagedTools(ctx, scoped, nil, models.Task{}, chat, nil)
+		out, handled, failed, err := rt.Executor(context.Background(), "grep_search", json.RawMessage(`{"pattern":"needle"}`))
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, failed, out)
+		require.NotContains(t, out, "private")
+		require.Contains(t, out, "public.md")
+		require.Contains(t, out, "public-alias.md")
+	}
+}

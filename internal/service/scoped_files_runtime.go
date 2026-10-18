@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -540,49 +540,17 @@ func (s *scopedFilesToolSession) grepSearch(ctx context.Context, input json.RawM
 	if params.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
-	re, err := regexp.Compile(params.Pattern)
-	if err != nil {
-		return "", err
-	}
 	abs, baseRel, scope, err := s.scopedPath(params.Path, true, readPerm())
 	if err != nil {
 		return "", err
 	}
-	var matches []string
-	err = filepath.WalkDir(abs, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if err := memory.AssertPathWithin(scope.absoluteDir, path); err != nil {
-			return nil
-		}
-		if params.Include != "" && !matchGlob(params.Include, filepath.Base(path)) {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		rel, _ := filepath.Rel(abs, path)
-		fullRel := filepath.ToSlash(filepath.Join(baseRel, rel))
-		fullRel = strings.TrimPrefix(fullRel, "./")
-		for i, line := range strings.Split(string(data), "\n") {
-			if re.MatchString(line) {
-				matches = append(matches, fmt.Sprintf("%s:%d: %s", fullRel, i+1, line))
-				if len(matches) >= 200 {
-					return filepath.SkipAll
-				}
-			}
-		}
-		return nil
+	matches, err := agenttools.SearchFiles(ctx, abs, params.Pattern, agenttools.SearchOptions{
+		Include: params.Include, MaxResults: 200,
+		AllowFile: func(path string) bool { return memory.AssertPathWithin(scope.absoluteDir, path) == nil },
+		DisplayPath: func(path string) string {
+			rel, _ := filepath.Rel(abs, path)
+			return strings.TrimPrefix(filepath.ToSlash(filepath.Join(baseRel, rel)), "./")
+		},
 	})
 	if err != nil {
 		return "", err
