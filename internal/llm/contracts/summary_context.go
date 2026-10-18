@@ -6,6 +6,8 @@ type summarySystemPromptKey struct{}
 
 // WithSummarySystemPrompt preserves the originating request's rendered system
 // instructions while the summary uses a direct call with a raw user prompt.
+// Its presence also identifies summary calls to clients: size estimates must
+// not reject them before the provider can accept or report context overflow.
 func WithSummarySystemPrompt(ctx context.Context, prompt string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

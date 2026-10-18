@@ -1197,7 +1197,9 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 }
 
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
-	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil {
+	// Summary compaction sends first and trims only after provider overflow.
+	_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil && !summarizing {
 		return nil, err
 	}
 	policy := httpretry.DefaultPolicy()

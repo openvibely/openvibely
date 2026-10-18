@@ -256,7 +256,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		messages = ensureCompletionsAttachments(ctx, messages)
-		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
+		// Summary compaction sends first and trims only after provider overflow.
+		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
 			return nil, err
 		}
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{

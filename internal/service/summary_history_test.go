@@ -51,7 +51,7 @@ func TestSummaryRemovesWholeLinkedMessages(t *testing.T) {
 	}
 }
 
-func TestSummaryRequestBudgetsInjectedContextAcrossProviders(t *testing.T) {
+func TestSummaryRequestTrimsOnlyAfterProviderOverflowAcrossProviders(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
 		t.Run(string(provider), func(t *testing.T) {
 			req := llmcontracts.AgentRequest{Ctx: context.Background(), RawDirectPrompt: true, DisableTools: true, Agent: models.LLMConfig{Provider: provider, Model: "claude-opus-5-5", ContextWindow: 20000}}
@@ -75,6 +75,11 @@ func TestSummaryRequestBudgetsInjectedContextAcrossProviders(t *testing.T) {
 				calls++
 				require.Equal(t, localContextCompactionInstruction, r.Message)
 				require.Empty(t, r.ChatHistory)
+				if calls == 1 {
+					require.Equal(t, probe.SummaryInput, r.SummaryInput, "send complete history despite the estimate")
+					require.Error(t, ensureRequestFitsWithBudget(r, calculateRequestBudget(r), "estimated overflow"))
+					return llmcontracts.AgentResult{}, errors.New("context length exceeded")
+				}
 				require.Len(t, r.SummaryInput, 1)
 				require.Contains(t, summaryInputText(r.SummaryInput), "recent completed work")
 				require.NotEmpty(t, managedcontext.Text(r.Ctx))
@@ -88,6 +93,17 @@ func TestSummaryRequestBudgetsInjectedContextAcrossProviders(t *testing.T) {
 			}), req, history)
 			require.NoError(t, err)
 			require.Equal(t, "summary", result)
+			require.Equal(t, 2, calls)
+			// An estimate over the limit must not discard history if the provider
+			// accepts the complete request.
+			calls = 0
+			result, err = (&LLMService{}).localSummaryCompaction(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				calls++
+				require.Equal(t, probe.SummaryInput, r.SummaryInput)
+				return llmcontracts.AgentResult{Output: "full summary"}, nil
+			}), req, history)
+			require.NoError(t, err)
+			require.Equal(t, "full summary", result)
 			require.Equal(t, 1, calls)
 		})
 	}
@@ -135,11 +151,13 @@ func TestSummaryExhaustionAndNonContextErrors(t *testing.T) {
 		}
 	}
 	req.Ctx = managedcontext.With(req.Ctx, strings.Repeat("fixed ", 20000))
+	calls := 0
 	_, err := (&LLMService{}).localSummaryCompaction(providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		t.Fatal("fixed context alone cannot fit; do not send")
-		return llmcontracts.AgentResult{}, nil
+		calls++
+		return llmcontracts.AgentResult{}, errors.New("context length exceeded")
 	}), req, history)
 	require.True(t, llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible))
+	require.Equal(t, 2, calls, "even oversized fixed context is submitted before overflow recovery")
 }
 
 func TestSummaryStructuredHistoryReachesProviderWire(t *testing.T) {
@@ -212,7 +230,8 @@ func TestSummaryStructuredHistoryReachesProviderWire(t *testing.T) {
 					model = "claude-opus-5-5"
 					replay = `{"messages":[{"role":"user","content":"inspect file"},{"role":"assistant","content_blocks":[{"type":"tool_use","id":"read1","name":"read_file","input":{}}]},{"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"read1","content":"FILE_CONTENT"}]},{"role":"assistant","content":"file inspected"}]}`
 				}
-				ctx := managedcontext.With(context.Background(), "CURRENT_SKILL_INDEX")
+				oversizedContext := "CURRENT_SKILL_INDEX " + strings.Repeat("x", 5000000)
+				ctx := managedcontext.With(context.Background(), oversizedContext)
 				ctx = attachmentcontext.With(ctx, "/uploads/current.txt")
 				req := llmcontracts.AgentRequest{Ctx: ctx, Operation: operation, ChatMode: models.ChatModeOrchestrate, ProjectInstructions: "PROJECT_RULE", ChatSystemContext: "CHAT_RULE", AgentDefinition: &models.Agent{SystemPrompt: "AGENT_RULE"}, Agent: models.LLMConfig{Provider: provider, Model: model, AuthMethod: route.auth, APIKey: "fixture", OAuthAccessToken: "fixture", OAuthExpiresAt: time.Now().Add(24 * time.Hour).UnixMilli(), BaseURL: server.URL + "/v1", PresetSlug: "vllm", OllamaBaseURL: server.URL, ContextWindow: 200000}}
 				svc := NewLLMService(nil, nil, nil, nil, nil, nil)
@@ -264,7 +283,7 @@ func TestSummaryStructuredHistoryReachesProviderWire(t *testing.T) {
 				require.GreaterOrEqual(t, len(messages), 5)
 				raw, err := json.Marshal(messages)
 				require.NoError(t, err)
-				for _, text := range []string{"read1", "FILE_CONTENT", "CURRENT_SKILL_INDEX", "/uploads/current.txt"} {
+				for _, text := range []string{"read1", "FILE_CONTENT", oversizedContext, "/uploads/current.txt"} {
 					require.Contains(t, string(raw), text)
 				}
 				// The instruction is a separate last user message, not a rendered transcript.
@@ -308,13 +327,17 @@ func TestSummaryKeepsSystemInstructionsWhenTrimmingHistory(t *testing.T) {
 				require.True(t, ok)
 				require.Equal(t, instructions, preserved)
 				require.Equal(t, estimatedUTF8Tokens(instructions), calculateRequestBudget(r).FixedTokens)
+				if calls == 1 {
+					require.Len(t, r.SummaryInput, 2)
+					return llmcontracts.AgentResult{}, errors.New("context length exceeded")
+				}
 				require.Len(t, r.SummaryInput, 1)
 				require.Contains(t, summaryInputText(r.SummaryInput), "recent work")
 				require.NoError(t, ensureRequestFitsWithBudget(r, calculateRequestBudget(r), "summary with system instructions"))
 				return llmcontracts.AgentResult{Output: "summary"}, nil
 			}), req, history)
 			require.NoError(t, err)
-			require.Equal(t, 1, calls)
+			require.Equal(t, 2, calls)
 			require.Equal(t, instructions, req.ProjectInstructions)
 			_, overridden := llmcontracts.SummarySystemPromptFromContext(req.Ctx)
 			require.False(t, overridden, "summary overrides must not leak into the continuing request")
