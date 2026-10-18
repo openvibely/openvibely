@@ -1462,17 +1462,12 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 		if err := summaryReq.Ctx.Err(); err != nil {
 			return "", err
 		}
-		// Account for the complete request, including injected context. On either
-		// a local or provider context rejection, remove whole messages and their
-		// tool partners. Never cut through serialized history or tool contents.
+		// Estimates are for observability only. Let the provider decide whether
+		// the summary request fits before removing history.
 		budget := calculateRequestBudget(summaryReq)
-		err := ensureRequestFitsWithBudget(summaryReq, budget, "summary request")
-		var res llmcontracts.AgentResult
-		if err == nil {
-			logContextDecisionWithBudget(history, summaryReq, "textual_summary", false, trigger, budget)
-			res, err = adapter.Call(summaryReq)
-			err = categorizeProviderError(err)
-		}
+		logContextDecisionWithBudget(history, summaryReq, "textual_summary", false, trigger, budget)
+		res, err := adapter.Call(summaryReq)
+		err = categorizeProviderError(err)
 		if err != nil {
 			logContextFailureWithBudget(summaryReq, err, budget)
 			if recognizedContextLengthError(err) {

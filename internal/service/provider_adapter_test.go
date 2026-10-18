@@ -651,11 +651,12 @@ func TestProviderContextBudget_LargeHistoryAndOversizedPendingAreHandledSeparate
 	var requests []llmcontracts.AgentRequest
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		requests = append(requests, req)
+		if req.Operation == llmcontracts.OperationDirect {
+			// Summary calls send full history; only the provider decides if it fits.
+			return llmcontracts.AgentResult{Output: "bounded history summary"}, nil
+		}
 		if err := ensureRequestFitsWithBudget(req, calculateRequestBudget(req), "test provider-bound request"); err != nil {
 			t.Fatalf("oversized provider request %d: %v", len(requests), err)
-		}
-		if req.Operation == llmcontracts.OperationDirect {
-			return llmcontracts.AgentResult{Output: "bounded history summary"}, nil
 		}
 		return llmcontracts.AgentResult{Output: "ok"}, nil
 	})
@@ -670,7 +671,7 @@ func TestProviderContextBudget_LargeHistoryAndOversizedPendingAreHandledSeparate
 		t.Fatal(err)
 	}
 	if len(requests) != 2 || requests[0].Operation != llmcontracts.OperationDirect || requests[1].Operation != llmcontracts.OperationStreaming {
-		t.Fatalf("requests = %#v, want bounded summary then continuation", requests)
+		t.Fatalf("requests = %#v, want summary then bounded continuation", requests)
 	}
 	if requests[1].Message == original || !strings.Contains(requests[1].Message, "Full input:") {
 		t.Fatal("oversized pending input was not handled independently after history compaction")

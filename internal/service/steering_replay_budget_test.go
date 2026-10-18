@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -28,11 +29,14 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	require.Equal(t, replay, loaded.ChatHistory[0].ReplayMessages)
 	require.Greater(t, calculateRequestBudget(loaded).HistoryTokens, before.HistoryTokens+40000)
 	require.Nil(t, req.ChatHistory[0].ReplayMessages, "loading must not mutate caller history")
-	_, err = svc.localSummaryCompaction(providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		t.Fatal("must not send when no summary history can fit")
-		return llmcontracts.AgentResult{}, nil
+	summaryCalls := 0
+	_, err = svc.localSummaryCompaction(providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		summaryCalls++
+		require.Contains(t, summaryInputText(r.SummaryInput), strings.Repeat("x", 200000))
+		return llmcontracts.AgentResult{}, errors.New("context length exceeded")
 	}), loaded, loaded.ChatHistory)
 	require.True(t, llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible))
+	require.Equal(t, 1, summaryCalls, "send full replay before accepting the provider's overflow decision")
 	// The actual provider entry point must count persisted replay, not just
 	// the small prompt supplied by its caller.
 	guarded := req
