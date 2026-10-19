@@ -391,3 +391,20 @@ func TestSidebarFooterToggleUsesThemeModeSwitch(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeKanbanSelectionUsesOKLCHPrimary(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, want := range []string{
+		"outline: 3px solid oklch(var(--p));",
+		"background: linear-gradient(135deg, oklch(var(--p) / 0.25), oklch(var(--p) / 0.15)) !important;",
+		"border-color: oklch(var(--p)) !important;\n\t\t\t\t\tbackground-color: oklch(var(--p) / 0.1);",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("native kanban selection/drag styles must use the oklch daisyUI primary, missing %q", want)
+		}
+	}
+}
