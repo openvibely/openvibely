@@ -976,7 +976,7 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 		for _, item := range published {
 			fileRefs = append(fileRefs, fmt.Sprintf("%s (path: %s)", item.name, item.path))
 		}
-		task.Prompt += fmt.Sprintf("\n\n[Attached files from chat:\n%s]", strings.Join(fileRefs, "\n"))
+		task.Prompt += fmt.Sprintf("\n\n[Attached files:\n%s]", strings.Join(fileRefs, "\n"))
 		if updateErr := h.taskRepo.Update(ctx, task); updateErr != nil {
 			applog.Infof("[handler] attachment lifecycle stage=update-prompt execution=%s task=%s error=%v", executionID, taskID, updateErr)
 		}
