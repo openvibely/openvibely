@@ -100,6 +100,20 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 					part, ok := value.(map[string]any)
 					if !ok || part["type"] != "input_text" {
 						retained["content"] = []any{map[string]any{"type": "input_text", "text": text}}
+						// The replacement has one text part, even when no text
+						// truncation is needed. Keep its classifications aligned.
+						for _, key := range []string{"internal_chat_message_metadata", "internal_chat_message_metadata_passthrough"} {
+							if metadata, ok := item[key].(map[string]any); ok {
+								if _, exists := metadata["content_item_kinds"]; exists {
+									updated := make(map[string]any, len(metadata))
+									for field, value := range metadata {
+										updated[field] = value
+									}
+									updated["content_item_kinds"] = []string{"user.text"}
+									retained[key] = updated
+								}
+							}
+						}
 						break
 					}
 				}
