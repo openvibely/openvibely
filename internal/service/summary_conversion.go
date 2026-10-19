@@ -152,48 +152,60 @@ func anthropicSummaryMessages(messages []anthropicclient.Message) []openaiclient
 
 func completionsAnthropicSummaryMessages(messages []openaiclient.CompletionsHistoryMessage) []anthropicclient.Message {
 	var out []anthropicclient.Message
+	var toolResults []map[string]any
+	flushToolResults := func() {
+		if len(toolResults) == 0 {
+			return
+		}
+		raw, _ := json.Marshal(toolResults)
+		out = append(out, anthropicclient.Message{Role: "user", ContentBlocks: raw})
+		toolResults = nil
+	}
 	for _, message := range messages {
+		// Anthropic expects parallel results together in the next user message.
+		// Flush at any non-tool message so separate rounds are never combined.
+		if message.Role == "tool" {
+			toolResults = append(toolResults, map[string]any{"type": "tool_result", "tool_use_id": message.ToolCallID, "content": message.Content})
+			continue
+		}
+		flushToolResults()
 		role := message.Role
 		if role == "system" || role == "developer" {
 			role = "user"
 		}
 		var blocks []map[string]any
-		if role == "tool" {
-			role = "user"
-			blocks = append(blocks, map[string]any{"type": "tool_result", "tool_use_id": message.ToolCallID, "content": message.Content})
-		} else {
-			if message.Content != "" {
-				blocks = append(blocks, map[string]any{"type": "text", "text": message.Content})
+		if message.Content != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": message.Content})
+		}
+		for _, part := range message.ImageContent {
+			if part["type"] == "text" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": part["text"]})
 			}
-			for _, part := range message.ImageContent {
-				if part["type"] == "text" {
-					blocks = append(blocks, map[string]any{"type": "text", "text": part["text"]})
-				}
-				if part["type"] == "image_url" {
-					image, _ := part["image_url"].(map[string]interface{})
-					url, _ := image["url"].(string)
-					source := map[string]any{"type": "url", "url": url}
-					if strings.HasPrefix(url, "data:") {
-						header, data, ok := strings.Cut(strings.TrimPrefix(url, "data:"), ";base64,")
-						if ok {
-							source = map[string]any{"type": "base64", "media_type": header, "data": data}
-						}
+			if part["type"] == "image_url" {
+				image, _ := part["image_url"].(map[string]interface{})
+				url, _ := image["url"].(string)
+				source := map[string]any{"type": "url", "url": url}
+				if strings.HasPrefix(url, "data:") {
+					header, data, ok := strings.Cut(strings.TrimPrefix(url, "data:"), ";base64,")
+					if ok {
+						source = map[string]any{"type": "base64", "media_type": header, "data": data}
 					}
-					blocks = append(blocks, map[string]any{"type": "image", "source": source})
 				}
+				blocks = append(blocks, map[string]any{"type": "image", "source": source})
 			}
-			for _, call := range message.ToolCalls {
-				var input any
-				if json.Unmarshal([]byte(call.Function.Arguments), &input) != nil {
-					input = map[string]any{"raw_arguments": call.Function.Arguments}
-				}
-				blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})
+		}
+		for _, call := range message.ToolCalls {
+			var input any
+			if json.Unmarshal([]byte(call.Function.Arguments), &input) != nil {
+				input = map[string]any{"raw_arguments": call.Function.Arguments}
 			}
+			blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})
 		}
 		if len(blocks) > 0 {
 			raw, _ := json.Marshal(blocks)
 			out = append(out, anthropicclient.Message{Role: role, ContentBlocks: raw})
 		}
 	}
+	flushToolResults()
 	return out
 }
