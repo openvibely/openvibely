@@ -37,7 +37,8 @@ func swarmSharedAttachmentParent(ctx context.Context, taskRepo persistence.TaskS
 	return parent, nil
 }
 
-func listTaskConversationAttachments(ctx context.Context, attachmentRepo persistence.AttachmentStore, taskRepo persistence.TaskStore, task *models.Task) ([]models.Attachment, error) {
+// ListTaskConversationAttachments loads task files and shared files from a same-project swarm parent.
+func ListTaskConversationAttachments(ctx context.Context, attachmentRepo persistence.AttachmentStore, taskRepo persistence.TaskStore, task *models.Task) ([]models.Attachment, error) {
 	attachments, err := attachmentRepo.ListByTask(ctx, task.ID)
 	if err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func NewTaskAttachmentContextSource(attachmentRepo persistence.AttachmentStore, 
 		keys = append(keys, *task.ParentTaskID)
 	}
 	return attachmentcontext.NewSource(func(ctx context.Context) (string, error) {
-		attachments, err := listTaskConversationAttachments(ctx, attachmentRepo, taskRepo, &task)
+		attachments, err := ListTaskConversationAttachments(ctx, attachmentRepo, taskRepo, &task)
 		if err != nil {
 			return "", fmt.Errorf("load task attachments: %w", err)
 		}
