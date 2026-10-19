@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -87,4 +89,57 @@ func TestSteeringPreparationFailureStopsHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputPending, queued.InputStatus)
 	require.Equal(t, models.ThreadInputModeQueued, queued.InputMode)
+}
+
+func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
+	for _, failure := range []string{"delivery", "second-upload"} {
+		t.Run(failure, func(t *testing.T) {
+			h, _, configs := setupTestHandler(t)
+			useTempUploadsDir(t)
+			ctx := context.Background()
+			agent := createAgent(t, configs)
+			project := createProject(t, h, "Attachment retry")
+			task := createTask(t, h, project.ID, "steering", func(task *models.Task) {
+				task.Category, task.Status, task.AgentID = models.CategoryActive, models.StatusRunning, &agent.ID
+			})
+			exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+			writeUpload := func(session string) {
+				dir := filepath.Join(uploadsDir, "chat", "pending", session)
+				require.NoError(t, os.MkdirAll(dir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "doc.pdf"), []byte(session), 0o644))
+			}
+			for _, session := range []string{"first", "second"} {
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: session, AttachmentSessionID: session}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+			}
+			writeUpload("first")
+			if failure == "delivery" {
+				writeUpload("second")
+			}
+			params := streamingResponseParams{ExecID: exec.ID}
+			batch, err := h.claimPendingSteeringInputs(ctx, &params)
+			require.NoError(t, err)
+			require.Equal(t, 2, batch.count())
+			commit := h.preparedSteeringCommit(params, batch)
+			// An unserializable checkpoint fails delivery after attachments are staged.
+			require.Error(t, commit(ctx, []any{make(chan int)}))
+			require.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", "first", "doc.pdf"))
+			rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			files, err := os.ReadDir(filepath.Join(uploadsDir, "chat", exec.ID))
+			require.NoError(t, err)
+			require.Empty(t, files)
+			writeUpload("second")
+			require.NoError(t, commit(ctx, nil))
+			require.NoError(t, commit(ctx, nil), "successful commits may be called again")
+			rows, err = h.attachmentRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, rows, 2)
+			require.NotEqual(t, rows[0].FilePath, rows[1].FilePath)
+			for _, session := range []string{"first", "second"} {
+				require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", session))
+			}
+		})
+	}
 }

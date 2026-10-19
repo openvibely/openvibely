@@ -660,15 +660,25 @@ func (h *Handler) listMessageAttachments(ctx context.Context, execID string) ([]
 // processAttachmentsWithReturn is like processAttachments but also returns the
 // published per-message attachment records for display.
 func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, error) {
+	text, images, records, finish, err := h.stageMessageAttachments(ctx, sessionID, execID)
+	if err == nil {
+		finish(true)
+	}
+	return text, images, records, err
+}
+
+// stageMessageAttachments retains pending uploads until delivery succeeds.
+// finish(false) rolls back published copies and metadata so delivery can retry.
+func (h *Handler) stageMessageAttachments(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
 	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, nil, err
 	}
 	if taskThreadID == "" && h.chatAttachmentRepo == nil {
-		return "", nil, nil, fmt.Errorf("chat attachment repository is unavailable")
+		return "", nil, nil, nil, fmt.Errorf("chat attachment repository is unavailable")
 	}
 	if taskThreadID != "" && h.attachmentRepo == nil {
-		return "", nil, nil, fmt.Errorf("task attachment repository is unavailable")
+		return "", nil, nil, nil, fmt.Errorf("task attachment repository is unavailable")
 	}
 	createMetadata := func(ctx context.Context, att *models.ChatAttachment) error {
 		return h.chatAttachmentRepo.Create(ctx, att)
@@ -692,27 +702,28 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	if _, err := os.Stat(pendingDir); err != nil {
 		if os.IsNotExist(err) {
 			applog.Infof("[handler] attachment lifecycle stage=session-source session=%s execution=%s source=%s error=file-not-found", sessionID, execID, pendingDir)
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, os.ErrNotExist)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, os.ErrNotExist)
 		}
-		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, err)
+		return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, err)
 	}
 
 	// Read files from pending directory
 	files, err := os.ReadDir(pendingDir)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("reading pending directory: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("reading pending directory: %w", err)
 	}
 
 	if len(files) == 0 {
-		return "", nil, nil, nil
+		return "", nil, nil, func(bool) {}, nil
 	}
 
 	// Create execution-specific directory
 	execDir := filepath.Join(uploadsDir, "chat", execID)
 	if err := os.MkdirAll(execDir, 0755); err != nil {
-		return "", nil, nil, fmt.Errorf("creating execution directory: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("creating execution directory: %w", err)
 	}
 
+	usedNames := make(map[string]bool)
 	var contextFiles []chatAttachmentModelContextFile
 	var chatAttachments []models.ChatAttachment
 	var staged []attachmentPublication
@@ -728,18 +739,18 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		}
 
 		srcPath := filepath.Join(pendingDir, file.Name())
-		destPath := filepath.Join(execDir, file.Name())
+		destPath := filepath.Join(execDir, uniqueAttachmentName(execDir, file.Name(), usedNames))
 		applog.Infof("[handler] attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s", sessionID, srcPath, execID, destPath)
 		if err := copyFileAtomically(srcPath, destPath); err != nil {
 			rollback()
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 
 		info, err := os.Stat(destPath)
 		if err != nil {
 			_ = os.Remove(destPath)
 			rollback()
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-verify session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-verify session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 		mediaType := mediaTypeFromExtension(file.Name())
 		attachment := &models.ChatAttachment{
@@ -749,7 +760,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		if err := createMetadata(ctx, attachment); err != nil {
 			_ = os.Remove(destPath)
 			rollback()
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 		staged = append(staged, attachmentPublication{id: attachment.ID, path: destPath})
 		chatAttachments = append(chatAttachments, *attachment)
@@ -765,15 +776,19 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	textContext, imageAttachments, err := buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{})
 	if err != nil {
 		rollback()
-		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s execution=%s: %w", sessionID, execID, err)
+		return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s execution=%s: %w", sessionID, execID, err)
 	}
 
-	if err := os.RemoveAll(pendingDir); err != nil {
-		applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
+	finish := func(committed bool) {
+		if !committed {
+			rollback()
+			return
+		}
+		if err := os.RemoveAll(pendingDir); err != nil {
+			applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
+		}
 	}
-	applog.Infof("[handler] attachment lifecycle stage=session-committed session=%s execution=%s attachments=%d", sessionID, execID, len(chatAttachments))
-
-	return textContext, imageAttachments, chatAttachments, nil
+	return textContext, imageAttachments, chatAttachments, finish, nil
 }
 
 func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.Attachment, error) {

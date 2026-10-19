@@ -667,19 +667,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		text := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		steeringCallbackParams.lifecycleUserMessage = text
-		attachmentsCommitted := false
+		commit := h.preparedSteeringCommit(params, batch)
 		return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
-			if !attachmentsCommitted {
-				for _, input := range batch.inputs {
-					if input.AttachmentSessionID != "" {
-						if _, _, _, err := h.processAttachmentsWithReturn(commitCtx, input.AttachmentSessionID, params.ExecID); err != nil {
-							return err
-						}
-					}
-				}
-				attachmentsCommitted = true
-			}
-			if err := h.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history}); err != nil {
+			if err := commit(commitCtx, history); err != nil {
 				return err
 			}
 			pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
@@ -1402,19 +1392,31 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 }
 
 func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch preparedSteeringBatch) llmcontracts.InitialSteeringCommit {
-	attachmentsCommitted := false
+	delivered := false
 	return func(ctx context.Context, history []any) error {
-		if !attachmentsCommitted {
+		var finishes []func(bool)
+		committed := false
+		defer func() {
+			for i := len(finishes) - 1; i >= 0; i-- {
+				finishes[i](committed)
+			}
+		}()
+		if !delivered {
 			for _, input := range batch.inputs {
 				if input.AttachmentSessionID != "" {
-					if _, _, _, err := h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, params.ExecID); err != nil {
+					_, _, _, finish, err := h.stageMessageAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+					if err != nil {
 						return err
 					}
+					finishes = append(finishes, finish)
 				}
 			}
-			attachmentsCommitted = true
 		}
-		return h.threadInputRepo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history})
+		if err := h.threadInputRepo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history}); err != nil {
+			return err
+		}
+		committed, delivered = true, true
+		return nil
 	}
 }
 
@@ -1423,12 +1425,17 @@ func (h *Handler) commitPreparedSteeringInputs(ctx context.Context, params strea
 		return nil
 	}
 	for _, input := range batch.inputs {
+		finish := func(bool) {}
 		if input.AttachmentSessionID != "" {
-			if _, _, _, attErr := h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, params.ExecID); attErr != nil {
-				return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, attErr)
+			var err error
+			_, _, _, finish, err = h.stageMessageAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+			if err != nil {
+				return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, err)
 			}
 		}
-		if err := h.threadInputRepo.MarkApplied(ctx, input.ID, params.ExecID, params.ExecID); err != nil {
+		err := h.threadInputRepo.MarkApplied(ctx, input.ID, params.ExecID, params.ExecID)
+		finish(err == nil)
+		if err != nil {
 			return err
 		}
 	}
