@@ -36,7 +36,7 @@ type Theme struct {
 }
 
 func Catalog() []Theme {
-	catalog := make([]Theme, 0, ExpectedThemeCount+3+len(paletteSpecs()))
+	catalog := make([]Theme, 0, ExpectedThemeCount+4+len(paletteSpecs()))
 	catalog = append(catalog, OpenVibelyThemes()...)
 	catalog = append(catalog, PaletteThemes()...)
 	catalog = append(catalog, VSCodeCatalog()...)
@@ -195,6 +195,7 @@ func OpenVibelyThemes() []Theme {
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
 		openVibelyContinuousTheme(),
+		openVibelyRaisedTheme(),
 	}
 }
 
@@ -205,6 +206,23 @@ func openVibelyContinuousTheme() Theme {
 	theme.Name = "OpenVibely Dark Continuous"
 	theme.Source = "OpenVibely experimental"
 	theme.SearchText = theme.Name + " dark experimental continuous sidebar"
+	return theme
+}
+
+// The raised variant retains native dark styling with cards drawn in the chat bubble color.
+func openVibelyRaisedTheme() Theme {
+	theme := openVibelyDarkTheme()
+	theme.ID = "openvibely-dark-raised"
+	theme.Name = "OpenVibely Dark Raised"
+	theme.Source = "OpenVibely experimental"
+	theme.SearchText = theme.Name + " dark experimental raised cards"
+	for _, role := range []string{"bg", "sidebarBg", "surface", "surfaceRaised", "inputBg"} {
+		theme.Semantic[role] = "#2B3039"
+	}
+	theme.Preview["bg"] = theme.Semantic["bg"]
+	theme.Preview["sidebar"] = theme.Semantic["sidebarBg"]
+	theme.Preview["surface"] = theme.Semantic["surface"]
+	theme.CSS = themeCSSVars(theme.Semantic, theme.Syntax)
 	return theme
 }
 
