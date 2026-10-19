@@ -2,7 +2,7 @@ package themes
 
 import "testing"
 
-func TestKanbanColumnsRecessBelowCardsAndStayReadable(t *testing.T) {
+func TestKanbanColumnsStandApartFromCardsAndPageAndStayReadable(t *testing.T) {
 	for _, theme := range Catalog() {
 		if theme.Source == "OpenVibely built-in" {
 			continue
@@ -10,6 +10,10 @@ func TestKanbanColumnsRecessBelowCardsAndStayReadable(t *testing.T) {
 		column, _, _ := parseThemeHexColor(kanbanColumnBackground(theme))
 		card, _, _ := parseThemeHexColor(theme.CSS["--ov-surface"])
 		sidebar, _, _ := parseThemeHexColor(theme.CSS["--ov-sidebar-bg"])
+		page, _, _ := parseThemeHexColor(theme.CSS["--ov-content-bg"])
+		if got := rgbDistance(page, column); got < kanbanColumnPageDistance {
+			t.Errorf("%s task column blends into page: distance %.1f", theme.ID, got)
+		}
 		if got := rgbDistance(card, column); got < kanbanColumnCardDistance {
 			t.Errorf("%s task column blends into cards: distance %.1f", theme.ID, got)
 		}
