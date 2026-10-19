@@ -199,8 +199,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			{"popup menu border", "#fixture-menu", "borderTopColor", "var(--ov-subtle-border)"},
 			{"popup menu text", "#fixture-menu", "color", "var(--ov-text)"},
 			{"project tab menu surface", "#project-tab-menu", "backgroundColor", "var(--ov-surface-raised)"},
-			{"selected schedule day", "#schedule-content [data-calendar-day]", "backgroundColor", "var(--ov-accent-tint)"},
-			{"selected schedule hour", "#schedule-content [data-calendar-hour]", "backgroundColor", "var(--ov-accent-tint)"},
+			{"selected schedule day", "#schedule-content [data-calendar-day]", "backgroundColor", "var(--ov-schedule-selection-bg)"},
+			{"selected schedule hour", "#schedule-content [data-calendar-hour]", "backgroundColor", "var(--ov-schedule-selection-bg)"},
 			{"schedule card tint", "#fixture-schedule-card", "backgroundColor", "var(--ov-schedule-task-bg)"},
 			{"schedule card border", "#fixture-schedule-card", "borderLeftColor", "var(--ov-schedule-task-border)"},
 			{"date picker surface", ".schedule-datetime-popup", "backgroundColor", "var(--ov-surface-raised)"},
@@ -356,6 +356,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("native theme keeps indigo running state", `window.near('#fixture-running', 'color', '#7480ff')`, "ok")
 		browser.waitFor("native theme keeps indigo primary text", `window.near('#fixture-primary-text', 'color', '#7480ff')`, "ok")
 		browser.waitFor("native theme keeps default selection tint", `window.computed('#schedule-content [data-calendar-day]', 'backgroundColor')`, "rgba(116, 128, 255, 0.16)")
+		browser.waitFor("native theme keeps indigo schedule card", `String(window.computed('#fixture-schedule-card', 'backgroundColor').indexOf('var(') === -1 && document.documentElement.style.getPropertyValue('--ov-schedule-task-bg') === '')`, "true")
 		browser.waitFor("native dark task column matches title bar", `String(window.computed('#fixture-column', 'backgroundColor') === window.computed('#desktop-project-titlebar', 'backgroundColor'))`, "true")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-light');'ok'`)
 		browser.waitFor("native light task column matches title bar", `String(window.computed('#fixture-column', 'backgroundColor') === window.computed('#desktop-project-titlebar', 'backgroundColor'))`, "true")
