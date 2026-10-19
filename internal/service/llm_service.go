@@ -1506,17 +1506,16 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			attachmentsCommitted := false
 			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
-				if !attachmentsCommitted {
-					if err := s.publishTaskSteeringAttachments(commitCtx, task.ID, exec.ID, inputs); err != nil {
-						return err
-					}
-					attachmentsCommitted = true
-				}
-				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
+				finishAttachments, err := s.publishTaskSteeringAttachments(commitCtx, task.ID, exec.ID, inputs)
+				if err != nil {
 					return err
 				}
+				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
+					finishAttachments(false)
+					return err
+				}
+				finishAttachments(true)
 				consumed := make(map[string]bool, len(inputs))
 				for _, input := range inputs {
 					consumed[input.ID] = true

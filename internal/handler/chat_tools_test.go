@@ -408,9 +408,12 @@ func TestProcessChatAttachmentsForEdits(t *testing.T) {
 		t.Fatalf("failed to create task: %v", err)
 	}
 
-	// Create a chat execution to associate attachments with
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Chat", Prompt: "chat", Category: models.CategoryChat, Status: models.StatusRunning}
+	if err := h.taskSvc.Create(ctx, chatTask); err != nil {
+		t.Fatalf("failed to create chat task: %v", err)
+	}
 	exec := &models.Execution{
-		TaskID:        task.ID,
+		TaskID:        chatTask.ID,
 		AgentConfigID: agent.ID,
 		Status:        models.ExecRunning,
 		PromptSent:    "Add this screenshot to the task",

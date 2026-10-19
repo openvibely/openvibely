@@ -89,12 +89,14 @@ func (s *LLMService) taskAttachmentUploadsRoot() string {
 	return "uploads"
 }
 
-// publishTaskSteeringAttachments moves steering uploads into task_attachments,
-// owned by the execution that consumed the steering message. Files are
-// published before metadata; failures roll back what this call published.
-func (s *LLMService) publishTaskSteeringAttachments(ctx context.Context, taskID, execID string, inputs []models.ThreadInput) error {
+// publishTaskSteeringAttachments copies steering uploads into task_attachments,
+// owned by the execution that consumed the steering message. Pending upload
+// directories are left in place; the caller must call finish(true) after the
+// steering commit succeeds, or finish(false) to undo the publication so a
+// retried delivery can publish again from the still-present uploads.
+func (s *LLMService) publishTaskSteeringAttachments(ctx context.Context, taskID, execID string, inputs []models.ThreadInput) (finish func(committed bool), err error) {
 	if s.attachmentRepo == nil {
-		return fmt.Errorf("attachment repository is unavailable")
+		return nil, fmt.Errorf("attachment repository is unavailable")
 	}
 	root := s.taskAttachmentUploadsRoot()
 	type published struct{ id, path string }
@@ -116,12 +118,12 @@ func (s *LLMService) publishTaskSteeringAttachments(ctx context.Context, taskID,
 		entries, err := os.ReadDir(source)
 		if err != nil {
 			rollback()
-			return fmt.Errorf("reading steering attachments %s: %w", sessionID, err)
+			return nil, fmt.Errorf("reading steering attachments %s: %w", sessionID, err)
 		}
 		dest := filepath.Join(root, "chat", execID)
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			rollback()
-			return err
+			return nil, err
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
@@ -130,28 +132,33 @@ func (s *LLMService) publishTaskSteeringAttachments(ctx context.Context, taskID,
 			destPath := filepath.Join(dest, entry.Name())
 			if err := copyAttachmentFile(filepath.Join(source, entry.Name()), destPath); err != nil {
 				rollback()
-				return fmt.Errorf("publishing steering attachment %s: %w", entry.Name(), err)
+				return nil, fmt.Errorf("publishing steering attachment %s: %w", entry.Name(), err)
 			}
 			info, err := os.Stat(destPath)
 			if err != nil {
 				_ = os.Remove(destPath)
 				rollback()
-				return err
+				return nil, err
 			}
 			att := &models.Attachment{TaskID: taskID, ExecutionID: execID, FileName: entry.Name(), FilePath: destPath, MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size()}
 			if err := s.attachmentRepo.Create(ctx, att); err != nil {
 				_ = os.Remove(destPath)
 				rollback()
-				return err
+				return nil, err
 			}
 			done = append(done, published{id: att.ID, path: destPath})
 		}
 		sessions = append(sessions, source)
 	}
-	for _, source := range sessions {
-		_ = os.RemoveAll(source)
-	}
-	return nil
+	return func(committed bool) {
+		if !committed {
+			rollback()
+			return
+		}
+		for _, source := range sessions {
+			_ = os.RemoveAll(source)
+		}
+	}, nil
 }
 
 func copyAttachmentFile(srcPath, destPath string) error {

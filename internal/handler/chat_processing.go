@@ -3233,7 +3233,7 @@ func (h *Handler) executeChatTaskCreationRequests(ctx context.Context, execID, p
 
 	applog.Infof("[handler] executeChatTaskCreationRequests exec=%s found %d task creation requests", execID, len(taskRequests))
 
-	chatAtts, err := h.chatAttachmentRepo.ListByExecution(ctx, execID)
+	chatAtts, err := h.listMessageAttachments(ctx, execID)
 	if err != nil {
 		applog.Infof("[handler] attachment lifecycle stage=metadata-load execution=%s destination_task=uncreated error=%v", execID, err)
 		return fmt.Sprintf("Failed to create %d task(s): Chat attachments could not be loaded; no tasks were created.", len(taskRequests)), 0

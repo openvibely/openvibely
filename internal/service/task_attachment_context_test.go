@@ -72,3 +72,57 @@ func TestExecuteTaskWithAgent_TaskWideAttachmentContextRefreshesDuringRun(t *tes
 		t.Fatalf("only task-level files are direct inputs; message files stay in their original message: %+v", direct)
 	}
 }
+
+func TestPublishTaskSteeringAttachmentsKeepsUploadsUntilCommitted(t *testing.T) {
+	ctx := context.Background()
+	db := teststores.New(t)
+	task := &models.Task{ProjectID: "default", Title: "Steer", Prompt: "p", Category: models.CategoryActive, Status: models.StatusRunning}
+	if err := db.Tasks.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+	if err := db.Executions.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewLLMService(db.LLMConfigs, db.Executions, db.Tasks, nil, nil, db.Attachments)
+	svc.taskSvc = &TaskService{uploadsDir: t.TempDir()}
+	pending := filepath.Join(svc.taskSvc.uploadsDir, "chat", "pending", "s1")
+	if err := os.MkdirAll(pending, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pending, "shot.png"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inputs := []models.ThreadInput{{AttachmentSessionID: "s1"}}
+	countRows := func() int {
+		rows, err := db.Attachments.ListByTask(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(rows)
+	}
+
+	finish, err := svc.publishTaskSteeringAttachments(ctx, task.ID, exec.ID, inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finish(false)
+	if countRows() != 0 {
+		t.Fatal("failed commit must remove published rows")
+	}
+	if _, err := os.Stat(pending); err != nil {
+		t.Fatalf("failed commit must keep pending uploads for retry: %v", err)
+	}
+
+	finish, err = svc.publishTaskSteeringAttachments(ctx, task.ID, exec.ID, inputs)
+	if err != nil {
+		t.Fatalf("retry must republish from pending uploads: %v", err)
+	}
+	finish(true)
+	if countRows() != 1 {
+		t.Fatal("committed retry must keep exactly one row")
+	}
+	if _, err := os.Stat(pending); !os.IsNotExist(err) {
+		t.Fatalf("committed publish must remove pending uploads: %v", err)
+	}
+}
