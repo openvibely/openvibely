@@ -7,25 +7,20 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
 )
 
-func TestProviderSwitchLoadsCompactionArchiveFromEarlierExecution(t *testing.T) {
+func TestProviderSwitchLoadsExistingTranscriptFromEarlierExecution(t *testing.T) {
 	ctx := context.Background()
 	stores := teststores.New(t).Stores
 	task := &models.Task{ProjectID: "default", Title: "archive", Category: models.CategoryBacklog, Status: models.StatusCompleted}
 	require.NoError(t, stores.Tasks.Create(ctx, task))
-	old := &models.Execution{TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "inspect"}
+	old := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "inspect", Output: "[Tool read_file done]\nOLD_TOOL_FACT\n[/Tool]"}
 	require.NoError(t, stores.Executions.Create(ctx, old))
-	require.NoError(t, stores.Executions.ReplaceReasoningReplay(ctx, old.ID, "", []models.ExecutionReplayMessage{{TranscriptJSON: `{
-		"responses_input":[{"type":"compaction","encrypted_content":"opaque"}],
-		"responses_compaction_sources":{"opaque":[
-			{"type":"message","role":"user","content":"inspect"},
-			{"type":"function_call","call_id":"a","name":"read_file","arguments":"{}"},
-			{"type":"function_call_output","call_id":"a","output":"OLD_TOOL_FACT"},
-			{"type":"message","role":"assistant","content":"done"}
-		]}}`}}))
+	require.NoError(t, stores.Executions.Complete(ctx, old.ID, models.ExecCompleted, old.Output, "", 0, 0))
+
 	current := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
 	require.NoError(t, stores.Executions.Create(ctx, current))
 	transcript := `{"responses_input":[{"type":"compaction","encrypted_content":"opaque"},{"type":"message","role":"user","content":"recent"},{"type":"message","role":"assistant","content":"recent answer"}]}`
@@ -33,7 +28,7 @@ func TestProviderSwitchLoadsCompactionArchiveFromEarlierExecution(t *testing.T) 
 		t.Run(string(provider), func(t *testing.T) {
 			s := &LLMService{execRepo: stores.Executions}
 			req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "next", Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000},
-				ChatHistory: []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}}
+				ChatHistory: []models.Execution{{Status: models.ExecCompleted, PromptSent: "recent", Output: "recent answer", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}}
 			called := false
 			_, err := s.callProviderWithCompaction(providerAdapterFunc(func(sent llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				called = true
@@ -117,4 +112,57 @@ func TestProviderSwitchRepairsInterruptedParallelCalls(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestProviderSwitchTranscriptRecoveryPagesAndRespectsNewContext(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	task := &models.Task{ProjectID: "default", Title: "paging", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+	require.NoError(t, stores.Tasks.Create(ctx, task))
+	create := func(prompt, output string, boundary bool) *models.Execution {
+		e := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: prompt, Output: output, StartsNewContext: boundary}
+		require.NoError(t, stores.Executions.Create(ctx, e))
+		require.NoError(t, stores.Executions.Complete(ctx, e.ID, models.ExecCompleted, output, "", 0, 0))
+		e.Status = models.ExecCompleted
+		return e
+	}
+	create("excluded", "BEFORE_NEW_CONTEXT", false)
+	create("new context", "FIRST_INCLUDED_FACT", true)
+	for i := 0; i < 101; i++ {
+		create("read", "saved tool output", false)
+	}
+	latest := create("last prompt", "LAST_INCLUDED_FACT", false)
+	opaque := `{"responses_input":[{"type":"compaction","encrypted_content":"opaque"}]}`
+	// Steering overwrites the provider context, but leaves the existing output intact.
+	require.NoError(t, stores.ThreadInputs.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: latest.ID, ResponsesHistory: []any{map[string]any{"type": "compaction", "encrypted_content": "opaque"}}}))
+	latest.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: opaque}}
+	current := create("next", "", false)
+	svc := &LLMService{execRepo: stores.Executions}
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+		recovered, err := svc.recoverPortableProviderHistory(llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, ChatHistory: []models.Execution{*latest}, Agent: models.LLMConfig{Provider: provider}})
+		require.NoError(t, err)
+		require.Len(t, recovered.ChatHistory, 103)
+		input, err := summaryHistoryInput(provider, recovered.ChatHistory)
+		require.NoError(t, err)
+		raw, err := json.Marshal(input)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), "FIRST_INCLUDED_FACT")
+		require.Contains(t, string(raw), "LAST_INCLUDED_FACT")
+		require.NotContains(t, string(raw), "BEFORE_NEW_CONTEXT")
+		require.NotContains(t, string(raw), "encrypted_content")
+	}
+	rows, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{latest.ID})
+	require.NoError(t, err)
+	require.Contains(t, rows[latest.ID][0].TranscriptJSON, "encrypted_content")
+	require.NotContains(t, rows[latest.ID][0].TranscriptJSON, "responses_compaction_sources")
+}
+
+func TestReadableCompactionRecoveryPreservesLaterStructuredTurns(t *testing.T) {
+	later := models.Execution{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `[{"role":"assistant","tool_calls":[{"id":"call","type":"function","function":{"name":"read_file","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call","content":"tool result"}]`}}}
+	history := []models.Execution{{PromptSent: "earlier", Output: "OLD_FACT", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"compaction","encrypted_content":"opaque"}]}`}}}, later}
+	recovered, err := readableCompactedHistory(history)
+	require.NoError(t, err)
+	require.Equal(t, later, recovered[1])
+	require.Contains(t, recovered[0].ReplayMessages[0].TranscriptJSON, "OLD_FACT")
+	require.Contains(t, history[0].ReplayMessages[0].TranscriptJSON, "encrypted_content")
 }
