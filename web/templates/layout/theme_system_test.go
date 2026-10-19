@@ -89,7 +89,7 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`--ov-account-limit-track: var(--ov-hover-bg);`,
 		`--ov-account-limit-fill: var(--ov-button-bg);`,
 		`--ov-schedule-grid-border: var(--ov-border);`,
-		`--ov-schedule-task-bg: var(--ov-surface-raised);`,
+		`--ov-schedule-task-hover-bg: var(--ov-selection-bg);`,
 		`--ov-schedule-task-border: var(--ov-link);`,
 		`--ov-schedule-drop-valid-bg: var(--ov-selection-bg);`,
 		`[data-ov-theme-layer="custom"] .drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }`,
