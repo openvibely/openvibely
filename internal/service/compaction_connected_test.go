@@ -376,6 +376,9 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							compactionServerReply(w, models.ProviderAnthropic, "", file)
 							return
 						}
+						if phase == "steering" && calls == 2 && !strings.Contains(text, "STEER_NATIVE") {
+							t.Error("steer missing from request before compaction")
+						}
 						if compact && native == 0 {
 							if !strings.Contains(text, "compact_20260112") {
 								t.Error("native compaction not enabled on wire")
@@ -384,11 +387,8 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 								t.Error("tool result missing")
 							}
 							native++
-							connectedAnthropicCompactionReply(w, phase == "steering")
+							connectedAnthropicCompactionReply(w, strings.Contains(text, "STEER_NATIVE"))
 							return
-						}
-						if phase == "steering" && calls == 2 && !strings.Contains(text, "STEER_NATIVE") {
-							t.Error("steer missing")
 						}
 						compactionServerReply(w, models.ProviderAnthropic, "FINAL_ANTHROPIC", "")
 					}))
@@ -472,6 +472,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						raw, _ := io.ReadAll(r.Body)
 						text := string(raw)
 						if strings.HasSuffix(r.URL.Path, "/responses/compact") {
+							if !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+								t.Error("source compaction did not receive old answer")
+							}
 							w.Header().Set("Content-Type", "application/json")
 							fmt.Fprint(w, `{"output":[{"type":"message","role":"user","content":"HISTORY_EVIDENCE"},{"type":"compaction","encrypted_content":"OPAQUE_SOURCE"}]}`)
 							return
@@ -484,7 +487,14 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							if to != models.ProviderOpenAI && strings.Contains(text, "OPAQUE_SOURCE") {
 								t.Error("encrypted OpenAI state sent to different provider")
 							}
-							compactionServerReply(w, provider, "SWITCH_SUMMARY HISTORY_EVIDENCE", "")
+							if !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+								t.Error("switch summary lost saved older answer")
+							}
+							summary := "SWITCH_SUMMARY HISTORY_EVIDENCE"
+							if strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+								summary += " RECOVER_ONLY_FROM_DB"
+							}
+							compactionServerReply(w, provider, summary, "")
 							return
 						}
 						if stage == 0 {
@@ -497,6 +507,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						if to != models.ProviderOpenAI && strings.Contains(text, "OPAQUE_SOURCE") {
 							t.Error("destination received opaque OpenAI state")
+						}
+						if (mode != "native_source" || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+							t.Error("destination lost saved older answer")
 						}
 						if stage == 1 {
 							targetCalls++
@@ -534,8 +547,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						return a
 					}
 					source, target := config(from), config(to)
-					old := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecCompleted, PromptSent: "HISTORY_EVIDENCE", Output: "old answer"}
+					old := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecCompleted, PromptSent: "HISTORY_EVIDENCE", Output: "RECOVER_ONLY_FROM_DB"}
 					require.NoError(t, stores.Executions.Create(ctx, &old))
+					require.NoError(t, stores.Executions.Complete(ctx, old.ID, models.ExecCompleted, old.Output, "", 0, 0))
 					first := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecRunning, PromptSent: "SOURCE_REQUEST"}
 					require.NoError(t, stores.Executions.Create(ctx, &first))
 					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: t.TempDir()}
