@@ -211,3 +211,57 @@ func TestProviderSwitchPreservesReadableMessagesBeforeCompaction(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderSwitchReusesRecoveryCheckpoint(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+		t.Run(string(provider), func(t *testing.T) {
+			ctx := context.Background()
+			stores := teststores.New(t).Stores
+			task := &models.Task{ProjectID: "default", Title: "recovery", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+			require.NoError(t, stores.Tasks.Create(ctx, task))
+			source := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "old question"}
+			require.NoError(t, stores.Executions.Create(ctx, source))
+			require.NoError(t, stores.Executions.Complete(ctx, source.ID, models.ExecCompleted, "old answer", "", 0, 0))
+			source.Status = models.ExecCompleted
+			source.Output = "old answer"
+			source.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":"BEFORE"},{"type":"compaction","encrypted_content":"opaque"},{"type":"message","role":"assistant","content":"AFTER"}]}`}}
+			require.NoError(t, stores.Executions.ReplaceReasoningReplay(ctx, source.ID, "", source.ReplayMessages))
+			history := []models.Execution{*source}
+			summaries := 0
+			for turn := 0; turn < 2; turn++ {
+				current := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "followup"}
+				require.NoError(t, stores.Executions.Create(ctx, current))
+				svc := &LLMService{execRepo: stores.Executions}
+				_, err := svc.callProviderWithCompaction(providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+					if len(req.SummaryInput) > 0 {
+						summaries++
+						require.Equal(t, 0, turn, "later followup must restore the checkpoint before recovery")
+						return llmcontracts.AgentResult{Output: "RECOVERED"}, nil
+					}
+					checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+					require.NoError(t, err)
+					require.NotNil(t, checkpoint, "checkpoint must be saved before dispatch")
+					require.Equal(t, source.ID, checkpoint.SourceExecutionID)
+					input, err := summaryHistoryInput(provider, req.ChatHistory)
+					require.NoError(t, err)
+					raw, err := json.Marshal(input)
+					require.NoError(t, err)
+					for _, value := range []string{"BEFORE", "RECOVERED", "AFTER"} {
+						require.Equal(t, 1, strings.Count(string(raw), value), "recovered context must occur once")
+					}
+					require.NotContains(t, string(raw), "encrypted_content")
+					if turn > 0 {
+						require.Contains(t, string(raw), "FIRST_REPLY")
+					}
+					return llmcontracts.AgentResult{Output: "FIRST_REPLY"}, nil
+				}), llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "followup", Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000}, ChatHistory: history})
+				require.NoError(t, err)
+				require.NoError(t, stores.Executions.Complete(ctx, current.ID, models.ExecCompleted, "FIRST_REPLY", "", 0, 0))
+				current.Status = models.ExecCompleted
+				current.Output = "FIRST_REPLY"
+				history = append(history, *current)
+			}
+			require.Equal(t, 1, summaries)
+		})
+	}
+}
