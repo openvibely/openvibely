@@ -122,6 +122,12 @@
         const entry = id && entries.get(id);
         pending = { xhr: detail.xhr, url: url, mutation: mutation, cached: false, source: detail.elt, pushURL: detail.elt?.getAttribute('hx-push-url') ?? null };
         if (!entry || key(activeURL) === id) return;
+        // The normal task response is a lazy shell. A warm refresh needs the
+        // bounded transcript in that response so it never replaces the preview
+        // with a loading placeholder and discards the live composer.
+        if (new URL(url, location.href).pathname.startsWith('/tasks/')) {
+            detail.xhr.setRequestHeader('X-OpenVibely-Thread-Refresh', 'true');
+        }
         keepOutgoingHistory(main);
         const preview = Object.assign({}, detail, {
             serverResponse: entry.html, shouldSwap: true, _ovCachedPreview: true
@@ -168,6 +174,9 @@
         // Preserve unchanged execution DOM during an authoritative full-page swap.
         const pairs = new Map(Array.from(currentRoot.querySelectorAll('[data-exec-id][data-execution-revision]'), el => [el.id, el]));
         nextRoot.querySelectorAll('[data-exec-id][data-execution-revision]').forEach(el => {
+            // Full thread markup marks terminal pairs preserved by default.
+            // A cached pair can be older, so preserve only after comparing it.
+            el.removeAttribute('hx-preserve');
             const old = pairs.get(el.id);
             if (old && !old.querySelector('[data-chat-input-request-id]') && !el.querySelector('[data-chat-input-request-id]') && old.getAttribute('data-execution-revision') === el.getAttribute('data-execution-revision') &&
                 /^(completed|failed|cancelled)$/.test(old.getAttribute('data-exec-status'))) {

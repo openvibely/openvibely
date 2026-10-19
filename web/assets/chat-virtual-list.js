@@ -25,6 +25,25 @@
         if (!list.messages.isConnected) { destroy(list); return; }
         if (suspended || list.selecting || list.messages.getAttribute('data-transcript-hydrating') === 'true') return;
         list.observer.disconnect();
+        const width = list.messages.clientWidth;
+        if (list.width !== width) {
+            // Docking/resizing the inspector changes wrapping without a window
+            // resize. Measure all retained rows at the new width, preserving the
+            // visible row (or bottom pin) before windowing them again.
+            const bounds = list.messages.getBoundingClientRect();
+            const pinned = list.messages.scrollHeight - list.messages.scrollTop - list.messages.clientHeight <= 2;
+            let anchor = null;
+            list.rows.forEach(row => {
+                const node = row.node.isConnected ? row.node : row.placeholder;
+                if (!node.isConnected || anchor) return;
+                const rect = node.getBoundingClientRect();
+                if (rect.bottom > bounds.top && rect.top < bounds.bottom) anchor = { row: row, top: rect.top };
+            });
+            list.rows.forEach(mount);
+            if (pinned) list.messages.scrollTop = list.messages.scrollHeight;
+            else if (anchor) list.messages.scrollTop += anchor.row.node.getBoundingClientRect().top - anchor.top;
+            list.width = width;
+        }
         // Drop removed executions rather than retaining their detached output.
         list.rows.forEach((row, node) => {
             if (!node.isConnected && !row.placeholder.isConnected) list.rows.delete(node);
@@ -143,8 +162,7 @@
     });
     window.addEventListener('beforeprint', () => { suspended = true; window.materializeVirtualChatRows(document.body); });
     window.addEventListener('afterprint', () => { suspended = false; lists.forEach(list => list.schedule()); });
-    window.addEventListener('resize', () => {
-        // Re-measure wrapped text at the new width before removing rows again.
-        window.materializeVirtualChatRows(document.body);
-    });
+    // Also schedule for browsers without ResizeObserver. refresh handles width
+    // changes for both window resizing and changes to the docked inspector.
+    window.addEventListener('resize', () => lists.forEach(list => list.schedule()));
 })();
