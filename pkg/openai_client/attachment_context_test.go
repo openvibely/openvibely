@@ -22,7 +22,7 @@ func TestAttachmentContextAfterNativeCompaction(t *testing.T) {
 	}
 }
 
-func TestAttachmentContextReplacesStaleCheckpointVersion(t *testing.T) {
+func TestAttachmentContextAppendsAfterStaleCheckpointVersion(t *testing.T) {
 	source := attachmentcontext.NewSource(func(context.Context) (string, error) { return "/uploads/new.pdf", nil }, "openai-checkpoint-test")
 	ctx := attachmentcontext.WithSource(context.Background(), source)
 	stale := attachmentcontext.Wrap("/uploads/deleted.pdf")
@@ -31,25 +31,17 @@ func TestAttachmentContextReplacesStaleCheckpointVersion(t *testing.T) {
 		map[string]any{"type": "message", "role": "user", "content": "do it"},
 		map[string]any{"type": "function_call", "call_id": "c1", "name": "read"},
 		map[string]any{"type": "function_call_output", "call_id": "c1", "output": "ok"},
-		map[string]any{"type": "message", "role": "user", "content": stale},
 	}
 	got := ensureAttachmentContext(ctx, checkpoint)
-	contexts := 0
-	for i, item := range got {
-		m := item.(map[string]any)
-		if m["content"] == stale {
-			t.Fatalf("stale context restored: %#v", got)
-		}
-		if m["content"] == attachmentcontext.Text(ctx) {
-			contexts++
-		}
-		if m["type"] == "function_call" {
-			if next := got[i+1].(map[string]any); next["type"] != "function_call_output" {
-				t.Fatalf("tool pair split: %#v", got)
-			}
+	if len(got) != 5 {
+		t.Fatalf("%#v", got)
+	}
+	for i := range checkpoint {
+		if got[i].(map[string]any)["content"] != checkpoint[i].(map[string]any)["content"] {
+			t.Fatalf("checkpoint prefix rewritten: %#v", got)
 		}
 	}
-	if contexts != 1 {
-		t.Fatalf("contexts = %d: %#v", contexts, got)
+	if got[4].(map[string]any)["content"] != attachmentcontext.Text(ctx) {
+		t.Fatalf("current context not appended after tool pair: %#v", got)
 	}
 }
