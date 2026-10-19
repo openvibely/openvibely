@@ -1273,7 +1273,13 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Load attachments for the task
 	attachments, err := s.loadTaskRunAttachments(ctx, &task)
+	attachmentSource := NewTaskAttachmentContextSource(s.attachmentRepo, s.taskRepo, task)
+	if err == nil {
+		attachments = directTaskRunAttachments(s.reconcileMissingTaskAttachments(ctx, task.ID, attachments))
+		err = attachmentSource.Load(ctx)
+	}
 	if err != nil {
+		err = fmt.Errorf("couldn't load task attachments. Retry the task: %w", err)
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
@@ -1288,12 +1294,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
-	attachments = directTaskRunAttachments(s.reconcileMissingTaskAttachments(ctx, task.ID, attachments))
 	applog.Debugf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
-	attachmentSource := NewTaskAttachmentContextSource(s.attachmentRepo, s.taskRepo, task)
-	if err := attachmentSource.Load(ctx); err != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent attachment context load failed task=%s: %v", task.ID, err)
-	}
 
 	// Vision-aware agent override: if the task has image attachments and the
 	// current agent doesn't support vision, try to find a vision-capable agent.
