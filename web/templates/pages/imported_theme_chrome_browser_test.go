@@ -131,7 +131,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			'ok'`)
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-continuous');'ok'`)
-		browser.waitFor("continuous sidebar joins canvas", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('body', 'backgroundColor'))`, "true")
+		browser.waitFor("continuous sidebar matches cards", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('#fixture-settings-card', 'backgroundColor'))`, "true")
 		browser.waitFor("continuous sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
 			browser.waitFor("continuous "+selector+" matches settings card", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.backgroundColor===b.backgroundColor&&a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
