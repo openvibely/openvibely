@@ -2549,16 +2549,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* Experimental native dark variant: lightness ladder instead of shadows. */
 html[data-color-theme="openvibely-dark-elevated"] {
-	--ov-elevation-control: #24292F;
-	--ov-elevation-top: #2B3039;
-	--ov-menu-surface: var(--ov-elevation-top);
-	--ov-menu-hover: #323843;
+	--ov-elevation-card: #22272E;
+	--ov-elevation-chat: #262B33;
+	--ov-menu-surface: var(--ov-elevation-chat);
+	--ov-menu-hover: #2D333C;
 }
-html[data-color-theme="openvibely-dark-elevated"] :is(.input, .select, .textarea) { background-color: var(--ov-elevation-control); }
-html[data-color-theme="openvibely-dark-elevated"] .sidebar-aside .menu li > a:is(:hover, [aria-current="page"]) { background-color: var(--ov-elevation-control); }
-html[data-color-theme="openvibely-dark-elevated"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg, .chat-input-container) { box-shadow: none; }
-html[data-color-theme="openvibely-dark-elevated"] :is(.dropdown-content, .ov-menu, .modal-box) { background-color: var(--ov-elevation-top); box-shadow: none; }
-html[data-color-theme="openvibely-dark-elevated"] .modal-box :is(.input, .select, .textarea) { background-color: oklch(var(--b1)); }
+html[data-color-theme="openvibely-dark-elevated"] #desktop-project-titlebar { background-color: oklch(var(--b1)); }
+html[data-color-theme="openvibely-dark-elevated"] .card { background-color: var(--ov-elevation-card); }
+html[data-color-theme="openvibely-dark-elevated"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg, .chat-input-container) { --chat-user-bg: var(--ov-elevation-chat); background-color: var(--ov-elevation-chat); box-shadow: none; }
+html[data-color-theme="openvibely-dark-elevated"] :is(.input, .select, .textarea) { background-color: var(--ov-elevation-chat); }
+html[data-color-theme="openvibely-dark-elevated"] :is(.dropdown-content, .ov-menu, .modal-box) { background-color: var(--ov-elevation-chat); box-shadow: none; }
 					/* Experimental native dark variant: shadowless chat surfaces. */
 html[data-color-theme="openvibely-dark-raised"] .chat-bubble-user-msg,
 html[data-color-theme="openvibely-dark-raised"] .chat-bubble-assistant-msg,

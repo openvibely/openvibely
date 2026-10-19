@@ -221,7 +221,7 @@ func openVibelyRaisedTheme() Theme {
 }
 
 // The elevated variant retains native dark styling and climbs an even lightness
-// ladder: page, cards, controls, then chat and overlays.
+// ladder: page, navigation, cards, then chat and controls.
 func openVibelyElevatedTheme() Theme {
 	theme := openVibelyDarkTheme()
 	theme.ID = "openvibely-dark-elevated"
