@@ -13,7 +13,7 @@ import (
 )
 
 // Rebuild current application context before committing replacement history.
-// Adapters still refresh dynamic context at dispatch and deduplicate these rows.
+// Adapters append dynamic context updates at dispatch.
 func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
 	out := make([]models.Execution, 0, len(history)+3)
 	var saved []models.Execution
@@ -29,7 +29,7 @@ func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history [
 		return models.Execution{PromptSent: text, Status: models.ExecCompleted, ContextKind: "application"}
 	}
 	// A missing source (for example while restoring a checkpoint) keeps its
-	// saved context. An explicitly disabled managed index removes the old one.
+	// saved context. An explicitly disabled index supplies a notice instead of the old index.
 	saved = managedcontext.Ensure(req.Ctx, saved, read, makeContext)
 	saved = attachmentcontext.Ensure(req.Ctx, saved, read, makeContext)
 	var restored []models.Execution

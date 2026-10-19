@@ -174,12 +174,14 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 			text := managedcontext.Text(turnCtx)
 			anyAllowed := p.ReadSkills || p.ReadMemories || !chat && (p.WriteSkills || p.WriteMemories)
 			require.Equal(t, anyAllowed, text != "", "mask=%d mode=%s", mask, mode)
-			expected := []string{history[0]}
+			require.Equal(t, history[:3], updated[:3])
+			require.Equal(t, history[3], updated[len(updated)-1])
 			if text != "" {
-				expected = append(expected, text)
+				require.Contains(t, updated, text)
+			} else {
+				require.Contains(t, updated[len(updated)-2], "No skills or memory index")
 			}
-			expected = append(expected, history[2:]...)
-			require.Equal(t, expected, updated)
+
 			for _, name := range []string{"skill_view", "memory_view", "skill_manage", "agent_skill_manage", "memory_save", "memory_delete"} {
 				require.Equal(t, rt.HasDefinition(name), strings.Contains(text, name), "mask=%d mode=%s tool=%s", mask, mode, name)
 			}
@@ -540,11 +542,15 @@ func TestManagedKnowledgeRevocationAndRestorationPreservesResults(t *testing.T) 
 	require.NoError(t, stores.Projects.Update(ctx, project))
 	require.Empty(t, managedcontext.Text(turn))
 	history = managedcontext.Ensure(turn, history, read, makeMessage)
-	require.Equal(t, []message{result, {"user", "Follow up"}}, history)
+	require.Len(t, history, 5)
+	require.Equal(t, result, history[1])
+	require.Contains(t, history[3].text, "No skills or memory index")
 	project.SkillMemoryPermissions = &models.SkillMemoryPermissions{ReadMemories: true}
 	require.NoError(t, stores.Projects.Update(ctx, project))
 	history = managedcontext.Ensure(turn, history, read, makeMessage)
-	require.Equal(t, []message{result, makeMessage(managedcontext.Text(turn)), {"user", "Follow up"}}, history)
+	require.Len(t, history, 6)
+	require.Equal(t, result, history[1])
+	require.Equal(t, managedcontext.Text(turn), history[4].text)
 	require.Equal(t, history, managedcontext.Ensure(turn, history, read, makeMessage))
 	// Compaction dropped the index: restore it once on the next request.
 	compacted := []message{{"user", "Conversation summary"}}

@@ -31,11 +31,13 @@ func TestResponsesKnowledgeIndexPreservesPrefixAndRestoresAfterCompaction(t *tes
 	index = "document_word: updated description"
 	changed := ctx
 	refreshed := ensureAttachmentContext(changed, items)
-	require.Equal(t, managedcontext.Text(changed), refreshed[1].(map[string]any)["content"])
-	require.Equal(t, items[2:], refreshed[2:])
+	require.Equal(t, managedcontext.Text(changed), refreshed[5].(map[string]any)["content"])
+	require.Equal(t, items[:5], refreshed[:5])
+	require.Equal(t, items[5:], refreshed[6:])
 	disabled := ensureAttachmentContext(managedcontext.With(ctx, ""), items)
-	require.Len(t, disabled, len(items)-1)
-	require.Equal(t, items[2:], disabled[1:])
+	require.Len(t, disabled, len(items)+1)
+	require.Equal(t, items[:5], disabled[:5])
+	require.Contains(t, disabled[5].(map[string]any)["content"], "No skills or memory index")
 	// An index before an opaque compaction item is no longer model-visible.
 	compacted := []any{items[1], map[string]any{"type": "compaction", "encrypted_content": "opaque"}, items[5], items[6]}
 	restored := ensureAttachmentContext(ctx, compacted)
@@ -117,14 +119,15 @@ func TestCompletionsIndexChangesDuringToolLoop(t *testing.T) {
 				at = i
 			}
 		}
-		require.Equal(t, 1, count)
-		if count == 1 {
-			if prefix == nil {
-				prefix = append([]completionsMessage(nil), request.Messages[:at+1]...)
-			}
-			require.Equal(t, prefix[:len(prefix)-1], request.Messages[:at])
-			require.Equal(t, managedcontext.Text(ctx), request.Messages[at].Content)
+		if calls == 0 {
+			require.Equal(t, 1, count)
+			prefix = append([]completionsMessage(nil), request.Messages[:at+1]...)
+		} else {
+			require.Equal(t, 2, count)
+			require.Equal(t, prefix, request.Messages[:len(prefix)])
 		}
+		require.Equal(t, managedcontext.Text(ctx), request.Messages[at].Content)
+
 		calls++
 		w.Header().Set("Content-Type", "text/event-stream")
 		if calls == 1 {
