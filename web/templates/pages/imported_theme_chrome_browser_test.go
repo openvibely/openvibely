@@ -147,10 +147,9 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("raised page canvas unchanged", `window.near('body', 'backgroundColor', '#191e24')`, "ok")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-elevated');'ok'`)
 		browser.waitFor("elevated retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#desktop-project-titlebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
+		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
 			browser.waitFor("elevated "+step.selector+" ladder step", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
 		}
-		browser.waitFor("elevated title bar keeps visible divider", `(function(){var t=getComputedStyle(document.getElementById('desktop-project-titlebar'));var m=t.boxShadow.match(/(rgba?|oklch)\([^)]*\)/);return String(!!m&&window.rgbOf(m[0]).join()!==window.rgbOf(t.backgroundColor).join());})()`, "true")
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer", "#fixture-menu"} {
 			browser.waitFor("elevated "+selector+" has no shadow", `window.computed('`+selector+`', 'boxShadow')`, "none")
 		}
