@@ -5545,7 +5545,7 @@ func TestCleanAssistantMessagesReturnsQueuedRenderCompletion(t *testing.T) {
 		"var scheduledRender = window.scheduleChatElementRender(el, raw);",
 		"renderPromises.push(scheduledRender);",
 		"if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);",
-		"var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';",
+		"var renderedRevision = el._renderedRevision || '';",
 		"if (renderedRevision === revision && hasRenderedContent) return;",
 		"container.setAttribute('data-rendered-revision', renderRevision);",
 		"el.setAttribute('data-rendered-revision', revision);",

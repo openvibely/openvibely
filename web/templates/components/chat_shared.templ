@@ -5157,7 +5157,9 @@ templ ChatAutoScrollScript() {
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
 				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
-				var renderedRevision = container._renderedRevision || container.getAttribute('data-rendered-revision') || '';
+				// Serialized HTML retains revision attributes but loses event handlers.
+				// Only a revision owned by this live node can skip hydration.
+				var renderedRevision = container._renderedRevision || '';
 				var hasRenderedContent = !!(container.textContent && container.textContent.trim()) || !!(container.querySelector && container.querySelector('*'));
 				if (renderedRevision === renderRevision && hasRenderedContent) return Promise.resolve(true);
 				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
@@ -6397,7 +6399,7 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					var renderedRevision = el._renderedRevision || '';
 					if (renderedRevision === revision && hasRenderedContent) return;
 					if (el._renderingRevision === revision) {
 						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
@@ -6447,7 +6449,7 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					var renderedRevision = el._renderedRevision || '';
 					if (renderedRevision === revision && hasRenderedContent) return;
 					if (el._renderingRevision === revision) {
 						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);

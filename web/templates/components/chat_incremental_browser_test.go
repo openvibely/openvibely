@@ -405,3 +405,45 @@ func TestBrowserFunctional_VirtualizedCompletedTranscript(t *testing.T) {
  return {passed:true};
  `)
 }
+
+func TestBrowserFunctional_CachedToolButtons(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const pair = document.getElementById('pair'); pair.dataset.execStatus='completed';
+ const content = document.createElement('div'); content.className='chat-stream-content'; stream.appendChild(content);
+ const raw='[Using tool: shell | echo example]\n[Tool shell done]\n'+('line of tool output\n'.repeat(200))+'[/Tool]\n';
+ content.setAttribute('data-raw-content',raw); content.setAttribute('data-raw-revision','fixture-v1');
+ await cleanAssistantMessages(pair);
+ let button=pair.querySelector('.stream-tool-output-toggle');
+ assert(button, 'fixture lacks output button');
+ button.click(); assert(button.getAttribute('aria-expanded')==='true','original button broken');
+ button.click();
+ const cached=pair.cloneNode(true).outerHTML;
+ pair.outerHTML=cached;
+ const restored=document.getElementById('pair');
+ await cleanAssistantMessages(restored);
+ button=restored.querySelector('.stream-tool-output-toggle'); button.click();
+ assert(button.getAttribute('aria-expanded')==='true','cached output button has no handler after normal hydration');
+ const hydratedButton=button;
+ await cleanAssistantMessages(restored);
+ assert(restored.querySelector('.stream-tool-output-toggle')===hydratedButton,'unchanged live output was unnecessarily rebuilt');
+ hydratedButton.click(); assert(hydratedButton.getAttribute('aria-expanded')==='false','rehydrated toggle did not collapse');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_VirtualRowsAfterPanelResize(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='chat-messages';
+ messages.style.cssText='height:300px;overflow:auto;width:800px;font:16px monospace;line-height:20px';
+ const pair=document.getElementById('pair'); pair.dataset.execStatus='completed';
+ pair.innerHTML=Array.from({length:200},()=>'<div class="chat-markdown" style="margin:0;padding:0">'+('word '.repeat(100))+'</div>').join('');
+ refreshVirtualChatRows(messages); await paint(); await pause(100);
+ assert(messages.querySelectorAll('[data-virtual-chat-row]').length>100,'fixture not virtualized');
+ messages.style.width='400px'; await pause(150); await paint();
+ const virtualHeight=messages.scrollHeight;
+ materializeVirtualChatRows(messages);
+ const actualHeight=messages.scrollHeight;
+ assert(Math.abs(actualHeight-virtualHeight)<3,'panel resize left stale spacer heights: virtual='+virtualHeight+' actual='+actualHeight);
+ return {};
+ `)
+}
