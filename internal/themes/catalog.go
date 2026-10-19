@@ -194,8 +194,8 @@ func OpenVibelyThemes() []Theme {
 	return []Theme{
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
+		openVibelyClassicTheme(),
 		openVibelyFlatTheme(),
-		openVibelyElevatedTheme(),
 	}
 }
 
@@ -209,14 +209,13 @@ func openVibelyFlatTheme() Theme {
 	return theme
 }
 
-// The elevated variant retains native dark styling and climbs an even lightness
-// ladder: page, navigation, cards, then chat and controls.
-func openVibelyElevatedTheme() Theme {
+// The classic variant retains the original native dark styling without the
+// lightness ladder applied to OpenVibely Dark.
+func openVibelyClassicTheme() Theme {
 	theme := openVibelyDarkTheme()
-	theme.ID = "openvibely-dark-elevated"
-	theme.Name = "OpenVibely Dark Elevated"
-	theme.Source = "OpenVibely experimental"
-	theme.SearchText = theme.Name + " dark experimental elevation"
+	theme.ID = "openvibely-dark-classic"
+	theme.Name = "OpenVibely Dark Classic"
+	theme.SearchText = theme.Name + " dark classic original"
 	return theme
 }
 
@@ -243,8 +242,17 @@ func RuntimeCatalogJSON() string {
 			Roles [7]string         `json:"r"`
 		}
 		catalog := Catalog()
+		native := make(map[string]bool)
+		for _, theme := range OpenVibelyThemes() {
+			native[theme.ID] = true
+		}
 		runtime := make([]runtimeTheme, 0, len(catalog))
 		for _, theme := range catalog {
+			// Native themes are styled by the stylesheet; the browser never applies their variables.
+			if native[theme.ID] {
+				runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, Roles: toggleRuntimeRoles(theme)})
+				continue
+			}
 			css := make(map[string]string, len(theme.CSS)-3)
 			for name, value := range theme.CSS {
 				switch name {

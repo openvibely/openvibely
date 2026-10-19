@@ -1425,7 +1425,7 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 		"--ov-primary-action-color: #7480ff;",
 		"[data-theme=\"light\"] {",
 		"--ov-primary-action-color: #7480ff;",
-		"[data-color-theme]:not([data-color-theme=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
+		"[data-color-theme]:not([data-color-theme^=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
 		"--ov-primary-action-color: oklch(var(--p) / 1);",
 		"[data-color-theme] .btn-primary.chat-send-button {",
 		"background-color: var(--ov-primary-action-color);",
@@ -1440,7 +1440,7 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 	for _, forbidden := range []string{
 		"background-color: var(--ov-primary-action-color) !important;",
 		"border-color: var(--ov-primary-action-color) !important;",
-		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
+		"[data-color-theme^=\"openvibely-dark\"] .btn-primary.chat-send-button,",
 		"\n\t\t\t\t\t.chat-send-button {",
 	} {
 		if strings.Contains(html, forbidden) {
@@ -1449,7 +1449,7 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 	}
 	sharedRule := strings.Index(html, `[data-color-theme] .btn-primary.chat-send-button {`)
 	for _, hoverSelector := range []string{
-		`[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
+		`[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
 		`[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {`,
 	} {
 		hoverRule := strings.Index(html, hoverSelector)
@@ -1496,25 +1496,25 @@ func TestDarkMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-accent:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-info:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-success:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-warning:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-error:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-neutral:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-ghost:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-link:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-primary:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-accent:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-info:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-success:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-warning:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-error:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-accent:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-info:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-success:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-warning:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-error:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-neutral:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-ghost:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-link:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-primary:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-accent:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-info:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-success:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-warning:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-error:hover {",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
