@@ -35,8 +35,7 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 	for _, fragment := range []string{
 		`data-theme-id="` + themes.OpenVibelyDarkThemeID + `"`,
 		`data-theme-id="` + themes.OpenVibelyLightThemeID + `"`,
-		`data-theme-id="openvibely-dark-continuous"`,
-		`data-theme-id="openvibely-dark-raised"`,
+		`data-theme-id="openvibely-dark-flat"`,
 		`data-theme-id="openvibely-dark-elevated"`,
 		`OpenVibely Dark`,
 		`OpenVibely Light`,

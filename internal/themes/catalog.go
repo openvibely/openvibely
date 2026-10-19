@@ -36,7 +36,7 @@ type Theme struct {
 }
 
 func Catalog() []Theme {
-	catalog := make([]Theme, 0, ExpectedThemeCount+5+len(paletteSpecs()))
+	catalog := make([]Theme, 0, ExpectedThemeCount+4+len(paletteSpecs()))
 	catalog = append(catalog, OpenVibelyThemes()...)
 	catalog = append(catalog, PaletteThemes()...)
 	catalog = append(catalog, VSCodeCatalog()...)
@@ -194,29 +194,18 @@ func OpenVibelyThemes() []Theme {
 	return []Theme{
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
-		openVibelyContinuousTheme(),
-		openVibelyRaisedTheme(),
+		openVibelyFlatTheme(),
 		openVibelyElevatedTheme(),
 	}
 }
 
-// The continuous variant retains native dark styling with flat, bordered chat surfaces.
-func openVibelyContinuousTheme() Theme {
+// The flat variant retains native dark styling with flat, bordered chat surfaces.
+func openVibelyFlatTheme() Theme {
 	theme := openVibelyDarkTheme()
-	theme.ID = "openvibely-dark-continuous"
-	theme.Name = "OpenVibely Dark Continuous"
+	theme.ID = "openvibely-dark-flat"
+	theme.Name = "OpenVibely Dark Flat"
 	theme.Source = "OpenVibely experimental"
-	theme.SearchText = theme.Name + " dark experimental continuous sidebar"
-	return theme
-}
-
-// The raised variant retains native dark styling with shadowless chat surfaces.
-func openVibelyRaisedTheme() Theme {
-	theme := openVibelyDarkTheme()
-	theme.ID = "openvibely-dark-raised"
-	theme.Name = "OpenVibely Dark Raised"
-	theme.Source = "OpenVibely experimental"
-	theme.SearchText = theme.Name + " dark experimental raised"
+	theme.SearchText = theme.Name + " dark experimental flat outlined"
 	return theme
 }
 
