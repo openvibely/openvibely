@@ -196,7 +196,14 @@
             // A cached pair can be older, so preserve only after comparing it.
             el.removeAttribute('hx-preserve');
             const old = pairs.get(el.id);
-            if (old && !old.querySelector('[data-chat-input-request-id]') && !el.querySelector('[data-chat-input-request-id]') && old.getAttribute('data-execution-revision') === el.getAttribute('data-execution-revision') &&
+            // A fast response can arrive while cached output is still hydrating.
+            // Swapping cancels that work; preserving its placeholders would leave
+            // a transcript with neither rendered rows nor a renderer to fill them.
+            const hydrated = old && Array.from(old.querySelectorAll('[data-raw-content]')).every(source => {
+                const raw = source.getAttribute('data-raw-content') || '';
+                return !raw.trim() || source._renderedRevision === (source.getAttribute('data-raw-revision') || raw);
+            });
+            if (hydrated && !old.querySelector('[data-chat-input-request-id]') && !el.querySelector('[data-chat-input-request-id]') && old.getAttribute('data-execution-revision') === el.getAttribute('data-execution-revision') &&
                 /^(completed|failed|cancelled)$/.test(old.getAttribute('data-exec-status'))) {
                 el.setAttribute('hx-preserve', 'true');
             }
