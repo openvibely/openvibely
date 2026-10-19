@@ -4,7 +4,7 @@ import "testing"
 
 func TestScheduleCardsAreTintedReadableAndDistinctFromSelection(t *testing.T) {
 	for _, theme := range Catalog() {
-		if theme.Source == "OpenVibely built-in" || theme.Source == "OpenVibely experimental" {
+		if theme.Source == "OpenVibely built-in" {
 			continue
 		}
 		card := scheduleTaskBackground(theme)
