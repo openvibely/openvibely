@@ -75,7 +75,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(source, -1), "")
 	// Match the page's parser scripts: large Markdown workers import the math
 	// parser through its data attribute, even when the response contains no math.
-	fixture := `<!doctype html><html><head>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
+	fixture := `<!doctype html><html><head><script src="` + static.URL("chat-virtual-list.js") + `"></script>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
  <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
  <script>` + probe + baseJS + `</script>` + sharedJS + `<script>
  ` + coalescer + `
@@ -364,4 +364,44 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
 	if after.CPU > before.CPU*.5 || after.Characters > before.Characters/2 || after.P95 > 250 {
 		t.Fatalf("incremental acceptance threshold failed: baseline=%+v incremental=%+v", before, after)
 	}
+}
+
+func TestBrowserFunctional_VirtualizedCompletedTranscript(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ document.getElementById('messages').id = 'chat-messages';
+ const messages = document.getElementById('chat-messages');
+ document.getElementById('pair').setAttribute('data-exec-status', 'completed');
+ let text = '';
+ for (let i=0; i<160; i++) text += '[Using tool: bash | echo row-'+i+']\n[Tool bash done]\nresult-'+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream, text, true);
+ await paint(); await paint();
+ assert(messages.querySelectorAll('[data-virtual-chat-row]').length > 100, 'completed tool rows were not virtualized');
+ assert(messages.querySelectorAll('.stream-tool').length < 40, 'too many tool cards mounted');
+ const height = messages.scrollHeight;
+ messages.scrollTop = messages.scrollHeight;
+ await paint(); await paint();
+ assert(messages.textContent.includes('row-159'), 'last tool did not mount');
+ assert(Math.abs(messages.scrollHeight-height)<4, 'tool window changed scroll extent');
+ // A full authoritative rerender must include rows currently represented by spacers.
+ await renderStreamingContent(stream, text+'\nNew final response.', true);
+ await paint(); await paint();
+ messages.scrollTop=0;
+ await paint(); await paint();
+ assert(messages.textContent.includes('row-0'), 'first tool was lost after rerender');
+ window.materializeVirtualChatRows(messages);
+ assert(messages.querySelectorAll('.stream-tool').length===160, 'virtual rows lost tool content');
+ const clone=messages.cloneNode(true);
+ window.cloneVirtualChatRows(messages,clone);
+ assert(clone.textContent.includes('row-159'), 'serialization omitted old rows');
+ document.getElementById('pair').setAttribute('data-exec-status', 'running');
+ await renderLiveChatContent(stream, text+text+'\nWorking...', true);
+ await paint(); await paint();
+ assert(messages.querySelectorAll('[data-virtual-chat-row]').length>100, 'sealed live output was not virtualized');
+ const tail=stream._incrementalChat.tail;
+ assert(tail.isConnected, 'mutable live tail detached');
+ await renderLiveChatContent(stream, text+text+'\nWorking... still streaming.', true);
+ await paint(); await paint();
+ assert(stream._incrementalChat.tail.textContent.includes('still streaming'), 'stream failed after windowing');
+ return {passed:true};
+ `)
 }
