@@ -20,6 +20,14 @@ import (
 // Loading older history leaves the latest execution offscreen. A fast warm
 // response must not preserve its serialized placeholders before hydration finishes.
 func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, false)
+}
+
+func TestTaskBoundedCachedHistoryInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, true)
+}
+
+func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -57,6 +65,7 @@ func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
 	path := "/tasks/" + task.ID
 	runner := fmt.Sprintf(`<script>
  window.addEventListener('DOMContentLoaded',()=>{
+ const bounded=%t;
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
  const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
@@ -70,15 +79,37 @@ func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
   await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>5,'older page');
   await until(()=>m.dataset.earlierAnchorRestoring!=='true','older page settled');await wait(150);
   for(let round=0;round<2;round++){
+   const pairs=Array.from(messages().querySelectorAll(':scope > [data-execution-pair]'));
+   const older=pairs.slice(0,-5).flatMap(pair=>window.captureChatVirtualData(pair));
+   const latest=pairs.slice(-5).flatMap(pair=>window.captureChatVirtualData(pair));
+   if(bounded && (!older.length||!latest.length))throw Error('Missing parsed history fixture');
    await openVibelyNavigate(%q);await until(()=>view()?.dataset.taskId===%q,'other task');
+   if(bounded){
+    if(older.some(data=>window.findCachedChatVirtualData(data.key,data.source)))throw Error('Older row models survived in cache');
+    if(!latest.every(data=>window.findCachedChatVirtualData(data.key,data.source)))throw Error('Latest row models missing from cache');
+   }
+   let previewCount=null,previewCursorValid=false;
+   const preview=event=>{if(event.detail._ovCachedPreview){const t=document.createElement('template');t.innerHTML=event.detail.serverResponse;previewCount=t.content.querySelectorAll('[data-execution-pair]').length;const loader=t.content.querySelector('[data-earlier-loader]'),first=t.content.querySelector('[data-execution-pair]');previewCursorValid=!!loader && new URL(loader.getAttribute('hx-get'),location.href).searchParams.get('before')===first?.dataset.execId && loader.dataset.loading!=='true'}};
+   document.addEventListener('htmx:beforeSwap',preview,true);
    await openVibelyNavigate(%q);await until(()=>view()?.dataset.taskId===%q,'return task');
+   document.removeEventListener('htmx:beforeSwap',preview,true);
+   if(bounded && !previewCursorValid)throw Error('Cached preview cannot reload earlier history');
+   if(bounded && previewCount!==5)throw Error('Expected five cached executions, got '+previewCount);
    await until(visible,'visible returned messages');await wait(200);
    if(!visible())throw Error('Returned messages disappeared '+debug());
    if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   if(bounded){
+    const current=messages(),loader=current.querySelector('[data-earlier-loader]');
+    const first=current.querySelector(':scope > [data-execution-pair]');
+    if(!loader||new URL(loader.getAttribute('hx-get'),location.href).searchParams.get('before')!==first.dataset.execId)throw Error('Wrong cached history cursor');
+    current.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));current.scrollTop=0;current.dispatchEvent(new Event('scroll'));
+    await until(()=>current.querySelectorAll(':scope > [data-execution-pair]').length===10,'reloaded older page');
+    await until(()=>current.dataset.earlierAnchorRestoring!=='true','reloaded older page settled');await wait(150);
+   }
   }
   await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
- });</script>`, "/tasks/"+other.ID, other.ID, path, task.ID)
+ });</script>`, bounded, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -95,6 +126,9 @@ func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/events") {
 			w.WriteHeader(204)
 			return
+		}
+		if bounded && r.URL.Path == path && r.Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+			time.Sleep(200 * time.Millisecond)
 		}
 		if r.URL.Path == path && r.Header.Get("HX-Request") != "true" {
 			rec := httptest.NewRecorder()
