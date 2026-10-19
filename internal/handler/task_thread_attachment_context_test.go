@@ -141,3 +141,29 @@ func TestMessageAttachmentsRouteByConversationType(t *testing.T) {
 		})
 	}
 }
+
+func TestCopyMessageAttachmentsToTaskFromTaskThread(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Thread task creation")
+	thread := createTask(t, h, project.ID, "Thread", func(tk *models.Task) { tk.Category = models.CategoryActive })
+	exec := createExec(t, h, thread.ID, agent.ID)
+	pending := filepath.Join(uploadsDir, "chat", "pending", "s1")
+	require.NoError(t, os.MkdirAll(pending, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "doc.pdf"), []byte("%PDF"), 0o644))
+	_, _, _, err := h.processAttachmentsWithReturn(ctx, "s1", exec.ID)
+	require.NoError(t, err)
+
+	target := createTask(t, h, project.ID, "Created", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+	copied, err := h.copyChatAttachmentsToTask(ctx, exec.ID, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, copied)
+	rows, err := h.attachmentRepo.ListByTask(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "doc.pdf", rows[0].FileName)
+	require.Empty(t, rows[0].ExecutionID)
+	require.FileExists(t, rows[0].FilePath)
+}

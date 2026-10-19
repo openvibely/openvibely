@@ -638,6 +638,25 @@ func (h *Handler) messageAttachmentOwner(ctx context.Context, execID string) (ta
 	return "", nil
 }
 
+func (h *Handler) listMessageAttachments(ctx context.Context, execID string) ([]models.ChatAttachment, error) {
+	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
+	if err != nil {
+		return nil, err
+	}
+	if taskThreadID == "" {
+		return h.chatAttachmentRepo.ListByExecution(ctx, execID)
+	}
+	byExec, err := h.attachmentRepo.ListByExecutionIDs(ctx, []string{execID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.ChatAttachment, 0, len(byExec[execID]))
+	for _, att := range byExec[execID] {
+		out = append(out, models.MessageAttachmentFromTask(att))
+	}
+	return out, nil
+}
+
 // processAttachmentsWithReturn is like processAttachments but also returns the
 // published per-message attachment records for display.
 func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, error) {
@@ -885,7 +904,7 @@ func rollbackAttachmentPublications(
 // when possible and retains files for metadata rows that cannot be deleted, so task execution
 // never observes a metadata reference to a file removed by rollback.
 func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, taskID string) (int, error) {
-	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, executionID)
+	chatAttachments, err := h.listMessageAttachments(ctx, executionID)
 	if err != nil {
 		return 0, fmt.Errorf("attachment lifecycle stage=list-source execution=%s task=%s: %w", executionID, taskID, err)
 	}
