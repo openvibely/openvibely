@@ -2547,12 +2547,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.tool-status-done { color: hsl(var(--su, 150 60% 40%) / 0.7); }
 				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
 
-					/* Experimental native dark variant: cards and chrome use the chat bubble color. */
-html[data-color-theme="openvibely-dark-raised"][data-theme="dark"] {
-	--b1: 0.3081 0.0177 262.24;
-	--ov-menu-surface: #2B3039;
-}
-html[data-color-theme="openvibely-dark-raised"][data-theme="dark"] .toggle.toggle.toggle { --tglbg: #2B3039 !important; }
+					/* Experimental native dark variant: shadowless chat surfaces. */
 html[data-color-theme="openvibely-dark-raised"] .chat-bubble-user-msg,
 html[data-color-theme="openvibely-dark-raised"] .chat-bubble-assistant-msg,
 html[data-color-theme="openvibely-dark-raised"] .chat-input-container { box-shadow: none; }
