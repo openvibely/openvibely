@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/pkg/agenttools"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -1081,22 +1082,20 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 
 // Swarm children consume the parent's shared inputs without duplicating files.
 func (s *LLMService) loadTaskRunAttachments(ctx context.Context, task *models.Task) ([]models.Attachment, error) {
-	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
-	if err != nil || task.SwarmRole == "" || task.ParentTaskID == nil {
-		return attachments, err
+	return listTaskConversationAttachments(ctx, s.attachmentRepo, s.taskRepo, task)
+}
+
+// directTaskRunAttachments keeps task-level files as direct request inputs.
+// Files attached to earlier thread messages are carried by the task-wide
+// attachment context as references instead of re-sending their bytes.
+func directTaskRunAttachments(attachments []models.Attachment) []models.Attachment {
+	direct := make([]models.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.ExecutionID == "" {
+			direct = append(direct, attachment)
+		}
 	}
-	parent, err := s.taskRepo.GetByID(ctx, *task.ParentTaskID)
-	if err != nil {
-		return nil, err
-	}
-	if parent == nil || parent.ProjectID != task.ProjectID || parent.SwarmRole != models.SwarmRoleParent {
-		return attachments, nil
-	}
-	shared, err := s.attachmentRepo.ListByTask(ctx, parent.ID)
-	if err != nil {
-		return nil, err
-	}
-	return append(attachments, shared...), nil
+	return direct
 }
 
 func (s *LLMService) reconcileMissingTaskAttachments(ctx context.Context, taskID string, attachments []models.Attachment) []models.Attachment {
@@ -1289,8 +1288,12 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
-	attachments = s.reconcileMissingTaskAttachments(ctx, task.ID, attachments)
+	attachments = directTaskRunAttachments(s.reconcileMissingTaskAttachments(ctx, task.ID, attachments))
 	applog.Debugf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
+	attachmentSource := NewTaskAttachmentContextSource(s.attachmentRepo, s.taskRepo, task)
+	if err := attachmentSource.Load(ctx); err != nil {
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent attachment context load failed task=%s: %v", task.ID, err)
+	}
 
 	// Vision-aware agent override: if the task has image attachments and the
 	// current agent doesn't support vision, try to find a vision-capable agent.
@@ -1473,6 +1476,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Call the LLM
 	callCtx := llmcontracts.WithDirectUsageProject(ctx, task.ProjectID)
+	callCtx = attachmentcontext.WithSource(callCtx, attachmentSource)
 	var preparedSteering []models.ThreadInput
 	var unsubscribeSteeringWakeup func()
 	if s.threadInputRepo != nil {
@@ -1497,12 +1501,19 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			preparedSteering = append(preparedSteering, inputs...)
-			messages, steeringErr := s.hydrateTaskSteeringMessages(inputs)
+			messages, steeringErr := s.hydrateTaskSteeringMessages(inputs, exec.ID)
 			if steeringErr != nil {
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
+			attachmentsCommitted := false
 			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
+				if !attachmentsCommitted {
+					if err := s.publishTaskSteeringAttachments(commitCtx, task.ID, exec.ID, inputs); err != nil {
+						return err
+					}
+					attachmentsCommitted = true
+				}
 				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
 					return err
 				}
@@ -2007,11 +2018,10 @@ func formatSteeringInstruction(steeringMessage string) string {
 	return strings.TrimSpace(steeringMessage)
 }
 
-func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput) ([]models.Attachment, error) {
-	uploadsRoot := "uploads"
-	if s.taskSvc != nil && strings.TrimSpace(s.taskSvc.uploadsDir) != "" {
-		uploadsRoot = s.taskSvc.uploadsDir
-	}
+// hydrateTaskSteeringAttachments reads pending steering uploads. Image bytes
+// come from the pending path; file tools see the path published on commit.
+func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput, execID string) ([]models.Attachment, error) {
+	uploadsRoot := s.taskAttachmentUploadsRoot()
 	var attachments []models.Attachment
 	for i := range inputs {
 		sessionID := strings.TrimSpace(inputs[i].AttachmentSessionID)
@@ -2032,17 +2042,17 @@ func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput)
 			if err != nil {
 				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
 			}
-			attachments = append(attachments, models.Attachment{FileName: entry.Name(), FilePath: path, MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size()})
+			attachments = append(attachments, models.Attachment{FileName: entry.Name(), FilePath: path, ReferencePath: filepath.Join(uploadsRoot, "chat", execID, entry.Name()), MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size()})
 
 		}
 	}
 	return attachments, nil
 }
 
-func (s *LLMService) hydrateTaskSteeringMessages(inputs []models.ThreadInput) ([]llmcontracts.LocalSteeringMessage, error) {
+func (s *LLMService) hydrateTaskSteeringMessages(inputs []models.ThreadInput, execID string) ([]llmcontracts.LocalSteeringMessage, error) {
 	messages := make([]llmcontracts.LocalSteeringMessage, 0, len(inputs))
 	for i := range inputs {
-		attachments, err := s.hydrateTaskSteeringAttachments(inputs[i : i+1])
+		attachments, err := s.hydrateTaskSteeringAttachments(inputs[i:i+1], execID)
 		if err != nil {
 			return nil, err
 		}

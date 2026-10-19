@@ -23,6 +23,14 @@ func ChatAttachmentDownloadURL(attachmentID, projectID string) string {
 	return base + "?project_id=" + url.QueryEscape(projectID)
 }
 
+// MessageAttachmentDownloadURL routes a message attachment to the store that owns it.
+func MessageAttachmentDownloadURL(att models.ChatAttachment, projectID string) string {
+	if att.Source == models.MessageAttachmentSourceTask {
+		return TaskAttachmentDownloadURL(att.ID, projectID)
+	}
+	return ChatAttachmentDownloadURL(att.ID, projectID)
+}
+
 func ChatAttachmentDeleteURL(attachmentID, projectID string) string {
 	base := fmt.Sprintf("/chat/attachments/%s", attachmentID)
 	if projectID == "" {

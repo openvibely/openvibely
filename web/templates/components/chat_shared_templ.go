@@ -783,7 +783,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var34 templ.SafeURL
-					templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)))
+					templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)))
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 298, Col: 77}
 					}
@@ -809,7 +809,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var36 string
-					templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(FileURLMode(ChatAttachmentDownloadURL(att.ID, projectID), "thumbnail")))
+					templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(FileURLMode(MessageAttachmentDownloadURL(att, projectID), "thumbnail")))
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 300, Col: 100}
 					}
@@ -866,7 +866,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var40 templ.SafeURL
-					templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)))
+					templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)))
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 318, Col: 68}
 					}
@@ -892,7 +892,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var42 string
-					templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)))
+					templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)))
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 318, Col: 247}
 					}
@@ -923,7 +923,7 @@ func ChatBubbleWithAttachments(role, content string, attachments []models.ChatAt
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var44 templ.SafeURL
-					templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)))
+					templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)))
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 324, Col: 77}
 					}

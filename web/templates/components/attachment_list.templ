@@ -100,12 +100,16 @@ templ TaskFilesList(attachments []models.Attachment, projectID string, messageGr
 			<p class="text-sm opacity-50">No files yet.</p>
 		} else {
 			for _, att := range attachments {
-				@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
+				if att.ExecutionID == "" {
+					@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
+				} else {
+					@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), "", "")
+				}
 			}
 		}
         for _, messages := range messageGroups {
             for _, att := range messages {
-                @ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, ChatAttachmentDownloadURL(att.ID, projectID), "", "")
+                @ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, MessageAttachmentDownloadURL(att, projectID), "", "")
             }
         }
         for _, file := range generated {

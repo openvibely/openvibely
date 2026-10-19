@@ -7919,10 +7919,10 @@ func TestHandler_GetTaskThread_LoadsAttachments(t *testing.T) {
 		ex.IsFollowup = true
 	})
 	h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "I see a screenshot", "", 10, 100)
-	h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
-		ExecutionID: exec.ID, FileName: "screenshot.png",
+	require.NoError(t, h.attachmentRepo.Create(ctx, &models.Attachment{
+		TaskID: task.ID, ExecutionID: exec.ID, FileName: "screenshot.png",
 		FilePath: "/tmp/fake/screenshot.png", MediaType: "image/png", FileSize: 12345,
-	})
+	}))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)

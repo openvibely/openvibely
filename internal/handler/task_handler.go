@@ -3580,7 +3580,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	}
 	agents, _ := h.llmConfigRepo.ListPickerOptions(ctx)
 
-	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(ctx, executions, "GetTaskThread")
+	chatAttachmentsByExec := h.loadMessageAttachmentsForTask(ctx, task, executions, "GetTaskThread")
 
 	pendingInputs := []models.ThreadInput{}
 	if h.threadInputRepo != nil {
@@ -3768,15 +3768,7 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
 	}
 
-	attachments := []models.ChatAttachment{}
-	if h.chatAttachmentRepo != nil {
-		byExec, attErr := h.chatAttachmentRepo.ListByExecutionIDs(c.Request().Context(), []string{execID})
-		if attErr != nil {
-			applog.Infof("[handler] GetTaskThreadExecutionFragment error loading attachments exec=%s: %v", execID, attErr)
-		} else {
-			attachments = byExec[execID]
-		}
-	}
+	attachments := h.loadMessageAttachmentsForTask(c.Request().Context(), task, []models.Execution{*exec}, "GetTaskThreadExecutionFragment")[exec.ID]
 	attachmentsByExecution := map[string][]models.ChatAttachment{exec.ID: attachments}
 	return render(c, http.StatusOK, components.ChatExecutionPair(
 		*exec,
