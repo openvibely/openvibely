@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
@@ -29,48 +30,93 @@ func hasOpaqueCompaction(history []models.Execution) bool {
 	return false
 }
 
-// Use the existing execution transcript when another provider cannot read an
-// OpenAI compaction item. Explicit messages preserve tool-result text that the
-// ordinary prompt/answer fallback cleans out of execution output.
+const recoveryBackgroundKind = "provider_recovery_background"
+
+// Split the latest complete OpenAI snapshot at its last compaction item.
+// Everything after it is still readable and must retain its message order.
+func portableRecoveryParts(history []models.Execution) (int, []models.Execution) {
+	for i := len(history) - 1; i >= 0; i-- {
+		for j := len(history[i].ReplayMessages) - 1; j >= 0; j-- {
+			var saved struct {
+				Input []json.RawMessage `json:"responses_input"`
+			}
+			if json.Unmarshal([]byte(history[i].ReplayMessages[j].TranscriptJSON), &saved) != nil {
+				continue
+			}
+			for k := len(saved.Input) - 1; k >= 0; k-- {
+				var item struct{ Type string }
+				_ = json.Unmarshal(saved.Input[k], &item)
+				if item.Type != "compaction" {
+					continue
+				}
+				// Use portable messages so the old Responses snapshot cannot replace the
+				// recovered background during EffectiveReplayHistory normalization.
+				messages := repairConvertedToolResults(llmopenai.ResponsesSummaryMessages(saved.Input[k+1:]))
+				var tail []models.Execution
+				if len(messages) > 0 {
+					raw, _ := json.Marshal(messages)
+					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_tail", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
+				}
+				if j+1 < len(history[i].ReplayMessages) {
+					remaining := history[i]
+					remaining.ReplayMessages = remaining.ReplayMessages[j+1:]
+					tail = append(tail, remaining)
+				}
+				tail = append(tail, history[i+1:]...)
+				return i, tail
+			}
+		}
+	}
+	return -1, nil
+}
+
+// Recovered records are background evidence, not fabricated alternating chat
+// messages. Their output can overlap the readable tail; no exact boundary is known.
 func readableCompactedHistory(history []models.Execution) ([]models.Execution, error) {
 	if !hasOpaqueCompaction(history) {
 		return history, nil
 	}
-	out := append([]models.Execution(nil), history...)
-	found := false
-	// Only the prefix covered by opaque state needs text recovery. Later turns
-	// can still use their existing structured replay (including images/tools).
-	lastOpaque := 0
-	for i := range out {
-		if hasOpaqueCompaction(out[i : i+1]) {
-			lastOpaque = i
-		}
-	}
-	for i := range out {
-		if i > lastOpaque {
+	last, tail := portableRecoveryParts(history)
+	var out []models.Execution
+	for _, exec := range history[:last+1] {
+		if exec.PromptSent == "" && exec.Output == "" {
 			continue
 		}
-		exec := &out[i]
-		var messages []openaiclient.CompletionsHistoryMessage
-		if exec.PromptSent != "" {
-			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
-		}
-		if exec.Output != "" {
-			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "assistant", Content: exec.Output})
-		}
-		if len(messages) > 0 {
-			found = true
-		}
-		raw, err := json.Marshal(messages)
-		if err != nil {
-			return nil, err
-		}
-		exec.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}
+		text := "Recovered execution background (may overlap later messages; output does not locate steering within the run).\nStarting user message:\n" + exec.PromptSent + "\nAssistant and tool output:\n" + exec.Output
+		raw, _ := json.Marshal([]openaiclient.CompletionsHistoryMessage{{Role: "user", Content: text}})
+		out = append(out, models.Execution{ID: exec.ID, Status: models.ExecCompleted, ContextKind: recoveryBackgroundKind, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
 	}
-	if !found {
+	if len(out) == 0 {
 		return nil, fmt.Errorf("cannot switch providers: readable history for native OpenAI compaction is unavailable")
 	}
-	return out, nil
+	return append(out, tail...), nil
+}
+
+// Summarize background separately so readable steering, images and tool exchanges
+// are not passed through summary replacement-history construction.
+func (s *LLMService) summarizeProviderRecovery(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
+	var background, tail []models.Execution
+	for _, exec := range req.ChatHistory {
+		if exec.ContextKind == recoveryBackgroundKind {
+			background = append(background, exec)
+		} else {
+			tail = append(tail, exec)
+		}
+	}
+	if len(background) == 0 {
+		return req, nil
+	}
+	summaryReq := req
+	summaryReq.TransportScope = "provider-recovery:" + req.ExecID
+	summary, err := s.localSummaryCompaction(adapter, summaryReq, background)
+	if err != nil {
+		return req, err
+	}
+	req.ChatHistory = append(buildCompactedReplacementHistory(nil, summary), tail...)
+	req.NativeCompactionStateJSON = ""
+	req.ProviderSessionStateJSON = ""
+	req.ContextTokenEstimate = 0
+	return req, nil
 }
 
 // Load older execution text only for opaque OpenAI history. Stop at an explicit
@@ -153,6 +199,54 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 				}
 			}
 			history = merged
+		}
+	}
+	// Recover applied steering as execution-scoped background. Do not insert it
+	// at a guessed point in the assistant's output string.
+	history = append([]models.Execution(nil), history...)
+	last, tail := portableRecoveryParts(history)
+	// Exact text matches in readable user messages already have a known place.
+	// Do not repeat those steering messages in the recovered background.
+	visibleSteering := make(map[string]bool)
+	for _, exec := range tail {
+		for _, replay := range exec.ReplayMessages {
+			var messages []openaiclient.CompletionsHistoryMessage
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &messages) != nil {
+				continue
+			}
+			for _, m := range messages {
+				if m.Role != "user" {
+					continue
+				}
+				if m.Content != "" {
+					visibleSteering[m.Content] = true
+				}
+				for _, part := range m.ImageContent {
+					if part["type"] == "text" {
+						if text, ok := part["text"].(string); ok {
+							visibleSteering[text] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if s != nil && s.threadInputRepo != nil {
+		for i := 0; i <= last; i++ {
+			if history[i].ID == "" {
+				continue
+			}
+			inputs, err := s.threadInputRepo.ListAppliedSteeringByExecution(req.Ctx, history[i].ID)
+			if err != nil {
+				return req, err
+			}
+			var notes strings.Builder
+			for _, input := range inputs {
+				if input.Content != "" && !visibleSteering[input.Content] {
+					notes.WriteString("\nApplied user steering during this run (exact position within output unknown):\n" + input.Content + "\n")
+				}
+			}
+			history[i].Output += notes.String()
 		}
 	}
 	var err error

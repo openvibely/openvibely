@@ -31,6 +31,11 @@ func TestProviderSwitchLoadsExistingTranscriptFromEarlierExecution(t *testing.T)
 				ChatHistory: []models.Execution{{Status: models.ExecCompleted, PromptSent: "recent", Output: "recent answer", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}}
 			called := false
 			_, err := s.callProviderWithCompaction(providerAdapterFunc(func(sent llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				if len(sent.SummaryInput) > 0 {
+					raw, _ := json.Marshal(sent.SummaryInput)
+					require.Contains(t, string(raw), "OLD_TOOL_FACT")
+					return llmcontracts.AgentResult{Output: "OLD_TOOL_FACT"}, nil
+				}
 				called = true
 				input, err := summaryHistoryInput(provider, sent.ChatHistory)
 				require.NoError(t, err)
