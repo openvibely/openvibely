@@ -248,6 +248,7 @@ func RuntimeCatalogJSON() string {
 			card := scheduleTaskBackground(theme)
 			css["--ov-schedule-task-bg"] = card
 			css["--ov-schedule-selection-bg"] = scheduleSelectionBackground(theme, card)
+			css["--ov-kanban-card-bg"] = kanbanCardBackground(theme)
 			runtime = append(runtime, runtimeTheme{
 				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css,
 				Roles: toggleRuntimeRoles(theme),
