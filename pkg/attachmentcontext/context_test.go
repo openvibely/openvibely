@@ -41,10 +41,10 @@ func TestRestoreAndUpdate(t *testing.T) {
 	}
 	next := With(ctx, "/uploads/report.docx\n/uploads/new.docx")
 	updated := Ensure(next, got, read, makeMessage)
-	if len(updated) != 2 || countContexts(updated) != 1 || updated[1].text != Text(next) {
-		t.Fatalf("stale context not replaced: %+v", updated)
+	if len(updated) != 3 || updated[1].text != Text(ctx) || updated[2].text != Text(next) {
+		t.Fatalf("changed context must be appended after the old one: %+v", updated)
 	}
-	if len(Ensure(next, updated, read, makeMessage)) != 2 {
+	if len(Ensure(next, updated, read, makeMessage)) != 3 {
 		t.Fatal("repeated updated references")
 	}
 	if len(Ensure(context.Background(), history, read, makeMessage)) != 2 {
@@ -52,18 +52,31 @@ func TestRestoreAndUpdate(t *testing.T) {
 	}
 }
 
-func TestEnsureRemovesStaleDuplicatesAndEmpty(t *testing.T) {
-	stale := Wrap("/uploads/old.pdf")
+func TestEnsureAppendsChangesWithoutRewritingHistory(t *testing.T) {
+	old := Wrap("/uploads/old.pdf")
 	current := With(context.Background(), "/uploads/new.pdf")
-	items := []message{{"user", stale}, {"assistant", "a"}, {"user", Text(current)}, {"user", stale}, {"user", "go"}}
+	items := []message{{"user", old}, {"assistant", "a"}, {"user", "go"}}
 	got := Ensure(current, items, read, makeMessage)
-	if countContexts(got) != 1 || strings.Contains(got[1].text, "old.pdf") {
+	want := []message{{"user", old}, {"assistant", "a"}, {"user", Text(current)}, {"user", "go"}}
+	if len(got) != len(want) {
 		t.Fatalf("%+v", got)
 	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("history prefix rewritten: %+v", got)
+		}
+	}
+
 	empty := With(context.Background(), "")
 	got = Ensure(empty, items, read, makeMessage)
-	if countContexts(got) != 0 || len(got) != 2 {
-		t.Fatalf("empty references must remove context: %+v", got)
+	if len(got) != 4 || got[0].text != old || got[2].text != emptyText {
+		t.Fatalf("removing all files must append an empty list: %+v", got)
+	}
+	if len(Ensure(empty, got, read, makeMessage)) != 4 {
+		t.Fatal("repeated empty list")
+	}
+	if got := Ensure(empty, []message{{"user", "go"}}, read, makeMessage); len(got) != 1 {
+		t.Fatalf("no files ever attached must add nothing: %+v", got)
 	}
 }
 
