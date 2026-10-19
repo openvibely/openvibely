@@ -57,6 +57,14 @@
             entries.delete(id);
         }
     }
+    window.findCachedChatVirtualData = function (key, source) {
+        for (const entry of entries.values()) {
+            if (Date.now() - entry.time > ttl) continue;
+            const data = entry.virtual?.find(data => data.key === key && (data.source === source || data.normalized === source));
+            if (data) return data;
+        }
+        return null;
+    };
     function save(main) {
         const id = key(activeURL);
         const thread = transcript(main);
@@ -75,9 +83,18 @@
         // Never replay stale preserve instructions across two different threads.
         clone.querySelectorAll('[hx-preserve]').forEach(el => el.removeAttribute('hx-preserve'));
         const html = clone.innerHTML;
-        const bytes = html.length * 2;
+        const virtual = window.captureChatVirtualData?.(main) || [];
+        // Budget source models along with serialized HTML. Measurements add only
+        // a few numbers per row; model strings are conservatively counted again.
+        let bytes = html.length * 2;
+        virtual.forEach(data => {
+            bytes += (data.source.length + data.normalized.length) * 2;
+            data.models.forEach(model => model.segments.forEach(seg => {
+                bytes += ((seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length) * 2 + 128;
+            }));
+        });
         entries.delete(id);
-        if (bytes <= maxBytes) entries.set(id, { html: html, bytes: bytes, time: Date.now() });
+        if (bytes <= maxBytes) entries.set(id, { html: html, virtual: virtual, bytes: bytes, time: Date.now() });
         forgetExpired();
     }
     function releaseHistorySnapshot() {
@@ -202,6 +219,13 @@
             });
         });
         detail.serverResponse = next.innerHTML;
+    }, true);
+    document.addEventListener('htmx:afterSwap', function (event) {
+        // HTMX does not carry custom beforeSwap fields into afterSwap. Restore
+        // the refresh marker before task handlers decide whether to reset scroll.
+        if (event.detail.target?.id === 'main-content' && composerRefreshes.has(event.detail.xhr)) {
+            event.detail._ovThreadRefresh = true;
+        }
     }, true);
     document.addEventListener('htmx:afterSwap', function (event) {
         if (event.detail._ovCachedPreview) return;
