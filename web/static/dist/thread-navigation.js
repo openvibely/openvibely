@@ -3,6 +3,7 @@
 (function () {
     'use strict';
     const entries = new Map();
+    const composerRefreshes = new WeakMap();
     const ttl = 30 * 60 * 1000;
     const maxBytes = 64 * 1024 * 1024;
     const maxEntries = 20;
@@ -20,9 +21,9 @@
         if (next.origin !== location.origin || next.pathname !== new URL(pending.url, location.href).pathname) return false;
         activeURL = next.pathname + next.search;
         pending.url = activeURL;
-        // A workspace/tab change supersedes the response's original view. HTMX
-        // still commits its history entry, using the latest requested tab.
-        mutation++;
+        // Workspace scripts read the displayed URL when the refreshed page mounts.
+        // Keep the latest tab without fencing out fresh conversation state; only
+        // server writes supersede that state.
         if (pending.source) pending.source.setAttribute('hx-push-url', activeURL);
         return true;
     };
@@ -183,11 +184,22 @@
                 el.setAttribute('hx-preserve', 'true');
             }
         });
-        // Preserve the live composer, including attachments, focus and edits made
-        // while the refresh was in flight. Other controls get fresh server state.
+        // Keep the live draft, attachment controls and their handlers. Queue and
+        // active-turn controls belong to the server and must still be refreshed.
+        const composers = [];
+        composerRefreshes.set(detail.xhr, composers);
         ['chat-form', 'task-thread-form'].forEach(id => {
             const form = next.content.querySelector('#' + id);
-            if (form && document.getElementById(id)) form.setAttribute('hx-preserve', 'true');
+            const live = document.getElementById(id);
+            if (!form || !live) return;
+            form.setAttribute('hx-preserve', 'true');
+            composers.push({
+                form: live,
+                regions: ['pending-thread-inputs', id + '-primary-action'].map(regionID => ({
+                    id: regionID, html: form.querySelector('#' + regionID)?.outerHTML
+                })),
+                turn: form.querySelector('input[name="expected_turn_id"]')?.cloneNode(true)
+            });
         });
         detail.serverResponse = next.innerHTML;
     }, true);
@@ -195,6 +207,23 @@
         if (event.detail._ovCachedPreview) return;
         if (event.detail.target?.id === 'main-content') {
             activeURL = pending?.url || location.pathname + location.search;
+            // HTMX copies only selected beforeSwap fields into afterSwap detail.
+            // Carry the reconciliation data by request identity instead.
+            const composers = composerRefreshes.get(event.detail.xhr) || [];
+            composerRefreshes.delete(event.detail.xhr);
+            composers.forEach(update => {
+                if (!update.form.isConnected) return;
+                update.regions.forEach(region => {
+                    const target = update.form.querySelector('#' + region.id);
+                    if (target && region.html) {
+                        // Use HTMX so fresh queue buttons receive request handlers
+                        // and replaced controls get their usual cleanup.
+                        htmx.swap(target, region.html, { swapStyle: 'outerHTML', settleDelay: 0 });
+                    }
+                });
+                update.form.querySelector('input[name="expected_turn_id"]')?.remove();
+                if (update.turn) update.form.appendChild(update.turn);
+            });
         }
     });
     document.addEventListener('htmx:pushedIntoHistory', releaseHistorySnapshot);
