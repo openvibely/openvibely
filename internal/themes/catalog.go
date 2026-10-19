@@ -36,7 +36,7 @@ type Theme struct {
 }
 
 func Catalog() []Theme {
-	catalog := make([]Theme, 0, ExpectedThemeCount+4+len(paletteSpecs()))
+	catalog := make([]Theme, 0, ExpectedThemeCount+5+len(paletteSpecs()))
 	catalog = append(catalog, OpenVibelyThemes()...)
 	catalog = append(catalog, PaletteThemes()...)
 	catalog = append(catalog, VSCodeCatalog()...)
@@ -196,6 +196,7 @@ func OpenVibelyThemes() []Theme {
 		openVibelyLightTheme(),
 		openVibelyContinuousTheme(),
 		openVibelyRaisedTheme(),
+		openVibelyElevatedTheme(),
 	}
 }
 
@@ -216,6 +217,17 @@ func openVibelyRaisedTheme() Theme {
 	theme.Name = "OpenVibely Dark Raised"
 	theme.Source = "OpenVibely experimental"
 	theme.SearchText = theme.Name + " dark experimental raised"
+	return theme
+}
+
+// The elevated variant retains native dark styling and climbs an even lightness
+// ladder: page, cards, controls, then chat and overlays.
+func openVibelyElevatedTheme() Theme {
+	theme := openVibelyDarkTheme()
+	theme.ID = "openvibely-dark-elevated"
+	theme.Name = "OpenVibely Dark Elevated"
+	theme.Source = "OpenVibely experimental"
+	theme.SearchText = theme.Name + " dark experimental elevation"
 	return theme
 }
 
