@@ -2549,6 +2549,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* Experimental native dark variant: join navigation to the main canvas. */
 html[data-color-theme="openvibely-dark-continuous"] #sidebar { background-color: oklch(var(--b2)); }
+html[data-color-theme="openvibely-dark-continuous"] .chat-bubble-user-msg,
+html[data-color-theme="openvibely-dark-continuous"] .chat-bubble-assistant-msg,
+html[data-color-theme="openvibely-dark-continuous"] .chat-input-container {
+	--chat-user-bg: oklch(var(--b1));
+	--chat-user-border: oklch(var(--b3));
+	background-color: oklch(var(--b1));
+	border: 1px solid oklch(var(--b3));
+	box-shadow: none;
+}
 
 /* Built-in VS Code palette application. Variables are generated at build time. */
 [data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}
