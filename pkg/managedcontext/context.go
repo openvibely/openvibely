@@ -43,19 +43,19 @@ func Contains[T any](items []T, read func(T) (string, string)) bool {
 	return false
 }
 
-// SeedReplay records a first index insertion in the current turn's durable replay.
+// SeedReplay records an index update in the current turn's durable replay.
 // visible is the assembled conversation before Ensure; replay contains this turn's
 // current user input without attachment bytes. An index owned by earlier history
 // is not copied into every turn. Placement matches Ensure, including multimodal input.
 func SeedReplay[T, R any](ctx context.Context, visible []T, replay []R, read func(T) (string, string), makeMessage func(string) R) []R {
-	text := Text(ctx)
-	if text == "" || Contains(visible, read) {
+	text := updateText(ctx, visible, read)
+	if text == "" {
 		return replay
 	}
 	at := len(replay)
 	if len(visible) > 0 && at > 0 {
 		role, content := read(visible[len(visible)-1])
-		if role == "user" && content != "" {
+		if role == "user" && content != "" && !isIndex(role, content) {
 			at--
 		}
 	}
@@ -68,56 +68,43 @@ func isIndex(role, content string) bool {
 	return role == "user" && strings.HasPrefix(content, Marker+"\n")
 }
 
-// Ensure keeps an identical index at its original position. Changed indexes replace
-// the first old index in place; missing indexes are restored, and duplicates removed.
-// An empty current index removes old indexes. Structured tool exchanges are untouched.
-// Call after rebuilding history and after compaction; individual skill bodies are
-// deliberately reloaded by the model rather than permanently pinned in context.
-func Ensure[T any](ctx context.Context, items []T, read func(T) (string, string), makeMessage func(string) T) []T {
+// updateText compares against the latest retained index, including disable notices.
+func updateText[T any](ctx context.Context, items []T, read func(T) (string, string)) string {
 	if ctx == nil || ctx.Value(key{}) == nil {
-		return items
+		return ""
 	}
 	text := Text(ctx)
-	keep, first := -1, -1
-	for i, item := range items {
-		role, content := read(item)
+	for i := len(items) - 1; i >= 0; i-- {
+		role, content := read(items[i])
 		if !isIndex(role, content) {
 			continue
 		}
-		if first < 0 {
-			first = i
+		if text == "" {
+			text = Marker + "\nNo skills or memory index is currently available. This supersedes previously listed indexes.\n</managed_knowledge_index>"
 		}
-		if keep < 0 && content == text {
-			keep = i
+		if content == text {
+			return ""
 		}
+		return text
 	}
-	if keep < 0 {
-		keep = first
+	return text
+}
+
+// Ensure preserves existing history and inserts an update only when the latest
+// index differs. Missing indexes are restored after compaction.
+func Ensure[T any](ctx context.Context, items []T, read func(T) (string, string), makeMessage func(string) T) []T {
+	text := updateText(ctx, items, read)
+	if text == "" {
+		return items
 	}
-	out := make([]T, 0, len(items)+1)
-	for i, item := range items {
-		role, content := read(item)
-		if isIndex(role, content) {
-			if i != keep || text == "" {
-				continue
-			}
-			if content != text {
-				item = makeMessage(text)
-			}
-		}
-		out = append(out, item)
-	}
-	if text == "" || keep >= 0 {
-		return out
-	}
-	at := len(out)
+	at := len(items)
 	if at > 0 {
-		role, content := read(out[at-1])
-		if role == "user" && content != "" {
+		role, content := read(items[at-1])
+		if role == "user" && content != "" && !isIndex(role, content) {
 			at--
 		}
 	}
-	result := append([]T(nil), out[:at]...)
+	result := append([]T(nil), items[:at]...)
 	result = append(result, makeMessage(text))
-	return append(result, out[at:]...)
+	return append(result, items[at:]...)
 }
