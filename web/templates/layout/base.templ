@@ -2827,10 +2827,10 @@ html[data-ov-theme-layer="custom"] #schedule-content [data-schedule-card][data-c
 [data-ov-theme-layer="custom"] .kanban-search-clear:focus-visible { box-shadow: inset 0 0 0 1px var(--ov-focus) !important; }
 [data-ov-theme-layer="custom"] .drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }
 [data-ov-theme-layer="custom"] .task-selected {
-outline-color: var(--ov-focus);
-background: linear-gradient(135deg, var(--ov-selection-bg), var(--ov-hover-bg)) !important;
-box-shadow: 0 0 0 3px var(--ov-selection-bg), 0 4px 12px rgba(0,0,0,0.35);
-border-color: var(--ov-focus) !important;
+outline: none;
+background: transparent !important;
+box-shadow: none;
+border-color: var(--ov-text) !important;
 }
 [data-ov-theme-layer="custom"] .task-selected::before { background: var(--ov-focus); color: var(--ov-button-fg); }
 [data-ov-theme-layer="custom"] .category-drop-zone,
