@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -170,4 +171,43 @@ func TestReadableCompactionRecoveryPreservesLaterStructuredTurns(t *testing.T) {
 	require.Equal(t, later, recovered[1])
 	require.Contains(t, recovered[0].ReplayMessages[0].TranscriptJSON, "OLD_FACT")
 	require.Contains(t, history[0].ReplayMessages[0].TranscriptJSON, "encrypted_content")
+}
+
+func TestProviderSwitchPreservesReadableMessagesBeforeCompaction(t *testing.T) {
+	const transcript = `{"responses_input":[
+ {"type":"message","role":"user","content":[{"type":"input_text","text":"PREFIX_MESSAGE"},{"type":"input_image","image_url":"data:image/png;base64,aW1hZ2U="}]},
+ {"type":"compaction","encrypted_content":"opaque"},
+ {"type":"message","role":"user","content":"SUFFIX_MESSAGE"}]}`
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+		t.Run(string(provider), func(t *testing.T) {
+			history := []models.Execution{{PromptSent: "starting prompt", Output: "older output", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
+			calls := 0
+			_, err := (&LLMService{}).callProviderWithCompaction(providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				calls++
+				if len(req.SummaryInput) > 0 {
+					raw, err := json.Marshal(req.SummaryInput)
+					require.NoError(t, err)
+					require.NotContains(t, string(raw), "PREFIX_MESSAGE")
+					require.NotContains(t, string(raw), "aW1hZ2U=")
+					return llmcontracts.AgentResult{Output: "RECOVERED_SUMMARY"}, nil
+				}
+				input, err := summaryHistoryInput(provider, req.ChatHistory)
+				require.NoError(t, err)
+				raw, err := json.Marshal(input)
+				require.NoError(t, err)
+				text := string(raw)
+				require.Contains(t, text, "PREFIX_MESSAGE")
+				require.Contains(t, text, "aW1hZ2U=")
+				require.Contains(t, text, "RECOVERED_SUMMARY")
+				require.Contains(t, text, "SUFFIX_MESSAGE")
+				require.NotContains(t, text, "encrypted_content")
+				require.Less(t, strings.Index(text, "PREFIX_MESSAGE"), strings.Index(text, "RECOVERED_SUMMARY"))
+				require.Less(t, strings.Index(text, "RECOVERED_SUMMARY"), strings.Index(text, "SUFFIX_MESSAGE"))
+				return llmcontracts.AgentResult{Output: "done"}, nil
+			}), llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000}, ChatHistory: history, Message: "continue"})
+			require.NoError(t, err)
+			require.Equal(t, 2, calls)
+			require.Equal(t, transcript, history[0].ReplayMessages[0].TranscriptJSON)
+		})
+	}
 }
