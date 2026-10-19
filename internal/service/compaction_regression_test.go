@@ -42,6 +42,43 @@ func TestSummaryRegressionProviderSwitchRetainsToolResultsForSummary(t *testing.
 	}
 }
 
+func TestSummaryProviderSwitchGroupsParallelResponsesCalls(t *testing.T) {
+	history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"function_call","call_id":"a","name":"read_file","arguments":"{}"},{"type":"function_call","call_id":"b","name":"read_file","arguments":"{}"},{"type":"function_call_output","call_id":"a","output":"file A"},{"type":"function_call_output","call_id":"b","output":"file B"}]}`}}}}
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
+		t.Run(string(provider), func(t *testing.T) {
+			input, err := summaryHistoryInput(provider, history)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(input) != 3 {
+				t.Fatalf("expected one assistant message and two tool results, got %s", input)
+			}
+			var assistant struct {
+				Role      string
+				ToolCalls []struct{ ID string } `json:"tool_calls"`
+			}
+			if err := json.Unmarshal(input[0], &assistant); err != nil {
+				t.Fatal(err)
+			}
+			if assistant.Role != "assistant" || len(assistant.ToolCalls) != 2 || assistant.ToolCalls[0].ID != "a" || assistant.ToolCalls[1].ID != "b" {
+				t.Fatalf("parallel calls were not grouped: %s", input[0])
+			}
+			for i, id := range []string{"a", "b"} {
+				var result struct {
+					Role       string
+					ToolCallID string `json:"tool_call_id"`
+				}
+				if err := json.Unmarshal(input[i+1], &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.Role != "tool" || result.ToolCallID != id {
+					t.Fatalf("incorrect tool result: %s", input[i+1])
+				}
+			}
+		})
+	}
+}
+
 func TestSummaryProviderSwitchPreservesAllReplayTurns(t *testing.T) {
 	sources := map[string][]models.ExecutionReplayMessage{
 		"responses": {{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":"initial request"},{"type":"function_call","call_id":"a","name":"read_file","arguments":"{}"},{"type":"function_call_output","call_id":"a","output":"first result"},{"type":"message","role":"user","content":"later request"},{"type":"function_call","call_id":"b","name":"read_file","arguments":"{}"},{"type":"function_call_output","call_id":"b","output":"second result"}]}`}},

@@ -17,6 +17,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestResponsesSummaryMessagesGroupsParallelCalls(t *testing.T) {
+	var input []json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(`[
+		{"type":"function_call","call_id":"a","name":"read_file","arguments":"{\"path\":\"a\"}"},
+		{"type":"reasoning","summary":[]},
+		{"type":"function_call","call_id":"b","name":"read_file","arguments":"{\"path\":\"b\"}"},
+		{"type":"function_call_output","call_id":"b","output":"file B"},
+		{"type":"function_call_output","call_id":"a","output":"file A"},
+		{"type":"function_call","call_id":"c","name":"read_file","arguments":"{}"},
+		{"type":"function_call_output","call_id":"c","output":"file C"}
+	]`), &input))
+	messages := ResponsesSummaryMessages(input)
+	require.Len(t, messages, 5)
+	require.Equal(t, "assistant", messages[0].Role)
+	require.Len(t, messages[0].ToolCalls, 2)
+	require.Equal(t, "a", messages[0].ToolCalls[0].ID)
+	require.Equal(t, "b", messages[0].ToolCalls[1].ID)
+	require.Equal(t, "read_file", messages[0].ToolCalls[0].Function.Name)
+	require.JSONEq(t, `{"path":"a"}`, messages[0].ToolCalls[0].Function.Arguments)
+	require.JSONEq(t, `{"path":"b"}`, messages[0].ToolCalls[1].Function.Arguments)
+	require.Equal(t, "tool", messages[1].Role)
+	require.Equal(t, "b", messages[1].ToolCallID)
+	require.Equal(t, "file B", messages[1].Content)
+	require.Equal(t, "tool", messages[2].Role)
+	require.Equal(t, "a", messages[2].ToolCallID)
+	require.Equal(t, "file A", messages[2].Content)
+	require.Equal(t, "assistant", messages[3].Role)
+	require.Len(t, messages[3].ToolCalls, 1, "a later tool round must remain separate")
+	require.Equal(t, "c", messages[3].ToolCalls[0].ID)
+	require.Equal(t, "tool", messages[4].Role)
+	require.Equal(t, "c", messages[4].ToolCallID)
+}
+
 func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 	for _, transport := range []string{"http", "websocket", "completions"} {
 		for _, cancelled := range []bool{false, true} {
