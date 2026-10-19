@@ -154,6 +154,7 @@ type AgenticOptions struct {
 	EnableAstraConfigurationUpdate bool
 	RequestLevelReasoningEffort    string
 	OnCompactionProgress           func(llmcontracts.CompactionProgress)
+	OnCompactionArchive            func(context.Context, []any, []any) error
 	OnCompaction                   func(summary string) // called when history is compacted
 	// onCompactionUsage records billing usage separately from active context size.
 	onCompactionUsage func(*agenticTurnResult)
@@ -404,6 +405,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "OpenAI mid-turn compaction", err)
 			}
 			return nil, err
+		}
+
+		if opts.OnCompactionArchive != nil {
+			if err := opts.OnCompactionArchive(ctx, items, compactedItems); err != nil {
+				if completedSampling {
+					return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "save readable compaction history", err)
+				}
+				return nil, fmt.Errorf("save readable compaction history: %w", err)
+			}
 		}
 
 		result.Compacted = true

@@ -932,6 +932,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	if req.Agent.Provider == models.ProviderMixture {
 		return adapter.Call(req)
 	}
+	if req.Agent.Provider != models.ProviderOpenAI {
+		req, replayErr = s.recoverPortableProviderHistory(req)
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
+	}
 	// Budget and send the destination provider's actual history format, rather
 	// than letting its adapter silently fall back to prompt/answer text.
 	req.ChatHistory = normalizeProviderReplay(req.Agent.Provider, req.ChatHistory, false)
