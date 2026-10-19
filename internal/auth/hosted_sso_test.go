@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 var hostedTestKey = []byte("0123456789abcdef0123456789abcdef")
@@ -255,7 +257,7 @@ func TestHostedTokenExchangeStrictValidationAndRetry(t *testing.T) {
 	client := NewHostedSSOClient(server.URL, "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
 	var delays []time.Duration
 	client.Sleep = func(ctx context.Context, d time.Duration) error { delays = append(delays, d); return nil }
-	identity, err := client.Exchange(context.Background(), code, verifier)
+	identity, err := client.Exchange(retrytest.Context(), code, verifier)
 	if err != nil {
 		t.Fatal(err)
 	}

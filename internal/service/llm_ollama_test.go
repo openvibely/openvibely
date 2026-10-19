@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 type ollamaListDoerFunc func(*http.Request) (*http.Response, error)
@@ -27,7 +29,7 @@ func TestListOllamaModelsRetriesTransientStatus(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"models":[{"name":"llama3","model":"llama3"}]}`))}, nil
 	})
 
-	models, err := ListOllamaModels(context.Background(), "http://ollama.invalid")
+	models, err := ListOllamaModels(retrytest.Context(), "http://ollama.invalid")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestDetectOllamaContextWindow(t *testing.T) {
 				}
 				return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
 			})
-			got, err := DetectOllamaContextWindow(context.Background(), "http://fixture/v1/", tc.model)
+			got, err := DetectOllamaContextWindow(retrytest.Context(), "http://fixture/v1/", tc.model)
 			if got != tc.want {
 				t.Fatalf("got %d want %d", got, tc.want)
 			}
@@ -207,7 +209,7 @@ func TestOllamaMetadataParallelRetriesAndCancellation(t *testing.T) {
 		}
 		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(retrytest.Context(), 3*time.Second)
 	defer cancel()
 	got := DiscoverOllamaModelMetadata(ctx, "http://fixture.invalid", "fixture")
 	if got.ContextLength != 8192 || got.ModelContextLength != 131072 || ps.Load() != 2 || show.Load() != 2 {
@@ -219,7 +221,7 @@ func TestOllamaMetadataParallelRetriesAndCancellation(t *testing.T) {
 		cancelled.Add(1)
 		return nil, req.Context().Err()
 	})
-	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel = context.WithTimeout(retrytest.Context(), 20*time.Millisecond)
 	defer cancel()
 	got = DiscoverOllamaModelMetadata(ctx, "http://fixture.invalid", "fixture")
 	if got != (OllamaModelMetadata{}) || cancelled.Load() != 2 {

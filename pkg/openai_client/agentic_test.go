@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1005,7 +1006,7 @@ func TestNativeCompactionReusesTurnTransport(t *testing.T) {
 					client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 				}
 				defer client.CloseResponsesTransport()
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(retrytest.Context(), 5*time.Second)
 				defer cancel()
 				opts := &AgenticOptions{Model: "gpt-5.6-sol", DisableTools: true, MaxTurns: 1}
 				if _, err := client.SendAgentic(ctx, "hello", opts); err != nil {
@@ -1775,7 +1776,7 @@ func TestSendAgentic_ResponsesLiteStreamFailureFallsBackAfterRetries(t *testing.
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(24*time.Hour).UnixMilli(), "org_test")
-	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+	resp, err := client.SendAgentic(retrytest.Context(), "test", &AgenticOptions{
 		Model:        "gpt-5.6-sol",
 		DisableTools: true,
 		MaxTurns:     1,
@@ -2447,7 +2448,7 @@ func TestSendAgentic_WithRetry(t *testing.T) {
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
 	client := newHTTPTestAPIKeyClient("sk-test")
-	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+	resp, err := client.SendAgentic(retrytest.Context(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
 	})
@@ -2510,7 +2511,7 @@ func TestSendAgentic_RetriesStreamAfterPartialOutputFromTurnState(t *testing.T) 
 
 	client := newHTTPTestAPIKeyClient("sk-test")
 	var streamed strings.Builder
-	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+	resp, err := client.SendAgentic(retrytest.Context(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
 		OnText: func(text string) {
@@ -2579,7 +2580,7 @@ func TestSendAgentic_RetriedTurnReplaysCompletedToolOutput(t *testing.T) {
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
 	client := newHTTPTestAPIKeyClient("sk-test")
-	resp, err := client.SendAgentic(context.Background(), "use lookup", &AgenticOptions{
+	resp, err := client.SendAgentic(retrytest.Context(), "use lookup", &AgenticOptions{
 		Model:            "gpt-5.3-codex",
 		SkipDefaultTools: true,
 		ExtraTools:       []ToolDefinition{{Type: "function", Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}},
