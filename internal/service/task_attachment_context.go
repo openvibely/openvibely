@@ -70,20 +70,12 @@ func NewTaskAttachmentContextSource(attachmentRepo persistence.AttachmentStore, 
 	}, keys...)
 }
 
-// TaskAttachmentReferences lists every task attachment as a file reference.
-// Message-scoped files keep the execution ID that attached them; image bytes
-// remain only in the original user message.
 func TaskAttachmentReferences(attachments []models.Attachment) string {
 	if len(attachments) == 0 {
 		return ""
 	}
 	var sb strings.Builder
 	for _, att := range attachments {
-		if att.ExecutionID != "" {
-			fmt.Fprintf(&sb, "[message %s] ", att.ExecutionID)
-		} else {
-			sb.WriteString("[task] ")
-		}
 		sb.WriteString(llmattachment.Reference(att))
 		sb.WriteByte('\n')
 	}

@@ -62,7 +62,7 @@ func TestExecuteTaskWithAgent_TaskWideAttachmentContextRefreshesDuringRun(t *tes
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(before, "[task] ") || !strings.Contains(before, "spec.pdf") || !strings.Contains(before, "[message "+prior.ID+"]") || !strings.Contains(before, "shot.png") {
+	if !strings.Contains(before, "spec.pdf") || !strings.Contains(before, "shot.png") || strings.Contains(before, "[message ") || strings.Contains(before, "[task]") {
 		t.Fatalf("initial context missing task attachments:\n%s", before)
 	}
 	if strings.Contains(before, "late.txt") || !strings.Contains(after, "late.txt") {
