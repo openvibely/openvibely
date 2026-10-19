@@ -69,11 +69,13 @@ func TestEnsureAppendsChangesWithoutRewritingHistory(t *testing.T) {
 
 	empty := With(context.Background(), "")
 	got = Ensure(empty, items, read, makeMessage)
-	if len(got) != 4 || got[0].text != old || got[2].text != emptyText {
-		t.Fatalf("removing all files must append an empty list: %+v", got)
+	if len(got) != len(items) {
+		t.Fatalf("empty file list must add nothing: %+v", got)
 	}
-	if len(Ensure(empty, got, read, makeMessage)) != 4 {
-		t.Fatal("repeated empty list")
+	for i := range items {
+		if got[i] != items[i] {
+			t.Fatalf("empty file list rewrote history: %+v", got)
+		}
 	}
 	if got := Ensure(empty, []message{{"user", "go"}}, read, makeMessage); len(got) != 1 {
 		t.Fatalf("no files ever attached must add nothing: %+v", got)
