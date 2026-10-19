@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestRefreshTokenFailureRedactsResponseBody(t *testing.T) {
@@ -80,7 +82,7 @@ func TestTokenStorageAndRefreshSuccessPaths(t *testing.T) {
 	oldURL := OAuthTokenURL
 	OAuthTokenURL = srv.URL
 	defer func() { OAuthTokenURL = oldURL }()
-	refreshed, err := RefreshToken("refresh-secret")
+	refreshed, err := RefreshTokenContext(retrytest.Context(), "refresh-secret")
 	if err != nil {
 		t.Fatalf("RefreshToken: %v", err)
 	}

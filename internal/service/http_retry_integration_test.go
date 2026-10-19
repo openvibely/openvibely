@@ -2,11 +2,12 @@ package service
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestChannelDownloadsUseGeneralRetries(t *testing.T) {
@@ -28,7 +29,7 @@ func TestChannelDownloadsUseGeneralRetries(t *testing.T) {
 			var err error
 			switch channel {
 			case "telegram":
-				req, _ := http.NewRequest(http.MethodGet, "https://api.telegram.org/file/botfixture/image.png", nil)
+				req, _ := http.NewRequestWithContext(retrytest.Context(), http.MethodGet, "https://api.telegram.org/file/botfixture/image.png", nil)
 				var resp *http.Response
 				resp, err = (telegramHTTPClient{client: client, token: "fixture"}).Do(req)
 				if err == nil {
@@ -37,10 +38,10 @@ func TestChannelDownloadsUseGeneralRetries(t *testing.T) {
 				}
 			case "slack":
 				svc := &SlackService{httpClient: client}
-				err = svc.downloadSlackPrivateFile(context.Background(), "fixture", "https://files.slack.com/files-pri/T-F/image.png", &output)
+				err = svc.downloadSlackPrivateFile(retrytest.Context(), "fixture", "https://files.slack.com/files-pri/T-F/image.png", &output)
 			case "discord":
 				svc := &DiscordService{httpClient: client}
-				err = svc.downloadDiscordFile(context.Background(), "https://cdn.discordapp.com/attachments/image.png", &output)
+				err = svc.downloadDiscordFile(retrytest.Context(), "https://cdn.discordapp.com/attachments/image.png", &output)
 			}
 			if err != nil || calls != 2 || output.String() != "image bytes" {
 				t.Fatalf("calls=%d output=%q err=%v", calls, output.String(), err)

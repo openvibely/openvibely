@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestTerminalCompactionFailureDoesNotFallBackToHTTP(t *testing.T) {
@@ -123,7 +124,7 @@ func TestTransientStreamReconnectsWebsocket(t *testing.T) {
 				if oauth {
 					client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(retrytest.Context(), 5*time.Second)
 				defer cancel()
 				for i := 0; i < 2; i++ {
 					var err error
