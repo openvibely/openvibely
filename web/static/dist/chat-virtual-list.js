@@ -7,17 +7,31 @@
     let suspended = false;
     const rowSelector = '.chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
 
-    function mount(row) {
+    function mount(row, restored) {
         if (!row.placeholder.isConnected) return;
         row.placeholder.replaceWith(row.node);
-        row.scroll?.forEach(saved => { saved.node.scrollTop = saved.top; saved.node.scrollLeft = saved.left; });
+        restored.push(row);
+    }
+    function restoreScroll(rows) {
+        // Setting scroll offsets can force layout. Insert every row first so a
+        // large transcript needs one layout, rather than one per restored row.
+        rows.forEach(row => row.scroll?.forEach(saved => {
+            saved.node.scrollTop = saved.top;
+            saved.node.scrollLeft = saved.left;
+        }));
+    }
+    function mountAll(rows) {
+        const restored = [];
+        rows.forEach(row => mount(row, restored));
+        restoreScroll(restored);
     }
     function destroy(list) {
         cancelAnimationFrame(list.frame);
         list.observer.disconnect();
         list.resize?.disconnect();
         list.messages.removeEventListener('scroll', list.schedule);
-        list.rows.forEach(mount);
+        // A discarded transcript no longer needs its detached rows reinserted.
+        list.rows.clear();
         lists.delete(list.messages);
     }
     function refresh(list) {
@@ -39,7 +53,7 @@
                 const rect = node.getBoundingClientRect();
                 if (rect.bottom > bounds.top && rect.top < bounds.bottom) anchor = { row: row, top: rect.top };
             });
-            list.rows.forEach(mount);
+            mountAll(list.rows);
             if (pinned) list.messages.scrollTop = list.messages.scrollHeight;
             else if (anchor) list.messages.scrollTop += anchor.row.node.getBoundingClientRect().top - anchor.top;
             list.width = width;
@@ -65,6 +79,7 @@
         const buffer = Math.max(600, list.messages.clientHeight);
         const selection = window.getSelection();
         const changes = [];
+        const restored = [];
         let anchor = null;
         // Read geometry before changing any rows to avoid repeated layout passes.
         list.rows.forEach(row => {
@@ -77,7 +92,7 @@
                 row.node.querySelector('video, audio, iframe, [data-chat-input-request-id]'));
             const visible = list.rows.size < 40 || protectedRow ||
                 (rect.bottom >= bounds.top - buffer && rect.top <= bounds.bottom + buffer);
-            if (visible && !mounted) changes.push(() => mount(row));
+            if (visible && !mounted) changes.push(() => mount(row, restored));
             if (!visible && mounted && rect.height > 0) {
                 const style = getComputedStyle(row.node);
                 row.placeholder.style.cssText = 'height:' + rect.height + 'px;min-height:' + rect.height +
@@ -88,6 +103,7 @@
         });
         const pinned = list.messages.scrollHeight - list.messages.scrollTop - list.messages.clientHeight <= 2;
         changes.forEach(change => change());
+        restoreScroll(restored);
         if (pinned) list.messages.scrollTop = list.messages.scrollHeight;
         else if (anchor) {
             const node = anchor.row.node.isConnected ? anchor.row.node : anchor.row.placeholder;
@@ -114,13 +130,15 @@
         list.schedule();
     };
     window.materializeVirtualChatRows = function (root) {
+        const restored = [];
         lists.forEach(list => {
             list.observer.disconnect();
             list.rows.forEach(row => {
-                if (root.contains(row.placeholder)) mount(row);
+                if (root.contains(row.placeholder)) mount(row, restored);
             });
             list.schedule();
         });
+        restoreScroll(restored);
     };
     window.cloneVirtualChatRows = function (source, clone) {
         lists.forEach(list => list.rows.forEach(row => {

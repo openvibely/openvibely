@@ -217,3 +217,82 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("thread performance: %s\n%s", outcome, stderr.String())
 	}
 }
+
+// Restoring hundreds of offscreen tool outputs must not force a layout per row
+// when navigating away or preparing a history snapshot.
+func TestBrowserFunctional_VirtualRowsNavigationLayoutsInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmx, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx)
+		case "/next":
+			_, _ = w.Write([]byte(`<div id="next">Next page</div>`))
+		default:
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx.js"></script><script src="%s"></script>
+<style>#task-thread-messages{height:400px;overflow:auto}.stream-tool{padding:8px;margin:12px 0;border:1px solid}pre{height:60px;width:400px;overflow:auto;margin:0}</style></head><body>
+<button id="leave" hx-get="/next" hx-target="#main-content" hx-push-url="true">Leave</button>
+<main id="main-content" hx-history-elt><div id="task-thread-messages"><div id="pair" data-execution-pair="true" data-exec-status="completed"></div></div></main>
+<script>
+const pair=document.getElementById('pair');
+for(let i=0;i<400;i++){const row=document.createElement('div');row.className='stream-tool';const pre=document.createElement('pre');pre.textContent=('tool output '.repeat(15)+'\n').repeat(8);row.append(pre);pair.append(row)}
+document.querySelectorAll('pre').forEach(pre=>{pre.scrollTop=16;pre.scrollLeft=24});
+refreshVirtualChatRows(document.getElementById('task-thread-messages'));
+</script></body></html>`, static.URL("chat-virtual-list.js"))
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "virtual-navigation", func(browser *composerFocusCDP) {
+		browser.waitFor("offscreen tool rows", `String(document.querySelectorAll('[data-virtual-chat-row]').length>300)`, "true")
+		browser.call("Performance.enable", map[string]any{}, nil)
+		layoutCount := func() float64 {
+			var result struct {
+				Metrics []struct {
+					Name  string  `json:"name"`
+					Value float64 `json:"value"`
+				} `json:"metrics"`
+			}
+			browser.call("Performance.getMetrics", map[string]any{}, &result)
+			for _, metric := range result.Metrics {
+				if metric.Name == "LayoutCount" {
+					return metric.Value
+				}
+			}
+			t.Fatal("Chrome did not report layout count")
+			return 0
+		}
+		before := layoutCount()
+		got := browser.evaluate(`(function(){
+materializeVirtualChatRows(document.getElementById('task-thread-messages'));
+const rows=Array.from(document.querySelectorAll('pre'));
+return String(rows.length===400 && rows.every(row=>row.scrollTop===16 && row.scrollLeft===24));
+})()`)
+		if got != "true" {
+			t.Fatal("materialization lost tool output or its scroll position")
+		}
+		if layouts := layoutCount() - before; layouts > 10 {
+			t.Fatalf("restoring offscreen rows forced %.0f layouts; expected batched restoration", layouts)
+		}
+		browser.waitFor("rows windowed again", `String(document.querySelectorAll('[data-virtual-chat-row]').length>300)`, "true")
+		before = layoutCount()
+		browser.evaluateAwait(`new Promise(resolve=>{
+document.addEventListener('htmx:afterSwap',function done(event){if(event.detail.target.id==='main-content'){document.removeEventListener('htmx:afterSwap',done);resolve('swapped')}});
+document.getElementById('leave').click();
+})`)
+		if layouts := layoutCount() - before; layouts > 10 {
+			t.Fatalf("leaving a virtualized thread forced %.0f layouts", layouts)
+		}
+		if got := browser.evaluate(`(function(){const saved=JSON.parse(localStorage.getItem('htmx-history-cache')||'[]').find(item=>item.url==='/');if(!saved)return 'missing history';const clone=document.createElement('template');clone.innerHTML=saved.content;return String(!!document.getElementById('next') && clone.content.querySelectorAll('pre').length===400 && !clone.content.querySelector('[data-virtual-chat-row]'));})()`); got != "true" {
+			t.Fatalf("navigation did not retain all offscreen output in history: %s", got)
+		}
+	})
+}
