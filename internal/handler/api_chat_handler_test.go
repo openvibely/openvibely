@@ -2436,7 +2436,7 @@ func TestAPIChatMessage_CopyChatAttachmentsToTask(t *testing.T) {
 	// Verify the task prompt was updated with attachment reference
 	updatedTask, err := h.taskRepo.GetByID(ctx, targetTask.ID)
 	require.NoError(t, err)
-	assert.Contains(t, updatedTask.Prompt, "[Attached files from chat:")
+	assert.Contains(t, updatedTask.Prompt, "[Attached files:")
 	assert.Contains(t, updatedTask.Prompt, "main.go (path: ")
 	// Verify the path is absolute (starts with tmpDir since uploadsDir was set to tmpDir)
 	assert.Contains(t, updatedTask.Prompt, filepath.Join(tmpDir, "tasks", targetTask.ID, "main.go"))
@@ -2529,7 +2529,7 @@ func TestAPIChatMessage_CopyChatAttachmentsToTask_MultipleFiles(t *testing.T) {
 	// Verify the task prompt references all files
 	updatedTask, err := h.taskRepo.GetByID(ctx, targetTask.ID)
 	require.NoError(t, err)
-	assert.Contains(t, updatedTask.Prompt, "[Attached files from chat:")
+	assert.Contains(t, updatedTask.Prompt, "[Attached files:")
 	for name := range files {
 		assert.Contains(t, updatedTask.Prompt, name)
 	}

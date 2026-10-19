@@ -3070,7 +3070,7 @@ func TestCopyChatAttachmentsToTask(t *testing.T) {
 	// Verify task prompt was updated with absolute file paths
 	updatedTask, err := h.taskRepo.GetByID(ctx, regularTask.ID)
 	require.NoError(t, err)
-	assert.Contains(t, updatedTask.Prompt, "[Attached files from chat:")
+	assert.Contains(t, updatedTask.Prompt, "[Attached files:")
 	assert.Contains(t, updatedTask.Prompt, "test1.txt (path: ")
 	assert.Contains(t, updatedTask.Prompt, "test2.png (path: ")
 	// Verify paths are absolute (start with tmpDir since uploadsDir was set to tmpDir)

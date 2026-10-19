@@ -499,8 +499,8 @@ func TestProcessChatAttachmentsForEdits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get updated task: %v", err)
 	}
-	if !contains(updatedTask.Prompt, "Attached files from chat") {
-		t.Errorf("expected task prompt to contain 'Attached files from chat', got %q", updatedTask.Prompt)
+	if !contains(updatedTask.Prompt, "Attached files") {
+		t.Errorf("expected task prompt to contain 'Attached files', got %q", updatedTask.Prompt)
 	}
 	if !contains(updatedTask.Prompt, "screenshot.png") {
 		t.Errorf("expected task prompt to contain 'screenshot.png', got %q", updatedTask.Prompt)
