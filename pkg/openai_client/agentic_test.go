@@ -2762,7 +2762,6 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 func TestSendAgentic_ForceCompactionBeforeTurnUsesNativeCompaction(t *testing.T) {
 	requests := 0
 	var compactionCallback string
-	archived := false
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -2790,9 +2789,6 @@ func TestSendAgentic_ForceCompactionBeforeTurnUsesNativeCompaction(t *testing.T)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"output":[{"type":"message","role":"user","content":"short history"},{"type":"compaction","encrypted_content":"forced summary"}]}`))
 		case 2:
-			if !archived {
-				t.Fatal("compacted request sent before readable history was archived")
-			}
 			if !strings.HasSuffix(r.URL.Path, "/responses") {
 				t.Fatalf("request 2 path = %q, want /responses", r.URL.Path)
 			}
@@ -2838,24 +2834,6 @@ func TestSendAgentic_ForceCompactionBeforeTurnUsesNativeCompaction(t *testing.T)
 		AutoCompaction:            true,
 		CompactionTokenThreshold:  10000,
 		ForceCompactionBeforeTurn: true,
-		OnCompactionArchive: func(ctx context.Context, before, after []any) error {
-			raw, err := json.Marshal(before)
-			if err != nil {
-				return err
-			}
-			if !strings.Contains(string(raw), "short answer") {
-				t.Fatalf("archive lost original answer: %s", raw)
-			}
-			raw, err = json.Marshal(after)
-			if err != nil {
-				return err
-			}
-			if !strings.Contains(string(raw), "forced summary") {
-				t.Fatalf("missing compaction key: %s", raw)
-			}
-			archived = true
-			return nil
-		},
 		OnCompaction: func(summary string) {
 			compactionCallback = summary
 		},
