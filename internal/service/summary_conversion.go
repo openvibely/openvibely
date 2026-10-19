@@ -15,6 +15,12 @@ import (
 // records before decoding them for the summary provider; never silently fall
 // back to just the execution's prompt and final answer.
 func normalizeSummaryReplay(provider models.LLMProvider, history []models.Execution) []models.Execution {
+	return normalizeProviderReplay(provider, history, true)
+}
+
+// Normalize foreign history before either continuation or summary preparation.
+// The source records stay unchanged; only the outgoing copy is converted.
+func normalizeProviderReplay(provider models.LLMProvider, history []models.Execution, forSummary bool) []models.Execution {
 	history = llmopenai.EffectiveReplayHistory(history)
 	out := append([]models.Execution(nil), history...)
 	for i := range out {
@@ -41,7 +47,7 @@ func normalizeSummaryReplay(provider models.LLMProvider, history []models.Execut
 				if envelope.Environment != "" {
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: envelope.Environment})
 				}
-				messages = append(messages, anthropicSummaryMessages(envelope.Messages)...)
+				messages = append(messages, anthropicReplayMessages(envelope.Messages, forSummary)...)
 			default:
 				if provider != models.ProviderAnthropic {
 					continue
@@ -92,7 +98,7 @@ func normalizeSummaryReplay(provider models.LLMProvider, history []models.Execut
 	return out
 }
 
-func anthropicSummaryMessages(messages []anthropicclient.Message) []openaiclient.CompletionsHistoryMessage {
+func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool) []openaiclient.CompletionsHistoryMessage {
 	var out []openaiclient.CompletionsHistoryMessage
 	for _, message := range messages {
 		if len(message.ContentBlocks) == 0 {
@@ -139,8 +145,13 @@ func anthropicSummaryMessages(messages []anthropicclient.Message) []openaiclient
 				}
 				current.ImageContent = append(current.ImageContent, map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": url}})
 			default:
+				if !forSummary && (block["type"] == "thinking" || block["type"] == "redacted_thinking") {
+					// Provider-specific reasoning/signatures are not portable
+					// assistant content for an ordinary continuation.
+					continue
+				}
 				// Provider-specific blocks cannot be replayed as native blocks elsewhere.
-				// Preserve their readable content as historical data for the summarizer.
+				// Preserve their readable content as historical data.
 				raw, _ := json.Marshal(block)
 				current.ImageContent = append(current.ImageContent, map[string]interface{}{"type": "text", "text": "Historical provider block: " + string(raw)})
 			}
