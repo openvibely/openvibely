@@ -12,7 +12,7 @@ type message struct {
 	toolResult bool
 }
 
-func TestRefreshRestoreAndDeduplicateWithoutLosingTools(t *testing.T) {
+func TestUpdatesPreserveHistoryAndRestoreAfterCompaction(t *testing.T) {
 	read := func(m message) (string, string) {
 		if m.toolResult {
 			return "", ""
@@ -20,70 +20,34 @@ func TestRefreshRestoreAndDeduplicateWithoutLosingTools(t *testing.T) {
 		return m.role, m.text
 	}
 	makeMessage := func(s string) message { return message{role: "user", text: s} }
-	ctx := With(context.Background(), "documents: edit documents\npreference.md: concise")
-	items := []message{{role: "user", text: "summarize report.docx"}, {role: "assistant", text: "skill_view(documents)"}, {role: "user", text: "loaded skill body", toolResult: true}, {role: "user", text: "edit that file"}}
-	items = Ensure(ctx, items, read, makeMessage)
-	require.Len(t, items, 5)
-	require.Equal(t, "edit that file", items[4].text)
-	require.Equal(t, items, Ensure(ctx, items, read, makeMessage))
-	changed := With(ctx, "documents: updated description")
-	items = Ensure(changed, append(items[:4], append([]message{{role: "user", text: Text(ctx)}}, items[4:]...)...), read, makeMessage)
-	require.Len(t, items, 5)
-	require.True(t, items[2].toolResult)
-	require.Contains(t, items[3].text, "updated description")
-	// Compaction removed both index and loaded instructions: restore only the index.
-	compacted := []message{{role: "user", text: "summary: report.docx was summarized"}, {role: "user", text: "edit that file"}}
-	restored := Ensure(changed, compacted, read, makeMessage)
-	require.Len(t, restored, 3)
-	require.Equal(t, Text(changed), restored[1].text)
-	require.NotContains(t, restored[1].text, "loaded skill body")
-	require.Len(t, Ensure(With(ctx, ""), items, read, makeMessage), 4)
-}
-
-func TestIndexStaysAtOriginalPositionAcrossFollowupsAndToolCalls(t *testing.T) {
-	read := func(m message) (string, string) {
-		if m.toolResult {
-			return "", ""
-		}
-		return m.role, m.text
-	}
-	makeMessage := func(s string) message { return message{role: "user", text: s} }
-	ctx := With(context.Background(), "documents: edit Word documents\npreferences.md: preferences")
-	original := []message{
-		{role: "user", text: "Summarize this document"},
-		{role: "user", text: Text(ctx)},
-		{role: "assistant", text: "skill_view(document_word)"},
-		{role: "user", text: "Word instructions", toolResult: true},
-		{role: "assistant", text: "Here's the summary"},
-	}
-	items := append([]message(nil), original...)
-	for _, next := range []message{
-		{role: "user", text: "Change the title"},
-		{role: "assistant", text: "edit_file(report.docx)"},
-		{role: "user", text: "Title updated", toolResult: true},
-	} {
-		items = append(items, next)
-		require.Equal(t, items, Ensure(ctx, items, read, makeMessage), "unchanged indexes must not move across model calls")
-	}
-	require.Equal(t, original, items[:len(original)])
-
-	changed := With(ctx, "documents: updated description\npreferences.md: preferences")
-	updated := Ensure(changed, items, read, makeMessage)
-	want := append([]message(nil), items...)
-	want[1] = makeMessage(Text(changed))
-	require.Equal(t, want, updated, "replace only the changed index in place")
-
-	duplicated := append(append([]message(nil), items...), makeMessage(Text(ctx)))
-	require.Equal(t, items, Ensure(ctx, duplicated, read, makeMessage))
-	// Keep the matching message even if a stale duplicate precedes it.
-	duplicated = append([]message{makeMessage(Text(changed))}, items...)
-	require.Equal(t, items, Ensure(ctx, duplicated, read, makeMessage))
-
-	without := append(append([]message(nil), items[:1]...), items[2:]...)
-	require.Equal(t, without, Ensure(With(ctx, ""), items, read, makeMessage))
-	require.False(t, Contains(without, read))
-	require.True(t, Contains(items, read))
-	require.Equal(t, items, Ensure(context.Background(), items, read, makeMessage), "unmanaged calls do not rewrite history")
+	ctx := With(context.Background(), "skills and memory v1")
+	old := []message{makeMessage(Text(ctx)), {role: "assistant", text: "call"}, {role: "user", text: "result", toolResult: true}, makeMessage("followup")}
+	require.Equal(t, old, Ensure(ctx, old, read, makeMessage))
+	changed := With(ctx, "skills and memory v2")
+	updated := Ensure(changed, old, read, makeMessage)
+	require.Equal(t, old[:3], updated[:3])
+	require.Equal(t, []message{makeMessage(Text(changed)), old[3]}, updated[3:])
+	require.Equal(t, updated, Ensure(changed, updated, read, makeMessage))
+	// Reverting to an older value still needs an update after the latest value.
+	reverted := Ensure(ctx, updated, read, makeMessage)
+	require.Equal(t, updated[:4], reverted[:4])
+	require.Equal(t, Text(ctx), reverted[4].text)
+	disabled := With(ctx, "")
+	cleared := Ensure(disabled, updated, read, makeMessage)
+	require.Equal(t, updated[:4], cleared[:4])
+	require.Contains(t, cleared[4].text, "No skills or memory index")
+	require.Equal(t, cleared, Ensure(disabled, cleared, read, makeMessage))
+	require.Equal(t, old, Ensure(context.Background(), old, read, makeMessage))
+	compacted := []message{makeMessage("summary")}
+	require.Equal(t, compacted, Ensure(disabled, compacted, read, makeMessage))
+	require.Equal(t, []message{makeMessage(Text(changed)), compacted[0]}, Ensure(changed, compacted, read, makeMessage))
+	// A tool result is not a plain user request: append after the complete exchange.
+	afterTool := Ensure(changed, old[:3], read, makeMessage)
+	require.Equal(t, old[:3], afterTool[:3])
+	require.Equal(t, Text(changed), afterTool[3].text)
+	replay := []message{old[1], old[2]}
+	require.Equal(t, append(replay, makeMessage(Text(changed))), SeedReplay(changed, old[:3], replay, read, makeMessage))
+	require.Equal(t, replay, SeedReplay(changed, afterTool, replay, read, makeMessage))
 }
 
 func TestSeedReplayMatchesFirstInsertionWithoutPinningAttachments(t *testing.T) {
@@ -108,24 +72,4 @@ func TestSeedReplayMatchesFirstInsertionWithoutPinningAttachments(t *testing.T) 
 		require.Equal(t, replay, SeedReplay(ctx, onWire, replay, read, makeMessage))
 		require.Equal(t, replay, SeedReplay(With(ctx, ""), visible, replay, read, makeMessage))
 	}
-}
-
-func TestLiveIndexSourcePreservesPositionAndRestoresAfterCompaction(t *testing.T) {
-	type message struct{ role, content string }
-	read := func(m message) (string, string) { return m.role, m.content }
-	makeMessage := func(s string) message { return message{"user", s} }
-	index := "skills and memory v1"
-	ctx := WithSource(context.Background(), func(context.Context) string { return index })
-	items := Ensure(ctx, []message{{"user", "first request"}}, read, makeMessage)
-	items = append(items, message{"assistant", "tool result"}, message{"user", "followup"})
-	original := append([]message(nil), items...)
-	require.Equal(t, original, Ensure(ctx, items, read, makeMessage))
-	index = "skills and memory v2"
-	items = Ensure(ctx, items, read, makeMessage)
-	require.Contains(t, items[0].content, "v2")
-	require.Equal(t, original[1:], items[1:])
-	restored := Ensure(ctx, []message{{"user", "compacted summary"}}, read, makeMessage)
-	require.Contains(t, restored[0].content, "v2")
-	index = ""
-	require.Equal(t, original[1:], Ensure(ctx, items, read, makeMessage))
 }

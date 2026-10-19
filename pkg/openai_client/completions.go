@@ -240,12 +240,6 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	if !opts.ContinueFromHistory {
 		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt, ImageContent: promptBlocks}}
 	}
-	currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
-		text, _ := m.Content.(string)
-		return m.Role, text
-	}, func(text string) CompletionsHistoryMessage {
-		return CompletionsHistoryMessage{Role: "user", Content: text}
-	})
 
 	// Publish completed exchanges even when a subsequent request is cancelled.
 	defer func() {
@@ -255,6 +249,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}()
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
+			text, _ := m.Content.(string)
+			return m.Role, text
+		}, func(text string) CompletionsHistoryMessage {
+			return CompletionsHistoryMessage{Role: "user", Content: text}
+		})
 		messages = ensureCompletionsAttachments(ctx, messages)
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)

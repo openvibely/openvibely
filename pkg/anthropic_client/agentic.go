@@ -479,14 +479,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			messages = appendHistoryMessage(messages, msg)
 		}
 	}
-	replay = managedcontext.SeedReplay(ctx, messages, replay, func(m agenticMessage) (string, string) {
-		text, _ := m.Content.(string)
-		return m.Role, text
-	}, func(text string) Message { return Message{Role: "user", Content: text} })
+
 	var allText strings.Builder
 	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		replay = managedcontext.SeedReplay(ctx, messages, replay, func(m agenticMessage) (string, string) {
+			text, _ := m.Content.(string)
+			return m.Role, text
+		}, func(text string) Message { return Message{Role: "user", Content: text} })
 		messages = ensureAttachmentContext(ctx, messages)
 		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
