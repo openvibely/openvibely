@@ -1217,9 +1217,8 @@ func TestChatInputContainerCSS_UsesSameSurfaceShadowAsMessageBubbles(t *testing.
 
 	html := buf.String()
 	for _, expected := range []string{
-		`--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);`,
-		`--ov-chat-surface-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);`,
 		`box-shadow: var(--ov-chat-surface-shadow);`,
+		`--ov-chat-surface-shadow: none;`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("chat input should share the exact message-bubble shadow token; missing %q", expected)
