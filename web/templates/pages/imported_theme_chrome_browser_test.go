@@ -389,6 +389,12 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("native theme menu uses chat elevation step", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(38, 43, 51)")
 		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")
-		browser.waitFor("native theme keeps default search surface", `String(window.computed('.kanban-search', 'backgroundColor') === window.themeColor('oklch(var(--b1))'))`, "true")
+		for _, property := range []string{"backgroundColor", "borderTopColor"} {
+			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
+		}
+		browser.waitFor("native dark search uses card step", `window.near('.kanban-search', 'backgroundColor', '#22272e')`, "ok")
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-classic');'ok'`)
+		browser.waitFor("classic dark keeps default search surface", `String(window.computed('.kanban-search', 'backgroundColor') === window.themeColor('oklch(var(--b1))'))`, "true")
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 	})
 }
