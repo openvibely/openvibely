@@ -33,7 +33,7 @@ func hasOpaqueCompaction(history []models.Execution) bool {
 const recoveryBackgroundKind = "provider_recovery_background"
 
 // Split the latest complete OpenAI snapshot at its last compaction item.
-// Everything after it is still readable and must retain its message order.
+// Preserve readable messages on both sides of the encrypted compaction item.
 func portableRecoveryParts(history []models.Execution) (int, []models.Execution) {
 	for i := len(history) - 1; i >= 0; i-- {
 		for j := len(history[i].ReplayMessages) - 1; j >= 0; j-- {
@@ -53,6 +53,11 @@ func portableRecoveryParts(history []models.Execution) (int, []models.Execution)
 				// recovered background during EffectiveReplayHistory normalization.
 				messages := repairConvertedToolResults(llmopenai.ResponsesSummaryMessages(saved.Input[k+1:]))
 				var tail []models.Execution
+				prefix := repairConvertedToolResults(llmopenai.ResponsesSummaryMessages(saved.Input[:k]))
+				if len(prefix) > 0 {
+					raw, _ := json.Marshal(prefix)
+					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_prefix", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
+				}
 				if len(messages) > 0 {
 					raw, _ := json.Marshal(messages)
 					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_tail", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
@@ -95,10 +100,12 @@ func readableCompactedHistory(history []models.Execution) ([]models.Execution, e
 // Summarize background separately so readable steering, images and tool exchanges
 // are not passed through summary replacement-history construction.
 func (s *LLMService) summarizeProviderRecovery(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	var background, tail []models.Execution
+	var background, prefix, tail []models.Execution
 	for _, exec := range req.ChatHistory {
 		if exec.ContextKind == recoveryBackgroundKind {
 			background = append(background, exec)
+		} else if exec.ContextKind == "provider_recovery_prefix" {
+			prefix = append(prefix, exec)
 		} else {
 			tail = append(tail, exec)
 		}
@@ -112,7 +119,8 @@ func (s *LLMService) summarizeProviderRecovery(adapter ProviderAdapter, req llmc
 	if err != nil {
 		return req, err
 	}
-	req.ChatHistory = append(buildCompactedReplacementHistory(nil, summary), tail...)
+	req.ChatHistory = append(prefix, buildCompactedReplacementHistory(nil, summary)...)
+	req.ChatHistory = append(req.ChatHistory, tail...)
 	req.NativeCompactionStateJSON = ""
 	req.ProviderSessionStateJSON = ""
 	req.ContextTokenEstimate = 0
