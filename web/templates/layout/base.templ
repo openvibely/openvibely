@@ -1984,7 +1984,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* --- Chat bubbles --- */
 					[data-theme="light"] {
-						--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
+						--ov-chat-surface-shadow: none;
 					}
 					[data-theme="light"] .chat-bubble-user-msg,
 					[data-theme="light"] .chat-bubble-assistant-msg {
@@ -2094,7 +2094,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					/* --- Chat bubbles (dark mode) --- */
 					[data-theme="dark"] {
-						--ov-chat-surface-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+						--ov-chat-surface-shadow: none;
 					}
 					[data-theme="dark"] .chat-bubble-user-msg,
 					[data-theme="dark"] .chat-bubble-assistant-msg {
@@ -2547,7 +2547,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.tool-status-done { color: hsl(var(--su, 150 60% 40%) / 0.7); }
 				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
 
-html[data-color-theme^="openvibely-dark"] { --ov-chat-surface-shadow: none; }
 					/* OpenVibely Dark climbs an even lightness ladder instead of using shadows. */
 html[data-color-theme="openvibely-dark"] {
 	--ov-elevation-card: #22272E;
