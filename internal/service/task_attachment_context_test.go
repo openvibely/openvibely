@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,8 +11,10 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExecuteTaskWithAgent_TaskWideAttachmentContextRefreshesDuringRun(t *testing.T) {
@@ -124,5 +128,64 @@ func TestPublishTaskSteeringAttachmentsKeepsUploadsUntilCommitted(t *testing.T) 
 	}
 	if _, err := os.Stat(pending); !os.IsNotExist(err) {
 		t.Fatalf("committed publish must remove pending uploads: %v", err)
+	}
+}
+
+type failingAttachmentListStore struct {
+	persistence.AttachmentStore
+	calls, failAt int
+}
+
+func (s *failingAttachmentListStore) ListByTask(ctx context.Context, taskID string) ([]models.Attachment, error) {
+	s.calls++
+	if s.calls == s.failAt {
+		return nil, errors.New("injected attachment read failure")
+	}
+	return s.AttachmentStore.ListByTask(ctx, taskID)
+}
+
+func TestExecuteTaskWithAgent_AttachmentLoadFailureStopsRunAndRetainsFiles(t *testing.T) {
+	for _, failAt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("load-%d", failAt), func(t *testing.T) {
+			ctx := context.Background()
+			db := teststores.New(t)
+			teststores.ClearLLMConfigs(t, db.LLMConfigs)
+			agent := &models.LLMConfig{Name: "Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, APIKey: "k", Model: "claude-sonnet-4-5-20250929", MaxTokens: 4096}
+			require.NoError(t, db.LLMConfigs.Create(ctx, agent))
+			task := &models.Task{ProjectID: "default", Title: "Files", Prompt: "Read the files", Category: models.CategoryBacklog, Status: models.StatusPending}
+			require.NoError(t, db.Tasks.Create(ctx, task))
+			path := filepath.Join(t.TempDir(), "report.txt")
+			require.NoError(t, os.WriteFile(path, []byte("report"), 0o644))
+			file := &models.Attachment{TaskID: task.ID, FileName: "report.txt", FilePath: path, MediaType: "text/plain", FileSize: 6}
+			require.NoError(t, db.Attachments.Create(ctx, file))
+			store := &failingAttachmentListStore{AttachmentStore: db.Attachments, failAt: failAt}
+			svc := NewLLMService(db.LLMConfigs, db.Executions, db.Tasks, nil, nil, store)
+			modelCalls := 0
+			svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderAnthropic: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				modelCalls++
+				require.Contains(t, attachmentcontext.Text(req.Ctx), "report.txt")
+				return llmcontracts.AgentResult{Output: "done"}, nil
+			})}
+			exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+			require.ErrorContains(t, err, "couldn't load task attachments. Retry the task")
+			require.Zero(t, modelCalls)
+			require.NotNil(t, exec)
+			storedExec, err := db.Executions.GetByID(ctx, exec.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.ExecFailed, storedExec.Status)
+			require.Contains(t, storedExec.ErrorMessage, "Retry the task")
+			storedTask, err := db.Tasks.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusFailed, storedTask.Status)
+			rows, err := db.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, file.ID, rows[0].ID)
+			require.FileExists(t, path)
+			require.NoError(t, db.Tasks.UpdateStatus(ctx, task.ID, models.StatusPending))
+			_, err = svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+			require.NoError(t, err)
+			require.Equal(t, 1, modelCalls)
+		})
 	}
 }
