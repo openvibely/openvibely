@@ -61,6 +61,14 @@ func TestHandler_GetTaskCachedRefreshIncludesBoundedThread(t *testing.T) {
 // Exercise the real task endpoint and its lazy /thread request, rather than a
 // fixture that always embeds the transcript in every navigation response.
 func TestTaskCachedNavigationRefreshInChrome(t *testing.T) {
+	testTaskCachedNavigationRefresh(t, false)
+}
+
+func TestTaskLazyCachedNavigationInChrome(t *testing.T) {
+	testTaskCachedNavigationRefresh(t, true)
+}
+
+func testTaskCachedNavigationRefresh(t *testing.T, large bool) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -81,6 +89,9 @@ func TestTaskCachedNavigationRefreshInChrome(t *testing.T) {
 		ex.PromptSent = "Read tool output"
 	})
 	output := "[Using tool: shell | echo example]\n[Tool shell done]\n" + strings.Repeat("line of tool output\n", 200) + "[/Tool]\n"
+	if large {
+		output = strings.Repeat("**Earlier message**\n"+output, 180)
+	}
 	require.NoError(t, h.execRepo.Complete(t.Context(), ex.ID, models.ExecCompleted, output, "", 0, 0))
 	path := "/tasks/" + task.ID
 	runner := fmt.Sprintf(`<script>
@@ -88,6 +99,9 @@ window.addEventListener('DOMContentLoaded',function(){
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  const assert=(ok,message)=>{if(!ok)throw Error(message)};
  async function until(check,label){for(let i=0;i<400;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label)}
+ let parsedSources=0;
+ const originalLink=window.linkStreamingToolResults;
+ window.linkStreamingToolResults=function(...args){parsedSources++;return originalLink.apply(this,args)};
  const view=()=>document.getElementById('task-thread-view');
  const toggle=()=>document.querySelector('.stream-tool-output-toggle');
  async function checkToggle(){
@@ -100,16 +114,20 @@ window.addEventListener('DOMContentLoaded',function(){
  (async function(){
    await until(()=>view() && toggle(),'initial lazy thread');
    await checkToggle();
+   assert(document.querySelectorAll('.stream-tool').length<40,'initial task page rendered offscreen tools');
    await openVibelyNavigate(%q);
    await until(()=>view()?.dataset.taskId===%q,'other thread');
    await fetch('/advance');
    let warmURL=%q;
    for(let round=0;round<2;round++){
+     const beforeWarmParses=parsedSources;
      let done=false;
      const warm=openVibelyNavigate(warmURL).then(()=>{done=true});
      await until(()=>view()?.dataset.taskId===%q,'cached preview');
      assert(!done,'preview waited for network');
      await checkToggle();
+     assert(parsedSources===beforeWarmParses,'cached preview reparsed the execution');
+     assert(document.querySelectorAll('.stream-tool').length<40,'cached preview rendered offscreen tools');
      const form=document.getElementById('task-thread-form');
      if(round===0){
        assert(!form.querySelector('#pending-thread-inputs').textContent.includes('queued-while-away'),'preview unexpectedly has new queue');
@@ -122,13 +140,22 @@ window.addEventListener('DOMContentLoaded',function(){
      const panelOpen=round===0;
      assert(document.getElementById('task-details-panel').hidden!==panelOpen,'panel did not toggle during refresh');
      const input=form.querySelector('textarea'); input.value='draft typed during refresh'; input.dispatchEvent(new Event('input',{bubbles:true}));
+     const messages=document.getElementById('task-thread-messages');
+     let readingHistory=false;
+     if(round===1 && messages.querySelectorAll('[data-virtual-chat-row]').length>100){
+       messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-600,bubbles:true}));
+       messages.scrollTop=Math.max(0,messages.scrollTop-600);
+       await window.renderVisibleChatRows(messages); await wait(40);
+       readingHistory=true;
+     }
      let lost=false;
      const observer=new MutationObserver(()=>{if(!view() || document.getElementById('task-thread-form')!==form)lost=true});
      observer.observe(document.getElementById('main-content'),{childList:true,subtree:true});
      await warm; await wait(150); observer.disconnect();
      assert(!lost,'refresh removed the cached transcript or composer');
      assert(document.getElementById('task-thread-form')===form && input.value==='draft typed during refresh','refresh lost composer edits');
-     await until(()=>view().textContent.includes('authoritative-update'),'fresh server output');
+     await until(()=>Array.from(view().querySelectorAll('[data-raw-content]')).some(el=>el.getAttribute('data-raw-content').includes('authoritative-update')),'fresh server output');
+     if(readingHistory){const freshMessages=document.getElementById('task-thread-messages');assert(freshMessages.scrollHeight-freshMessages.scrollTop-freshMessages.clientHeight>100,'refresh pulled the history reader to the bottom')}
      assert(document.getElementById('task-details-panel').hidden!==panelOpen,'refresh reset the chosen panel');
      assert(new URL(location.href).searchParams.get('tab')===(panelOpen?'details':'chat'),'refresh committed the wrong tab URL');
      assert(form.querySelector('#pending-thread-inputs').textContent.includes('queued-while-away'),'fresh queued input missing from preserved composer');
@@ -142,6 +169,14 @@ window.addEventListener('DOMContentLoaded',function(){
        assert(input.value==='draft typed during refresh','queue action lost the draft');
      }
    }
+   const currentTaskID=view().dataset.taskId;
+   history.back();
+   await until(()=>view() && view().dataset.taskId!==currentTaskID,'browser back to other task');
+   history.forward();
+   await until(()=>view()?.dataset.taskId===currentTaskID,'browser forward to task');
+   await checkToggle(); await wait(100);
+   assert(getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','history restored a hidden transcript');
+   assert(document.querySelectorAll('.stream-tool').length<40,'history restoration rendered offscreen tools');
    await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
 });</script>`, "/tasks/"+other.ID, other.ID, path, task.ID, "/tasks/"+other.ID, other.ID)

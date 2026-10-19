@@ -4084,7 +4084,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024",
+		"var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024",
 		"window.codeRangesAsync(textBuffer, container, true)",
 		"targetProperty = 'thinkingRenderedContent'",
 		"pendingThinkingRenderedContent = seg.thinkingRenderedContent",
