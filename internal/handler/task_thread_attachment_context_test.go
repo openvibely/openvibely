@@ -63,9 +63,9 @@ func TestTaskThreadFollowupSeesPanelUploadAndAttachmentsBeyondHistoryLimit(t *te
 	request := mock.AgentRequests[0]
 	text := attachmentcontext.Text(request.Ctx)
 	require.Contains(t, text, "spec.pdf")
-	require.Contains(t, text, "[task] ")
 	require.Contains(t, text, "ancient.png")
-	require.Contains(t, text, "[message "+first.ID+"]")
+	require.NotContains(t, text, "[message ")
+	require.NotContains(t, text, "[task]")
 	require.Empty(t, request.Attachments, "historical files are references, not re-sent inputs")
 	require.NotContains(t, request.Message, "spec.pdf")
 	for _, hist := range request.ChatHistory {
