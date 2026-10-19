@@ -1,7 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
+	compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -37,39 +42,67 @@ func TestSummaryParallelToolConversionMatrix(t *testing.T) {
 	}
 	for source, transcript := range sources {
 		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
-			t.Run(source+"_to_"+string(provider), func(t *testing.T) {
-				history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
-				input, err := summaryHistoryInput(provider, history)
-				require.NoError(t, err)
-				target := "completions"
-				if provider == models.ProviderOpenAI {
-					target = "responses"
-				}
-				if provider == models.ProviderAnthropic {
-					target = "anthropic"
-				}
-				// The independently specified destination fixture defines exact
-				// message boundaries, call arguments, IDs, and result ordering.
-				var expected []json.RawMessage
-				if target == "completions" {
-					require.NoError(t, json.Unmarshal([]byte(sources[target]), &expected))
-				} else {
-					var envelope struct {
-						Input    []json.RawMessage `json:"responses_input"`
-						Messages []json.RawMessage `json:"messages"`
+			for _, mode := range []string{"summary", "followup"} {
+				t.Run(source+"_to_"+string(provider)+"/"+mode, func(t *testing.T) {
+					history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
+					var input []json.RawMessage
+					if mode == "summary" {
+						var err error
+						input, err = summaryHistoryInput(provider, history)
+						require.NoError(t, err)
+					} else {
+						calls := 0
+						_, err := (&LLMService{}).callProviderWithCompaction(providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+							calls++
+							require.Nil(t, req.SummaryInput, "normal follow-up must not compact")
+							require.Equal(t, "new follow-up", req.Message)
+							var outgoing any
+							switch provider {
+							case models.ProviderOpenAI:
+								outgoing = llmopenai.HistoryInputItems(req.ChatHistory)
+							case models.ProviderAnthropic:
+								outgoing = llmanthropic.SummaryHistory(req.ChatHistory)
+							default:
+								outgoing = compatible.SummaryHistory(req.ChatHistory)
+							}
+							raw, err := json.Marshal(outgoing)
+							require.NoError(t, err)
+							require.NoError(t, json.Unmarshal(raw, &input))
+							return llmcontracts.AgentResult{Output: "done"}, nil
+						}), llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "new follow-up", ChatHistory: history, Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000}})
+						require.NoError(t, err)
+						require.Equal(t, 1, calls)
 					}
-					require.NoError(t, json.Unmarshal([]byte(sources[target]), &envelope))
-					expected = envelope.Input
-					if target == "anthropic" {
-						expected = envelope.Messages
+					target := "completions"
+					if provider == models.ProviderOpenAI {
+						target = "responses"
 					}
-				}
-				require.Len(t, input, len(expected))
-				for i := range expected {
-					require.Equal(t, canonicalSummaryTestMessage(t, expected[i]), canonicalSummaryTestMessage(t, input[i]), "message %d", i)
-				}
-				require.Equal(t, transcript, history[0].ReplayMessages[0].TranscriptJSON, "conversion must not mutate source history")
-			})
+					if provider == models.ProviderAnthropic {
+						target = "anthropic"
+					}
+					// The independently specified destination fixture defines exact
+					// message boundaries, call arguments, IDs, and result ordering.
+					var expected []json.RawMessage
+					if target == "completions" {
+						require.NoError(t, json.Unmarshal([]byte(sources[target]), &expected))
+					} else {
+						var envelope struct {
+							Input    []json.RawMessage `json:"responses_input"`
+							Messages []json.RawMessage `json:"messages"`
+						}
+						require.NoError(t, json.Unmarshal([]byte(sources[target]), &envelope))
+						expected = envelope.Input
+						if target == "anthropic" {
+							expected = envelope.Messages
+						}
+					}
+					require.Len(t, input, len(expected))
+					for i := range expected {
+						require.Equal(t, canonicalSummaryTestMessage(t, expected[i]), canonicalSummaryTestMessage(t, input[i]), "message %d", i)
+					}
+					require.Equal(t, transcript, history[0].ReplayMessages[0].TranscriptJSON, "conversion must not mutate source history")
+				})
+			}
 		}
 	}
 }
