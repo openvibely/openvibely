@@ -74,6 +74,21 @@
         if (Array.from(main.querySelectorAll('input[type="file"]')).some(input => input.files?.length)) return;
         if (Array.from(main.querySelectorAll('input[name="attachment_session_id"]')).some(input => input.value)) return;
         const clone = main.cloneNode(true);
+        clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
+            // Older pages belong to the current reading session, not the shared
+            // navigation cache. Rebuild the paging cursor for the retained window.
+            messages.setAttribute('data-window-limit', '5');
+            if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(messages);
+            delete messages.dataset.earlierLoaderBound;
+            messages.dataset.earlierRequestLoading = 'false';
+            messages.dataset.earlierAnchorRestoring = 'false';
+            messages.dataset.earlierGestureLocked = 'false';
+            messages.querySelectorAll('[data-earlier-loader]').forEach(loader => {
+                loader.dataset.loading = 'false';
+                loader.querySelector('[data-earlier-loader-idle]')?.classList.remove('hidden');
+                loader.querySelector('[data-earlier-loader-busy]')?.classList.add('hidden');
+            });
+        });
         if (window.cloneVirtualChatRows) window.cloneVirtualChatRows(main, clone);
         clone.querySelectorAll('.htmx-request').forEach(el => el.classList.remove('htmx-request'));
         clone.querySelectorAll('[data-disabled-by-htmx]').forEach(el => {
@@ -83,7 +98,10 @@
         // Never replay stale preserve instructions across two different threads.
         clone.querySelectorAll('[hx-preserve]').forEach(el => el.removeAttribute('hx-preserve'));
         const html = clone.innerHTML;
-        const virtual = window.captureChatVirtualData?.(main) || [];
+        const retained = new Set(Array.from(clone.querySelectorAll('[data-execution-pair]'), pair => pair.getAttribute('data-exec-id')));
+        const virtual = Array.from(main.querySelectorAll('[data-execution-pair]'))
+            .filter(pair => retained.has(pair.getAttribute('data-exec-id')))
+            .flatMap(pair => window.captureChatVirtualData?.(pair) || []);
         // Budget source models along with serialized HTML. Measurements add only
         // a few numbers per row; model strings are conservatively counted again.
         let bytes = html.length * 2;
