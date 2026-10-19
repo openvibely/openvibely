@@ -587,7 +587,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", llmusage.FromTotal(0), err
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
-	recorder := a.newResponsesRecorder(execID)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
@@ -616,8 +615,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnHistory:                      recorder.history,
-		OnCompactionArchive:            recorder.archive,
+		OnHistory:                      a.responsesHistoryRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -732,7 +730,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		return "", llmusage.FromTotal(0), err
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
-	recorder := a.newResponsesRecorder(execID)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
@@ -762,8 +759,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnHistory:                      recorder.history,
-		OnCompactionArchive:            recorder.archive,
+		OnHistory:                      a.responsesHistoryRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,

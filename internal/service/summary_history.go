@@ -13,7 +13,7 @@ import (
 func summaryHistoryInput(provider models.LLMProvider, history []models.Execution) ([]json.RawMessage, error) {
 	if provider != models.ProviderOpenAI {
 		var err error
-		history, err = llmopenai.ExpandCompactedHistory(history, llmopenai.CompactionSources(history))
+		history, err = readableCompactedHistory(history)
 		if err != nil {
 			return nil, err
 		}
