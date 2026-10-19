@@ -1122,11 +1122,15 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
 		return req
 	}
-	if (strings.TrimSpace(checkpoint.ProviderStateJSON) != "" || strings.TrimSpace(checkpoint.ProviderSessionStateJSON) != "") && checkpoint.CompatibilityKey != providerCompatibilityKey(req.Agent) {
-		return req
-	}
-	if checkpoint.ModelConfigID != "" && req.Agent.ID != "" && checkpoint.ModelConfigID != req.Agent.ID {
-		return req
+	// Readable history is portable and converted for the selected provider below.
+	// Only provider-specific state requires the original compatibility identity.
+	if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" || strings.TrimSpace(checkpoint.ProviderSessionStateJSON) != "" {
+		if checkpoint.CompatibilityKey != providerCompatibilityKey(req.Agent) {
+			return req
+		}
+		if checkpoint.ModelConfigID != "" && req.Agent.ID != "" && checkpoint.ModelConfigID != req.Agent.ID {
+			return req
+		}
 	}
 	restored := req
 	if checkpoint.Strategy == "local_summary_inflight" {
