@@ -58,7 +58,7 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`--ov-border-subtle: var(--ov-subtle-border);`,
 		`html[data-ov-theme-layer="custom"] .ov-menu { --ov-menu-active: var(--ov-hover-bg);`,
 		`html[data-ov-theme-layer="custom"] #desktop-project-titlebar { background-color: var(--ov-sidebar-bg) !important;`,
-		`html[data-ov-theme-layer="custom"] #schedule-content .schedule-day-selected { background: var(--ov-accent-tint) !important; }`,
+		`html[data-ov-theme-layer="custom"] #schedule-content .schedule-day-selected { background: var(--ov-schedule-selection-bg) !important; }`,
 		`[data-ov-theme-layer="custom"] .schedule-datetime-popup [data-time-selected=true] { background: var(--ov-button-bg) !important;`,
 		`background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important`,
 		`[data-ov-theme-layer="custom"] .hover\:border-primary\/40:hover`,
