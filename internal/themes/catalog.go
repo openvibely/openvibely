@@ -245,6 +245,7 @@ func RuntimeCatalogJSON() string {
 					css[name] = value
 				}
 			}
+			css["--ov-schedule-task-bg"] = scheduleTaskBackground(theme)
 			runtime = append(runtime, runtimeTheme{
 				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css,
 				Roles: toggleRuntimeRoles(theme),
