@@ -932,7 +932,13 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	if req.Agent.Provider == models.ProviderMixture {
 		return adapter.Call(req)
 	}
+	originalHistory := req.ChatHistory
+	uncompactedReq := req
 	if req.Agent.Provider != models.ProviderOpenAI {
+		// Reuse saved recovery before inspecting old OpenAI replay for opaque state.
+		req = s.restoreCompactionCheckpoint(req)
+		recoverySource := req
+		needsRecovery := hasOpaqueCompaction(req.ChatHistory)
 		req, replayErr = s.recoverPortableProviderHistory(req)
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
@@ -940,6 +946,15 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req, replayErr = s.summarizeProviderRecovery(adapter, req)
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
+		}
+		if needsRecovery {
+			// Keep the covered execution boundary for any further compaction on
+			// this turn, including when recovery ends with a synthetic message.
+			if n := len(req.ChatHistory); n > 0 && len(recoverySource.ChatHistory) > 0 {
+				req.ChatHistory[n-1].ID = recoverySource.ChatHistory[len(recoverySource.ChatHistory)-1].ID
+			}
+			s.persistCompactionCheckpoint(recoverySource, req, historyCompactionSummary(req.ChatHistory), "provider_recovery")
+			uncompactedReq = req
 		}
 	}
 	// Budget and send the destination provider's actual history format, rather
@@ -956,9 +971,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		}
 		return res, err
 	}
-	uncompactedReq := req
-	originalHistory := req.ChatHistory
-	req = s.restoreCompactionCheckpoint(req)
+	uncompactedReq.ChatHistory = normalizeProviderReplay(req.Agent.Provider, uncompactedReq.ChatHistory, false)
+	if req.Agent.Provider == models.ProviderOpenAI {
+		req = s.restoreCompactionCheckpoint(req)
+	}
 	req.ChatHistory = normalizeProviderReplay(req.Agent.Provider, req.ChatHistory, false)
 	compactionStrategy := "none"
 	if req.NativeCompactionStateJSON != "" {
