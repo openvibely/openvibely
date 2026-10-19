@@ -628,13 +628,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					flex-shrink: 1;
 					flex-grow: 0;
 				}
-				.task-selected {
-					outline: 3px solid hsl(var(--p));
-					outline-offset: 2px;
-					background: linear-gradient(135deg, hsl(var(--p) / 0.25), hsl(var(--p) / 0.15)) !important;
-					box-shadow: 0 0 0 3px hsl(var(--p) / 0.3), 0 4px 12px rgba(0,0,0,0.4);
+				.card.task-selected,
+				[data-theme="light"]:not([data-ov-theme-layer="custom"]) .card.task-selected.border {
 					position: relative;
-					border-color: hsl(var(--p)) !important;
+					outline: none;
+					background: transparent !important;
+					box-shadow: none;
+					border-color: oklch(var(--bc)) !important;
 				}
 
 					.task-selected .btn-circle {
