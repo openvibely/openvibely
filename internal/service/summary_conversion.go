@@ -56,6 +56,7 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 					continue
 				}
 			}
+			messages = repairConvertedToolResults(messages)
 			if len(messages) == 0 {
 				continue
 			}
@@ -218,5 +219,36 @@ func completionsAnthropicSummaryMessages(messages []openaiclient.CompletionsHist
 		}
 	}
 	flushToolResults()
+	return out
+}
+
+// Restored history can end after a persisted call but before execution finished.
+// Close those exchanges without running the tool again.
+func repairConvertedToolResults(messages []openaiclient.CompletionsHistoryMessage) []openaiclient.CompletionsHistoryMessage {
+	var out []openaiclient.CompletionsHistoryMessage
+	var pending []string
+	done := make(map[string]bool)
+	flush := func() {
+		for _, id := range pending {
+			if !done[id] {
+				out = append(out, openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: id, Content: "aborted"})
+			}
+		}
+		pending = nil
+		clear(done)
+	}
+	for _, m := range messages {
+		if m.Role != "tool" {
+			flush()
+		}
+		out = append(out, m)
+		for _, call := range m.ToolCalls {
+			pending = append(pending, call.ID)
+		}
+		if m.Role == "tool" {
+			done[m.ToolCallID] = true
+		}
+	}
+	flush()
 	return out
 }
