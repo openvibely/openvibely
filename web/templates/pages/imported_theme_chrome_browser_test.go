@@ -142,8 +142,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		for _, selector := range []string{"#fixture-settings-card", "#sidebar"} {
 			browser.waitFor("raised "+selector+" uses chat bubble color", `window.near('`+selector+`', 'backgroundColor', '#2b3039')`, "ok")
 		}
-		browser.waitFor("raised bubble keeps default styling", `(function(){var a=getComputedStyle(document.querySelector('#fixture-bubble'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow!=='none'&&a.borderTopWidth==='0px');})()`, "true")
-		browser.waitFor("raised composer keeps default styling", `(function(){var a=getComputedStyle(document.querySelector('#fixture-composer'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow!=='none');})()`, "true")
+		browser.waitFor("raised bubble keeps color without shadow", `(function(){var a=getComputedStyle(document.querySelector('#fixture-bubble'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow==='none'&&a.borderTopWidth==='0px');})()`, "true")
+		browser.waitFor("raised composer keeps color without shadow", `(function(){var a=getComputedStyle(document.querySelector('#fixture-composer'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow==='none');})()`, "true")
 		browser.waitFor("raised page canvas unchanged", `window.near('body', 'backgroundColor', '#191e24')`, "ok")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default sidebar restored", `window.near('#sidebar', 'backgroundColor', '#1d232a')`, "ok")
