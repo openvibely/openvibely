@@ -2320,6 +2320,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// New-task forms have no transcript history to recover.
 					var root = form.closest('#task-thread-view, #chat-page-root');
 					if (!root) return [];
+					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(root);
 					var entries = [];
 					root.querySelectorAll('.chat-bubble-user-msg .chat-bubble-inner > div:first-child, #pending-thread-inputs [data-pending-input-content]').forEach(function(node) {
 						var message = node.textContent || '';
@@ -3631,6 +3632,7 @@ templ ChatAutoScrollScript() {
 						var form = target && target.closest ? target.closest('form[data-input-id]') : null;
 						if (form && form.getAttribute('hx-target') !== '#' + el.id) return;
 						if (!form && target && target !== document.body && target !== document.documentElement && !el.contains(target)) return;
+						if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(el);
 						var bubbles = Array.from(el.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg')).filter(function(bubble) {
 							return bubble.getClientRects().length && getComputedStyle(bubble).visibility !== 'hidden';
 						});
@@ -3880,7 +3882,18 @@ templ ChatAutoScrollScript() {
 				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
 				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
 				if (tracker) tracker.userScrolledUp = !pinned;
-				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
+				// Show available content immediately. The layout observer keeps a pinned
+				// transcript at the bottom as markdown, fonts and images finish loading.
+				if (pinned) messages.scrollTop = messages.scrollHeight;
+				else if (state) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+				messages.style.visibility = '';
+				messages.removeAttribute('data-transcript-hydrating');
+				window.observeChatTranscriptLayout({
+					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
+				});
+				Promise.resolve(options.renderPromise).catch(function() {}).then(function() {
+					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
+				});
 
 				function waitForImages() {
 					if (!options.waitForImages) return Promise.resolve();
@@ -4499,6 +4512,9 @@ templ ChatAutoScrollScript() {
 								var resolved = document.getElementById(messagesEl.id);
 								if (resolved) liveMessages = resolved;
 							}
+							if (liveMessages !== messagesEl || !messagesEl.isConnected) return;
+							var tracker = window['scrollTracker_' + messagesEl.id];
+							if (tracker && !tracker.shouldAutoScroll()) return;
 							if (liveMessages && window.chatAutoScroll) {
 								window.chatAutoScroll.scrollToBottom(liveMessages, !!smooth);
 							}
@@ -5014,6 +5030,7 @@ templ ChatAutoScrollScript() {
 				container.classList.remove('whitespace-pre-wrap');
 				var state = container._incrementalChat;
 				if (!state || state.tail.parentNode !== container || !text.startsWith(state.source)) {
+					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(container);
 					var tail = document.createElement('div');
 					tail.style.display = 'contents';
 					while (container.firstChild) tail.appendChild(container.firstChild);
@@ -5047,6 +5064,7 @@ templ ChatAutoScrollScript() {
 					state.renderOffset += (state.tail.getAttribute('data-raw-content') || '').length;
 					state.tail.removeAttribute('data-raw-content');
 					state.tail.removeAttribute('data-raw-revision');
+					state.tail.setAttribute('data-chat-stable-segment', 'true');
 					state.tail = document.createElement('div');
 					state.tail.style.display = 'contents';
 					container.appendChild(state.tail);
@@ -5548,6 +5566,7 @@ templ ChatAutoScrollScript() {
 				];
 
 				function renderPreparedSegments() {
+			if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(container);
 
 			// Save open state of existing thinking sections before clearing.
 			// Uses both a local array (fast path for same-call re-renders) and a
@@ -6082,6 +6101,7 @@ templ ChatAutoScrollScript() {
 			if (window.convertTaskEditLinksInMessage) {
 				window.convertTaskEditLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
 			}
+			if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(container);
 			}
 				function fillLargeToolOutputChunks(done, fail) {
 					var outputIndex = 0;

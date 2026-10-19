@@ -1579,6 +1579,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 
 						var _threadContentLoading = false;
 					function _currentTaskIdFromPath() {
+						var mounted = document.getElementById('task-detail-content');
+						if (mounted && mounted.dataset.taskId) return mounted.dataset.taskId;
 						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
 						return taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';
 					}
@@ -1885,10 +1887,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				function _refreshTaskDetailActions() {
 					var actions = document.getElementById('task-detail-actions');
 					if (!actions) return;
-					var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-					if (!taskIdMatch || !taskIdMatch[1]) return;
+					var taskId = _currentTaskIdFromPath();
+					if (!taskId) return;
 					if (typeof htmx === 'undefined') return;
-					htmx.ajax('GET', '/tasks/' + taskIdMatch[1] + '/detail-actions', {
+					htmx.ajax('GET', '/tasks/' + taskId + '/detail-actions', {
 						target: '#task-detail-actions',
 						swap: 'outerHTML'
 					});
@@ -1926,8 +1928,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					var _taskDetailTaskEventHandler = function(event) {
 						var data = event.detail || {};
 						// Only react to this task's events
-						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-						if (!taskIdMatch || !taskIdMatch[1] || data.task_id !== taskIdMatch[1]) return;
+						var taskId = _currentTaskIdFromPath();
+						if (!taskId || data.task_id !== taskId) return;
 						if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {
 							// TaskThreadLiveEventsScript owns these events. It appends the
 							// authoritative execution fragment and attaches /events/chat/:exec_id

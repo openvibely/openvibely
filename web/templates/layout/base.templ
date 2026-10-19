@@ -186,6 +186,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
 			<script defer src={ static.URL("kanban.js") }></script>
+			<script defer src={ static.URL("thread-navigation.js") }></script>
+			<script defer src={ static.URL("chat-virtual-list.js") }></script>
 			<script>
 			window.appendPendingThreadInputEditButton = function(actions) {
 				var button = document.createElement('button');
@@ -4691,6 +4693,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                         const previous = currentPageRequest;
                         currentPageRequest = detail.xhr;
                         if (previous && previous !== detail.xhr && previous.readyState !== 4) previous.abort();
+                        if (!event.defaultPrevented && window.showCachedThreadNavigation) window.showCachedThreadNavigation(detail);
                     });
                     document.addEventListener('htmx:beforeSwap', function(event) {
                         const detail = event.detail;

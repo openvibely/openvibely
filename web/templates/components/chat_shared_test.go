@@ -5345,7 +5345,6 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 		"var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;",
 		"previous.userScrolledUp && !userScrolledUp && intentRevision <= (previous.intentRevision || 0)",
 		"if (typeof self.onIntentChange === 'function') self.onIntentChange();",
-		"messages.style.visibility = 'hidden';",
 		"Promise.resolve(options.renderPromise)",
 		"if (!options.waitForImages) return Promise.resolve();",
 		"img[data-chat-attachment-image=\"true\"]",
@@ -5368,7 +5367,7 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 	}
 }
 
-func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testing.T) {
+func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	task := &models.Task{ID: "thread-stable-hydration", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 	var buf bytes.Buffer
 	if err := TaskThreadView(task, []models.Execution{{ID: "exec-1", Status: models.ExecCompleted, Output: "# rendered later"}}, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
@@ -5472,7 +5471,7 @@ func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 	if !strings.Contains(content, "target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content'") {
 		t.Fatal("main-content navigation must synchronously identify the outgoing task thread")
 	}
-	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content')")
+	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh)")
 	if mainContentStart < 0 {
 		t.Fatal("task-detail navigation must release detached task-thread state")
 	}
@@ -5493,7 +5492,7 @@ func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"else if (target && target.id === 'main-content')",
+		"else if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh)",
 		"document.body.addEventListener('htmx:historyRestore'",
 		"_initializeFreshTaskThreadOpen();",
 	} {
@@ -5984,7 +5983,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		var resolveHydration;
 		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
 		var restored = window.restoreChatTranscriptScroll({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
-		if (messages.style.visibility !== 'hidden') fail('initial transcript was revealed before hydration settled');
+		if (messages.style.visibility === 'hidden') fail('available transcript stayed hidden while hydration was pending');
 		pair(messages); pair(messages); pair(messages);
 		resolveHydration();
 		Promise.resolve(restored).then(async function() {
