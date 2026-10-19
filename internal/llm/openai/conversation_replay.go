@@ -151,6 +151,12 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 			call := openaiclient.CompletionsToolCall{ID: item.CallID, Type: "function"}
 			call.Function.Name = item.Name
 			call.Function.Arguments = item.Arguments
+			// Responses emits parallel calls as separate items. Completions
+			// requires them in one assistant message before their tool results.
+			if n := len(result); n > 0 && result[n-1].Role == "assistant" && len(result[n-1].ToolCalls) > 0 {
+				result[n-1].ToolCalls = append(result[n-1].ToolCalls, call)
+				continue
+			}
 			result = append(result, openaiclient.CompletionsHistoryMessage{Role: "assistant", ToolCalls: []openaiclient.CompletionsToolCall{call}})
 		case "function_call_output":
 			result = append(result, openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: item.CallID, Content: item.Output})
