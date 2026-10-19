@@ -81,7 +81,7 @@ func TestProviderSwitchRecoversSteeringAndPreservesReadableTail(t *testing.T) {
 				require.Len(t, actual, len(expected)+1)
 				require.Equal(t, expected, actual[1:], "readable message order, images and tool exchanges survive summary retries")
 				return llmcontracts.AgentResult{Output: "done"}, nil
-			}), llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "continue", Agent: models.LLMConfig{Provider: p, Model: "test", ContextWindow: 200000}, ChatHistory: []models.Execution{*saved}})
+			}), llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "continue", Agent: models.LLMConfig{ID: string(p), Provider: p, Model: "test", ContextWindow: 200000}, ChatHistory: []models.Execution{*saved}})
 			require.NoError(t, err)
 			require.Equal(t, 2, summaries)
 			require.Equal(t, 1, calls)
