@@ -26,23 +26,173 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	return nil
 }
 
-func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, []any) error {
+type responsesReplay struct {
+	Input   []json.RawMessage            `json:"responses_input"`
+	Sources map[string][]json.RawMessage `json:"responses_compaction_sources,omitempty"`
+}
+
+type responsesRecorder struct {
+	history func(context.Context, []any) error
+	archive func(context.Context, []any, []any) error
+}
+
+func (a *Adapter) newResponsesRecorder(execID string) responsesRecorder {
 	if a.execRepo == nil || execID == "" {
+		return responsesRecorder{}
+	}
+	saved := responsesReplay{}
+	loaded := false
+	load := func(ctx context.Context) error {
+		if loaded {
+			return nil
+		}
+		rows, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execID})
+		if err != nil {
+			return err
+		}
+		for _, row := range rows[execID] {
+			_ = json.Unmarshal([]byte(row.TranscriptJSON), &saved)
+		}
+		loaded = true
 		return nil
 	}
-	return func(ctx context.Context, items []any) error {
-		raw, err := json.Marshal(struct {
-			Input []any `json:"responses_input"`
-		}{items})
+	persist := func(ctx context.Context) error {
+		raw, err := json.Marshal(saved)
 		if err != nil {
 			return err
 		}
 		if err := a.saveConversation(ctx, execID, json.RawMessage(raw)); err != nil {
 			return err
 		}
-		llmcontracts.RecordResponsesRecovery(ctx, string(raw))
+		// Recovery requests need the model input, not the archive.
+		recovery, err := json.Marshal(responsesReplay{Input: saved.Input})
+		if err != nil {
+			return err
+		}
+		llmcontracts.RecordResponsesRecovery(ctx, string(recovery))
 		return nil
 	}
+	return responsesRecorder{
+		history: func(ctx context.Context, items []any) error {
+			if err := load(ctx); err != nil {
+				return err
+			}
+			raw, err := json.Marshal(items)
+			if err != nil {
+				return err
+			}
+			var input []json.RawMessage
+			if err := json.Unmarshal(raw, &input); err != nil {
+				return err
+			}
+			saved.Input = input
+			return persist(ctx)
+		},
+		archive: func(ctx context.Context, before, after []any) error {
+			if err := load(ctx); err != nil {
+				return err
+			}
+			raw, err := json.Marshal(before)
+			if err != nil {
+				return err
+			}
+			var source []json.RawMessage
+			if err := json.Unmarshal(raw, &source); err != nil {
+				return err
+			}
+			if saved.Sources == nil {
+				saved.Sources = make(map[string][]json.RawMessage)
+			}
+			existing := make(map[string]bool)
+			for _, raw := range source {
+				var item struct {
+					Type string
+					Key  string `json:"encrypted_content"`
+				}
+				if json.Unmarshal(raw, &item) == nil && item.Type == "compaction" {
+					existing[item.Key] = true
+				}
+			}
+			for _, item := range after {
+				block, ok := item.(map[string]any)
+				if !ok || block["type"] != "compaction" {
+					continue
+				}
+				key, _ := block["encrypted_content"].(string)
+				if key != "" && !existing[key] {
+					saved.Sources[key] = source
+				}
+			}
+			// Keep the original request durable until the compacted request is saved.
+			saved.Input = source
+			return persist(ctx)
+		},
+	}
+}
+
+// CompactionSources returns durable readable snapshots, never model input.
+func CompactionSources(history []models.Execution) map[string][]json.RawMessage {
+	sources := make(map[string][]json.RawMessage)
+	for _, exec := range history {
+		for _, replay := range exec.ReplayMessages {
+			var saved responsesReplay
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil {
+				for key, source := range saved.Sources {
+					sources[key] = source
+				}
+			}
+		}
+	}
+	return sources
+}
+
+// ExpandCompactedHistory substitutes readable snapshots for native opaque state.
+// A compaction item replaces its preceding prefix, including retained user items.
+func ExpandCompactedHistory(history []models.Execution, sources map[string][]json.RawMessage) ([]models.Execution, error) {
+	var expand func([]json.RawMessage, map[string]bool) ([]json.RawMessage, error)
+	expand = func(items []json.RawMessage, visiting map[string]bool) ([]json.RawMessage, error) {
+		for i := len(items) - 1; i >= 0; i-- {
+			var item struct {
+				Type string
+				Key  string `json:"encrypted_content"`
+			}
+			if json.Unmarshal(items[i], &item) != nil || item.Type != "compaction" {
+				continue
+			}
+			source, ok := sources[item.Key]
+			if !ok || len(source) == 0 || visiting[item.Key] {
+				return nil, fmt.Errorf("cannot switch providers: readable history for native OpenAI compaction is unavailable; continue with OpenAI or start a new context")
+			}
+			visiting[item.Key] = true
+			prefix, err := expand(source, visiting)
+			if err != nil {
+				return nil, err
+			}
+			delete(visiting, item.Key)
+			return append(append([]json.RawMessage(nil), prefix...), items[i+1:]...), nil
+		}
+		return items, nil
+	}
+	out := append([]models.Execution(nil), EffectiveReplayHistory(history)...)
+	for i := range out {
+		out[i].ReplayMessages = append([]models.ExecutionReplayMessage(nil), out[i].ReplayMessages...)
+		for j := range out[i].ReplayMessages {
+			var saved responsesReplay
+			if json.Unmarshal([]byte(out[i].ReplayMessages[j].TranscriptJSON), &saved) != nil || len(saved.Input) == 0 {
+				continue
+			}
+			input, err := expand(saved.Input, make(map[string]bool))
+			if err != nil {
+				return nil, err
+			}
+			raw, err := json.Marshal(responsesReplay{Input: input})
+			if err != nil {
+				return nil, err
+			}
+			out[i].ReplayMessages[j].TranscriptJSON = string(raw)
+		}
+	}
+	return out, nil
 }
 
 func (a *Adapter) saveCompletionsHistory(ctx context.Context, execID string, client *openaiclient.Client, callErr error) error {
