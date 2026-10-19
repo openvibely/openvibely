@@ -932,6 +932,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	if req.Agent.Provider == models.ProviderMixture {
 		return adapter.Call(req)
 	}
+	// Budget and send the destination provider's actual history format, rather
+	// than letting its adapter silently fall back to prompt/answer text.
+	req.ChatHistory = normalizeProviderReplay(req.Agent.Provider, req.ChatHistory, false)
 	if contextCompactionFallbackDisabled(req.Ctx) {
 		budget := calculateRequestBudget(req)
 		if err := ensureRequestFitsWithBudget(req, budget, "provider request"); err != nil {
@@ -946,6 +949,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	uncompactedReq := req
 	originalHistory := req.ChatHistory
 	req = s.restoreCompactionCheckpoint(req)
+	req.ChatHistory = normalizeProviderReplay(req.Agent.Provider, req.ChatHistory, false)
 	compactionStrategy := "none"
 	if req.NativeCompactionStateJSON != "" {
 		compactionStrategy = "provider_native_checkpoint"
