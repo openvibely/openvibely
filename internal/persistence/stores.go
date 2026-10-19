@@ -735,6 +735,7 @@ type TelegramUserProjectStore interface {
 
 // ThreadInputStore persists queued task thread and chat inputs.
 type ThreadInputStore interface {
+	ListAppliedSteeringByExecution(ctx context.Context, executionID string) ([]models.ThreadInput, error)
 	BindPreExecutionQueuedTaskInputs(ctx context.Context, taskID string, executionID string) error
 	CancelPending(ctx context.Context, id string) (*models.ThreadInput, error)
 	CancelPendingForChat(ctx context.Context, projectID string) error

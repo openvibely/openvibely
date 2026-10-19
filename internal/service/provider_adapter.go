@@ -937,6 +937,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
 		}
+		req, replayErr = s.summarizeProviderRecovery(adapter, req)
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
 	}
 	// Budget and send the destination provider's actual history format, rather
 	// than letting its adapter silently fall back to prompt/answer text.
