@@ -98,16 +98,16 @@ func TestPortableCheckpointAcrossSavedModelSelections(t *testing.T) {
 
 func TestProviderSpecificCheckpointStillRequiresCompatibility(t *testing.T) {
 	for _, field := range []string{"provider_state", "session_state"} {
-		for _, change := range []string{"none", "config_id", "endpoint"} {
+		for _, change := range []string{"none", "config_id", "endpoint", "model", "provider"} {
 			t.Run(field+"/"+change, func(t *testing.T) {
 				ctx := context.Background()
 				stores := teststores.New(t).Stores
-				source := models.LLMConfig{ID: "source-model", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", BaseURL: "https://one.example/v1"}
+				source := models.LLMConfig{ID: "source-model", Provider: models.ProviderOpenAI, Model: "gpt-6-astra", BaseURL: "https://one.example/v1"}
 				checkpoint := models.ChatCompactionCheckpoint{ScopeType: "chat_project", ScopeID: "compatibility", ModelConfigID: source.ID, CompatibilityKey: providerCompatibilityKey(source), History: buildCompactedReplacementHistory(nil, "NATIVE_CHECKPOINT_HISTORY")}
 				if field == "provider_state" {
 					checkpoint.ProviderStateJSON = `[{"type":"compaction","encrypted_content":"opaque"}]`
 				} else {
-					checkpoint.ProviderSessionStateJSON = `{"session":"provider-specific"}`
+					checkpoint.ProviderSessionStateJSON = `{"version":1,"model":"gpt-6-astra","request_effort":"medium","configured_effort":"high"}`
 				}
 				require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(ctx, checkpoint))
 				if field == "session_state" {
@@ -120,17 +120,94 @@ func TestProviderSpecificCheckpointStillRequiresCompatibility(t *testing.T) {
 				if change == "endpoint" {
 					target.BaseURL = "https://two.example/v1"
 				}
+				if change == "model" {
+					target.Model = "gpt-6-sol"
+				}
+				if change == "provider" {
+					target.Provider = models.ProviderAnthropic
+				}
 				req := llmcontracts.AgentRequest{Ctx: ctx, TransportScope: "chat:project:compatibility", Agent: target, ChatHistory: []models.Execution{{PromptSent: "original"}}}
 				svc := &LLMService{execRepo: stores.Executions}
 				got := svc.restoreCompactionCheckpoint(req)
 				if change != "none" {
-					require.Equal(t, req.ChatHistory, got.ChatHistory)
+					if field == "session_state" {
+						require.Equal(t, checkpoint.History[0].PromptSent, got.ChatHistory[0].PromptSent)
+					} else {
+						require.Equal(t, req.ChatHistory, got.ChatHistory)
+					}
 					require.Empty(t, got.NativeCompactionStateJSON)
 					require.Empty(t, got.ProviderSessionStateJSON)
 				} else {
 					require.Equal(t, checkpoint.ProviderStateJSON, got.NativeCompactionStateJSON)
 					require.Equal(t, checkpoint.ProviderSessionStateJSON, got.ProviderSessionStateJSON)
 					require.Equal(t, checkpoint.History[0].PromptSent, got.ChatHistory[0].PromptSent)
+				}
+				saved, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "chat_project", "compatibility")
+				require.NoError(t, err)
+				require.Equal(t, checkpoint.ProviderSessionStateJSON, saved.ProviderSessionStateJSON, "restore must not mutate stored settings")
+
+			})
+		}
+	}
+}
+
+func TestSessionSettingsUpdatePreservesPortableCheckpoint(t *testing.T) {
+	for _, native := range []bool{false, true} {
+		for _, switched := range []bool{false, true} {
+			name := "readable"
+			if native {
+				name = "native"
+			}
+			if switched {
+				name += "/switched"
+			} else {
+				name += "/same"
+			}
+			t.Run(name, func(t *testing.T) {
+				ctx := context.Background()
+				stores := teststores.New(t).Stores
+				source := models.LLMConfig{ID: "previous", Provider: models.ProviderOpenAI, Model: "gpt-6-astra"}
+				checkpoint := models.ChatCompactionCheckpoint{ScopeType: "chat_project", ScopeID: "session-save", ModelConfigID: source.ID, CompatibilityKey: providerCompatibilityKey(source), SourceExecutionID: "covered", Strategy: "local_summary", Summary: "KEEP_SUMMARY", History: buildCompactedReplacementHistory(nil, "KEEP_SUMMARY")}
+				if native {
+					checkpoint.ProviderStateJSON = `[{"type":"compaction","encrypted_content":"opaque"}]`
+				}
+				require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(ctx, checkpoint))
+				target := source
+				if switched {
+					target.ID = "new-config"
+					target.Model = "gpt-6-sol"
+				}
+				svc := &LLMService{execRepo: stores.Executions}
+				req := llmcontracts.AgentRequest{Ctx: ctx, TransportScope: "chat:project:session-save", Agent: target, ChatHistory: []models.Execution{{ID: "covered", PromptSent: "old"}, {ID: "newer", PromptSent: "AFTER_SUMMARY"}}}
+				settings := `{"version":1,"model":"` + target.Model + `","request_effort":"high","configured_effort":"high"}`
+				// This is the same persistence path invoked after a successful model call.
+				svc.persistProviderSessionState(req, settings)
+				saved, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "chat_project", "session-save")
+				require.NoError(t, err)
+				require.Equal(t, target.ID, saved.ModelConfigID)
+				require.Equal(t, settings, saved.ProviderSessionStateJSON)
+				if native && switched {
+					require.Empty(t, saved.ProviderStateJSON)
+					require.Empty(t, saved.History)
+					require.Empty(t, saved.SourceExecutionID)
+				} else {
+					require.Equal(t, checkpoint.History, saved.History)
+					require.Equal(t, checkpoint.SourceExecutionID, saved.SourceExecutionID)
+					require.Equal(t, checkpoint.Summary, saved.Summary)
+					require.Equal(t, checkpoint.Strategy, saved.Strategy)
+					require.Equal(t, checkpoint.ProviderStateJSON, saved.ProviderStateJSON)
+					restored := svc.restoreCompactionCheckpoint(req)
+					require.Equal(t, settings, restored.ProviderSessionStateJSON)
+					var summaries int
+					for _, message := range restored.ChatHistory {
+						if message.ContextKind == "summary" {
+							summaries++
+							require.Contains(t, message.PromptSent, "KEEP_SUMMARY")
+						}
+						require.NotEqual(t, "old", message.PromptSent)
+					}
+					require.Equal(t, 1, summaries)
+					require.Equal(t, "AFTER_SUMMARY", restored.ChatHistory[len(restored.ChatHistory)-1].PromptSent)
 				}
 			})
 		}

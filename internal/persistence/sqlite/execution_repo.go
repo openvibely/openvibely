@@ -1169,20 +1169,24 @@ func (r *ExecutionRepo) UpsertChatProviderSessionState(ctx context.Context, chec
 		) VALUES (?, ?, ?, ?, '[]', ?, datetime('now'), datetime('now'))
 		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
 			source_execution_id = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.source_execution_id ELSE '' END,
 			history_json = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.history_json ELSE '[]' END,
 			summary = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.summary ELSE '' END,
 			strategy = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.strategy ELSE '' END,
 			provider_state_json = CASE
 				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key

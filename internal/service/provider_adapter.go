@@ -1122,15 +1122,16 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
 		return req
 	}
-	// Readable history is portable and converted for the selected provider below.
-	// Only provider-specific state requires the original compatibility identity.
-	if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" || strings.TrimSpace(checkpoint.ProviderSessionStateJSON) != "" {
-		if checkpoint.CompatibilityKey != providerCompatibilityKey(req.Agent) {
+	// Readable history remains portable even when the row also holds reasoning
+	// settings. Reject incompatible native compaction, but only clear session
+	// settings in the restored copy; do not discard its readable history.
+	compatible := checkpoint.CompatibilityKey == providerCompatibilityKey(req.Agent) &&
+		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
+	if !compatible {
+		if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
 			return req
 		}
-		if checkpoint.ModelConfigID != "" && req.Agent.ID != "" && checkpoint.ModelConfigID != req.Agent.ID {
-			return req
-		}
+		checkpoint.ProviderSessionStateJSON = ""
 	}
 	restored := req
 	if checkpoint.Strategy == "local_summary_inflight" {
