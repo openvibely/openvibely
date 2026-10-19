@@ -147,7 +147,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("raised page canvas unchanged", `window.near('body', 'backgroundColor', '#191e24')`, "ok")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-elevated');'ok'`)
 		browser.waitFor("elevated retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#fixture-settings-card", "#1d232a"}, {"#sidebar", "#1d232a"}, {"#fixture-input", "#24292f"}, {"#fixture-bubble", "#2b3039"}, {"#fixture-composer", "#2b3039"}, {"#fixture-menu", "#2b3039"}} {
+		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#desktop-project-titlebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
 			browser.waitFor("elevated "+step.selector+" ladder step", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
 		}
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer", "#fixture-menu"} {
