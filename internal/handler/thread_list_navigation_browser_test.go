@@ -65,6 +65,9 @@ window.addEventListener('DOMContentLoaded',function(){
      }
      await openVibelyNavigate(%q);
      await until(()=>document.querySelector('#task-thread-view'),'return to thread');
+     await until(()=>document.querySelector('.chat-stream-content')?._renderedRevision,'returned messages rendered');
+     await wait(100); // Include HTMX's delayed attribute settling.
+     assert(getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','returned transcript remains hidden');
    }
    assert(!errors.length,'browser errors: '+JSON.stringify(errors));
    await fetch('/browser-result?status=pass');

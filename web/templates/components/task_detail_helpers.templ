@@ -356,7 +356,6 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				id="task-thread-messages"
 				class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"
 				if preservedExecIDs == nil {
-					style="visibility: hidden;"
 					data-transcript-hydrating="true"
 				}
 				data-window-limit={ fmt.Sprintf("%d", windowLimit) }

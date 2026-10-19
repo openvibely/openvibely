@@ -5375,14 +5375,14 @@ func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
 		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
 	}
 	if !strings.Contains(content, "waitForImages: true,") {
-		t.Fatal("task thread initial reveal must wait for historical attachment image load and decode")
+		t.Fatal("task thread scroll stabilization must track historical attachment image load and decode")
 	}
 }
 
@@ -5710,7 +5710,8 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 
 	html := `<!doctype html><html><head><meta charset="utf-8"><style>
 		#fixture-root { width: 480px; }
-		.transcript { height: 200px; overflow-y: auto; visibility: hidden; }
+		.transcript { height: 200px; overflow-y: auto; }
+        [data-transcript-hydrating="true"] { visibility: hidden; }
 		.pair { height: 120px; }
 	</style><script>window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); }; window.cancelAnimationFrame = clearTimeout;</script></head><body><main id="fixture-root"><div id="messages" class="transcript" data-transcript-hydrating="true"><div class="pair" data-execution-pair="true"></div><div class="pair" data-execution-pair="true"></div></div></main>` + chatScript.String() + `<script>
 	window.addEventListener('DOMContentLoaded', function() {
@@ -5983,7 +5984,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		var resolveHydration;
 		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
 		var restored = window.restoreChatTranscriptScroll({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
-		if (messages.style.visibility === 'hidden') fail('available transcript stayed hidden while hydration was pending');
+		if (getComputedStyle(messages).visibility !== 'hidden') fail('cold transcript revealed partial history while hydration was pending');
 		pair(messages); pair(messages); pair(messages);
 		resolveHydration();
 		Promise.resolve(restored).then(async function() {

@@ -102,7 +102,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 		</div>
 		<!-- Chat Messages Container -->
 		<div class="relative flex-1 min-h-0 min-w-0">
-			<div id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
+			<div id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
 				if hasEarlier && len(chatHistory) > 0 {
 					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
