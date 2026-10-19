@@ -1082,7 +1082,7 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 
 // Swarm children consume the parent's shared inputs without duplicating files.
 func (s *LLMService) loadTaskRunAttachments(ctx context.Context, task *models.Task) ([]models.Attachment, error) {
-	return listTaskConversationAttachments(ctx, s.attachmentRepo, s.taskRepo, task)
+	return ListTaskConversationAttachments(ctx, s.attachmentRepo, s.taskRepo, task)
 }
 
 // directTaskRunAttachments keeps task-level files as direct request inputs.

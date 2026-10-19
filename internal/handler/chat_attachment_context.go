@@ -86,7 +86,7 @@ func (h *Handler) prepareTaskThreadAttachmentContext(ctx context.Context, params
 		return nil, fmt.Errorf("load conversation attachments: %w", err)
 	}
 	params.attachmentSource = source
-	attachments, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+	attachments, err := service.ListTaskConversationAttachments(ctx, h.attachmentRepo, h.taskRepo, &task)
 	if err != nil {
 		return nil, fmt.Errorf("load conversation attachments: %w", err)
 	}

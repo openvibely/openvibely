@@ -167,3 +167,36 @@ func TestCopyMessageAttachmentsToTaskFromTaskThread(t *testing.T) {
 	require.Empty(t, rows[0].ExecutionID)
 	require.FileExists(t, rows[0].FilePath)
 }
+
+func TestTaskThreadFollowupHookFilesIncludeSwarmParent(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Shared files")
+	parent := createTask(t, h, project.ID, "Parent", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.SwarmRole = models.SwarmRoleParent
+	})
+	worker := createTask(t, h, project.ID, "Worker", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.SwarmRole = models.SwarmRoleWorker
+		task.ParentTaskID = &parent.ID
+	})
+	exec := createExec(t, h, worker.ID, agent.ID)
+	own := models.Attachment{TaskID: worker.ID, FileName: "worker.txt", FilePath: "/files/worker.txt", MediaType: "text/plain"}
+	shared := models.Attachment{TaskID: parent.ID, FileName: "parent.pdf", FilePath: "/files/parent.pdf", MediaType: "application/pdf"}
+	for _, file := range []*models.Attachment{&own, &shared} {
+		require.NoError(t, h.attachmentRepo.Create(ctx, file))
+	}
+	params := streamingResponseParams{TaskID: worker.ID, Task: worker, ExecID: exec.ID, IsTaskFollowup: true, Message: "Review files", ImageAttachments: []models.Attachment{own}}
+	files, err := h.prepareChatAttachmentContext(ctx, &params)
+	require.NoError(t, err)
+	require.Len(t, files, 2, "hook files include the parent and deduplicate current inputs")
+	paths := []string{files[0].FilePath, files[1].FilePath}
+	require.ElementsMatch(t, []string{own.FilePath, shared.FilePath}, paths)
+	modelContext := attachmentcontext.Text(params.withAttachmentContext(ctx))
+	for _, path := range paths {
+		require.Contains(t, modelContext, path)
+	}
+	require.Len(t, params.ImageAttachments, 1, "parent files remain references, not direct uploads")
+}
