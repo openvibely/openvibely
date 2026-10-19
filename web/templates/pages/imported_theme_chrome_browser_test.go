@@ -117,7 +117,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 				}
 				browser.evaluate(`window.openVibelyThemes.apply('` + theme.ID + `'); 'ok'`)
 				browser.waitFor(theme.ID+" preserves default toggle geometry and fading", `window.toggleGeometry() === window.originalToggleGeometry ? 'true' : window.toggleGeometry() + ' expected ' + window.originalToggleGeometry`, "true")
-				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" && theme.ID != "openvibely-dark-continuous" && theme.ID != "openvibely-dark-raised" && theme.ID != "openvibely-dark-elevated" {
+				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" && theme.ID != "openvibely-dark-flat" && theme.ID != "openvibely-dark-elevated" {
 					browser.waitFor(theme.ID+" consumes dedicated toggle colors", `JSON.stringify(['.theme-toggle-pill','.theme-toggle-thumb','.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'moon' : 'sun'),'.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')].map(function(selector, i) { var probe = document.getElementById('probe'); probe.style.color = 'var(--ov-mode-'+['track','thumb','active','inactive'][i]+')'; return getComputedStyle(document.querySelector(selector))[i < 2 ? 'backgroundColor' : 'color'] === getComputedStyle(probe).color; }))`, "[true,true,true,true]")
 				}
 			}
@@ -130,21 +130,13 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			window.matches = function(selector, property, value) { var got = window.computed(selector, property); var want = window.themeColor(value, property); return got === want ? 'ok' : got + ' != ' + want; };
 			'ok'`)
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
-		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-continuous');'ok'`)
-		browser.waitFor("continuous sidebar matches cards", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('#fixture-settings-card', 'backgroundColor'))`, "true")
-		browser.waitFor("continuous sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
+		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-flat');'ok'`)
+		browser.waitFor("flat sidebar matches cards", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('#fixture-settings-card', 'backgroundColor'))`, "true")
+		browser.waitFor("flat sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
-			browser.waitFor("continuous "+selector+" matches settings card", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.backgroundColor===b.backgroundColor&&a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
+			browser.waitFor("flat "+selector+" matches settings card", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.backgroundColor===b.backgroundColor&&a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
 		}
-		browser.waitFor("continuous retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-raised');'ok'`)
-		browser.waitFor("raised retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, selector := range []string{"#fixture-settings-card", "#sidebar"} {
-			browser.waitFor("raised "+selector+" uses default dark color", `window.near('`+selector+`', 'backgroundColor', '#1d232a')`, "ok")
-		}
-		browser.waitFor("raised bubble keeps color without shadow", `(function(){var a=getComputedStyle(document.querySelector('#fixture-bubble'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow==='none'&&a.borderTopWidth==='0px');})()`, "true")
-		browser.waitFor("raised composer keeps color without shadow", `(function(){var a=getComputedStyle(document.querySelector('#fixture-composer'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow==='none');})()`, "true")
-		browser.waitFor("raised page canvas unchanged", `window.near('body', 'backgroundColor', '#191e24')`, "ok")
+		browser.waitFor("flat retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-elevated');'ok'`)
 		browser.waitFor("elevated retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
 		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {

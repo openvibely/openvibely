@@ -116,7 +116,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							function normalizeStoredTheme(value) { value = String(value || '').trim(); if (value === 'light' || value === 'dark') return fallbackIDForMode(value); if (validTheme(value)) return value; return ''; }
 							function normalizeThemeID(value) { return normalizeStoredTheme(value); }
 							function persistUIPreference(payload) { try { fetch('/ui/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function() {}); } catch (_) {} }
-							function usesNativeTheme(id) { return id === defaultLight || id === defaultDark || id === 'openvibely-dark-continuous' || id === 'openvibely-dark-raised' || id === 'openvibely-dark-elevated'; }
+							function usesNativeTheme(id) { return id === defaultLight || id === defaultDark || id === 'openvibely-dark-flat' || id === 'openvibely-dark-elevated'; }
 							function setCSSVars(theme) { catalog.forEach(function(entry) { Object.keys(entry.css || {}).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.removeProperty(name); }); }); ['automation-node-border', 'automation-edge', 'yaml-indent-rail', 'mode-track', 'mode-thumb', 'mode-active', 'mode-inactive'].forEach(function(name) { document.documentElement.style.removeProperty('--ov-' + name); }); if (usesNativeTheme(theme.id)) return; var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); var roles = theme && Array.isArray(theme.r) ? theme.r : []; ['automation-node-border', 'automation-edge', 'yaml-indent-rail', 'mode-track', 'mode-thumb', 'mode-active', 'mode-inactive'].forEach(function(name, index) { if (roles[index]) document.documentElement.style.setProperty('--ov-' + name, String(roles[index])); }); }
 							function updateThemeToggleState(theme) { var mode = modeForTheme(theme); var label = mode === 'dark' ? 'Switch to last light theme' : 'Switch to last dark theme'; document.querySelectorAll('.theme-toggle-icon').forEach(function(icon) { icon.setAttribute('data-theme-current', mode); }); document.querySelectorAll('[data-theme-mode-toggle]').forEach(function(el) { el.setAttribute('aria-pressed', mode === 'dark' ? 'true' : 'false'); el.setAttribute('title', label); el.setAttribute('aria-label', label); el.setAttribute('data-tip', label); }); }
 							function applyTheme(id, options) { options = options || {}; var theme = validTheme(normalizeStoredTheme(id)) || validTheme(defaultDark) || catalog[0]; if (!theme) return null; var themeID = theme.id; var mode = modeForTheme(theme); document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', themeID); document.documentElement.setAttribute('data-ov-theme-layer', usesNativeTheme(themeID) ? 'native' : 'custom'); document.documentElement.setAttribute('data-color-theme-kind', theme.kind || mode); setCSSVars(theme); if (options.persistLocal !== false) { safeSet(exactKey, themeID); try { localStorage.setItem('theme', themeID); } catch (_) {} } if (options.persistDB) persistUIPreference({ theme: themeID }); safeSet(mode === 'light' ? lastLightKey : lastDarkKey, themeID); updateThemeToggleState(theme); if (window.openVibelyThemes && typeof window.openVibelyThemes.refreshThemeCards === 'function') window.openVibelyThemes.refreshThemeCards(); return theme; }
@@ -2558,14 +2558,10 @@ html[data-color-theme="openvibely-dark-elevated"] .card { background-color: var(
 html[data-color-theme="openvibely-dark-elevated"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg, .chat-input-container) { --chat-user-bg: var(--ov-elevation-chat); background-color: var(--ov-elevation-chat); box-shadow: none; }
 html[data-color-theme="openvibely-dark-elevated"] :is(.input, .select, .textarea) { background-color: var(--ov-elevation-chat); }
 html[data-color-theme="openvibely-dark-elevated"] :is(.dropdown-content, .ov-menu, .modal-box) { background-color: var(--ov-elevation-chat); box-shadow: none; }
-					/* Experimental native dark variant: shadowless chat surfaces. */
-html[data-color-theme="openvibely-dark-raised"] .chat-bubble-user-msg,
-html[data-color-theme="openvibely-dark-raised"] .chat-bubble-assistant-msg,
-html[data-color-theme="openvibely-dark-raised"] .chat-input-container { box-shadow: none; }
 					/* Experimental native dark variant: flat bordered chat surfaces. */
-html[data-color-theme="openvibely-dark-continuous"] .chat-bubble-user-msg,
-html[data-color-theme="openvibely-dark-continuous"] .chat-bubble-assistant-msg,
-html[data-color-theme="openvibely-dark-continuous"] .chat-input-container {
+html[data-color-theme="openvibely-dark-flat"] .chat-bubble-user-msg,
+html[data-color-theme="openvibely-dark-flat"] .chat-bubble-assistant-msg,
+html[data-color-theme="openvibely-dark-flat"] .chat-input-container {
 	--chat-user-bg: oklch(var(--b1));
 	--chat-user-border: oklch(var(--b3));
 	background-color: oklch(var(--b1));
