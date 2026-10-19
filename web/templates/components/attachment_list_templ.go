@@ -506,15 +506,22 @@ func TaskFilesList(attachments []models.Attachment, projectID string, messageGro
 			}
 		} else {
 			for _, att := range attachments {
-				templ_7745c5c3_Err = ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list").Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
+				if att.ExecutionID == "" {
+					templ_7745c5c3_Err = ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list").Render(ctx, templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else {
+					templ_7745c5c3_Err = ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), "", "").Render(ctx, templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
 				}
 			}
 		}
 		for _, messages := range messageGroups {
 			for _, att := range messages {
-				templ_7745c5c3_Err = ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, ChatAttachmentDownloadURL(att.ID, projectID), "", "").Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, MessageAttachmentDownloadURL(att, projectID), "", "").Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

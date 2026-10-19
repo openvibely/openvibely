@@ -97,6 +97,7 @@ type streamingResponseParams struct {
 	// It is added only to the model-facing user message, never system context.
 	AttachmentContext           string
 	historicalAttachmentContext string
+	attachmentSource            *attachmentcontext.Source
 	// Task is the task record supplied for deferred context loading when
 	// DeferHistoryLoad is true.
 	Task *models.Task
@@ -748,7 +749,7 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
-		requestCtx = attachmentcontext.With(requestCtx, params.historicalAttachmentContext)
+		requestCtx = params.withAttachmentContext(requestCtx)
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
 			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...)}

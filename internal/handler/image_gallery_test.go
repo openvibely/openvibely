@@ -102,15 +102,17 @@ func TestNewTaskMessageImagesRemainInAttachmentPanel(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Contains(t, rec.Body.String(), "screenshot.png")
 		require.Contains(t, rec.Body.String(), "data-image-gallery-item")
-		require.Contains(t, rec.Body.String(), "/chat/attachments/")
+		require.Contains(t, rec.Body.String(), "/attachments/")
+		require.NotContains(t, rec.Body.String(), "/chat/attachments/")
 		require.NotContains(t, rec.Body.String(), "No attachments")
 	}
 	taskFiles, err := h.attachmentRepo.ListByTask(context.Background(), id)
 	require.NoError(t, err)
-	require.Empty(t, taskFiles, "message files must not become automatic inputs to every task execution")
+	require.Len(t, taskFiles, 1)
+	require.Equal(t, executions[0].ID, taskFiles[0].ExecutionID, "composer files stay tied to the message that attached them")
 	messageFiles, err := h.chatAttachmentRepo.ListByTask(context.Background(), id)
 	require.NoError(t, err)
-	require.Len(t, messageFiles, 1)
+	require.Empty(t, messageFiles, "task composer files must not be stored as Chat page attachments")
 }
 
 func TestDeferredTaskImagesRemainAvailable(t *testing.T) {

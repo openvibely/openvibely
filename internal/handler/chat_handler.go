@@ -21,6 +21,7 @@ import (
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -142,6 +143,35 @@ func (h *Handler) loadChatExecutionWindow(ctx context.Context, projectID, before
 	}
 	visible, hasEarlier := trimExecutionWindow(rows, limit)
 	return visible, hasEarlier, nil
+}
+
+// loadTaskThreadAttachmentsForExecutions loads per-message attachments of a
+// task thread from task_attachments for display.
+func (h *Handler) loadTaskThreadAttachmentsForExecutions(ctx context.Context, executions []models.Execution, label string) map[string][]models.ChatAttachment {
+	result := make(map[string][]models.ChatAttachment)
+	if h.attachmentRepo == nil {
+		return result
+	}
+	byExec, err := h.attachmentRepo.ListByExecutionIDs(ctx, executionIDs(executions))
+	if err != nil {
+		applog.Infof("[handler] %s error loading attachments: %v", label, err)
+		return result
+	}
+	for execID, attachments := range byExec {
+		for _, att := range attachments {
+			result[execID] = append(result[execID], models.MessageAttachmentFromTask(att))
+		}
+	}
+	return result
+}
+
+// loadMessageAttachmentsForTask picks the attachment store from the task's
+// persisted conversation type.
+func (h *Handler) loadMessageAttachmentsForTask(ctx context.Context, task *models.Task, executions []models.Execution, label string) map[string][]models.ChatAttachment {
+	if service.IsTaskThread(task) {
+		return h.loadTaskThreadAttachmentsForExecutions(ctx, executions, label)
+	}
+	return h.loadChatAttachmentsForExecutions(ctx, executions, label)
 }
 
 func (h *Handler) loadChatAttachmentsForExecutions(ctx context.Context, executions []models.Execution, label string) map[string][]models.ChatAttachment {
@@ -584,10 +614,57 @@ func (h *Handler) processAttachments(ctx context.Context, sessionID, execID stri
 	return textContext, imageAttachments, err
 }
 
-// processAttachmentsWithReturn is like processAttachments but also returns the created ChatAttachment records
+// messageAttachmentOwner resolves where an execution's message attachments are
+// stored from the persisted task category: Chat-page conversations use
+// chat_attachments; task threads use task_attachments with execution_id.
+func (h *Handler) messageAttachmentOwner(ctx context.Context, execID string) (taskThreadID string, err error) {
+	if h.execRepo == nil || h.taskRepo == nil {
+		return "", nil
+	}
+	exec, err := h.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		return "", fmt.Errorf("resolve attachment owner execution=%s: %w", execID, err)
+	}
+	if exec == nil || exec.TaskID == "" {
+		return "", nil
+	}
+	task, err := h.taskRepo.GetByID(ctx, exec.TaskID)
+	if err != nil {
+		return "", fmt.Errorf("resolve attachment owner task=%s: %w", exec.TaskID, err)
+	}
+	if service.IsTaskThread(task) {
+		return task.ID, nil
+	}
+	return "", nil
+}
+
+// processAttachmentsWithReturn is like processAttachments but also returns the
+// published per-message attachment records for display.
 func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, error) {
-	if h.chatAttachmentRepo == nil {
+	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if taskThreadID == "" && h.chatAttachmentRepo == nil {
 		return "", nil, nil, fmt.Errorf("chat attachment repository is unavailable")
+	}
+	if taskThreadID != "" && h.attachmentRepo == nil {
+		return "", nil, nil, fmt.Errorf("task attachment repository is unavailable")
+	}
+	createMetadata := func(ctx context.Context, att *models.ChatAttachment) error {
+		return h.chatAttachmentRepo.Create(ctx, att)
+	}
+	deleteMetadata := func(ctx context.Context, id string) error { return h.chatAttachmentRepo.Delete(ctx, id) }
+	if taskThreadID != "" {
+		createMetadata = func(ctx context.Context, att *models.ChatAttachment) error {
+			row := &models.Attachment{TaskID: taskThreadID, ExecutionID: att.ExecutionID, FileName: att.FileName, FilePath: att.FilePath, MediaType: att.MediaType, FileSize: att.FileSize}
+			if err := h.attachmentRepo.Create(ctx, row); err != nil {
+				return err
+			}
+			*att = models.MessageAttachmentFromTask(*row)
+			return nil
+		}
+		deleteMetadata = func(ctx context.Context, id string) error { return h.attachmentRepo.Delete(ctx, id) }
 	}
 	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 
@@ -621,7 +698,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	var chatAttachments []models.ChatAttachment
 	var staged []attachmentPublication
 	rollback := func() {
-		for _, rollbackErr := range rollbackAttachmentPublications(ctx, staged, h.chatAttachmentRepo.Delete) {
+		for _, rollbackErr := range rollbackAttachmentPublications(ctx, staged, deleteMetadata) {
 			applog.Infof("[handler] attachment lifecycle stage=rollback-chat session=%s execution=%s error=%v", sessionID, execID, rollbackErr)
 		}
 	}
@@ -650,7 +727,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 			ExecutionID: execID, FileName: file.Name(), FilePath: destPath,
 			MediaType: mediaType, FileSize: info.Size(),
 		}
-		if err := h.chatAttachmentRepo.Create(ctx, attachment); err != nil {
+		if err := createMetadata(ctx, attachment); err != nil {
 			_ = os.Remove(destPath)
 			rollback()
 			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)

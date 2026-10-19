@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/pkg/filecontent"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -387,9 +388,13 @@ func (h *Handler) renderTaskAttachmentList(c echo.Context, taskID, projectID str
 	if err != nil {
 		return err
 	}
-	messages, err := h.chatAttachmentRepo.ListByTask(c.Request().Context(), taskID)
-	if err != nil {
-		return err
+	var messages []models.ChatAttachment
+	if task, taskErr := h.taskRepo.GetByID(c.Request().Context(), taskID); taskErr == nil && !service.IsTaskThread(task) && h.chatAttachmentRepo != nil {
+		// Chat-page conversations keep message files in chat_attachments.
+		messages, err = h.chatAttachmentRepo.ListByTask(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
 	}
 	generated, err := h.attachmentRepo.ListGeneratedFiles(c.Request().Context(), projectID, taskID)
 	if err != nil {

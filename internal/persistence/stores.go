@@ -80,6 +80,7 @@ type AttachmentStore interface {
 	GetByID(ctx context.Context, id string) (*models.Attachment, error)
 	GetByIDForProject(ctx context.Context, id string, projectID string) (*models.Attachment, error)
 	ListByTask(ctx context.Context, taskID string) ([]models.Attachment, error)
+	ListByExecutionIDs(ctx context.Context, execIDs []string) (map[string][]models.Attachment, error)
 }
 
 // AutomationStore persists automations, their bindings, dispatches, history, and health.

@@ -1425,7 +1425,7 @@ func TestLLMService_HydrateTaskSteeringAttachmentsKeepsImagesStructured(t *testi
 
 	svc := &LLMService{taskSvc: &TaskService{uploadsDir: uploadsDir}}
 	inputs := []models.ThreadInput{{Content: "inspect these", AttachmentSessionID: sessionID}}
-	attachments, err := svc.hydrateTaskSteeringAttachments(inputs)
+	attachments, err := svc.hydrateTaskSteeringAttachments(inputs, "exec-1")
 	require.NoError(t, err)
 	require.NotContains(t, inputs[0].Content, "attachment notes")
 	require.Len(t, attachments, 2)
@@ -1446,7 +1446,7 @@ func TestLLMService_HydrateTaskSteeringMessagesPreservesBoundaries(t *testing.T)
 		{Content: "first correction"},
 		{Content: "second correction", AttachmentSessionID: sessionID},
 	}
-	messages, err := svc.hydrateTaskSteeringMessages(inputs)
+	messages, err := svc.hydrateTaskSteeringMessages(inputs, "exec-1")
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
 	require.Equal(t, "first correction", messages[0].Text)

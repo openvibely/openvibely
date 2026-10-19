@@ -244,7 +244,7 @@ func (r *ChatAttachmentRepo) DeleteByIDForProject(ctx context.Context, id, proje
 	return nil
 }
 
-const selectAllChatAttachmentFilePathsSQL = `SELECT file_path FROM chat_attachments`
+const selectAllChatAttachmentFilePathsSQL = `SELECT file_path FROM chat_attachments UNION ALL SELECT file_path FROM task_attachments`
 
 // GetAllFilePaths returns all file paths currently in the database
 func (r *ChatAttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, error) {
