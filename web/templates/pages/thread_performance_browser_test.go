@@ -122,6 +122,7 @@ window.addEventListener('DOMContentLoaded', function() {
    await wait(50); assert(page()==='b', 'expired cache was displayed'); await expired;
    Date.now = realNow;
    await window.openVibelyNavigate('/tasks/b');
+   await fetch('/version');
    const tabRefresh = window.openVibelyNavigate('/tasks/a');
    await until(() => page()==='a', 'cached page before tab change');
    document.getElementById('draft').value = 'edited while changing tabs';
@@ -130,7 +131,17 @@ window.addEventListener('DOMContentLoaded', function() {
    await tabRefresh;
    assert(location.pathname==='/tasks/a' && location.search==='?tab=changes', 'pending tab URL not committed');
    assert(document.getElementById('draft').value==='edited while changing tabs', 'tab change lost local view');
+   assert(document.getElementById('version').textContent==='3', 'tab change discarded fresh server state');
    await window.openVibelyNavigate('/tasks/a');
+   await window.openVibelyNavigate('/tasks/b');
+   await fetch('/version');
+   const superseded = window.openVibelyNavigate('/tasks/a');
+   await until(() => page()==='a', 'cached page before local write');
+   htmx.trigger(document.body, 'htmx:beforeRequest', {requestConfig:{verb:'post'}, target:document.body});
+   assert(window.updateCachedThreadNavigationURL('/tasks/a?tab=details'), 'tab update after write rejected');
+   await superseded;
+   assert(document.getElementById('version').textContent==='3', 'tab update bypassed local write fencing');
+   assert(location.search==='?tab=details', 'superseded refresh lost tab URL');
    await window.openVibelyNavigate('/tasks/b');
    document.querySelector('[data-page]').setAttribute('hx-history','false');
    localStorage.removeItem('htmx-history-cache');

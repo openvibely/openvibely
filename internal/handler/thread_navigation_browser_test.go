@@ -102,13 +102,24 @@ window.addEventListener('DOMContentLoaded',function(){
    await openVibelyNavigate(%q);
    await until(()=>view()?.dataset.taskId===%q,'other thread');
    await fetch('/advance');
+   let warmURL=%q;
    for(let round=0;round<2;round++){
      let done=false;
-     const warm=openVibelyNavigate(%q).then(()=>{done=true});
+     const warm=openVibelyNavigate(warmURL).then(()=>{done=true});
      await until(()=>view()?.dataset.taskId===%q,'cached preview');
      assert(!done,'preview waited for network');
      await checkToggle();
      const form=document.getElementById('task-thread-form');
+     if(round===0){
+       assert(!form.querySelector('#pending-thread-inputs').textContent.includes('queued-while-away'),'preview unexpectedly has new queue');
+       // Simulate stale active-turn controls in a cached composer.
+       const action=form.querySelector('#task-thread-form-primary-action');
+       action.dataset.composerRunning='true'; action.dataset.activeTurnId='old-turn';
+       const guard=document.createElement('input'); guard.type='hidden'; guard.name='expected_turn_id'; guard.value='old-turn'; form.appendChild(guard);
+     }
+     window.taskWorkspace.togglePanel();
+     const panelOpen=round===0;
+     assert(document.getElementById('task-details-panel').hidden!==panelOpen,'panel did not toggle during refresh');
      const input=form.querySelector('textarea'); input.value='draft typed during refresh'; input.dispatchEvent(new Event('input',{bubbles:true}));
      let lost=false;
      const observer=new MutationObserver(()=>{if(!view() || document.getElementById('task-thread-form')!==form)lost=true});
@@ -117,8 +128,18 @@ window.addEventListener('DOMContentLoaded',function(){
      assert(!lost,'refresh removed the cached transcript or composer');
      assert(document.getElementById('task-thread-form')===form && input.value==='draft typed during refresh','refresh lost composer edits');
      await until(()=>view().textContent.includes('authoritative-update'),'fresh server output');
+     assert(document.getElementById('task-details-panel').hidden!==panelOpen,'refresh reset the chosen panel');
+     assert(new URL(location.href).searchParams.get('tab')===(panelOpen?'details':'chat'),'refresh committed the wrong tab URL');
+     assert(form.querySelector('#pending-thread-inputs').textContent.includes('queued-while-away'),'fresh queued input missing from preserved composer');
+     assert(form.querySelector('#task-thread-form-primary-action').dataset.composerRunning==='false','stale running state survived refresh');
+     assert(!form.querySelector('input[name="expected_turn_id"]'),'stale turn guard survived refresh');
      await checkToggle();
-     if(round===0){await openVibelyNavigate(%q);await until(()=>view()?.dataset.taskId===%q,'other thread again')}
+     if(round===0){warmURL=location.pathname+location.search;await openVibelyNavigate(%q);await until(()=>view()?.dataset.taskId===%q,'other thread again')}
+     else {
+       form.querySelector('#pending-thread-inputs button[aria-label="Cancel queued follow-up"]').click();
+       await until(()=>!form.querySelector('#pending-thread-inputs').textContent.includes('queued-while-away'),'refreshed queue cancel handler');
+       assert(input.value==='draft typed during refresh','queue action lost the draft');
+     }
    }
    await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
@@ -140,6 +161,15 @@ window.addEventListener('DOMContentLoaded',function(){
 		}
 		if r.URL.Path == "/advance" {
 			if err := h.execRepo.Complete(r.Context(), ex.ID, models.ExecCompleted, output+"\nauthoritative-update", "", 0, 0); err != nil {
+				t.Error(err)
+			}
+			pending := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+				RunExecutionID: ex.ID, AgentConfigID: agent.ID,
+				InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+				Content: "queued-while-away",
+			}
+			if err := h.threadInputRepo.CreateQueued(r.Context(), pending); err != nil {
 				t.Error(err)
 			}
 			w.WriteHeader(http.StatusNoContent)
