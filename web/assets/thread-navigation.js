@@ -11,6 +11,7 @@
     let pending = null;
     let historySnapshot = null;
     let mutation = 0;
+    let restoringEntry = null;
 
     window.openVibelyDisplayedURL = function () {
         return pending?.cached ? new URL(activeURL, location.href).href : location.href;
@@ -65,6 +66,19 @@
         }
         return null;
     };
+    // Called by the cached shell before its normal thread initialization scripts.
+    // Restore strings directly into DOM properties/attributes, never through HTML.
+    window.restoreCachedThreadSources = function (root) {
+        if (!restoringEntry) return;
+        root.querySelectorAll('[data-cached-thread-source]').forEach(node => {
+            const source = restoringEntry.sources[Number(node.getAttribute('data-cached-thread-source'))];
+            if (!source) return;
+            if (source.kind === 'text') node.textContent = source.text;
+            else node.setAttribute('data-raw-content', source.text);
+            node.removeAttribute('data-cached-thread-source');
+        });
+        root.querySelector('[data-cached-thread-bootstrap]')?.remove();
+    };
     function save(main) {
         const id = key(activeURL);
         const thread = transcript(main);
@@ -97,22 +111,46 @@
         });
         // Never replay stale preserve instructions across two different threads.
         clone.querySelectorAll('[hx-preserve]').forEach(el => el.removeAttribute('hx-preserve'));
-        const html = clone.innerHTML;
         const retained = new Set(Array.from(clone.querySelectorAll('[data-execution-pair]'), pair => pair.getAttribute('data-exec-id')));
         const virtual = Array.from(main.querySelectorAll('[data-execution-pair]'))
             .filter(pair => retained.has(pair.getAttribute('data-exec-id')))
             .flatMap(pair => window.captureChatVirtualData?.(pair) || []);
-        // Budget source models along with serialized HTML. Measurements add only
-        // a few numbers per row; model strings are conservatively counted again.
-        let bytes = html.length * 2;
+        const sources = [];
+        clone.querySelectorAll('[data-execution-pair] [data-raw-content], [data-execution-pair] .chat-bubble-user-msg .whitespace-pre-wrap').forEach(node => {
+            // A live response can contain raw-content attributes on its stable
+            // sections. The outer source already owns the complete response.
+            if (!clone.contains(node) || node.parentElement.closest('[data-raw-content]')) return;
+            const kind = node.hasAttribute('data-raw-content') ? 'output' : 'text';
+            sources.push({kind, text: kind === 'output' ? node.getAttribute('data-raw-content') : node.textContent});
+            node.replaceChildren();
+            node.removeAttribute('data-raw-content');
+            node.removeAttribute('data-rendered-revision');
+            node.removeAttribute('data-chat-virtual-owner');
+            node.setAttribute('data-cached-thread-source', String(sources.length - 1));
+        });
+        if (sources.length) {
+            const bootstrap = document.createElement('script');
+            bootstrap.setAttribute('data-cached-thread-bootstrap', '');
+            bootstrap.textContent = 'window.restoreCachedThreadSources(document.currentScript.parentElement);';
+            transcript(clone).prepend(bootstrap);
+        }
+        const html = clone.innerHTML;
+        // Count each distinct retained string once. Sources and parsed models can
+        // share strings; rendered message HTML is no longer retained at all.
+        const strings = new Set([html]);
+        sources.forEach(source => strings.add(source.text));
+        let overhead = sources.length * 128;
         virtual.forEach(data => {
-            bytes += (data.source.length + data.normalized.length) * 2;
+            strings.add(data.source); strings.add(data.normalized);
             data.models.forEach(model => model.segments.forEach(seg => {
-                bytes += ((seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length) * 2 + 128;
+                strings.add(seg.content || ''); strings.add(seg.resultOutput || ''); strings.add(seg.secondary || '');
+                overhead += 128;
             }));
         });
+        let bytes = overhead;
+        strings.forEach(text => { bytes += text.length * 2; });
         entries.delete(id);
-        if (bytes <= maxBytes) entries.set(id, { html: html, virtual: virtual, bytes: bytes, time: Date.now() });
+        if (bytes <= maxBytes) entries.set(id, { html: html, sources: sources, virtual: virtual, bytes: bytes, time: Date.now() });
         forgetExpired();
     }
     function releaseHistorySnapshot() {
@@ -173,7 +211,12 @@
         activeURL = url;
         entries.delete(id);
         entries.set(id, entry);
-        htmx.swap(main, entry.html, { swapStyle: 'innerHTML', settleDelay: 0 }, { eventInfo: preview });
+        restoringEntry = entry;
+        try {
+            htmx.swap(main, entry.html, { swapStyle: 'innerHTML', settleDelay: 0 }, { eventInfo: preview });
+        } finally {
+            restoringEntry = null;
+        }
     };
 
     document.addEventListener('htmx:beforeRequest', function (event) {

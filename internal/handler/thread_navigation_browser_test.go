@@ -103,6 +103,15 @@ window.addEventListener('DOMContentLoaded',function(){
  const originalLink=window.linkStreamingToolResults;
  window.linkStreamingToolResults=function(...args){parsedSources++;return originalLink.apply(this,args)};
  const view=()=>document.getElementById('task-thread-view');
+ let cachedShellError='';
+ document.addEventListener('htmx:beforeSwap',event=>{
+   if(!event.detail._ovCachedPreview)return;
+   const shell=document.createElement('template');shell.innerHTML=event.detail.serverResponse;
+   if(!shell.content.querySelector('[data-execution-pair]'))return;
+   if(shell.content.querySelector('[data-execution-pair] [data-raw-content], [data-execution-pair] .stream-tool, [data-execution-pair] .chat-markdown'))cachedShellError='cached shell contains transcript output HTML';
+   if(!shell.content.querySelector('[data-cached-thread-source]'))cachedShellError='cached shell has no structured source references';
+ },true);
+
  const toggle=()=>document.querySelector('.stream-tool-output-toggle');
  async function checkToggle(){
    await until(()=>toggle() && toggle().isConnected,'tool hydration');
@@ -115,6 +124,8 @@ window.addEventListener('DOMContentLoaded',function(){
    await until(()=>view() && toggle(),'initial lazy thread');
    await checkToggle();
    assert(document.querySelectorAll('.stream-tool').length<40,'initial task page rendered offscreen tools');
+   await window.materializeVirtualChatRows(view(),{renderLazy:false});
+   const originalPrompt=document.querySelector('.chat-bubble-user-msg').textContent;
    await openVibelyNavigate(%q);
    await until(()=>view()?.dataset.taskId===%q,'other thread');
    await fetch('/advance');
@@ -126,6 +137,9 @@ window.addEventListener('DOMContentLoaded',function(){
      await until(()=>view()?.dataset.taskId===%q,'cached preview');
      assert(!done,'preview waited for network');
      await checkToggle();
+     assert(!cachedShellError,cachedShellError);
+     await window.materializeVirtualChatRows(view(),{renderLazy:false});
+     assert(document.querySelector('.chat-bubble-user-msg').textContent===originalPrompt,'cached user message missing');
      assert(parsedSources===beforeWarmParses,'cached preview reparsed the execution');
      assert(document.querySelectorAll('.stream-tool').length<40,'cached preview rendered offscreen tools');
      const form=document.getElementById('task-thread-form');
