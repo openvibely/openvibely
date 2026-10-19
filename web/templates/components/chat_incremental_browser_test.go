@@ -447,3 +447,57 @@ func TestBrowserFunctional_VirtualRowsAfterPanelResize(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_TranscriptHydrationRevealsTogether(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');
+ messages.setAttribute('data-transcript-hydrating','true');
+ const pair=document.getElementById('pair'); pair.dataset.execStatus='completed';
+ pair.replaceChildren();
+ for(let i=0;i<3;i++){
+   const bubble=document.createElement('div'); bubble.className='chat-stream-content';
+   bubble.dataset.rawContent='Completed message '+i; bubble.dataset.rawRevision='revision-'+i;
+   pair.appendChild(bubble);
+ }
+ const image=document.createElement('img'); image.dataset.chatAttachmentImage='true';
+ Object.defineProperty(image,'complete',{value:false}); image.decode=()=>Promise.resolve();
+ messages.appendChild(image);
+ const render=window.renderStreamingContent, gates=[];
+ window.renderStreamingContent=async function(...args){
+   await new Promise(resolve=>gates.push(resolve));
+   return render(...args);
+ };
+ async function gate(index){
+   for(let i=0;i<200 && !gates[index];i++) await pause(10);
+   assert(gates[index],'render queue did not reach message '+index);
+ }
+ const hydration=cleanAssistantMessages(messages);
+ let settled=false;
+ const restoring=restoreChatTranscriptScroll({messages,renderPromise:hydration,waitForImages:true}).then(()=>{settled=true});
+ for(let i=0;i<3;i++){
+   await gate(i);
+   assert(getComputedStyle(messages).visibility==='hidden','history appeared one bubble at a time');
+   gates[i]();
+ }
+ await hydration; await paint();
+ assert(getComputedStyle(messages).visibility==='visible','rendered history was not revealed');
+ assert(messages.querySelectorAll('.chat-markdown').length===3,'reveal omitted completed bubbles');
+ assert(!settled,'fixture did not delay attachment loading');
+ image.dispatchEvent(new Event('load'));
+ await restoring;
+ // Cached markup must remain visible while controls are rehydrated, without
+ // clearing or revealing each bubble separately again.
+ const cached=messages.cloneNode(true); messages.replaceWith(cached);
+ const cachedHydration=cleanAssistantMessages(cached);
+ const cachedRestore=restoreChatTranscriptScroll({messages:cached,renderPromise:cachedHydration});
+ for(let i=3;i<6;i++){
+   await gate(i);
+   assert(getComputedStyle(cached).visibility==='visible','cached history disappeared during hydration');
+   assert(cached.querySelectorAll('.chat-markdown').length===3,'cached bubbles disappeared during hydration');
+   gates[i]();
+ }
+ await cachedRestore;
+ window.renderStreamingContent=render;
+ return {};
+ `)
+}

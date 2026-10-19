@@ -3882,16 +3882,23 @@ templ ChatAutoScrollScript() {
 				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
 				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
 				if (tracker) tracker.userScrolledUp = !pinned;
-				// Show available content immediately. The layout observer keeps a pinned
-				// transcript at the bottom as markdown, fonts and images finish loading.
+				// Keep an already-rendered cached transcript visible. Cold history is
+				// revealed as one batch after rendering, before images or fonts settle.
+				// Visibility is controlled by a data attribute, not an inline style:
+				// HTMX's delayed style settling must not hide it again after this reveal.
 				if (pinned) messages.scrollTop = messages.scrollHeight;
 				else if (state) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-				messages.style.visibility = '';
-				messages.removeAttribute('data-transcript-hydrating');
 				window.observeChatTranscriptLayout({
 					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
 				});
-				Promise.resolve(options.renderPromise).catch(function() {}).then(function() {
+				var rendered = Promise.resolve(options.renderPromise).catch(function() { return false; }).then(function() {
+					if (!messages.isConnected) return;
+					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+					if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
+					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+					messages.style.visibility = '';
+					messages.removeAttribute('data-transcript-hydrating');
 					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
 				});
 
@@ -3943,7 +3950,7 @@ templ ChatAutoScrollScript() {
 						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
 					});
 				}
-				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
+				return rendered.then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
 					if (!messages.isConnected) return false;
 					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
 					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;

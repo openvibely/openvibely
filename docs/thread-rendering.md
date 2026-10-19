@@ -12,7 +12,7 @@ While a preview is visible, an inert template retains the outgoing history eleme
 
 Focused rows and active media stay mounted. Selection, native find/select-all and printing materialize rows; Escape resumes windowing after find. History serialization, composer history, bubble navigation, full rerenders and viewport resizing materialize rows as needed. Transcript width changes, including docking or resizing the inspector, remeasure retained rows before windowing them again. Detached transcripts release their observers and row references.
 
-Available transcript content is revealed without waiting for fonts or attachment images. The existing layout observer follows late growth only while the user is pinned to the bottom. Deferred image-scroll callbacks recheck that the original transcript is still mounted and that the reader still wants to follow output.
+Cold transcript history is revealed together after its initial message rendering, without waiting for fonts or attachment images. Cached rendered content stays visible during hydration. Visibility uses the `data-transcript-hydrating` attribute rather than an inline style, so HTMX's delayed style settling cannot hide a completed transcript again. The existing layout observer follows late growth only while the user is pinned to the bottom. Deferred image-scroll callbacks recheck that the original transcript is still mounted and that the reader still wants to follow output.
 
 ## Limits
 

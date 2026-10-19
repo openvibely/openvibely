@@ -93,6 +93,7 @@ window.addEventListener('DOMContentLoaded',function(){
  async function checkToggle(){
    await until(()=>toggle() && toggle().isConnected,'tool hydration');
    await until(()=>document.querySelector('.chat-stream-content')._renderedRevision,'render revision');
+   assert(getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','rendered transcript is hidden');
    const button=toggle(), expanded=button.getAttribute('aria-expanded');
    button.click(); assert(button.getAttribute('aria-expanded')!==expanded,'tool toggle lost its handler');
  }

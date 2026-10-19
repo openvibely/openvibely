@@ -1037,6 +1037,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					max-width: none;
 					padding-left: 16px;
 				}
+				/* Data attributes are not replayed by HTMX's delayed style settling. */
+				[data-transcript-hydrating="true"] { visibility: hidden; }
 				.chat-bubble-user-msg,
 				.chat-bubble-assistant-msg {
 					color: hsl(var(--bc));
