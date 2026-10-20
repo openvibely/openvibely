@@ -288,7 +288,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	if !strings.Contains(bubbleSection, "function utf8ByteLength(value)") ||
 		!strings.Contains(bubbleSection, "var streamOffset = utf8ByteLength(textBuffer);") ||
-		!strings.Contains(bubbleSection, "window.openVibelyLive.execution(execId, streamOffset)") {
+		!strings.Contains(bubbleSection, "window.openVibelyLive.execution(execId, streamOffset, projectId)") {
 		t.Fatal("live-created assistant stream must reconnect with the current UTF-8 byte offset")
 	}
 	if !strings.Contains(bubbleSection, "progressDiv.id = 'mixture-progress-' + execId;") || !strings.Contains(bubbleSection, "innerDiv.appendChild(progressDiv);") {

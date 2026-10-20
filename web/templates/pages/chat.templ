@@ -1007,7 +1007,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var streamOffset = utf8ByteLength(textBuffer);
 							contentDiv._sseConnected = true;
 							contentDiv.setAttribute('data-initial-byte-length', String(streamOffset));
-							eventSource = window.openVibelyLive.execution(execId, streamOffset);
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, projectId);
 							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 							if (window.registerChatStreamEventSource) {
 								window.registerChatStreamEventSource(execId, eventSource);
