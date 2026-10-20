@@ -975,9 +975,9 @@ const CatalogJSONRaw = `[
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-kimbie-dark/themes/kimbie-dark-color-theme.json",
     "semantic": {
       "automationEdge": "#957B5C",
-      "automationNodeBorder": "#B39471",
+      "automationNodeBorder": "#6F5A41",
       "bg": "#221A0F",
-      "border": "#B39471",
+      "border": "#423524",
       "borderStrong": "#A57A4C",
       "buttonBg": "#6E583B",
       "buttonFg": "#FFFFFF",
@@ -1001,7 +1001,7 @@ const CatalogJSONRaw = `[
       "info": "#3794FF",
       "infoForeground": "#000000",
       "inputBg": "#51412C",
-      "inputBorder": "#B39471",
+      "inputBorder": "#423524",
       "kanbanColumnBg": "#362712",
       "link": "#92826C",
       "primary": "#6E583B",
@@ -1016,7 +1016,7 @@ const CatalogJSONRaw = `[
       "textMuted": "#957B5C",
       "warning": "#CCA700",
       "warningForeground": "#000000",
-      "yamlIndentRail": "#B39471"
+      "yamlIndentRail": "#453827"
     },
     "syntax": {
       "background": "#221A0F",
@@ -1044,9 +1044,9 @@ const CatalogJSONRaw = `[
     },
     "css": {
       "--ov-automation-edge": "#957B5C",
-      "--ov-automation-node-border": "#B39471",
+      "--ov-automation-node-border": "#6F5A41",
       "--ov-bg": "#221A0F",
-      "--ov-border": "#B39471",
+      "--ov-border": "#423524",
       "--ov-border-strong": "#A57A4C",
       "--ov-button-bg": "#6E583B",
       "--ov-button-fg": "#FFFFFF",
@@ -1070,7 +1070,7 @@ const CatalogJSONRaw = `[
       "--ov-info": "#3794FF",
       "--ov-info-foreground": "#000000",
       "--ov-input-bg": "#51412C",
-      "--ov-input-border": "#B39471",
+      "--ov-input-border": "#423524",
       "--ov-kanban-column-bg": "#362712",
       "--ov-link": "#92826C",
       "--ov-primary": "#6E583B",
@@ -1096,7 +1096,7 @@ const CatalogJSONRaw = `[
       "--ov-text-muted": "#957B5C",
       "--ov-warning": "#CCA700",
       "--ov-warning-foreground": "#000000",
-      "--ov-yaml-indent-rail": "#B39471"
+      "--ov-yaml-indent-rail": "#453827"
     },
     "searchText": "Kimbie Dark dark dark VS Code theme-kimbie-dark theme-kimbie-dark"
   },
@@ -1779,9 +1779,9 @@ const CatalogJSONRaw = `[
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-monokai-dimmed/themes/dimmed-monokai-color-theme.json",
     "semantic": {
       "automationEdge": "#8B8D8B",
-      "automationNodeBorder": "#A7A9A8",
+      "automationNodeBorder": "#6C6D6C",
       "bg": "#1E1E1E",
-      "border": "#A7A9A8",
+      "border": "#3C3D3C",
       "borderStrong": "#3655B5",
       "buttonBg": "#565656",
       "buttonFg": "#FFFFFF",
@@ -1805,7 +1805,7 @@ const CatalogJSONRaw = `[
       "info": "#3794FF",
       "infoForeground": "#000000",
       "inputBg": "#525252",
-      "inputBorder": "#A7A9A8",
+      "inputBorder": "#3C3D3C",
       "kanbanColumnBg": "#151515",
       "link": "#858585",
       "primary": "#565656",
@@ -1820,7 +1820,7 @@ const CatalogJSONRaw = `[
       "textMuted": "#8B8D8B",
       "warning": "#CCA700",
       "warningForeground": "#000000",
-      "yamlIndentRail": "#A7A9A8"
+      "yamlIndentRail": "#3C3D3C"
     },
     "syntax": {
       "background": "#1E1E1E",
@@ -1848,9 +1848,9 @@ const CatalogJSONRaw = `[
     },
     "css": {
       "--ov-automation-edge": "#8B8D8B",
-      "--ov-automation-node-border": "#A7A9A8",
+      "--ov-automation-node-border": "#6C6D6C",
       "--ov-bg": "#1E1E1E",
-      "--ov-border": "#A7A9A8",
+      "--ov-border": "#3C3D3C",
       "--ov-border-strong": "#3655B5",
       "--ov-button-bg": "#565656",
       "--ov-button-fg": "#FFFFFF",
@@ -1874,7 +1874,7 @@ const CatalogJSONRaw = `[
       "--ov-info": "#3794FF",
       "--ov-info-foreground": "#000000",
       "--ov-input-bg": "#525252",
-      "--ov-input-border": "#A7A9A8",
+      "--ov-input-border": "#3C3D3C",
       "--ov-kanban-column-bg": "#151515",
       "--ov-link": "#858585",
       "--ov-primary": "#565656",
@@ -1900,7 +1900,7 @@ const CatalogJSONRaw = `[
       "--ov-text-muted": "#8B8D8B",
       "--ov-warning": "#CCA700",
       "--ov-warning-foreground": "#000000",
-      "--ov-yaml-indent-rail": "#A7A9A8"
+      "--ov-yaml-indent-rail": "#3C3D3C"
     },
     "searchText": "Monokai Dimmed dark dark VS Code theme-monokai-dimmed theme-monokai-dimmed"
   },
@@ -1913,9 +1913,9 @@ const CatalogJSONRaw = `[
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-quietlight/themes/quietlight-color-theme.json",
     "semantic": {
       "automationEdge": "#6D705B",
-      "automationNodeBorder": "#464646",
+      "automationNodeBorder": "#CACACA",
       "bg": "#F5F5F5",
-      "border": "#464646",
+      "border": "#CECECE",
       "borderStrong": "#9769DC",
       "buttonBg": "#705697",
       "buttonFg": "#FFFFFF",
@@ -1939,7 +1939,7 @@ const CatalogJSONRaw = `[
       "info": "#0078D4",
       "infoForeground": "#FFFFFF",
       "inputBg": "#F5F5F5",
-      "inputBorder": "#464646",
+      "inputBorder": "#CECECE",
       "kanbanColumnBg": "#EBEBEB",
       "link": "#705697",
       "primary": "#705697",
@@ -1982,9 +1982,9 @@ const CatalogJSONRaw = `[
     },
     "css": {
       "--ov-automation-edge": "#6D705B",
-      "--ov-automation-node-border": "#464646",
+      "--ov-automation-node-border": "#CACACA",
       "--ov-bg": "#F5F5F5",
-      "--ov-border": "#464646",
+      "--ov-border": "#CECECE",
       "--ov-border-strong": "#9769DC",
       "--ov-button-bg": "#705697",
       "--ov-button-fg": "#FFFFFF",
@@ -2008,7 +2008,7 @@ const CatalogJSONRaw = `[
       "--ov-info": "#0078D4",
       "--ov-info-foreground": "#FFFFFF",
       "--ov-input-bg": "#F5F5F5",
-      "--ov-input-border": "#464646",
+      "--ov-input-border": "#CECECE",
       "--ov-kanban-column-bg": "#EBEBEB",
       "--ov-link": "#705697",
       "--ov-primary": "#705697",
@@ -2047,9 +2047,9 @@ const CatalogJSONRaw = `[
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-red/themes/Red-color-theme.json",
     "semantic": {
       "automationEdge": "#FF7777",
-      "automationNodeBorder": "#D6CBCB",
+      "automationNodeBorder": "#742B2B",
       "bg": "#390000",
-      "border": "#D6CBCB",
+      "border": "#5B2D2D",
       "borderStrong": "#FF6666AA",
       "buttonBg": "#883333",
       "buttonFg": "#FFFFFF",
@@ -2073,7 +2073,7 @@ const CatalogJSONRaw = `[
       "info": "#3794FF",
       "infoForeground": "#000000",
       "inputBg": "#580000",
-      "inputBorder": "#D6CBCB",
+      "inputBorder": "#5B2D2D",
       "kanbanColumnBg": "#250000",
       "link": "#AC7070",
       "primary": "#883333",
@@ -2088,7 +2088,7 @@ const CatalogJSONRaw = `[
       "textMuted": "#B5A1A1",
       "warning": "#CCA700",
       "warningForeground": "#000000",
-      "yamlIndentRail": "#D6CBCB"
+      "yamlIndentRail": "#5B2D2D"
     },
     "syntax": {
       "background": "#390000",
@@ -2116,9 +2116,9 @@ const CatalogJSONRaw = `[
     },
     "css": {
       "--ov-automation-edge": "#FF7777",
-      "--ov-automation-node-border": "#D6CBCB",
+      "--ov-automation-node-border": "#742B2B",
       "--ov-bg": "#390000",
-      "--ov-border": "#D6CBCB",
+      "--ov-border": "#5B2D2D",
       "--ov-border-strong": "#FF6666AA",
       "--ov-button-bg": "#883333",
       "--ov-button-fg": "#FFFFFF",
@@ -2142,7 +2142,7 @@ const CatalogJSONRaw = `[
       "--ov-info": "#3794FF",
       "--ov-info-foreground": "#000000",
       "--ov-input-bg": "#580000",
-      "--ov-input-border": "#D6CBCB",
+      "--ov-input-border": "#5B2D2D",
       "--ov-kanban-column-bg": "#250000",
       "--ov-link": "#AC7070",
       "--ov-primary": "#883333",
@@ -2168,7 +2168,7 @@ const CatalogJSONRaw = `[
       "--ov-text-muted": "#B5A1A1",
       "--ov-warning": "#CCA700",
       "--ov-warning-foreground": "#000000",
-      "--ov-yaml-indent-rail": "#D6CBCB"
+      "--ov-yaml-indent-rail": "#5B2D2D"
     },
     "searchText": "Red dark dark VS Code theme-red theme-red"
   },
@@ -2449,9 +2449,9 @@ const CatalogJSONRaw = `[
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-tomorrow-night-blue/themes/tomorrow-night-blue-color-theme.json",
     "semantic": {
       "automationEdge": "#A6B2C2",
-      "automationNodeBorder": "#D1D8E0",
+      "automationNodeBorder": "#2E4B70",
       "bg": "#002451",
-      "border": "#D1D8E0",
+      "border": "#2E4B70",
       "borderStrong": "#BBDAFF",
       "buttonBg": "#BBDAFF",
       "buttonFg": "#000000",
@@ -2475,7 +2475,7 @@ const CatalogJSONRaw = `[
       "info": "#3794FF",
       "infoForeground": "#000000",
       "inputBg": "#001733",
-      "inputBorder": "#D1D8E0",
+      "inputBorder": "#2E4B70",
       "kanbanColumnBg": "#001126",
       "link": "#BBDAFF",
       "primary": "#BBDAFF",
@@ -2490,7 +2490,7 @@ const CatalogJSONRaw = `[
       "textMuted": "#A6B2C2",
       "warning": "#CCA700",
       "warningForeground": "#000000",
-      "yamlIndentRail": "#D1D8E0"
+      "yamlIndentRail": "#2E4B70"
     },
     "syntax": {
       "background": "#002451",
@@ -2518,9 +2518,9 @@ const CatalogJSONRaw = `[
     },
     "css": {
       "--ov-automation-edge": "#A6B2C2",
-      "--ov-automation-node-border": "#D1D8E0",
+      "--ov-automation-node-border": "#2E4B70",
       "--ov-bg": "#002451",
-      "--ov-border": "#D1D8E0",
+      "--ov-border": "#2E4B70",
       "--ov-border-strong": "#BBDAFF",
       "--ov-button-bg": "#BBDAFF",
       "--ov-button-fg": "#000000",
@@ -2544,7 +2544,7 @@ const CatalogJSONRaw = `[
       "--ov-info": "#3794FF",
       "--ov-info-foreground": "#000000",
       "--ov-input-bg": "#001733",
-      "--ov-input-border": "#D1D8E0",
+      "--ov-input-border": "#2E4B70",
       "--ov-kanban-column-bg": "#001126",
       "--ov-link": "#BBDAFF",
       "--ov-primary": "#BBDAFF",
@@ -2570,7 +2570,7 @@ const CatalogJSONRaw = `[
       "--ov-text-muted": "#A6B2C2",
       "--ov-warning": "#CCA700",
       "--ov-warning-foreground": "#000000",
-      "--ov-yaml-indent-rail": "#D1D8E0"
+      "--ov-yaml-indent-rail": "#2E4B70"
     },
     "searchText": "Tomorrow Night Blue dark dark VS Code theme-tomorrow-night-blue theme-tomorrow-night-blue"
   }
