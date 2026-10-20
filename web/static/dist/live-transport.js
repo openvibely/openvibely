@@ -5,7 +5,8 @@
     if (window.openVibelyLive) return;
     var socket = null, retry = null, attempt = 0, nextID = 0, connected = false, connecting = false;
     var subscriptions = new Map();
-    var encoder = new TextEncoder(), decoder = new TextDecoder();
+    // U+FEFF is output content, including at a replay/frame boundary.
+    var encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {ignoreBOM: true});
     function send(command) {
         if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(command));
     }
@@ -22,6 +23,29 @@
         if (retry) return;
         retry = setTimeout(function () { retry = null; connect(); }, Math.min(15000, 250 * Math.pow(2, attempt++)) + Math.random() * 250);
     }
+    async function nativeTicket() {
+        var controller = new AbortController();
+        var deadline;
+        var timeout = new Promise(function (_, reject) {
+            deadline = setTimeout(function () {
+                controller.abort();
+                reject(Error('Native live ticket timed out'));
+            }, 10000);
+        });
+        try {
+            // Bound headers and body together. The race also releases connection
+            // ownership if a native proxy fails to settle the aborted request.
+            return await Promise.race([timeout, (async function () {
+                var response = await fetch('/events/native-ticket', {
+                    method: 'POST', headers: {'X-OpenVibely-Live': '1'}, signal: controller.signal
+                });
+                if (!response.ok) throw Error('Native live ticket unavailable');
+                return await response.json();
+            })()]);
+        } finally {
+            clearTimeout(deadline);
+        }
+    }
     async function connect() {
         if (socket || retry || connecting) return;
         connecting = true;
@@ -30,9 +54,7 @@
         var ws;
         try {
             if (document.documentElement.getAttribute('data-openvibely-native-window') === 'true') {
-                var response = await fetch('/events/native-ticket', {method: 'POST', headers: {'X-OpenVibely-Live': '1'}});
-                if (!response.ok) throw Error('Native live ticket unavailable');
-                var ticket = await response.json();
+                var ticket = await nativeTicket();
                 url = ticket.url;
                 protocols = ['openvibely-live', 'ticket.' + ticket.ticket];
             }

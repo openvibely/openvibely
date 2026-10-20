@@ -67,8 +67,11 @@ required. The endpoint returns a loopback WebSocket URL and a random, one-use,
 60-second ticket. The ticket travels in a WebSocket subprotocol, not a URL or
 cookie exposed to JavaScript. Consumption is restricted to loopback peers and
 Wails origins, and restores the original HTTP session cookie server-side for
-normal authentication and subsequent session-expiry checks. Tickets never grant
-additional project access. The ticket store is bounded to 256 outstanding entries.
+normal authentication and subsequent session-expiry checks. Ticket requests have
+a ten-second deadline covering both headers and body; timeouts abort the request
+and retry without allowing late responses to open another socket. Tickets never
+grant additional project access. The ticket store is bounded to 256 outstanding
+entries.
 
 There are at most 64 subscriptions per connection, a 4 KiB command limit, and a
 128-frame outbound queue. Existing broadcaster/hub subscriber limits (50) remain;
