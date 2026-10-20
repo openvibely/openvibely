@@ -75,10 +75,38 @@ and retry without allowing late responses to open another socket. Tickets never
 grant additional project access. The ticket store is bounded to 256 outstanding
 entries.
 
-There are at most 64 subscriptions per connection, a 4 KiB command limit, and a
-128-frame outbound queue. Existing broadcaster/hub subscriber limits (50) remain;
-active socket count is also capped at 50 per handler. The writer and queue have
-five-second deadlines; stalled clients disconnect and recover through replay.
+Admission budgets are configurable at startup in both server and desktop modes:
+
+| Environment variable | Default | Scope |
+| --- | ---: | --- |
+| `OPENVIBELY_LIVE_MAX_CONNECTIONS` | 500 | WebSockets per backend instance |
+| `OPENVIBELY_LIVE_MAX_SUBSCRIPTIONS_PER_CONNECTION` | 200 | Live + execution subscriptions on one connection |
+| `OPENVIBELY_LIVE_MAX_PROJECT_SUBSCRIPTIONS` | 5,000 | Live subscriptions across all projects and connections |
+| `OPENVIBELY_LIVE_MAX_EXECUTION_SUBSCRIPTIONS` | 25,000 | Execution-output subscriptions across all executions and connections |
+
+Values must be positive integers; unset, malformed, nonpositive, or overflowing
+values fall back to the defaults. Changes require restarting the backend. Built-in
+project tabs share the window's WebSocket; separate browser tabs/native windows
+have separate connections. An execution-output subscription counts once per
+watcher, even when several watchers receive the same run. These budgets do not
+limit the number of agents that can run.
+
+Each live subscription counts once, although it attaches to task, Chat, and
+optionally file broadcasters. Their individual budgets match the live budget,
+so the former 50-subscriber ceiling no longer applies. The execution hub uses its
+own budget. Connections above the cap receive HTTP 503. Subscriptions above the
+per-connection cap receive an error; exhausted shared live/output budgets send a
+retry frame. Unsubscribe, completion, cancellation, and disconnect release the
+corresponding resources.
+
+The defaults allow 200 windows with 100 output subscriptions each on paper,
+with headroom. They are resource safeguards, **not load-tested capacity claims**.
+This change does not add background subscriptions or output caching for unviewed
+threads, and does not change execution concurrency limits.
+
+There is a 4 KiB command limit and a 128-frame outbound queue per connection.
+The writer and queue have five-second deadlines; stalled clients disconnect and
+recover through replay.
 WebSocket pings run every 15 seconds with a ten-second timeout. Closing a window
 cancels its workers and releases broadcaster/hub subscriptions.
 
