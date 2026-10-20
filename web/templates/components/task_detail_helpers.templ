@@ -1027,6 +1027,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById('task-thread-messages');
+							if (status !== 'failed' && status !== 'cancelled') return;
 							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 							var wrap = document.createElement('div');
 							wrap.id = 'task-thread-terminal-status';
