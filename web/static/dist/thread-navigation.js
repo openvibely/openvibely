@@ -133,6 +133,12 @@
             node.setAttribute('data-cached-thread-source', String(sources.length - 1));
         });
         if (sources.length) {
+            // This shell no longer contains rendered messages. Reveal it only
+            // after the visible rows and scroll position are ready, just like a
+            // cold transcript; otherwise readers see its height grow in stages.
+            clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
+                messages.setAttribute('data-transcript-hydrating', 'true');
+            });
             const bootstrap = document.createElement('script');
             bootstrap.setAttribute('data-cached-thread-bootstrap', '');
             bootstrap.textContent = 'window.restoreCachedThreadSources(document.currentScript.parentElement);';
