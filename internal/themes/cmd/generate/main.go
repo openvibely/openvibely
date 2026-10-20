@@ -383,7 +383,11 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["surfaceRaised"] = fallback(pick("dropdown.background", "menu.background", "quickInput.background"), m["surface"])
 	m["text"] = fallback(pick("foreground", "editor.foreground"), fb["text"])
 	m["textMuted"] = fallback(pick("descriptionForeground", "disabledForeground", "input.placeholderForeground"), mix(m["text"], m["bg"], .35))
-	m["border"] = fallback(pick("contrastBorder", "widget.border", "panel.border", "sideBar.border"), mix(m["text"], m["bg"], .18))
+	borderMix := .18
+	if strings.HasPrefix(kind, "high-contrast") {
+		borderMix = .82
+	}
+	m["border"] = fallback(pick("contrastBorder", "widget.border", "panel.border", "sideBar.border"), mix(m["bg"], m["text"], borderMix))
 	m["borderStrong"] = fallback(pick("contrastActiveBorder", "focusBorder"), mix(m["text"], m["bg"], .35))
 	m["primary"] = fallback(pick("button.background", "textLink.foreground", "focusBorder", "activityBarBadge.background"), fb["primary"])
 	m["primaryForeground"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(composite(m["primary"], m["contentBg"])))
