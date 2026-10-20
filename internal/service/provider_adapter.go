@@ -1146,7 +1146,23 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
 	if !compatible {
 		if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
-			return req
+			if checkpoint.Strategy != "anthropic_context_management" {
+				return req
+			}
+			history, err := portableAnthropicCheckpoint(checkpoint.ProviderStateJSON)
+			if err != nil {
+				applog.Infof("[agent-svc] convert Anthropic checkpoint: %v", err)
+				return req
+			}
+			checkpoint.History = normalizeProviderReplay(req.Agent.Provider, history, false)
+			checkpoint.ProviderStateJSON = ""
+			checkpoint.ProviderSessionStateJSON = ""
+			checkpoint.Strategy = "provider_recovery"
+			checkpoint.ModelConfigID = req.Agent.ID
+			checkpoint.CompatibilityKey = providerCompatibilityKey(req.Agent)
+			if err := s.execRepo.UpsertChatCompactionCheckpoint(req.Ctx, *checkpoint); err != nil {
+				applog.Infof("[agent-svc] persist converted Anthropic checkpoint: %v", err)
+			}
 		}
 		checkpoint.ProviderSessionStateJSON = ""
 	}

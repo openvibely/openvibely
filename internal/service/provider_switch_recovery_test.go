@@ -265,3 +265,30 @@ func TestProviderSwitchReusesRecoveryCheckpoint(t *testing.T) {
 		})
 	}
 }
+
+func TestPortableAnthropicCheckpoint(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"compaction","content":"OLDER_FACT","encrypted_content":"PRIVATE_STATE"}`,
+		`{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"OLDER_FACT","encrypted_content":"PRIVATE_STATE"},{"type":"thinking","thinking":"PRIVATE_REASONING","signature":"PRIVATE_SIGNATURE"},{"type":"text","text":"AFTER_SUMMARY"},{"type":"tool_use","id":"read","name":"read_file","input":{"file_path":"a"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"read","content":"TOOL_FACT"}]},{"role":"assistant","content":[{"type":"text","text":"FINAL_FACT"},{"type":"compaction","content":null}]}]}`,
+	} {
+		history, err := portableAnthropicCheckpoint(raw)
+		require.NoError(t, err)
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+			converted := normalizeProviderReplay(provider, history, false)
+			encoded, err := json.Marshal(converted[0].ReplayMessages)
+			require.NoError(t, err)
+			require.Contains(t, string(encoded), "OLDER_FACT")
+			require.NotContains(t, string(encoded), "PRIVATE_")
+			if strings.Contains(raw, "TOOL_FACT") {
+				require.Contains(t, string(encoded), "TOOL_FACT")
+				require.Contains(t, string(encoded), "FINAL_FACT")
+				require.Contains(t, string(encoded), "AFTER_SUMMARY")
+				require.NotContains(t, string(encoded), "aborted")
+			}
+		}
+	}
+	for _, raw := range []string{`[]`, `{"version":1,"messages":[]}`, `{"type":"compaction","content":null}`, `{"version":99,"messages":[]}`} {
+		_, err := portableAnthropicCheckpoint(raw)
+		require.Error(t, err)
+	}
+}
