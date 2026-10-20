@@ -789,34 +789,45 @@ func TestHandler_PersonalityPage_DoesNotRenderFullPromptBodiesInCardAttributes(t
 	h, e, repo, _ := setupCustomPersonalityHandler(t)
 	ctx := context.Background()
 
+	// Both prompts exceed the preview length and share the same visible prefix.
+	// Only the stored body grows; card metadata and previews stay identical.
 	promptPrefix := strings.Repeat("VISIBLE_PREVIEW_TEXT_", 10)
 	promptTail := "FULL_CUSTOM_PROMPT_BODY_MUST_NOT_RENDER_IN_CARD_ATTRIBUTES"
 	longPrompt := promptPrefix + strings.Repeat("x", 32*1024-len(promptPrefix)-len(promptTail)) + promptTail
+	personalities := make([]*models.CustomPersonality, 0, 100)
 	for i := 0; i < 100; i++ {
-		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+		p := &models.CustomPersonality{
 			Name:         "Large Custom Personality " + strconv.Itoa(i),
 			Key:          "large_custom_personality_" + strconv.Itoa(i),
 			Description:  "Large prompt render fixture",
-			SystemPrompt: longPrompt,
-		}))
+			SystemPrompt: promptPrefix,
+		}
+		require.NoError(t, repo.Create(ctx, p))
+		personalities = append(personalities, p)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/personality", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	renderPage := func() string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/personality", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		require.NoError(t, h.handleAppSettings(c))
+		require.Equal(t, http.StatusOK, rec.Code)
+		return rec.Body.String()
+	}
+	shortPromptBody := renderPage()
+	for _, p := range personalities {
+		p.SystemPrompt = longPrompt
+		require.NoError(t, repo.Update(ctx, p.Key, p))
+	}
 
-	err := h.handleAppSettings(c)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, rec.Code)
-
-	body := rec.Body.String()
+	body := renderPage()
 	assert.Contains(t, body, "VISIBLE_PREVIEW_TEXT_")
 	assert.NotContains(t, body, promptTail)
 	assert.NotContains(t, body, "data-personality-prompt=")
-	// The full-page shell includes the compact exact-theme bootstrap catalog in
-	// addition to the personality card projection; keep a small allowance for
-	// that legitimate metadata while retaining the no-full-prompt guard.
-	assert.Less(t, len(body), (512+128)*1024, "personality page should be bounded by card metadata, previews, and compact theme metadata")
+	// Compare identical cards under the same page shell instead of imposing a
+	// whole-page byte limit that changes with unrelated scripts/theme metadata.
+	assert.Equal(t, len(shortPromptBody), len(body), "larger stored prompt bodies must not increase personality page size")
 	assert.Contains(t, body, "fetch(personalityMutationURL('/personality/custom/'")
 }
 
