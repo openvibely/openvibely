@@ -34,6 +34,25 @@ func EstimateHistoryTokens(history []models.Execution) int {
 	return openaiclient.EstimateResponsesInputTokens(HistoryInputItems(history))
 }
 
+// EstimateContinuationTokens follows SendAgentic's input assembly: a complete
+// replay replaces the initial native checkpoint; plain messages append to it.
+// Native items use the same image-aware estimator as replay items.
+func EstimateContinuationTokens(history []models.Execution, nativeJSON string) (historyTokens, nativeTokens int) {
+	var native []any
+	if json.Unmarshal([]byte(nativeJSON), &native) == nil {
+		nativeTokens = openaiclient.EstimateResponsesInputTokens(native)
+	}
+	for _, message := range buildClientHistory(history) {
+		if len(message.ResponsesInputItems) > 0 {
+			nativeTokens = 0
+			historyTokens = openaiclient.EstimateResponsesInputTokens(message.ResponsesInputItems)
+		} else {
+			historyTokens += openaiclient.EstimateResponsesInputTokens([]any{map[string]any{"type": "message", "role": message.Role, "content": message.Content}})
+		}
+	}
+	return historyTokens, nativeTokens
+}
+
 // HistoryInputItems is the canonical replay representation for chat and task
 // recovery requests alike.
 func HistoryInputItems(history []models.Execution) []any {
