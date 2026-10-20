@@ -21,6 +21,14 @@ import (
 // Checking the final scroll position alone misses the empty shell and height jumps
 // readers see during the frames preceding it.
 func TestTaskCachedFirstPaintInChrome(t *testing.T) {
+	testTaskFirstPaint(t, false)
+}
+
+func TestTaskInitiallyHiddenFirstPaintInChrome(t *testing.T) {
+	testTaskFirstPaint(t, true)
+}
+
+func testTaskFirstPaint(t *testing.T, initiallyHidden bool) {
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -52,7 +60,7 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  const assert=(ok,label)=>{if(!ok)throw Error(label)};
  async function until(f,label){for(let i=0;i<500;i++){if(f())return;await wait(10)}throw Error('Timeout: '+label)}
- const taskID=%q,taskURL=%q,otherURL=%q;
+ const taskID=%q,taskURL=%q,otherURL=%q,initiallyHidden=%t;
  // Model asynchronous Markdown/worker scheduling even on a fast test machine.
  let render=window.scheduleChatElementRender;
  const delayed=function(...args){const fn=render;return wait(40).then(()=>fn.apply(this,args))};
@@ -68,6 +76,18 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
   if(!stopped)requestAnimationFrame(sample);
  }
  requestAnimationFrame(sample);
+ if(initiallyHidden){
+  await until(()=>document.querySelector('#task-thread-messages [data-chat-virtual-owner]'),'hidden row data');
+  await wait(120);
+  assert(document.getElementById('task-thread-messages').dataset.transcriptHydrating==='true','hidden viewport was marked ready');
+  frames=[];record=true;
+  document.getElementById('task-workspace-back').click();
+  await until(()=>frames.length>0,'revealed Chat');await wait(150);record=false;
+  assert(frames.every(f=>f.visible),'painted empty rows on revealing Chat: '+JSON.stringify(frames));
+  const first=frames[0];
+  assert(frames.every(f=>Math.abs(f.height-first.height)<=2&&Math.abs(f.top-first.top)<=2),'revealed Chat moved after first paint: '+JSON.stringify(frames));
+  assert(frames.every(f=>Math.abs(f.height-f.top-f.viewport)<=2),'revealed Chat was not pinned at first paint');
+ }
  await until(()=>document.querySelector('#task-thread-messages .chat-markdown')&&document.getElementById('task-thread-messages').dataset.transcriptHydrating!=='true','cold render');
  await wait(150);
  for(let round=0;round<3;round++){
@@ -86,7 +106,7 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
  stopped=true;
  assert(!errors.length,'browser errors: '+errors.join('; '));
  await fetch('/browser-result?status=pass');
-})().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))))});</script>`, task.ID, path, "/tasks/"+other.ID)
+})().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))))});</script>`, task.ID, path+"?tab=chat", "/tasks/"+other.ID, initiallyHidden)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -119,7 +139,11 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path)
+	initialTab := "chat"
+	if initiallyHidden {
+		initialTab = "changes"
+	}
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path+"?tab="+initialTab)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	require.NoError(t, startHandlerBrowserProcess(cmd))

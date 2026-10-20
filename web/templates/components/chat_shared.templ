@@ -3895,13 +3895,18 @@ templ ChatAutoScrollScript() {
 					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
 				});
 				var rendered = Promise.resolve(options.renderPromise).catch(function() { return false; }).then(async function() {
-					if (!messages.isConnected) return;
-					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
-					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
-					if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
-					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-					if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
-					if (!messages.isConnected) return;
+					do {
+						if (!messages.isConnected) return false;
+						if (window.waitForChatTranscriptViewport && !await window.waitForChatTranscriptViewport(messages)) return false;
+						tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+						var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+						if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
+						else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
+						// The reader may switch panels while async Markdown is rendering.
+						// Never mark a hidden, unmeasured viewport ready for first display.
+					} while (messages.isConnected && window.waitForChatTranscriptViewport && !messages.clientHeight);
+					if (!messages.isConnected) return false;
 					messages.style.visibility = '';
 					messages.removeAttribute('data-transcript-hydrating');
 					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
