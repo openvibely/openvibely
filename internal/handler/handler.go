@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -15,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/livelimits"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -63,7 +65,10 @@ type Handler struct {
 	chatInputRequests          *chatInputRequestBroker
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
-	liveSSEWriteObserver       func(int) // test seam invoked after a live SSE event is written
+	nativeLiveTickets          nativeLiveTickets
+	liveSocketCount            atomic.Int64
+	liveSubscriptionCount      atomic.Int64
+	liveLimits                 livelimits.Limits
 	telegramService            *service.TelegramService
 	xService                   *service.XService
 	xServiceMu                 sync.RWMutex
@@ -742,7 +747,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/api/system/update", h.SystemUpdate)
 	e.POST("/api/system/update/apply", h.ApplySystemUpdate)
 	e.POST("/api/system/update/cancel", h.CancelSystemUpdate)
-	e.GET("/api/system/update/events", h.SystemUpdateEvents)
 
 	// Swagger API documentation
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
@@ -1127,9 +1131,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/insights/health-check", h.RunHealthCheck)
 	e.POST("/history/grade-ideas", h.GradeIdeas)
 
-	// Server-Sent Events for real-time updates
-	e.GET("/events/live", h.LiveEventsSSE)
-	e.GET("/events/chat/:exec_id", h.ChatStreamSSE)
+	// Shared browser/native WebSocket transport
+	e.GET("/events/ws", h.LiveWebSocket)
+	e.POST("/events/native-ticket", h.NativeLiveTicket)
 }
 
 // AppIconPNG serves the shared browser icon for server and desktop web views.
@@ -1142,4 +1146,10 @@ func (h *Handler) AppIconPNG(c echo.Context) error {
 func (h *Handler) AppIconICO(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 	return c.Blob(http.StatusOK, "image/x-icon", desktopicons.BrowserICO)
+}
+
+// SetLiveLimits configures admission budgets before serving requests. Broadcaster
+// and execution hub budgets are configured at construction by the server.
+func (h *Handler) SetLiveLimits(limits livelimits.Limits) {
+	h.liveLimits = limits.WithDefaults()
 }

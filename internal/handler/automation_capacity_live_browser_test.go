@@ -88,10 +88,10 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			browserResult := make(chan string, 4)
 			runner := automationLiveBoardBrowserRunner(automationTask.ID, decoy.ID, ordinary.ID, failed.ID, cancelled.ID)
 			e := echo.New()
-			e.GET("/events/live", tc.handler.LiveEventsSSE)
+			e.GET("/events/ws", tc.handler.LiveWebSocket)
 			mux := http.NewServeMux()
 			mux.Handle(static.Prefix, static.Handler())
-			mux.Handle("/events/live", e)
+			mux.Handle("/events/ws", e)
 			mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 				_, _ = w.Write(htmxJS)
@@ -288,7 +288,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	var firstSSEMu sync.Mutex
 	var firstSSECancel context.CancelFunc
 	liveEcho := echo.New()
-	liveEcho.GET("/events/live", func(c echo.Context) error {
+	liveEcho.GET("/events/ws", func(c echo.Context) error {
 		connection := sseConnections.Add(1)
 		if connection == 1 {
 			streamCtx, cancel := context.WithCancel(c.Request().Context())
@@ -297,12 +297,12 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 			firstSSEMu.Unlock()
 			c.SetRequest(c.Request().WithContext(streamCtx))
 		}
-		return tc.handler.LiveEventsSSE(c)
+		return tc.handler.LiveWebSocket(c)
 	})
 
 	mux := http.NewServeMux()
 	mux.Handle(static.Prefix, static.Handler())
-	mux.Handle("/events/live", liveEcho)
+	mux.Handle("/events/ws", liveEcho)
 	mux.HandleFunc("/disconnect-live", func(w http.ResponseWriter, _ *http.Request) {
 		firstSSEMu.Lock()
 		cancel := firstSSECancel
@@ -359,7 +359,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		t.Fatalf("Run now freshness browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 	if got := sseConnections.Load(); got < 2 {
-		t.Fatalf("shared SSE connections = %d, want at least 2 to prove native EventSource reconnection", got)
+		t.Fatalf("shared WebSocket connections = %d, want at least 2 to prove WebSocket reconnection", got)
 	}
 }
 
@@ -399,7 +399,7 @@ func automationRunNowFreshnessBrowserRunner(automationID string) string {
 	      document.getElementById('automation-live').replaceWith(staleDocument.getElementById('automation-live'));
 		      if (!stateNode('failed') || stateNode('running')) throw new Error('failed to restore disconnected stale snapshot');
 		      var disconnectResponse = await fetch('/disconnect-live', {method:'POST'});
-		      if (!disconnectResponse.ok) throw new Error('failed to disconnect production shared SSE stream: ' + disconnectResponse.status);
+		      if (!disconnectResponse.ok) throw new Error('failed to disconnect production shared WebSocket: ' + disconnectResponse.status);
 		      await waitFor(function() { return window._automationRunNowSSEConnections >= 2; }, 'native shared SSE reconnection');
 		      await waitFor(function() { return stateNode('running') && !stateNode('failed'); }, 'authoritative running state after SSE reconnect');
 	      sessionStorage.setItem('automation-run-now-freshness', 'reloaded');
@@ -430,14 +430,14 @@ func createAutomationLiveBoardTask(t *testing.T, ctx context.Context, repo persi
 func automationLiveBoardBrowserRunner(automationTaskID, decoyID, ordinaryID, failedID, cancelledID string) string {
 	return fmt.Sprintf(`<script>
 (function() {
-  var NativeEventSource = window.EventSource;
+  var NativeWebSocket = window.WebSocket;
   window._taskBoardNamedFrames = 0;
-  window.EventSource = function(url, options) {
-    var source = new NativeEventSource(url, options);
-    source.addEventListener('task_board_updated', function() { window._taskBoardNamedFrames++; });
-    return source;
+  window.WebSocket = class extends NativeWebSocket {
+    constructor(url, protocols) {
+      super(url, protocols);
+      this.addEventListener('message', function(event) { if (JSON.parse(event.data).event === 'task_board_updated') window._taskBoardNamedFrames++; });
+    }
   };
-  window.EventSource.prototype = NativeEventSource.prototype;
   var liveReady = new Promise(function(resolve) { window.addEventListener('sse-live-connected', resolve, {once:true}); });
   window.addEventListener('DOMContentLoaded', function() {
     function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
@@ -454,7 +454,7 @@ func automationLiveBoardBrowserRunner(automationTaskID, decoyID, ordinaryID, fai
       });
     }
     (async function() {
-      await Promise.race([liveReady, new Promise(function(_, reject) { setTimeout(function() { reject(new Error('live SSE did not connect')); }, 5000); })]);
+      await Promise.race([liveReady, new Promise(function(_, reject) { setTimeout(function() { reject(new Error('live WebSocket did not connect')); }, 5000); })]);
       if (document.getElementById('task-%s')) fail('capacity task was visible before repository claim');
       if (document.getElementById('task-%s')) fail('project-scoping decoy was initially visible');
       if (document.getElementById('task-%s')) fail('ordinary scheduled task was projected onto the board');
@@ -474,7 +474,7 @@ func automationLiveBoardBrowserRunner(automationTaskID, decoyID, ordinaryID, fai
       var queued = document.getElementById('task-%s');
       if (!pending || !pending.contains(queued)) fail('capacity-queued Automation is not in Active pending dropzone');
       if (queued.dataset.taskCategory !== 'scheduled' || queued.dataset.taskStatus !== 'pending') fail('capacity-queued card lost persisted category/status');
-      if (window._taskBoardNamedFrames <= namedFramesBeforeClaim) fail('repository claim task_board_updated frame did not reach the production EventSource');
+      if (window._taskBoardNamedFrames <= namedFramesBeforeClaim) fail('repository claim task_board_updated frame did not reach the production WebSocket');
       await report('pass', '');
     })().catch(function(error) { report('fail', String(error && error.stack || error)); });
   });

@@ -185,6 +185,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			</script>
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
+			<script src={ static.URL("live-transport.js") }></script>
 			<script defer src={ static.URL("kanban.js") }></script>
 			<script defer src={ static.URL("thread-navigation.js") }></script>
 			<script defer src={ static.URL("chat-virtual-list.js") }></script>
@@ -3531,133 +3532,29 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				let autoScrollInterval = null;
 				let currentScrollZone = null;
 
-				// ── Tab Visibility Manager ──			// Centralized manager to pause/resume SSE connections and HTMX polling
-			// when a tab is hidden/visible. Prevents resource exhaustion with multiple tabs.
-			window._tabVisibility = (function() {
-				let sseConnections = {}; // name → { url, onmessage, onerror, onopen, instance }
-				let hidden = false;
+				// Visibility pauses ordinary polling, never the shared live transport.
+                window._tabVisibility = (function() {
+                    document.addEventListener('visibilitychange', function() {
+                        if (document.hidden) {
+                            document.querySelectorAll('[hx-trigger*="every"]').forEach(function(el) {
+                                el.setAttribute('data-hx-trigger-paused', el.getAttribute('hx-trigger'));
+                                el.setAttribute('hx-trigger', 'none'); htmx.process(el);
+                            });
+                        } else {
+                            document.querySelectorAll('[data-hx-trigger-paused]').forEach(function(el) {
+                                el.setAttribute('hx-trigger', el.getAttribute('data-hx-trigger-paused'));
+                                el.removeAttribute('data-hx-trigger-paused'); htmx.process(el);
+                            });
+                            window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {reconnected: true}}));
+                        }
+                    });
+                    return {
+                        dispatchSSEEvent: function(name, data) { window.dispatchEvent(new CustomEvent(name, {detail: data})); },
+                        isHidden: function() { return document.hidden; }
+                    };
+                })();
 
-				function createSSE(name, entry) {
-					if (entry.instance) {
-						entry.instance.close();
-						entry.instance = null;
-					}
-					const es = new EventSource(entry.url);
-					es.onopen = entry.onopen || function() {};
-					es.onmessage = entry.onmessage || function() {};
-					es.onerror = entry.onerror || function() {};
-					if (entry.listeners) {
-						for (const evtName in entry.listeners) {
-							es.addEventListener(evtName, entry.listeners[evtName]);
-						}
-					}
-					entry.instance = es;
-					return es;
-				}
-
-				function pauseAll() {
-					hidden = true;
-					// Close all managed SSE connections
-					for (const name in sseConnections) {
-						const entry = sseConnections[name];
-						if (entry.instance) {
-							console.log('[visibility] Closing SSE:', name);
-							entry.instance.close();
-							entry.instance = null;
-						}
-					}
-					// Pause all HTMX polling elements
-					document.querySelectorAll('[hx-trigger*="every"]').forEach(function(el) {
-						el.setAttribute('data-hx-trigger-paused', el.getAttribute('hx-trigger'));
-						el.setAttribute('hx-trigger', 'none');
-						htmx.process(el);
-					});
-				}
-
-				function resumeAll() {
-					hidden = false;
-					// Reconnect all managed SSE connections
-					for (const name in sseConnections) {
-						const entry = sseConnections[name];
-						if (!entry.instance) {
-							console.log('[visibility] Reconnecting SSE:', name);
-							createSSE(name, entry);
-						}
-					}
-					// Resume HTMX polling elements
-					document.querySelectorAll('[data-hx-trigger-paused]').forEach(function(el) {
-						el.setAttribute('hx-trigger', el.getAttribute('data-hx-trigger-paused'));
-						el.removeAttribute('data-hx-trigger-paused');
-						htmx.process(el);
-					});
-				}
-
-				document.addEventListener('visibilitychange', function() {
-					if (document.hidden) {
-						pauseAll();
-					} else {
-						resumeAll();
-					}
-				});
-
-				return {
-					// Register a managed SSE connection. Auto-pauses when tab hidden.
-					registerSSE: function(name, url, handlers) {
-						// Close previous connection with this name if it exists
-						if (sseConnections[name] && sseConnections[name].instance) {
-							sseConnections[name].instance.close();
-						}
-						var entry = {
-							url: url,
-							onopen: handlers.onopen,
-							onmessage: handlers.onmessage,
-							onerror: handlers.onerror,
-							listeners: handlers.listeners,
-							instance: null
-						};
-						sseConnections[name] = entry;
-						if (!hidden) {
-							createSSE(name, entry);
-						}
-						return {
-							close: function() {
-								if (entry.instance) {
-									entry.instance.close();
-									entry.instance = null;
-								}
-								if (sseConnections[name] === entry) delete sseConnections[name];
-							}
-						};
-					},
-					// Replace a managed stream's URL while preserving its registered handlers.
-					retargetSSE: function(name, url) {
-						var entry = sseConnections[name];
-						if (!entry || entry.url === url) return;
-						entry.url = url;
-						if (entry.instance) {
-							entry.instance.close();
-							entry.instance = null;
-						}
-						if (!hidden) createSSE(name, entry);
-					},
-					// Unregister and close an SSE connection
-					unregisterSSE: function(name) {
-						var entry = sseConnections[name];
-						if (entry) {
-							if (entry.instance) {
-								entry.instance.close();
-							}
-							delete sseConnections[name];
-						}
-					},
-					// Dispatch a custom event from an SSE message (for shared connections)
-					dispatchSSEEvent: function(eventName, data) {
-						window.dispatchEvent(new CustomEvent(eventName, { detail: data }));
-					},
-					isHidden: function() { return hidden; }
-				};			})();
-
-			// Track which element was focused before mousedown to properly detect dropdown toggle.
+                // Track which element was focused before mousedown to properly detect dropdown toggle.
 			// Also record whether a Kanban menu was open so focus changes during the click
 			// do not invert first-click behavior.
 			let focusedBeforeClick = null;
@@ -5774,7 +5671,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				if (!window._openVibelySystemUpdateIndicatorsRegistered) {
 					window._openVibelySystemUpdateIndicatorsRegistered = true;
 					refreshGlobalSystemUpdateIndicators();
-					window.openVibelySystemUpdateIndicatorPoll = setInterval(refreshGlobalSystemUpdateIndicators, 30000);
+					window.addEventListener('live-system-update', function(event) { handleGlobalSystemUpdateSnapshot(event.detail); });
+                        window.addEventListener('live-transport-connected', function() { refreshGlobalSystemUpdateIndicators(); });
 					document.body.addEventListener('alertUpdate', refreshGlobalSystemUpdateIndicators);
 				}
 			</script>

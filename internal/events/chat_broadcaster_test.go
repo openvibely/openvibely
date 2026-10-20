@@ -153,10 +153,11 @@ func TestChatBroadcaster_MultipleSubscribers(t *testing.T) {
 }
 
 func TestChatBroadcaster_MaxSubscribers(t *testing.T) {
-	b := NewChatBroadcaster()
+	const limit = 3
+	b := NewChatBroadcasterWithLimit(limit)
 
-	subs := make([]ChatSubscriber, 0, MaxSubscribers)
-	for i := 0; i < MaxSubscribers; i++ {
+	subs := make([]ChatSubscriber, 0, limit)
+	for i := 0; i < limit; i++ {
 		sub, err := b.Subscribe()
 		if err != nil {
 			t.Fatalf("Subscribe #%d should succeed, got: %v", i, err)
