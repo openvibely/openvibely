@@ -527,7 +527,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
 		for _, to := range providers {
-			modes := []string{"below_limit", "summary"}
+			modes := []string{"below_limit", "summary", "summary_source"}
 			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
@@ -572,6 +572,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						if stage == 0 {
 							sourceCalls++
+							if mode == "summary_source" && (!strings.Contains(text, "SWITCH_SUMMARY") || !strings.Contains(text, "SOURCE_REQUEST")) {
+								t.Error("source generation missing summary or current request")
+							}
 							if from == models.ProviderAnthropic && mode == "native_source" {
 								if !strings.Contains(text, "context_management") || !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 									t.Error("Anthropic native compaction missing configuration or history")
@@ -601,7 +604,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if (mode != "native_source" || from != models.ProviderOpenAI || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 							t.Error("destination lost saved older answer")
 						}
-						if mode == "native_source" && from == models.ProviderAnthropic && !strings.Contains(text, "SOURCE_FINAL") {
+						if (mode == "summary_source" || (mode == "native_source" && from == models.ProviderAnthropic)) && !strings.Contains(text, "SOURCE_FINAL") {
 							t.Error("destination lost post-compaction source answer")
 						}
 						if from == models.ProviderAnthropic && mode == "native_source" {
@@ -611,6 +614,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							if strings.Contains(text, `"type":"compaction"`) {
 								t.Error("destination received incompatible native block")
 							}
+						}
+						if mode == "summary_source" && !strings.Contains(text, "SWITCH_SUMMARY") {
+							t.Error("destination lost source summary")
 						}
 						if stage == 1 {
 							targetCalls++
@@ -660,10 +666,26 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							req.ContextTokenEstimate = 110000
 						}
 					}
+					if mode == "summary_source" {
+						req.ContextTokenEstimate = 190000
+						req.DisableNativeCompaction = true
+					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, sourceCalls)
+					if mode == "summary_source" {
+						require.Equal(t, 1, summaries)
+						checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, err)
+						require.NotNil(t, checkpoint)
+						require.Empty(t, checkpoint.ProviderStateJSON)
+						require.Equal(t, source.ID, checkpoint.ModelConfigID)
+						require.Equal(t, old.ID, checkpoint.SourceExecutionID)
+						require.Equal(t, "local_summary", checkpoint.Strategy)
+						require.Contains(t, checkpoint.Summary, "SWITCH_SUMMARY")
+						require.Contains(t, checkpoint.Summary, "RECOVER_ONLY_FROM_DB")
+					}
 					if mode == "native_source" {
 						checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 						require.NoError(t, checkpointErr)
@@ -685,7 +707,8 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					req.ExecID = second.ID
 					req.Message = second.PromptSent
 					req.ChatHistory = history
-					if from == models.ProviderAnthropic && mode == "native_source" {
+					if mode == "summary_source" || (from == models.ProviderAnthropic && mode == "native_source") {
+						// Only recent executions are loaded; older facts must come from the checkpoint.
 						req.ChatHistory = history[1:]
 					}
 					req.ContextTokenEstimate = 0
@@ -704,7 +727,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						require.Equal(t, target.ID, saved.ModelConfigID)
 						require.Equal(t, "provider_recovery", saved.Strategy)
 					}
-					if mode == "summary" || (mode == "native_source" && from == models.ProviderOpenAI && to != models.ProviderOpenAI) {
+					if mode == "summary_source" {
+						require.Equal(t, 1, summaries, "switch must reuse the source summary")
+					} else if mode == "summary" || (mode == "native_source" && from == models.ProviderOpenAI && to != models.ProviderOpenAI) {
 						require.Positive(t, summaries)
 					} else {
 						require.Zero(t, summaries)
@@ -718,6 +743,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					req.ExecID = third.ID
 					req.Message = third.PromptSent
 					req.ChatHistory = history
+					if mode == "summary_source" {
+						req.ChatHistory = history[1:]
+					}
 					req.ContextTokenEstimate = 0
 					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
 					before := summaries
