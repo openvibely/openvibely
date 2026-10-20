@@ -251,3 +251,29 @@ func TestSummaryTruncatedUserMessageKeepsIdentity(t *testing.T) {
 	require.Empty(t, wire.Content[0].Annotations)
 	require.LessOrEqual(t, estimatedUTF8Tokens(wire.Content[0].Text), 40)
 }
+
+func TestRetainedUserSteeringProviderMatrix(t *testing.T) {
+	fixtures := map[string]string{
+		"openai":            `{"responses_input":[{"type":"message","role":"user","content":"START_WORK"},{"type":"function_call","call_id":"a","name":"read_file","arguments":"{}"},{"type":"function_call_output","call_id":"a","output":"TOOL_EVIDENCE"},{"type":"message","role":"user","content":[{"type":"input_text","text":"DO_NOT_CHANGE_DATABASE"},{"type":"input_image","image_url":"data:image/png;base64,IMAGE_DATA"}]}]}`,
+		"openai_compatible": `[{"role":"user","content":"START_WORK"},{"role":"assistant","tool_calls":[{"id":"a","type":"function","function":{"name":"read_file","arguments":"{}"}}]},{"role":"tool","tool_call_id":"a","content":"TOOL_EVIDENCE"},{"role":"user","content":[{"type":"text","text":"DO_NOT_CHANGE_DATABASE"},{"type":"image_url","image_url":{"url":"data:image/png;base64,IMAGE_DATA"}}]}]`,
+		"anthropic_text":    `{"messages":[{"role":"user","content":"START_WORK"},{"role":"assistant","content":"working"},{"role":"user","content":"DO_NOT_CHANGE_DATABASE"}]}`,
+		"anthropic_blocks":  `{"messages":[{"role":"user","content":"START_WORK"},{"role":"assistant","content_blocks":[{"type":"tool_use","id":"a","name":"read_file","input":{}}]},{"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"a","content":"TOOL_EVIDENCE"},{"type":"text","text":"DO_NOT_CHANGE_DATABASE"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"IMAGE_DATA"}}]}]}`,
+	}
+	for name, raw := range fixtures {
+		t.Run(name, func(t *testing.T) {
+			history := []models.Execution{{ID: "source", Status: models.ExecCompleted, PromptSent: "START_WORK", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: raw}}}}
+			before, err := json.Marshal(history)
+			require.NoError(t, err)
+			replacement := buildCompactedReplacementHistory(history, "Summary deliberately omits steering")
+			encoded, err := json.Marshal(replacement)
+			require.NoError(t, err)
+			require.Contains(t, string(encoded), "START_WORK")
+			require.Contains(t, string(encoded), "DO_NOT_CHANGE_DATABASE")
+			require.NotContains(t, string(encoded), "TOOL_EVIDENCE")
+			require.NotContains(t, string(encoded), "IMAGE_DATA")
+			after, err := json.Marshal(history)
+			require.NoError(t, err)
+			require.Equal(t, string(before), string(after), "retention must not mutate saved replay")
+		})
+	}
+}

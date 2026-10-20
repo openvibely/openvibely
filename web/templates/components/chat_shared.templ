@@ -425,6 +425,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
+							if (status !== 'failed' && status !== 'cancelled') return;
 							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 						var wrap = document.createElement('div');
 						wrap.id = 'task-thread-terminal-status';
@@ -956,7 +957,8 @@ templ ChatStreamingResumeInitScript() {
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
-						if (!messages || document.getElementById('task-thread-terminal-status')) return;
+						if (status !== 'failed' && status !== 'cancelled') return;
+							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 					var wrap = document.createElement('div');
 					wrap.id = 'task-thread-terminal-status';
 					wrap.className = 'flex items-center justify-center gap-2 py-2';
@@ -1428,11 +1430,11 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 
 templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
 	if chatExecutionIsTerminal(exec) {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
 			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	} else {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	}
@@ -1440,7 +1442,7 @@ templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []m
 
 templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string, preservedExecIDs map[string]bool) {
 	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
 	} else {
 		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 	}
@@ -1449,7 +1451,7 @@ templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment, projectID string) {
-	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
+	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
 		if len(attachments) > 0 {
 			@ChatBubbleWithAttachments("User", message, attachments, projectID)
 		} else {
@@ -1559,7 +1561,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
 
-	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6">
+	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2">
 		<form
 			id={ config.FormID }
 			method="post"
@@ -1775,7 +1777,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// breadcrumb focus belongs to navigation, not a new editing choice.
 					if (active.matches('[data-breadcrumb-selector-button]') && active.closest('#task-detail-content')) return active;
 					if (!active.matches('[data-nav-base]')) return null;
-					return active.getAttribute('data-nav-base') === window.location.pathname ? active : null;
+					var displayedPath = window.openVibelyDisplayedURL ? new URL(window.openVibelyDisplayedURL(), window.location.href).pathname : window.location.pathname;
+					return active.getAttribute('data-nav-base') === displayedPath ? active : null;
 				}
 
 				function _rememberComposerFocusNavigationTrigger(event) {
@@ -3892,13 +3895,18 @@ templ ChatAutoScrollScript() {
 					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
 				});
 				var rendered = Promise.resolve(options.renderPromise).catch(function() { return false; }).then(async function() {
-					if (!messages.isConnected) return;
-					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
-					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
-					if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
-					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-					if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
-					if (!messages.isConnected) return;
+					do {
+						if (!messages.isConnected) return false;
+						if (window.waitForChatTranscriptViewport && !await window.waitForChatTranscriptViewport(messages)) return false;
+						tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+						var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+						if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
+						else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
+						// The reader may switch panels while async Markdown is rendering.
+						// Never mark a hidden, unmeasured viewport ready for first display.
+					} while (messages.isConnected && window.waitForChatTranscriptViewport && !messages.clientHeight);
+					if (!messages.isConnected) return false;
 					messages.style.visibility = '';
 					messages.removeAttribute('data-transcript-hydrating');
 					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
@@ -5234,8 +5242,11 @@ templ ChatAutoScrollScript() {
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
 				var sourceText = textBuffer;
+				// Promoting an enhanced SVG to lazy rows discards its live figure and
+				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
 				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
-					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable);
+					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable) &&
+					!container.querySelector('.chat-svg-preview');
 				var projectionKey = _thinkingStateKey(container);
 				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
 				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;

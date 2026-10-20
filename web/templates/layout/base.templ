@@ -116,7 +116,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							function normalizeStoredTheme(value) { value = String(value || '').trim(); if (value === 'light' || value === 'dark') return fallbackIDForMode(value); if (validTheme(value)) return value; return ''; }
 							function normalizeThemeID(value) { return normalizeStoredTheme(value); }
 							function persistUIPreference(payload) { try { fetch('/ui/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function() {}); } catch (_) {} }
-							function usesNativeTheme(id) { return id === defaultLight || id === defaultDark || id === 'openvibely-dark-continuous'; }
+							function usesNativeTheme(id) { return id === defaultLight || id === defaultDark || id === 'openvibely-dark-flat'; }
 							function setCSSVars(theme) { catalog.forEach(function(entry) { Object.keys(entry.css || {}).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.removeProperty(name); }); }); ['automation-node-border', 'automation-edge', 'yaml-indent-rail', 'mode-track', 'mode-thumb', 'mode-active', 'mode-inactive'].forEach(function(name) { document.documentElement.style.removeProperty('--ov-' + name); }); if (usesNativeTheme(theme.id)) return; var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); var roles = theme && Array.isArray(theme.r) ? theme.r : []; ['automation-node-border', 'automation-edge', 'yaml-indent-rail', 'mode-track', 'mode-thumb', 'mode-active', 'mode-inactive'].forEach(function(name, index) { if (roles[index]) document.documentElement.style.setProperty('--ov-' + name, String(roles[index])); }); }
 							function updateThemeToggleState(theme) { var mode = modeForTheme(theme); var label = mode === 'dark' ? 'Switch to last light theme' : 'Switch to last dark theme'; document.querySelectorAll('.theme-toggle-icon').forEach(function(icon) { icon.setAttribute('data-theme-current', mode); }); document.querySelectorAll('[data-theme-mode-toggle]').forEach(function(el) { el.setAttribute('aria-pressed', mode === 'dark' ? 'true' : 'false'); el.setAttribute('title', label); el.setAttribute('aria-label', label); el.setAttribute('data-tip', label); }); }
 							function applyTheme(id, options) { options = options || {}; var theme = validTheme(normalizeStoredTheme(id)) || validTheme(defaultDark) || catalog[0]; if (!theme) return null; var themeID = theme.id; var mode = modeForTheme(theme); document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', themeID); document.documentElement.setAttribute('data-ov-theme-layer', usesNativeTheme(themeID) ? 'native' : 'custom'); document.documentElement.setAttribute('data-color-theme-kind', theme.kind || mode); setCSSVars(theme); if (options.persistLocal !== false) { safeSet(exactKey, themeID); try { localStorage.setItem('theme', themeID); } catch (_) {} } if (options.persistDB) persistUIPreference({ theme: themeID }); safeSet(mode === 'light' ? lastLightKey : lastDarkKey, themeID); updateThemeToggleState(theme); if (window.openVibelyThemes && typeof window.openVibelyThemes.refreshThemeCards === 'function') window.openVibelyThemes.refreshThemeCards(); return theme; }
@@ -455,7 +455,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							transparent 6px
 						);
 					}
-					[data-color-theme]:not([data-color-theme="openvibely-dark"]):not([data-color-theme="openvibely-light"]) {
+					[data-color-theme]:not([data-color-theme^="openvibely-dark"]):not([data-color-theme="openvibely-light"]) {
 						--ov-primary-action-color: oklch(var(--p) / 1);
 					}
 					[data-color-theme] .btn-primary.chat-send-button {
@@ -628,13 +628,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					flex-shrink: 1;
 					flex-grow: 0;
 				}
-				.task-selected {
-					outline: 3px solid hsl(var(--p));
-					outline-offset: 2px;
-					background: linear-gradient(135deg, hsl(var(--p) / 0.25), hsl(var(--p) / 0.15)) !important;
-					box-shadow: 0 0 0 3px hsl(var(--p) / 0.3), 0 4px 12px rgba(0,0,0,0.4);
+				.card.task-selected,
+				[data-theme="light"]:not([data-ov-theme-layer="custom"]) .card.task-selected.border {
 					position: relative;
-					border-color: hsl(var(--p)) !important;
+					outline: none;
+					background: transparent !important;
+					box-shadow: none;
+					border-color: oklch(var(--bc)) !important;
 				}
 
 					.task-selected .btn-circle {
@@ -1469,6 +1469,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Compact page navigation, scoped away from dialogs and section headings. */
 				#main-content:has([data-page-header]) { padding-top: 0; }
+				#main-content { padding-bottom: 4px; margin-bottom: 10px; }
 				#main-content [data-page-header] { min-height: 48px; padding-top: 8px; padding-bottom: 8px; margin-bottom: 0; align-items: center; }
 				#main-content [data-page-header] h2 { display: flex; align-items: center; min-height: 32px; }
 				#main-content h2[data-page-header] { display: flex; }
@@ -1615,81 +1616,81 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* --- Buttons --- */
 					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {
 						background-color: #2f3540 !important;
 						border-color: #2f3540 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-primary:hover {
 						background-color: #646fe4 !important;
 						border-color: #646fe4 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {
 						background-color: #e63ab3 !important;
 						border-color: #e63ab3 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-accent:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-accent:hover {
 						background-color: #00baa9 !important;
 						border-color: #00baa9 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-info:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-info:hover {
 						background-color: #00a1d8 !important;
 						border-color: #00a1d8 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-success:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-success:hover {
 						background-color: #00b682 !important;
 						border-color: #00b682 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-warning:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-warning:hover {
 						background-color: #e6af29 !important;
 						border-color: #e6af29 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-error:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-error:hover {
 						background-color: #e66465 !important;
 						border-color: #e66465 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-neutral:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-neutral:hover {
 						background-color: #273140 !important;
 						border-color: #273140 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-ghost:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-ghost:hover {
 						background-color: rgba(255, 255, 255, 0.12) !important;
 						border-color: transparent !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-link:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-link:hover {
 						background-color: transparent !important;
 						border-color: transparent !important;
 						text-decoration-line: underline;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline:hover:where(:not(:disabled):not(.btn-disabled)) {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline:hover:where(:not(:disabled):not(.btn-disabled)) {
 						background-color: #c9d0db !important;
 						border-color: #c9d0db !important;
 						color: #1f2937 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-primary:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-primary:hover {
 						background-color: #646fe4 !important;
 						border-color: #646fe4 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {
 						background-color: #e63ab3 !important;
 						border-color: #e63ab3 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-accent:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-accent:hover {
 						background-color: #00baa9 !important;
 						border-color: #00baa9 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-info:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-info:hover {
 						background-color: #00a1d8 !important;
 						border-color: #00a1d8 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-success:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-success:hover {
 						background-color: #00b682 !important;
 						border-color: #00b682 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-warning:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-warning:hover {
 						background-color: #e6af29 !important;
 						border-color: #e6af29 !important;
 					}
-					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-outline.btn-error:hover {
+					[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-outline.btn-error:hover {
 						background-color: #e66465 !important;
 						border-color: #e66465 !important;
 					}
@@ -1984,7 +1985,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* --- Chat bubbles --- */
 					[data-theme="light"] {
-						--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
+						--ov-chat-surface-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
 					}
 					[data-theme="light"] .chat-bubble-user-msg,
 					[data-theme="light"] .chat-bubble-assistant-msg {
@@ -2094,7 +2095,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					/* --- Chat bubbles (dark mode) --- */
 					[data-theme="dark"] {
-						--ov-chat-surface-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+						--ov-chat-surface-shadow: none;
 					}
 					[data-theme="dark"] .chat-bubble-user-msg,
 					[data-theme="dark"] .chat-bubble-assistant-msg {
@@ -2547,8 +2548,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.tool-status-done { color: hsl(var(--su, 150 60% 40%) / 0.7); }
 				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
 
-					/* Experimental native dark variant: join navigation to the main canvas. */
-html[data-color-theme="openvibely-dark-continuous"] #sidebar { background-color: oklch(var(--b2)); border-right-color: oklch(var(--b2)); }
+					/* OpenVibely Dark climbs an even lightness ladder instead of using shadows. */
+html[data-color-theme="openvibely-dark"] {
+	--ov-elevation-card: #22272E;
+	--ov-elevation-chat: #262B33;
+	--ov-menu-surface: var(--ov-elevation-chat);
+	--ov-menu-hover: #2D333C;
+}
+html[data-color-theme="openvibely-dark"] :is(.card, .stats) { background-color: var(--ov-elevation-card); }
+html[data-color-theme="openvibely-dark"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg, .chat-input-container) { --chat-user-bg: var(--ov-elevation-chat); background-color: var(--ov-elevation-chat); }
+html[data-color-theme="openvibely-dark"] :is(.input, .select, .textarea) { background-color: var(--ov-elevation-chat); }
+html[data-color-theme="openvibely-dark"] .kanban-search[data-open="true"] { background-color: var(--ov-elevation-card); }
+html[data-color-theme="openvibely-dark"] :is(.dropdown-content, .ov-menu, .modal-box) { background-color: var(--ov-elevation-chat); box-shadow: none; }
+					/* Experimental native dark variant: flat bordered chat surfaces. */
+html[data-color-theme="openvibely-dark-flat"] .chat-bubble-user-msg,
+html[data-color-theme="openvibely-dark-flat"] .chat-bubble-assistant-msg,
+html[data-color-theme="openvibely-dark-flat"] .chat-input-container {
+	--chat-user-bg: oklch(var(--b1));
+	--chat-user-border: oklch(var(--b3));
+	background-color: oklch(var(--b1));
+	border: 1px solid oklch(var(--b3));
+	box-shadow: none;
+}
 
 /* Built-in VS Code palette application. Variables are generated at build time. */
 [data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}
@@ -2661,7 +2682,9 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 [data-ov-theme-layer="custom"] .ov-modal-close:focus-visible { color: var(--ov-error) !important; background-color: var(--ov-hover-bg) !important; }
 [data-ov-theme-layer="custom"] .bg-base-200,
 [data-ov-theme-layer="custom"] .stats { background-color: var(--ov-content-bg); }
-[data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-sidebar-bg); }
+[data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-kanban-column-bg); }
+/* Keeps card borders off the scroll clip edge; WebKit drops them at fractional widths. */
+.category-drop-zone { padding-inline: 2px; }
 [data-ov-theme-layer="custom"] .text-base-content,
 [data-ov-theme-layer="custom"] h1,
 [data-ov-theme-layer="custom"] h2,
@@ -2751,7 +2774,7 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 --ov-account-limit-track: var(--ov-hover-bg);
 --ov-account-limit-fill: var(--ov-button-bg);
 --ov-schedule-grid-border: var(--ov-border);
---ov-schedule-task-bg: var(--ov-surface-raised);
+--ov-schedule-task-hover-bg: var(--ov-selection-bg);
 --ov-schedule-task-border: var(--ov-link);
 --ov-schedule-today-bg: var(--ov-hover-bg);
 --ov-schedule-today-border: var(--ov-subtle-border);
@@ -2788,7 +2811,7 @@ html[data-ov-theme-layer="custom"] .ov-menu { --ov-menu-active: var(--ov-hover-b
 [data-ov-theme-layer="custom"] .ov-mp-star { color: var(--ov-text-muted); }
 [data-ov-theme-layer="custom"] .ov-mp-star[aria-pressed="true"] { color: var(--ov-focus); }
 html[data-ov-theme-layer="custom"] .ov-mp-effort input[type="range"] { --ov-mp-accent: var(--ov-button-bg); --ov-mp-track: var(--ov-border); accent-color: var(--ov-button-bg); }
-html[data-ov-theme-layer="custom"] #desktop-project-titlebar { background-color: var(--ov-sidebar-bg) !important; color: var(--ov-text); --project-tab-selected: var(--ov-content-bg); --project-tab-contour: var(--ov-subtle-border); }
+html[data-ov-theme-layer="custom"] #desktop-project-titlebar { background-color: var(--ov-kanban-column-bg) !important; color: var(--ov-text); --project-tab-selected: var(--ov-content-bg); --project-tab-contour: var(--ov-subtle-border); }
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"] { color: var(--ov-text-muted) !important; }
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: var(--ov-text) !important; }
 /* Keep the tab contour light where palette surfaces already separate the shell. */
@@ -2796,13 +2819,13 @@ html[data-ov-theme-layer="custom"] #desktop-project-titlebar { box-shadow: inset
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"][aria-selected="true"]::before { border-width: 1px; border-bottom: 0; }
 [data-ov-theme-layer="custom"] .desktop-project-tab[data-selected="true"]::before { background: radial-gradient(circle at 0 0, transparent 9px, var(--project-tab-contour) 9px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
 [data-ov-theme-layer="custom"] .desktop-project-tab[data-selected="true"]::after { background: radial-gradient(circle at 100% 0, transparent 9px, var(--project-tab-contour) 9px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
-[data-ov-theme-layer="custom"] .desktop-project-tab:not([data-selected="true"])::after { background-color: var(--ov-border) !important; }
+[data-ov-theme-layer="custom"] .desktop-project-tab:not([data-selected="true"])::after { background-color: var(--ov-project-tab-divider, var(--ov-border)) !important; }
 [data-ov-theme-layer="custom"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"],
-[data-ov-theme-layer="custom"] .desktop-project-tab [data-close-project]:enabled:hover,
 [data-ov-theme-layer="custom"] #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]),
 [data-ov-theme-layer="custom"] .desktop-window-controls button:not([data-window-action="Close"]):is(:hover, :active, [data-native-hover], [data-native-pressed]) { background-color: var(--ov-hover-bg) !important; }
+[data-ov-theme-layer="custom"] .desktop-project-tab [data-close-project]:enabled:hover { background-color: color-mix(in srgb, var(--ov-text) 18%, transparent) !important; }
 [data-ov-theme-layer="custom"] #desktop-project-titlebar button:focus-visible:not([data-project-tab]) { outline-color: var(--ov-focus); }
-html[data-ov-theme-layer="custom"] #schedule-content .schedule-day-selected { background: var(--ov-accent-tint) !important; }
+html[data-ov-theme-layer="custom"] #schedule-content .schedule-day-selected { background: var(--ov-schedule-selection-bg) !important; }
 html[data-ov-theme-layer="custom"] #schedule-content [data-calendar-day].schedule-day-selected { box-shadow: inset 0 2px var(--ov-focus); }
 html[data-ov-theme-layer="custom"] #schedule-content [data-calendar-hour].schedule-day-selected { box-shadow: inset 2px 0 var(--ov-focus); }
 [data-ov-theme-layer="custom"] .schedule-selection-box { border-color: var(--ov-focus); background: var(--ov-accent-tint); }
@@ -2825,11 +2848,11 @@ html[data-ov-theme-layer="custom"] #schedule-content [data-schedule-card][data-c
 [data-ov-theme-layer="custom"] .kanban-search-toggle:focus-visible,
 [data-ov-theme-layer="custom"] .kanban-search-clear:focus-visible { box-shadow: inset 0 0 0 1px var(--ov-focus) !important; }
 [data-ov-theme-layer="custom"] .drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }
-[data-ov-theme-layer="custom"] .task-selected {
-outline-color: var(--ov-focus);
-background: linear-gradient(135deg, var(--ov-selection-bg), var(--ov-hover-bg)) !important;
-box-shadow: 0 0 0 3px var(--ov-selection-bg), 0 4px 12px rgba(0,0,0,0.35);
-border-color: var(--ov-focus) !important;
+[data-ov-theme-layer="custom"] .card.task-selected {
+outline: none;
+background: transparent !important;
+box-shadow: none;
+border-color: var(--ov-text) !important;
 }
 [data-ov-theme-layer="custom"] .task-selected::before { background: var(--ov-focus); color: var(--ov-button-fg); }
 [data-ov-theme-layer="custom"] .category-drop-zone,
@@ -2841,6 +2864,7 @@ border-color: var(--ov-focus) !important;
 [data-ov-theme-layer="custom"] #schedule-timeline-container .schedule-time-label { background-color: var(--ov-surface-raised) !important; color: var(--ov-text-muted) !important; }
 [data-ov-theme-layer="custom"] #schedule-content .bg-indigo-900 { background-color: var(--ov-schedule-today-bg) !important; }
 [data-ov-theme-layer="custom"] #schedule-content .bg-indigo-600 { background-color: var(--ov-schedule-task-bg) !important; }
+[data-ov-theme-layer="custom"] #schedule-content .bg-indigo-600:hover { background-color: var(--ov-schedule-task-hover-bg) !important; }
 [data-ov-theme-layer="custom"] #schedule-content .text-indigo-400 { color: var(--ov-link) !important; }
 [data-ov-theme-layer="custom"] #schedule-content .border-indigo-500 { border-color: var(--ov-schedule-task-border) !important; }
 [data-ov-theme-layer="custom"] #schedule-content .border-indigo-400 { border-color: var(--ov-schedule-today-border) !important; }

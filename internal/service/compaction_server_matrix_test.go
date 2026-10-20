@@ -36,7 +36,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 				continue
 			}
 			for _, media := range []string{"text", "image", "tool_image"} {
-				for _, outcome := range []string{"success", "summary_overflow_once", "summary_overflow_exhausted", "authentication", "empty_summary", "continuation_overflow", "transient_once", "transient_exhausted"} {
+				for _, outcome := range []string{"success", "summary_overflow_once", "summary_overflow_exhausted", "authentication", "empty_summary", "continuation_overflow", "continuation_partial_failure", "transient_once", "transient_exhausted"} {
 					// Retry exhaustion is independent of native fallback; exercise it in both summary entry points.
 					if outcome == "transient_exhausted" && strings.Contains(phase, "native") {
 						continue
@@ -101,11 +101,26 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								return
 							}
 							if restarted {
+								if !strings.Contains(text, "OLDER_STEER_739") {
+									t.Error("reload lost retained steering omitted by summary")
+								}
+								if outcome == "continuation_partial_failure" && !strings.Contains(text, "POST_SUMMARY_PARTIAL") {
+									t.Error("reload lost post-compaction partial answer")
+								}
 								restartCalls++
+								if strings.Contains(text, "PRE_SUMMARY_ASSISTANT_TEXT") {
+									t.Error("reload restored assistant text already covered by summary")
+								}
+								if strings.Contains(text, "PRECOMPACTION_UI_OUTPUT") {
+									t.Error("reload used original execution output instead of empty continuation")
+								}
+								if strings.Contains(text, "read739") {
+									t.Error("reload restored a tool exchange already covered by summary")
+								}
 								if strings.Contains(text, "OLDER_ANSWER") {
 									t.Error("reload brought back history already covered by summary")
 								}
-								if !strings.Contains(text, "FINAL_739") {
+								if outcome != "continuation_overflow" && outcome != "continuation_partial_failure" && !strings.Contains(text, "FINAL_739") {
 									t.Error("reload lost the post-compaction answer")
 								}
 								if retainsAttachment && !strings.Contains(text, "image/png") {
@@ -123,6 +138,12 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							if strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
 								events = append(events, "summary")
 								summaries++
+								if summaries == 1 && !strings.Contains(text, "OLDER_STEER_739") {
+									t.Error("summary input lost older steering")
+								}
+								if summaries == 1 && (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && !strings.Contains(text, "PRE_SUMMARY_ASSISTANT_TEXT") {
+									t.Error("summary missing pre-compaction assistant text")
+								}
 								key := "messages"
 								if provider == models.ProviderOpenAI {
 									key = "input"
@@ -180,7 +201,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								if media == "tool_image" {
 									tool = "view_image"
 								}
-								compactionServerToolReply(w, provider, file, tool)
+								compactionServerToolReply(w, provider, file, tool, "PRE_SUMMARY_ASSISTANT_TEXT")
 								return
 							}
 							if (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && generations == 2 {
@@ -200,6 +221,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								return
 							}
 							events = append(events, "continuation")
+							if !strings.Contains(text, "OLDER_STEER_739") {
+								t.Error("continuation lost retained steering omitted by summary")
+							}
 							if strings.HasPrefix(phase, "steering") && !strings.Contains(text, "STEER_SUMMARY_739") {
 								t.Error("continuation lost steering")
 							}
@@ -208,6 +232,10 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							}
 							if strings.Count(text, "CURRENT_REQUEST_739") != 1 {
 								t.Errorf("prompt missing or duplicated: count=%d", strings.Count(text, "CURRENT_REQUEST_739"))
+							}
+							if outcome == "continuation_partial_failure" {
+								compactionServerPartialFailure(w, provider)
+								return
 							}
 							if outcome == "continuation_overflow" {
 								compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
@@ -311,6 +339,17 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							oldExecution.ReplayMessages = replay[oldExecution.ID]
 							req.ChatHistory = []models.Execution{oldExecution}
 						}
+
+						// The summary deliberately omits this saved steering message.
+						// Hydrate it from the database, as a real later turn does.
+						replayRaw := ""
+						if len(oldExecution.ReplayMessages) > 0 {
+							replayRaw = oldExecution.ReplayMessages[len(oldExecution.ReplayMessages)-1].TranscriptJSON
+						}
+						replayRaw = compactionMatrixSavedSteering(t, provider, replayRaw)
+						require.NoError(t, stores.Executions.ReplaceReasoningReplay(ctx, oldExecution.ID, "", []models.ExecutionReplayMessage{{TranscriptJSON: replayRaw}}))
+						oldExecution.ReplayMessages = nil
+						req.ChatHistory = []models.Execution{oldExecution}
 						if media == "image" {
 							req.Attachments = []models.Attachment{attachment}
 						}
@@ -336,8 +375,15 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							expected = append(expected, "summary")
 						}
 						success := outcome == "success" || outcome == "summary_overflow_once" || outcome == "transient_once"
-						if success || outcome == "continuation_overflow" {
+						if success || outcome == "continuation_overflow" || outcome == "continuation_partial_failure" {
 							expected = append(expected, "continuation")
+							if outcome == "continuation_partial_failure" {
+								// The transport may retry an interrupted stream; each attempt emits text.
+								require.LessOrEqual(t, len(events)-len(expected)+1, 7)
+								for i := len(expected); i < len(events); i++ {
+									expected = append(expected, "continuation")
+								}
+							}
 						}
 						require.Equal(t, expected, events)
 						if success {
@@ -357,8 +403,24 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 						default:
 							require.Equal(t, 1, summaries)
 						}
-						if success {
-							require.NoError(t, stores.Executions.Complete(ctx, exec.ID, models.ExecCompleted, result.Output, "", 0, 0))
+						if success || outcome == "continuation_overflow" || outcome == "continuation_partial_failure" {
+							status := models.ExecCompleted
+							savedOutput := result.Output
+							if !success {
+								status = models.ExecFailed
+								if provider == models.ProviderOpenAICompatible && !strings.HasPrefix(phase, "preturn") && outcome != "continuation_partial_failure" {
+									savedOutput = "PRECOMPACTION_UI_OUTPUT"
+								}
+							}
+							require.NoError(t, stores.Executions.Complete(ctx, exec.ID, status, savedOutput, "", 0, 0))
+							beforeReload, readErr := stores.Executions.GetByID(ctx, exec.ID)
+							require.NoError(t, readErr)
+							if outcome == "continuation_partial_failure" {
+								require.Contains(t, beforeReload.Output, "POST_SUMMARY_PARTIAL")
+							}
+							if !strings.HasPrefix(phase, "preturn") && savedOutput != "PRECOMPACTION_UI_OUTPUT" {
+								require.Contains(t, beforeReload.Output, "PRE_SUMMARY_ASSISTANT_TEXT")
+							}
 							checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 							require.NoError(t, checkpointErr)
 							require.NotNil(t, checkpoint)
@@ -385,6 +447,14 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							require.NoError(t, nextErr)
 							require.Contains(t, nextResult.Output, "RESTART_FINAL_739")
 							require.Equal(t, 1, restartCalls)
+							afterReload, readErr := stores.Executions.GetByID(ctx, exec.ID)
+							require.NoError(t, readErr)
+							require.Equal(t, beforeReload.Output, afterReload.Output, "restoration must not change saved UI output")
+							if savedOutput == "PRECOMPACTION_UI_OUTPUT" {
+								saved, readErr := stores.Executions.GetByID(ctx, exec.ID)
+								require.NoError(t, readErr)
+								require.Equal(t, savedOutput, saved.Output, "UI output must remain saved")
+							}
 						} else {
 							saved, readErr := stores.Executions.GetByID(ctx, oldExecution.ID)
 							require.NoError(t, readErr)
@@ -409,16 +479,31 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 	args, _ := json.Marshal(map[string]string{"file_path": file})
 	switch provider {
 	case models.ProviderOpenAI:
+		var items []any
+		if file != "" && text != "" {
+			emit(map[string]any{"type": "response.output_text.delta", "delta": text})
+			prefix := map[string]any{"type": "message", "id": "before739", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}
+			items = append(items, prefix)
+			emit(map[string]any{"type": "response.output_item.done", "output_index": 0, "item": prefix})
+		}
 		var item map[string]any
 		if file != "" {
 			item = map[string]any{"type": "function_call", "id": "fc_read", "call_id": "read739", "name": "read_file", "arguments": string(args)}
 		} else {
 			item = map[string]any{"type": "message", "id": "msg739", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}
 		}
-		emit(map[string]any{"type": "response.output_item.done", "output_index": 0, "item": item})
-		emit(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp739", "status": "completed", "output": []any{item}, "usage": map[string]int{"input_tokens": 20, "output_tokens": 5}}})
+		emit(map[string]any{"type": "response.output_item.done", "output_index": len(items), "item": item})
+		items = append(items, item)
+		emit(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp739", "status": "completed", "output": items, "usage": map[string]int{"input_tokens": 20, "output_tokens": 5}}})
 	case models.ProviderAnthropic:
+		index := 0
 		emit(map[string]any{"type": "message_start", "message": map[string]any{"id": "msg739", "usage": map[string]int{"input_tokens": 20}}})
+		if file != "" && text != "" {
+			emit(map[string]any{"type": "content_block_start", "index": index, "content_block": map[string]any{"type": "text", "text": ""}})
+			emit(map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": text}})
+			emit(map[string]any{"type": "content_block_stop", "index": index})
+			index++
+		}
 		block := map[string]any{"type": "text", "text": ""}
 		delta := map[string]any{"type": "text_delta", "text": text}
 		stop := "end_turn"
@@ -427,16 +512,16 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 			delta = map[string]any{"type": "input_json_delta", "partial_json": string(args)}
 			stop = "tool_use"
 		}
-		emit(map[string]any{"type": "content_block_start", "index": 0, "content_block": block})
-		emit(map[string]any{"type": "content_block_delta", "index": 0, "delta": delta})
-		emit(map[string]any{"type": "content_block_stop", "index": 0})
+		emit(map[string]any{"type": "content_block_start", "index": index, "content_block": block})
+		emit(map[string]any{"type": "content_block_delta", "index": index, "delta": delta})
+		emit(map[string]any{"type": "content_block_stop", "index": index})
 		emit(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop}, "usage": map[string]int{"output_tokens": 5}})
 		emit(map[string]any{"type": "message_stop"})
 	default:
 		delta := map[string]any{"content": text}
 		stop := "stop"
 		if file != "" {
-			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "read739", "type": "function", "function": map[string]any{"name": "read_file", "arguments": string(args)}}}}
+			delta = map[string]any{"content": text, "tool_calls": []any{map[string]any{"index": 0, "id": "read739", "type": "function", "function": map[string]any{"name": "read_file", "arguments": string(args)}}}}
 			stop = "tool_calls"
 		}
 		emit(map[string]any{"choices": []any{map[string]any{"delta": delta, "finish_reason": stop}}})
@@ -444,9 +529,77 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 	}
 }
 
-func compactionServerToolReply(w http.ResponseWriter, provider models.LLMProvider, file, tool string) {
+func compactionServerToolReply(w http.ResponseWriter, provider models.LLMProvider, file, tool string, text ...string) {
 	rec := httptest.NewRecorder()
-	compactionServerReply(rec, provider, "", file)
+	prefix := ""
+	if len(text) > 0 {
+		prefix = text[0]
+	}
+	compactionServerReply(rec, provider, prefix, file)
 	w.Header().Set("Content-Type", "text/event-stream")
 	fmt.Fprint(w, strings.ReplaceAll(rec.Body.String(), `"name":"read_file"`, `"name":"`+tool+`"`))
+}
+
+// Deliver answer text, then fail before a completed assistant message exists.
+func compactionServerPartialFailure(w http.ResponseWriter, provider models.LLMProvider) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	var events []any
+	switch provider {
+	case models.ProviderOpenAI:
+		events = []any{map[string]any{"type": "response.output_text.delta", "delta": "POST_SUMMARY_PARTIAL"}, map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": "invalid_request_error", "message": "nonretryable failure"}}}
+	case models.ProviderAnthropic:
+		events = []any{
+			map[string]any{"type": "message_start", "message": map[string]any{"id": "partial"}},
+			map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}},
+			map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": "POST_SUMMARY_PARTIAL"}},
+			map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "message": "nonretryable failure"}},
+		}
+	default:
+		// EOF without a finish_reason/[DONE] models a dropped connection.
+		events = []any{map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "POST_SUMMARY_PARTIAL"}}}}}
+	}
+	for _, event := range events {
+		raw, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}
+}
+
+func compactionMatrixSavedSteering(t *testing.T, provider models.LLMProvider, raw string) string {
+	t.Helper()
+	var envelope map[string]any
+	var messages []any
+	key := ""
+	if provider == models.ProviderOpenAI {
+		key = "responses_input"
+	} else if provider == models.ProviderAnthropic {
+		key = "messages"
+	}
+	if raw != "" {
+		if key != "" {
+			require.NoError(t, json.Unmarshal([]byte(raw), &envelope))
+			messages, _ = envelope[key].([]any)
+		} else {
+			require.NoError(t, json.Unmarshal([]byte(raw), &messages))
+		}
+	}
+	if len(messages) == 0 {
+		messages = []any{map[string]any{"role": "user", "content": "OLDER_REQUEST"}, map[string]any{"role": "assistant", "content": "OLDER_ANSWER"}}
+	}
+	steer := map[string]any{"role": "user", "content": "OLDER_STEER_739"}
+	if provider == models.ProviderAnthropic {
+		delete(steer, "content")
+		steer["content_blocks"] = []any{map[string]any{"type": "text", "text": "OLDER_STEER_739"}}
+	}
+	messages = append(messages, steer)
+	var value any = messages
+	if key != "" {
+		if envelope == nil {
+			envelope = map[string]any{}
+		}
+		envelope[key] = messages
+		value = envelope
+	}
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(encoded)
 }

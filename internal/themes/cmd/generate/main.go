@@ -19,6 +19,30 @@ const vscodeRef = "1.130.0"
 const vscodeRepo = "https://github.com/microsoft/vscode.git"
 
 var requiredSemantic = []string{"bg", "contentBg", "sidebarBg", "surface", "surfaceRaised", "text", "textMuted", "border", "borderStrong", "automationNodeBorder", "automationEdge", "yamlIndentRail", "primary", "primaryForeground", "focus", "link", "inputBg", "inputBorder", "buttonBg", "buttonFg", "buttonHoverBg", "buttonHoverFg", "buttonSecondaryBg", "buttonSecondaryFg", "selectionBg", "hoverBg", "info", "infoForeground", "success", "successForeground", "warning", "warningForeground", "error", "errorForeground", "diffAddBg", "diffAddFg", "diffModifyBg", "diffModifyFg", "diffDeleteBg", "diffDeleteFg", "codeBg", "codeFg"}
+
+// VS Code themes have no task-column color of their own.
+var kanbanColumns = map[string]string{
+	"vscode-dark-modern":                 "#0F0F0F",
+	"vscode-light-modern":                "#EEEEEE",
+	"vscode-abyss":                       "#02020E",
+	"vscode-visual-studio-dark":          "#151515",
+	"vscode-dark-2026":                   "#0A0B0B",
+	"vscode-default-high-contrast":       "#181818",
+	"vscode-dark":                        "#151515",
+	"vscode-kimbie-dark":                 "#362712",
+	"vscode-visual-studio-light":         "#F3F3F3",
+	"vscode-light-2026":                  "#F0F0F3",
+	"vscode-default-high-contrast-light": "#F3F3F3",
+	"vscode-light":                       "#F3F3F3",
+	"vscode-monokai":                     "#161614",
+	"vscode-monokai-dimmed":              "#151515",
+	"vscode-quiet-light":                 "#EBEBEB",
+	"vscode-red":                         "#250000",
+	"vscode-solarized-dark":              "#00212B",
+	"vscode-solarized-light":             "#EEE8D5",
+	"vscode-tomorrow-night-blue":         "#001126",
+}
+
 var cssVarName = regexp.MustCompile(`^--ov-[a-z0-9-]+$`)
 
 type manifest struct {
@@ -150,6 +174,11 @@ func buildCatalog(root string) ([]outTheme, []string, error) {
 			seen[id] = true
 			kind, mode := normalizeKind(contrib.UITheme)
 			semantic := normalizeSemantic(kind, merged.Colors)
+			column, ok := kanbanColumns[id]
+			if !ok {
+				return nil, nil, fmt.Errorf("theme %q has no kanban column color", id)
+			}
+			semantic["kanbanColumnBg"] = column
 			syntax := normalizeSyntax(kind, merged.Colors, merged.TokenColors)
 			preview := map[string]string{"bg": semantic["bg"], "sidebar": semantic["sidebarBg"], "surface": semantic["surface"], "text": semantic["text"], "accent": semantic["primary"], "syntaxKeyword": syntax["keyword"], "syntaxString": syntax["string"], "syntaxFunction": syntax["function"], "syntaxComment": syntax["comment"]}
 			css := cssVars(semantic, syntax)
@@ -354,7 +383,11 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["surfaceRaised"] = fallback(pick("dropdown.background", "menu.background", "quickInput.background"), m["surface"])
 	m["text"] = fallback(pick("foreground", "editor.foreground"), fb["text"])
 	m["textMuted"] = fallback(pick("descriptionForeground", "disabledForeground", "input.placeholderForeground"), mix(m["text"], m["bg"], .35))
-	m["border"] = fallback(pick("contrastBorder", "widget.border", "panel.border", "sideBar.border"), mix(m["text"], m["bg"], .18))
+	borderMix := .18
+	if strings.HasPrefix(kind, "high-contrast") {
+		borderMix = .82
+	}
+	m["border"] = fallback(pick("contrastBorder", "widget.border", "panel.border", "sideBar.border"), mix(m["bg"], m["text"], borderMix))
 	m["borderStrong"] = fallback(pick("contrastActiveBorder", "focusBorder"), mix(m["text"], m["bg"], .35))
 	m["primary"] = fallback(pick("button.background", "textLink.foreground", "focusBorder", "activityBarBadge.background"), fb["primary"])
 	m["primaryForeground"] = fallback(pick("button.foreground", "activityBarBadge.foreground"), bestText(composite(m["primary"], m["contentBg"])))
