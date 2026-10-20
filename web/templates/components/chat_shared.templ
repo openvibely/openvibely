@@ -5240,7 +5240,7 @@ templ ChatAutoScrollScript() {
 				var projectionKey = _thinkingStateKey(container);
 				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
 				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;
-				var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || options?.preparedSegments?.some(function(seg) { return (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length >= 64 * 1024; }));
+				var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || (options?.preparedSegments?.reduce(function(size, seg) { return size + (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length; }, 0) || 0) >= 64 * 1024);
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
