@@ -16,6 +16,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/buildinfo"
+	"github.com/openvibely/openvibely/internal/livelimits"
 )
 
 // RuntimeMode distinguishes web/server deployments from desktop app mode.
@@ -32,6 +33,7 @@ const (
 const DatabaseDriverSQLite = "sqlite"
 
 type Config struct {
+	LiveLimits livelimits.Limits
 	// Mode is the runtime mode (server or desktop).
 	Mode                       RuntimeMode
 	Port                       string
@@ -126,6 +128,12 @@ func LoadWithMode(mode RuntimeMode) *Config {
 	}).normalizeUpdateDefaults()
 
 	return (&Config{
+		LiveLimits: livelimits.Limits{
+			Connections:                positiveEnvInt("OPENVIBELY_LIVE_MAX_CONNECTIONS"),
+			SubscriptionsPerConnection: positiveEnvInt("OPENVIBELY_LIVE_MAX_SUBSCRIPTIONS_PER_CONNECTION"),
+			LiveSubscriptions:          positiveEnvInt("OPENVIBELY_LIVE_MAX_PROJECT_SUBSCRIPTIONS"),
+			ExecutionSubscriptions:     positiveEnvInt("OPENVIBELY_LIVE_MAX_EXECUTION_SUBSCRIPTIONS"),
+		}.WithDefaults(),
 		Mode:                       mode,
 		Port:                       getEnv("PORT", defaults.Port),
 		DatabaseDriver:             getEnv("DATABASE_DRIVER", DatabaseDriverSQLite),
@@ -184,6 +192,7 @@ func (c *Config) NormalizeForMode() *Config {
 	if c.Mode == "" {
 		c.Mode = ModeServer
 	}
+	c.LiveLimits = c.LiveLimits.WithDefaults()
 	defaults := defaultsForMode(c.Mode)
 	if c.Port == "" {
 		c.Port = defaults.Port
@@ -700,4 +709,14 @@ func ValidateAppBaseURL(raw string) error {
 		return fmt.Errorf("APP_BASE_URL must be an absolute http(s) URL without query/fragment/userinfo, got %q", trimmed)
 	}
 	return nil
+}
+
+// positiveEnvInt returns zero for unset, malformed, or nonpositive values so
+// WithDefaults consistently supplies a finite budget for every entry point.
+func positiveEnvInt(name string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }
