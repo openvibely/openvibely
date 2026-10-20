@@ -149,8 +149,10 @@ func TestBuiltInModelSupportedForAuth(t *testing.T) {
 			t.Errorf("OAuth support for %s = %v", spec.ID, got)
 		}
 	}
-	if BuiltInModelSupportedForAuth(ProviderOpenAI, "gpt-5.3-codex", AuthMethodOAuth) {
-		t.Fatal("GPT-5.3-Codex must not be offered for ChatGPT sign-in")
+	for _, model := range []string{"gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"} {
+		if BuiltInModelSupportedForAuth(ProviderOpenAI, model, AuthMethodOAuth) {
+			t.Errorf("%s must not be offered for ChatGPT sign-in", model)
+		}
 	}
 	if !BuiltInModelSupportedForAuth(ProviderOpenAICompatible, "custom", AuthMethodOAuth) {
 		t.Fatal("custom provider OAuth was restricted")
