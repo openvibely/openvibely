@@ -111,6 +111,7 @@ templ TaskWorkspaceScript() {
 				var tracker = window._taskThreadPageTracker;
 				scrollState = messages ? {
 					scrollTop: messages.scrollTop,
+					restoreAnchor: window.captureChatVirtualScroll ? window.captureChatVirtualScroll(messages) : null,
 					userScrolledUp: tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp
 				} : null;
 				returnFocus = composerFocus || document.activeElement;
@@ -144,6 +145,7 @@ templ TaskWorkspaceScript() {
 					if (tracker) tracker.userScrolledUp = scrollState.userScrolledUp;
 					window._taskThreadUserScrolledUp = scrollState.userScrolledUp;
 					messages.scrollTop = scrollState.userScrolledUp ? scrollState.scrollTop : messages.scrollHeight;
+					if (scrollState.userScrolledUp && scrollState.restoreAnchor) scrollState.restoreAnchor();
 					// History may have been prepended while this workspace was hidden.
 					// Restore its logical anchor before the first visible frame.
 					if (window.compensateChatEarlierLayout) window.compensateChatEarlierLayout(messages);
