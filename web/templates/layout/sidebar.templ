@@ -575,9 +575,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				// Also aborts in-flight HTMX polling requests within main-content when
 				// navigating away, preventing expensive morph operations (e.g. thread
 				// view's every-3s morph:outerHTML) from blocking sidebar navigation.
-				(function() {
-					function closeMobileDrawer() {
-						var sidebarToggle = document.getElementById('sidebar-toggle');
+					(function() {
+						function displayedPath() {
+							return new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href).pathname;
+						}
+						function closeMobileDrawer() {						var sidebarToggle = document.getElementById('sidebar-toggle');
 						if (sidebarToggle) sidebarToggle.checked = false;
 					}
 
@@ -588,7 +590,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						var link = event.target.closest('[data-nav-base]');
 						if (!link) return;
 						var navBase = link.getAttribute('data-nav-base');
-						if (window.location.pathname === navBase) return;
+						if (displayedPath() === navBase) return;
 						window._sidebarNavigating = true;
 						// Safety: clear flag if navigation doesn't complete within 3s
 						// (e.g., drag-off, cancelled click, or network failure)
@@ -602,7 +604,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						var elt = event.detail.elt;
 						if (elt && elt.hasAttribute('data-nav-base')) {
 							var navBase = elt.getAttribute('data-nav-base');
-							if (window.location.pathname === navBase) {
+							if (displayedPath() === navBase) {
 								closeMobileDrawer();
 								event.preventDefault();
 								return;

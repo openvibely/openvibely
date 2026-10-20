@@ -33,12 +33,13 @@ func TestBrowserFunctional_ChatNavigationStateAndActiveStreamInChrome(t *testing
 		t.Fatalf("render base navigation script: %v", err)
 	}
 	baseHTML := base.String()
-	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	navStart := strings.Index(baseHTML, "// One owner for full-page fragment navigation")
 	navEnd := strings.Index(baseHTML[navStart:], "// Scroll position restoration for drop zones")
 	if navStart < 0 || navEnd < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
 	}
 	navigationScript := baseHTML[navStart : navStart+navEnd]
+	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	history := make([]models.Execution, 0, 14)
 	for i := 0; i < 14; i++ {
@@ -266,7 +267,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
+			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -461,7 +462,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
 		t.Fatal(err)
 	}
-	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	navStart := strings.Index(baseHTML, "// One owner for full-page fragment navigation")
 	if navStart < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
 	}
@@ -470,6 +471,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 		t.Fatal("could not find end of production HTMX navigation helper")
 	}
 	navigationScript := baseHTML[navStart : navStart+navEndOffset]
+	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	var renderedChat bytes.Buffer
 	if err := ChatContent(nil, nil, "project-actions", nil, nil, nil, false, false, 30).Render(context.Background(), &renderedChat); err != nil {
@@ -685,7 +687,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(chatFragment))
 				return
 			}
-			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
+			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + performanceScripts + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

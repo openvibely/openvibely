@@ -944,13 +944,13 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 		wantSummary    bool
 	}{
 		{name: "reported usage includes native state", reportedTokens: 139302},
-		{name: "oversized checkpoint restores transcript", reportedTokens: 190000, wantSummary: true},
+		{name: "oversized checkpoint preserves native summary", reportedTokens: 190000, wantSummary: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := teststores.New(t).Executions
 			ctx := context.Background()
 			agent := models.LLMConfig{ID: "model", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5", ContextWindow: 200000}
-			state := `[{"type":"text","text":"` + strings.Repeat("x", 274000) + `"}]`
+			state := `{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"NATIVE_ONLY_FACT ` + strings.Repeat("x", 274000) + `"},{"type":"text","text":"NATIVE_CONTINUATION"}]}]}`
 			req := llmcontracts.AgentRequest{
 				Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true,
 				TransportScope: "chat:project:checkpoint-followup",
@@ -960,7 +960,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 			if err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{
 				ScopeType: "chat_project", ScopeID: req.ProjectID, ModelConfigID: agent.ID,
 				CompatibilityKey: providerCompatibilityKey(agent), SourceExecutionID: "source",
-				Strategy: "anthropic", ProviderStateJSON: state,
+				Strategy: "anthropic_context_management", ProviderStateJSON: state,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -977,8 +977,14 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 					if got.NativeCompactionStateJSON != "" {
 						t.Fatal("local summary or continuation retained native state")
 					}
-					if calls == 1 && (got.Operation != llmcontracts.OperationDirect || !strings.Contains(summaryInputText(got.SummaryInput), "original answer")) {
-						t.Fatal("must summarize original transcript before continuation")
+					if calls == 1 {
+						input := summaryInputText(got.SummaryInput)
+						if got.Operation != llmcontracts.OperationDirect || !strings.Contains(input, "NATIVE_ONLY_FACT") || !strings.Contains(input, "NATIVE_CONTINUATION") {
+							t.Fatal("must summarize native summary and continuation")
+						}
+						if strings.Contains(input, "original answer") {
+							t.Fatal("must not replace checkpoint with covered execution text")
+						}
 					}
 					if calls == 2 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
 						t.Fatal("continuation lost pending message or summary")

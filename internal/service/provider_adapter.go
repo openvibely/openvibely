@@ -1032,11 +1032,23 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		compactionStrategy = "provider_native"
 	}
 	if triggered && shouldUseLocalSummaryBeforeProviderWithBudget(req, budget) {
+		originalReq := req
 		if req.NativeCompactionStateJSON != "" {
-			req.ChatHistory = uncompactedReq.ChatHistory
+			if req.Agent.Provider == models.ProviderAnthropic {
+				history, err := portableAnthropicCheckpoint(req.NativeCompactionStateJSON)
+				if err != nil {
+					return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "read Anthropic checkpoint for summary", err)
+				}
+				// Native state precedes the executions restored after its boundary.
+				// Include its readable summary and continuation before clearing it.
+				req.ChatHistory = append(history, req.ChatHistory...)
+			} else {
+				req.ChatHistory = uncompactedReq.ChatHistory
+				originalReq = req
+				originalReq.NativeCompactionStateJSON = ""
+			}
 			req.NativeCompactionStateJSON = ""
 		}
-		originalReq := req
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
 		if compactErr != nil {
 			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d failure_category=%s", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, contextFailureCategory(compactErr))
@@ -1146,7 +1158,23 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
 	if !compatible {
 		if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
-			return req
+			if checkpoint.Strategy != "anthropic_context_management" {
+				return req
+			}
+			history, err := portableAnthropicCheckpoint(checkpoint.ProviderStateJSON)
+			if err != nil {
+				applog.Infof("[agent-svc] convert Anthropic checkpoint: %v", err)
+				return req
+			}
+			checkpoint.History = normalizeProviderReplay(req.Agent.Provider, history, false)
+			checkpoint.ProviderStateJSON = ""
+			checkpoint.ProviderSessionStateJSON = ""
+			checkpoint.Strategy = "provider_recovery"
+			checkpoint.ModelConfigID = req.Agent.ID
+			checkpoint.CompatibilityKey = providerCompatibilityKey(req.Agent)
+			if err := s.execRepo.UpsertChatCompactionCheckpoint(req.Ctx, *checkpoint); err != nil {
+				applog.Infof("[agent-svc] persist converted Anthropic checkpoint: %v", err)
+			}
 		}
 		checkpoint.ProviderSessionStateJSON = ""
 	}
@@ -1188,6 +1216,17 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	}
 	if len(checkpoint.History) > 0 || strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
 		restored.ChatHistory = mergeCheckpointHistory(req.ChatHistory, checkpoint.History, checkpoint.SourceExecutionID)
+		if checkpoint.Strategy == "local_summary_inflight" {
+			for i, execution := range req.ChatHistory {
+				if execution.ID == checkpoint.SourceExecutionID {
+					// Responses snapshots above contain the complete replacement
+					// history. Other providers save only the continuation after
+					// recovery, which must follow the saved summary.
+					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), req.ChatHistory[i:]...)
+					break
+				}
+			}
+		}
 	}
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
@@ -1279,6 +1318,18 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	sourceID := ""
 	if len(originalReq.ChatHistory) > 0 {
 		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
+	}
+	if sourceID == "" && originalReq.NativeCompactionStateJSON != "" {
+		// A native checkpoint may cover every loaded execution. Carry its
+		// boundary forward so the next followup does not replay covered turns.
+		checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(originalReq.Ctx, scope.Type, scope.ID)
+		if err != nil {
+			applog.Infof("[agent-svc] read native checkpoint boundary for summary: %v", err)
+			return
+		}
+		if checkpoint != nil && checkpoint.ProviderStateJSON == originalReq.NativeCompactionStateJSON {
+			sourceID = checkpoint.SourceExecutionID
+		}
 	}
 	if strategy == "local_summary" && sourceID != "" && sourceID == originalReq.ExecID {
 		strategy = "local_summary_inflight"

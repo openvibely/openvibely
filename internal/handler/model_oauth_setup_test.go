@@ -317,7 +317,7 @@ func TestBuiltInModelOAuthConnectBeforeSave(t *testing.T) {
 				form.Set("name", "Connected model")
 				model := "claude-sonnet-4-5-20250929"
 				if providerName == "openai" {
-					model = "gpt-5.5"
+					model = "gpt-6.1-sol"
 				}
 				form.Set("model", model)
 				if attempt >= 3 {

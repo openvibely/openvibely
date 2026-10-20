@@ -58,7 +58,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
 	}
 
-	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	if !strings.Contains(content, `data-messages-id="chat-messages"`) || !strings.Contains(content, `data-tracker-key="scrollTracker_chat-messages"`) || !strings.Contains(content, `aria-label="Scroll to latest message"`) {

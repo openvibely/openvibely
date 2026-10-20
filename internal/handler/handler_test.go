@@ -5568,7 +5568,7 @@ func TestSidebar_SamePageNavPrevention(t *testing.T) {
 	if !strings.Contains(body, "htmx:beforeRequest") {
 		t.Error("sidebar must contain htmx:beforeRequest handler for same-page nav prevention")
 	}
-	if !strings.Contains(body, "window.location.pathname === navBase") {
+	if !strings.Contains(body, "displayedPath() === navBase") || !strings.Contains(body, "window.openVibelyDisplayedURL()") {
 		t.Error("sidebar must check current pathname against nav link base to prevent re-navigation")
 	}
 
