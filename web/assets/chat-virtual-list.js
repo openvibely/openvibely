@@ -20,6 +20,15 @@
         const lines = Math.max(text.split('\n').length, Math.ceil(text.length / Math.max(30, width / 8)));
         return Math.max(28, Math.min(20000, lines * 24 + 16));
     }
+    // Match the renderer's large-content threshold. Entering the viewport must
+    // not cancel worker preparation and reparse an arbitrarily large row on the
+    // main thread. Explicit Find/print materialization still controls its own mode.
+    function canRenderImmediately(row) {
+        if (!row.lazy || row.ready) return true;
+        if (row.sourceSize === undefined) row.sourceSize = row.model.segments.reduce((size, segment) =>
+            size + (segment.content || '').length + (segment.resultOutput || '').length + (segment.secondary || '').length, 0);
+        return row.sourceSize < 64 * 1024;
+    }
     function sizePlaceholder(row, height, margins) {
         row.placeholder.style.cssText = 'height:' + height + 'px;min-height:' + height +
             'px;box-sizing:border-box;flex-shrink:0;margin-top:' + (margins?.marginTop || '0px') + ';margin-bottom:' + (margins?.marginBottom || '0px') + ';';
@@ -47,21 +56,38 @@
             const el = element(row);
             if (!el.isConnected || (readingPair && !readingPair.contains(el))) return;
             const rect = el.getBoundingClientRect();
-            if (rect.bottom > bounds.top && rect.top < bounds.bottom && (!anchor || rect.top < anchor.top)) anchor = {row, top:rect.top};
+            const estimated = row.lazy && !row.ready;
+            // Follow actual content already being read, not a newly encountered
+            // estimate whose height can change drastically when it finishes.
+            if (rect.bottom > bounds.top && rect.top < bounds.bottom &&
+                (!anchor || (anchor.estimated && !estimated) || (Boolean(anchor.estimated) === Boolean(estimated) && rect.top < anchor.top))) {
+                anchor = {row, top:rect.top, estimated};
+            }
         });
         return function () {
+            if (!hasVisibleArea(messages)) return false;
             let restored = pinned;
             if (pinned) messages.scrollTop = messages.scrollHeight;
             else if (anchor) {
                 const row = anchor.row.lazy ? (anchor.row.owner._chatVirtualRows?.[anchor.row.index] || anchor.row) : anchor.row;
-                if (element(row).isConnected) {
-                    messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top;
+                if (messages.contains(element(row))) {
+                    const viewportShift = messages.getBoundingClientRect().top - bounds.top;
+                    messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top - viewportShift;
                     restored = true;
                 }
             }
             if (restored) window.acknowledgeChatEarlierLayout?.(messages);
+            return restored;
         };
     }
+    // Capture before hiding a workspace. Async rows can finish while it has no
+    // geometry; restore the same message relative to the viewport after reveal.
+    window.captureChatVirtualScroll = function (messages) {
+        if (!hasVisibleArea(messages)) return null;
+        const list = ensureList(messages);
+        collect(list);
+        return saveAnchor(list);
+    };
     window.preserveChatVirtualScroll = function (node, commit) {
         const list = lists.get(node.closest(messagesSelector));
         const restore = list && !list.bulk && saveAnchor(list);
@@ -83,7 +109,9 @@
                 row.node.style.minHeight = row.placeholder.style.height;
             }
             if (row.placeholder.isConnected) row.placeholder.replaceWith(row.node);
+            const generation = row.generation = (row.generation || 0) + 1;
             const finish = () => {
+                if (row.generation !== generation) return;
                 row.ready = true;
                 row.loading = null;
                 if (row.node.isConnected) row.node.style.minHeight = '';
@@ -92,6 +120,7 @@
             try {
                 const rendered = row.render(row.node, row.model, row.index, synchronous);
                 if (rendered?.then) row.loading = Promise.resolve(rendered).then(finish, error => {
+                    if (row.generation !== generation) return;
                     // Keep raw source accessible if a Markdown worker fails.
                     row.node.textContent = row.model.segments.map(seg => seg.content || seg.resultOutput || seg.secondary || '').join('\n');
                     row.node.style.whiteSpace = 'pre-wrap';
@@ -192,6 +221,11 @@
         }
         const bounds = list.messages.getBoundingClientRect();
         const buffer = 250;
+        // Start expensive rows ahead of the reader, while keeping the retained
+        // DOM window small. A 250px window alone can enter and leave the screen
+        // before asynchronous Markdown preparation has finished.
+        const movement = hydrating || list.scrollTop === undefined ? 0 : list.messages.scrollTop - list.scrollTop;
+        const lookahead = Math.min(2400, Math.max(list.messages.clientHeight * 2, Math.abs(movement) * 10));
         const selection = window.getSelection();
         const changes = [], restored = [], pending = [];
         const restore = saveAnchor(list);
@@ -206,7 +240,13 @@
             // or updated content instead of freezing it as empty placeholders.
             const visible = suspended || list.selecting || (!row.lazy && list.rows.size < 40) || protectedRow ||
                 (rect.bottom >= bounds.top - buffer && rect.top <= bounds.bottom + buffer);
-            if (visible && (!mounted || (row.lazy && !row.ready))) changes.push(() => mount(row, restored));
+            const approaching = row.lazy && !row.ready && !row.loading &&
+                ((movement < 0 && rect.bottom >= bounds.top - lookahead && rect.top <= bounds.bottom) ||
+                 (movement > 0 && rect.top <= bounds.bottom + lookahead && rect.bottom >= bounds.top));
+            // Finish small viewport rows before paint. Large rows keep their
+            // asynchronous preparation even if scrolling overtakes the lookahead.
+            const immediate = !hydrating && rect.bottom > bounds.top && rect.top < bounds.bottom && canRenderImmediately(row);
+            if ((visible || approaching) && (!mounted || (row.lazy && !row.ready && (!row.loading || immediate)))) changes.push(() => mount(row, restored, immediate));
             if (mounted && row.lazy && row.ready && rect.height > 0) {
                 row.model.height = rect.height;
                 row.model.width = width;
@@ -225,6 +265,25 @@
         changes.forEach(change => change());
         restoreScroll(restored);
         restore();
+        if (!hydrating) {
+            // A measured row can shrink enough to pull further placeholders into
+            // view. Settle small/retained rows in this frame. A large pending row
+            // must be left to its worker rather than retried in this loop.
+            for (let pass = 0; pass < list.rows.size; pass++) {
+                const exposed = [];
+                list.rows.forEach(row => {
+                    if (row.node?.isConnected && (!row.lazy || row.ready || (row.loading && !canRenderImmediately(row)))) return;
+                    const rect = element(row).getBoundingClientRect();
+                    if (rect.bottom > bounds.top && rect.top < bounds.bottom) exposed.push(row);
+                });
+                if (!exposed.length) break;
+                const keepPosition = saveAnchor(list), newlyMounted = [];
+                exposed.forEach(row => mount(row, newlyMounted, canRenderImmediately(row)));
+                restoreScroll(newlyMounted);
+                keepPosition();
+            }
+        }
+        list.scrollTop = list.messages.scrollTop;
         list.rows.forEach(row => { if (row.loading) pending.push(row.loading); });
         list.observer.observe(list.messages, {childList:true, subtree:true});
         if (changes.length) list.schedule();

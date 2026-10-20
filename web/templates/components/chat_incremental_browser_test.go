@@ -780,3 +780,218 @@ func TestBrowserFunctional_HiddenTranscriptHydrationWaitsForViewport(t *testing.
  return {};
  `)
 }
+
+func TestBrowserFunctional_VirtualScrollFillsVisibleRowsBeforePaint(t *testing.T) {
+	report := runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.width='640px'; messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ let source='';
+ for(let i=0;i<40;i++) source+='[Thinking]\nreason '+i+'\n[/Thinking]\n'+(i%10===0?'Formatted **paragraph**.\n\n'.repeat(800):'Message '+i)+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});
+ await paint();
+ let blanks=0, frames=0, missing=[], longestFrameMS=0;
+ const check=()=>{
+   const bounds=messages.getBoundingClientRect();
+   for(const row of stream._chatVirtualRows) {
+     const el=row.node?.isConnected?row.node:row.placeholder;
+     const rect=el.getBoundingClientRect();
+     if(rect.bottom>bounds.top+1 && rect.top<bounds.bottom-1 && !row.ready) {blanks++;missing.push({frame:frames,index:row.index,top:rect.top-bounds.top,height:rect.height,loading:!!row.loading,children:row.node?.childElementCount})}
+   }
+   frames++;
+ };
+ // Ordinary rows stay below the asynchronous renderer's 64 KiB threshold.
+ // Oversized messages are tested separately: they must not block a frame.
+ // These are already loaded execution rows, not a network/history page fetch.
+ for(let step=0;step<100;step++) {
+   const started=performance.now();
+   messages.scrollTop=Math.max(0,messages.scrollTop-180);
+   const bounds=messages.getBoundingClientRect();
+   const reading=stream._chatVirtualRows.filter(row=>row.ready && row.node?.isConnected).map(row=>({node:row.node,top:row.node.getBoundingClientRect().top})).find(row=>row.top>=bounds.top && row.top<bounds.bottom);
+   messages.dispatchEvent(new Event('scroll'));
+   await new Promise(resolve=>requestAnimationFrame(()=>{check();resolve()}));
+   longestFrameMS=Math.max(longestFrameMS,performance.now()-started);
+   if(reading) assert(reading.node.isConnected && Math.abs(reading.node.getBoundingClientRect().top-reading.top)<3,'rendering moved an already visible message at step '+step);
+ }
+ assert(blanks===0,'visible unrendered rows across scroll frames: '+blanks+' / '+frames+' '+JSON.stringify(missing));
+ return {blanks,frames,longestFrameMS};
+ `)
+	t.Logf("scroll frames: %s", report)
+}
+
+func TestBrowserFunctional_VirtualScrollOvertakesBackgroundPreparation(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.height='80px'; messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ let rejectBackground, backgroundCalls=0, foregroundCalls=0;
+ const models=Array.from({length:10},()=>({kind:'using',segments:[]}));
+ await installChatVirtualRows(stream,{models},(node,model,index,synchronous)=>{
+   if(index===0 && !synchronous) {
+     backgroundCalls++;
+     return new Promise((resolve,reject)=>{rejectBackground=reject});
+   }
+   if(index===0) foregroundCalls++;
+   node.style.height='180px'; node.textContent='Ready message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});
+ await paint();
+ messages.scrollTop=300; messages.dispatchEvent(new Event('scroll')); await paint();
+ assert(backgroundCalls===1 && rejectBackground,'offscreen row did not start background preparation');
+ messages.scrollTop=0; messages.dispatchEvent(new Event('scroll'));
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ const row=stream._chatVirtualRows[0];
+ assert(foregroundCalls===1 && row.ready && row.node.textContent==='Ready message 0','visible row waited for background work');
+ // A superseded worker must not replace the committed row with its fallback.
+ rejectBackground(new Error('superseded preparation')); await pause(0); await paint();
+ assert(row.ready && row.loading===null && row.node.textContent==='Ready message 0','late background failure overwrote the visible message');
+ assert(stream.querySelectorAll('[data-chat-lazy-row]:not([data-virtual-chat-row])').length<6,'lookahead left offscreen rows mounted');
+ return {backgroundCalls,foregroundCalls};
+ `)
+}
+
+func TestBrowserFunctional_VirtualScrollSettlesEstimatedHeightsBeforePaint(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const models=Array.from({length:180},()=>({kind:'using',segments:[]}));
+ await installChatVirtualRows(stream,{models},(node,model,index)=>{
+   node.style.height='24px'; node.textContent='Short message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true}); await paint();
+ // A scrollbar jump encounters estimates that shrink as the window mounts.
+ messages.scrollTop=3000; messages.dispatchEvent(new Event('scroll'));
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ const bounds=messages.getBoundingClientRect();
+ const empty=stream._chatVirtualRows.filter(row=>{
+   const node=row.node?.isConnected?row.node:row.placeholder, rect=node.getBoundingClientRect();
+   return rect.bottom>bounds.top+1 && rect.top<bounds.bottom-1 && (!row.ready || !row.node?.isConnected);
+ });
+ assert(empty.length===0,'height changes exposed unrendered rows for a frame: '+empty.length);
+ return {};
+ `)
+}
+
+func TestBrowserPerformance_VirtualScrollLargeRowYields(t *testing.T) {
+	report := runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const paragraph='A large **message** with *formatting*, a [reference](https://example.com), and a little more prose.\n\n';
+ const huge=paragraph.repeat(Math.ceil(1048576/paragraph.length));
+ const text=huge+('[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n'.repeat(30))+'Latest message.';
+ await renderStreamingContent(stream,text,false);await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ assert(!stream._chatVirtualRows[0].ready,'large row was already rendered');
+ let synchronousLargeCalls=0,largeCalls=0;
+ const original=window.renderStreamingContent;
+ window.renderStreamingContent=function(node,source,yielding,options){
+   const size=options?.preparedSegments?.reduce((sum,s)=>sum+(s.content||'').length,0)||0;
+   if(options?.virtualRow && size>=65536){largeCalls++;if(yielding===false)synchronousLargeCalls++}
+   return original.apply(this,arguments);
+ };
+ messages.scrollTop=0;const start=performance.now();messages.dispatchEvent(new Event('scroll'));
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ const firstFrameMS=performance.now()-start;
+ assert(synchronousLargeCalls===0,'large viewport row bypassed asynchronous rendering');
+ assert(firstFrameMS<250,'large viewport row blocked the first frame: '+firstFrameMS+'ms');
+ const deadline=performance.now()+10000;
+ while(!stream._chatVirtualRows[0].ready && performance.now()<deadline) await pause(20);
+ const row=stream._chatVirtualRows[0];
+ assert(row.ready && row.node.querySelector('strong')?.textContent==='message','large row failed to finish with formatted content');
+ assert(largeCalls===1 && synchronousLargeCalls===0,'scroll settling restarted the large row');
+ return {firstFrameMS,largeCalls,synchronousLargeCalls};
+ `)
+	t.Logf("large-row first frame: %s", report)
+}
+
+func TestBrowserFunctional_VirtualScrollKeepsLargePreparationPending(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='80px';messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const models=Array.from({length:10},(_,index)=>({kind:'using',segments:[{resultOutput:index===0?'x'.repeat(65536):''}]}));
+ let calls=0,finish;
+ await installChatVirtualRows(stream,{models},(node,model,index,synchronous)=>{
+   if(index===0){
+     calls++;assert(!synchronous,'large tool result forced synchronous');
+     return new Promise(resolve=>{finish=()=>{node.style.height='180px';node.textContent='Finished tool result';resolve()}});
+   }
+   node.style.height='180px';node.textContent='Message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ messages.scrollTop=300;messages.dispatchEvent(new Event('scroll'));await paint();
+ assert(calls===1 && finish,'lookahead did not begin preparation');
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await paint();
+ for(let i=0;i<4;i++){messages.dispatchEvent(new Event('scroll'));await paint()}
+ assert(calls===1 && !stream._chatVirtualRows[0].ready,'visible-window settling restarted pending work');
+ finish();await paint();
+ const row=stream._chatVirtualRows[0];
+ assert(row.ready && row.loading===null && row.node.textContent==='Finished tool result','pending row failed to finish');
+ return {calls};
+ `)
+}
+
+func TestBrowserFunctional_VirtualScrollLargeThinkingGroupYields(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ let source='';
+ for(let i=0;i<80;i++)source+='[Thinking]\nThought '+i+' '+('**reasoning** text. '.repeat(100))+'\n[/Thinking]\n';
+ source+=('[Using tool: shell | echo tail]\n[Tool shell done]\ntail result\n[/Tool]\n'.repeat(30))+'Latest message.';
+ await renderStreamingContent(stream,source,false);await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ const row=stream._chatVirtualRows[0];
+ assert(row.model.kind==='thinking' && row.model.segments.length===80,'fixture did not group thinking');
+ assert(row.model.segments.every(s=>s.content.length<65536),'fixture has an individually large segment');
+ let asyncCalls=0;const original=window.renderChatMarkdownAsync;
+ window.renderChatMarkdownAsync=function(text,...args){if(text.length>=65536)asyncCalls++;return original.call(this,text,...args)};
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await new Promise(resolve=>requestAnimationFrame(resolve));
+ assert(!row.ready && row.loading,'large thinking group completed synchronously');
+ const deadline=performance.now()+10000;while(!row.ready && performance.now()<deadline)await pause(20);
+ assert(asyncCalls===1,'large thinking group bypassed the Markdown worker: '+asyncCalls);
+ assert(row.ready && row.node.querySelectorAll('details.stream-thinking').length===1,'thinking group failed to render');
+ assert(row.node.textContent.includes('Thought 0') && row.node.textContent.includes('Thought 79'),'thinking content was lost');
+ return {asyncCalls};
+ `)
+}
+
+func TestBrowserFunctional_HiddenVirtualAnchorResizesAndExpires(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='80px';messages.style.width='640px';messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const models=Array.from({length:10},(_,index)=>({kind:'using',segments:[{resultOutput:index===0?'x'.repeat(65536):''}]}));
+ let finish;
+ await installChatVirtualRows(stream,{models},(node,model,index)=>{
+   if(index===0)return new Promise(resolve=>{finish=()=>{
+     preserveChatVirtualScroll(node,()=>{node.style.height='1800px';node.textContent='Large result'});resolve();
+   }});
+   node.style.height='180px';node.textContent='Message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ messages.scrollTop=300;messages.dispatchEvent(new Event('scroll'));await paint();
+ assert(finish,'large row not preparing');
+ const reading=stream._chatVirtualRows[2];
+ const before=reading.node.getBoundingClientRect().top-messages.getBoundingClientRect().top;
+ const restore=captureChatVirtualScroll(messages);
+ messages.style.display='none';finish();await pause(0);
+ messages.style.width='320px';messages.style.marginTop='64px';
+ assert(restore()===false,'restored against hidden geometry');
+ messages.style.display='';
+ assert(restore()===true,'failed to restore visible anchor');
+ await paint();
+ const el=reading.node.isConnected?reading.node:reading.placeholder;
+ assert(Math.abs(el.getBoundingClientRect().top-messages.getBoundingClientRect().top-before)<3,'viewport movement changed relative reading position');
+ // Bottom-following should still follow the newest content after a hidden resize.
+ messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await paint();
+ const pinned=captureChatVirtualScroll(messages);
+ messages.style.display='none';const tail=document.createElement('div');tail.style.height='200px';messages.appendChild(tail);
+ messages.style.display='';pinned();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<3,'lost bottom-following');
+ // A saved closure must not touch detached transcripts after navigation.
+ messages.remove();
+ assert(restore()===false && pinned()===false,'restored a detached transcript');
+ return {};
+ `)
+}
