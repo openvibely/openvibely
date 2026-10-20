@@ -2,15 +2,21 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
 
@@ -350,4 +356,60 @@ func TestSteeringAttachmentRefreshFailurePreventsModelCall(t *testing.T) {
 	files, err := originalStore.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Empty(t, files)
+}
+
+func TestOpenAISteeringAttachmentsRefreshBeforeProviderBuildsContext(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	h.workerSvc = nil
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	agent.Provider = models.ProviderOpenAI
+	agent.Model = "gpt-5.4"
+	agent.APIKey = "test-key"
+	agent.AuthMethod = models.AuthMethodAPIKey
+	project := createProject(t, h, "OpenAI steering context")
+	task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Status = models.StatusRunning })
+	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+	pending := filepath.Join(uploadsDir, "chat", "pending", "before-context")
+	require.NoError(t, os.MkdirAll(pending, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "new.pdf"), []byte("new report"), 0600))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "before-context"}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+	params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, Task: task, ProjectID: project.ID, Agent: *agent, Message: "go", IsTaskFollowup: true}
+	_, err := h.prepareChatAttachmentContext(ctx, &params)
+	require.NoError(t, err)
+	batch, err := h.claimPendingSteeringInputs(ctx, &params)
+	require.NoError(t, err)
+	require.NoError(t, h.prepareSteeringAttachmentDelivery(ctx, params, &batch))
+	commit := h.preparedSteeringCommit(params, batch)
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "no websocket", 426)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"done\",\"status\":\"completed\",\"output\":[]}}\n\n")
+	}))
+	defer server.Close()
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = server.URL + "/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+	client := openaiclient.NewWithAPIKey("test-key")
+	_, err = client.SendAgentic(params.withAttachmentContext(ctx), "read the new upload", &openaiclient.AgenticOptions{Model: "gpt-5.4", DisableTools: true, InitialInputCommit: commit})
+	require.NoError(t, err)
+	wire, err := json.Marshal(received)
+	require.NoError(t, err)
+	require.Contains(t, string(wire), "new.pdf", "first request must include the refreshed attachment context")
+	require.NoError(t, commit(ctx, nil))
+	rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "checkpoint must not publish a second copy")
+	require.NoDirExists(t, pending)
 }
