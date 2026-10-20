@@ -4128,6 +4128,17 @@ templ ChatAutoScrollScript() {
 				});
 			}
 
+			// Virtual rows preserve the reader themselves. Rebase the paging transaction
+			// after that compensation so its observer does not apply the same delta again.
+			window.acknowledgeChatEarlierLayout = function(container) {
+				var anchor = container._earlierAnchor;
+				if (!anchor) return;
+				anchor.position = anchor.pair && anchor.pair.isConnected
+					? anchor.pair.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+					: container.scrollHeight;
+				rememberChatEarlierLayout(container);
+			};
+
 			function compensateChatEarlierLayout(container) {
 				var anchor = container._earlierAnchor;
 				if (!anchor || !container.isConnected) return;
@@ -4159,6 +4170,8 @@ templ ChatAutoScrollScript() {
 				anchor.position = position;
 				rememberChatEarlierLayout(container);
 			}
+
+			window.compensateChatEarlierLayout = compensateChatEarlierLayout;
 
 			function setAllEarlierLoadersIdle(container) {
 				container.querySelectorAll('[data-earlier-loader="true"]').forEach(function(loader) {
