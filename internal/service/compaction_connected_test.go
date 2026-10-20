@@ -613,7 +613,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
 		for _, to := range providers {
-			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source"}
+			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source"}
 			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
@@ -631,6 +631,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					dir := t.TempDir()
 					file := filepath.Join(dir, "source.txt")
 					require.NoError(t, os.WriteFile(file, []byte("SOURCE_TOOL_EVIDENCE"), 0600))
+					if mode == "tool_image_source" {
+						file = connectedImageAttachment(t, dir).FilePath
+					}
 					sourceCalls, targetCalls, summaries, restarts := 0, 0, 0, 0
 					server := connectedModelServer(t, "websocket", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, _ := io.ReadAll(r.Body)
@@ -676,6 +679,11 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						if stage == 0 {
 							sourceCalls++
+							if mode == "tool_image_source" && sourceCalls == 1 {
+								compactionServerToolReply(w, provider, file, "view_image")
+								return
+							}
+
 							if inflight && sourceCalls == 1 {
 								compactionServerToolReply(w, provider, file, "read_file")
 								return
@@ -709,6 +717,15 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							}
 							compactionServerReply(w, provider, "SOURCE_FINAL", "")
 							return
+						}
+						if mode == "tool_image_source" {
+							var body any
+							if err := json.Unmarshal(raw, &body); err != nil {
+								t.Error(err)
+							}
+							if !containsStructuredImage(body) {
+								t.Error("destination lost structured tool-result image")
+							}
 						}
 						if sourceSummary {
 							if strings.Contains(text, "OLD_RAW_MUST_NOT_RETURN") {
@@ -784,7 +801,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					require.NoError(t, stores.Executions.Complete(ctx, old.ID, models.ExecCompleted, old.Output, "", 0, 0))
 					first := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecRunning, PromptSent: "SOURCE_REQUEST"}
 					require.NoError(t, stores.Executions.Create(ctx, &first))
-					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: dir}
+					req := llmcontracts.AgentRequest{ProjectID: "default", Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: dir}
 					if mode == "native_source" {
 						req.ContextTokenEstimate = 190000
 						if from == models.ProviderAnthropic {
@@ -809,10 +826,12 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							return "SOURCE_STEER", nil
 						})
 					}
-					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
 					require.NoError(t, err)
-					if inflight {
+					if mode == "tool_image_source" {
+						require.Equal(t, 2, sourceCalls)
+					} else if inflight {
 						require.Equal(t, 3, sourceCalls)
 					} else {
 						require.Equal(t, 1, sourceCalls)
@@ -865,7 +884,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					if mode == "summary" {
 						req.ContextTokenEstimate = 190000
 					}
-					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
@@ -896,7 +915,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						req.ChatHistory = history[1:]
 					}
 					req.ContextTokenEstimate = 0
-					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					before := summaries
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
