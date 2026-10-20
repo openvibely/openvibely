@@ -660,11 +660,15 @@ func (h *Handler) completeOAuthFlow(state, code string) oauthCompletionResult {
 }
 
 func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, state string) (int64, error) {
+	return h.exchangeOAuthCodeAndSaveTokensContext(context.Background(), flow, code, state)
+}
+
+func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flow *oauthPendingFlow, code, state string) (int64, error) {
 	if flow.Provider == models.ProviderOpenAICompatible {
 		return h.exchangeCustomOAuthCodeAndSaveTokens(flow, code)
 	}
 	tokenBody, contentType := buildTokenExchangeBody(flow, code, state)
-	tokenReq, err := http.NewRequest("POST", flow.TokenURL, bytes.NewReader(tokenBody))
+	tokenReq, err := http.NewRequestWithContext(ctx, "POST", flow.TokenURL, bytes.NewReader(tokenBody))
 	if err != nil {
 		return 0, err
 	}
@@ -702,7 +706,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	profileDisplayName := ""
 	principalHash := ""
 	if flow.Provider == models.ProviderOpenAI {
-		identityCtx, cancelIdentity := context.WithTimeout(context.Background(), 10*time.Second)
+		identityCtx, cancelIdentity := context.WithTimeout(ctx, 10*time.Second)
 		identity, identityErr := h.resolveConsistentOpenAIOAuthIdentity(identityCtx, tokenResult.IDToken, tokenResult.AccessToken)
 		cancelIdentity()
 		if identityErr != nil {
@@ -712,7 +716,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 		profileDisplayName = identity.DisplayName
 		principalHash = identity.PrincipalHash
 	} else if flow.Provider == models.ProviderAnthropic && h.oauthIdentityResolver != nil {
-		profileCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		profileCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		profile, profileErr := h.oauthIdentityResolver(profileCtx, tokenResult.AccessToken)
 		cancel()
 		if profileErr != nil {

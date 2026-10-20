@@ -60,6 +60,12 @@ func WithRetryTimer(ctx context.Context, after func(time.Duration) <-chan time.T
 	return context.WithValue(ctx, retryTimerContextKey{}, after)
 }
 
+// Wait pauses between application-level retries, honoring cancellation and any
+// timer override attached with WithRetryTimer.
+func Wait(ctx context.Context, delay time.Duration) error {
+	return wait(ctx, time.After, delay)
+}
+
 // RetryEvent describes a retry that will be attempted. Attempt is the
 // one-based retry number (the initial request is not counted as a retry).
 type RetryEvent struct {
