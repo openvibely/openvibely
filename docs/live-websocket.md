@@ -5,8 +5,10 @@ project/task notifications, file changes, and system-update snapshots share it.
 HTMX navigation, follow-ups, and subsequent runs replace subscriptions, not the
 socket. Execution cleanup belongs to the outgoing view when navigation commits;
 retargeting notifications during a pending or failed project switch does not stop
-that view's output. Each browser tab or native window has its own connection. A
-full document reload necessarily creates a replacement connection.
+that view's output. Execution renderers capture the owning view's project ID, so
+cached previews subscribe correctly while the URL and selector still refer to
+the outgoing project. Each browser tab or native window has its own connection.
+A full document reload necessarily creates a replacement connection.
 
 HTTP still serves pages, history windows, fragments, reconciliation snapshots and
 actions. Rendering, virtualization, draft ownership, scroll tracking and thread
