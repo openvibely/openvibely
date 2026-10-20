@@ -26,6 +26,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -1230,7 +1231,7 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
 	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
 		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution, attachments []models.ChatAttachment) (bool, error) {
-			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
+			created, err := s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
 				if err := s.taskRepo.CreateInTx(ctx, tx, task); err != nil {
 					return err
 				}
@@ -1264,6 +1265,10 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				}
 				return nil
 			})
+			if err == nil && created && len(attachments) > 0 {
+				attachmentcontext.Invalidate(attachmentcontext.ChatProjectKey(task.ProjectID))
+			}
+			return created, err
 		}
 	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
