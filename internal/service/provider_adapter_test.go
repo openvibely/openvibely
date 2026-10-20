@@ -23,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
@@ -57,7 +58,7 @@ func TestOpenAIProviderAdapterCanonicalizesModelOverrides(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 	adapter := &openAIProviderAdapter{adapter: llmopenai.New(nil, nil, nil, nil)}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
-		Ctx: context.Background(), Operation: llmcontracts.OperationDirect, Message: "hello", RawDirectPrompt: true, DisableTools: true,
+		Ctx: retrytest.Context(), Operation: llmcontracts.OperationDirect, Message: "hello", RawDirectPrompt: true, DisableTools: true,
 		Agent:           models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1"},
 		AgentDefinition: &models.Agent{Model: " GPT-6-SOL "},
 	})

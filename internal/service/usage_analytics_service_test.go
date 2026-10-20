@@ -20,6 +20,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
@@ -125,7 +126,7 @@ type usageRetryTransport func(*http.Request) (*http.Response, error)
 func (f usageRetryTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestUsageAnalyticsService_UsageRequestNetworkRetryAndCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(retrytest.Context())
 	defer cancel()
 	calls := 0
 	svc := NewUsageAnalyticsService(nil, nil)

@@ -254,7 +254,7 @@ func TestProviderSwitchReusesRecoveryCheckpoint(t *testing.T) {
 						require.Contains(t, string(raw), "FIRST_REPLY")
 					}
 					return llmcontracts.AgentResult{Output: "FIRST_REPLY"}, nil
-				}), llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "followup", Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000}, ChatHistory: history})
+				}), llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "followup", Agent: models.LLMConfig{ID: "saved-model-" + string(provider), Provider: provider, Model: "test", ContextWindow: 200000}, ChatHistory: history})
 				require.NoError(t, err)
 				require.NoError(t, stores.Executions.Complete(ctx, current.ID, models.ExecCompleted, "FIRST_REPLY", "", 0, 0))
 				current.Status = models.ExecCompleted

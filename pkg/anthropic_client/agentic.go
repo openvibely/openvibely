@@ -323,6 +323,27 @@ func hasLeadingCompactionMessage(messages []agenticMessage) bool {
 	return hasLeadingCompactionMessageWithRole(messages, "assistant")
 }
 
+// EstimateNativeCompactionTokens budgets the decoded continuation, including
+// images acquired after compaction, using the same image cost as live requests.
+func EstimateNativeCompactionTokens(raw string) int {
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	messages, err := decodeNativeCompactionState(raw)
+	if err != nil {
+		return tokenestimate.FromText(raw)
+	}
+	encoded, err := json.Marshal(map[string]any{"messages": messages})
+	if err != nil {
+		return tokenestimate.FromText(raw)
+	}
+	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+	if err != nil {
+		return tokenestimate.FromText(raw)
+	}
+	return tokens
+}
+
 func hasLeadingCompactionMessageWithRole(messages []agenticMessage, role string) bool {
 	if len(messages) == 0 || messages[0].Role != role {
 		return false
@@ -455,18 +476,23 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 	}
-	// If attachments are present, build multimodal content blocks for the prompt
+	replayPrompt := Message{Role: "user", Content: prompt}
+	// If attachments are present, preserve the same multimodal prompt for replay.
 	if len(opts.Attachments) > 0 {
 		contentBlocks, blockErr := buildContentBlocks(prompt, opts.Attachments)
 		if blockErr != nil {
 			return nil, fmt.Errorf("build content blocks: %w", blockErr)
 		}
 		messages = append(messages, agenticMessage{Role: "user", Content: contentBlocks})
+		replayPrompt.ContentBlocks, blockErr = json.Marshal(contentBlocks)
+		if blockErr != nil {
+			return nil, fmt.Errorf("encode prompt replay content blocks: %w", blockErr)
+		}
 	} else {
 		messages = append(messages, agenticMessage{Role: "user", Content: prompt})
 	}
 
-	replay := []Message{{Role: "user", Content: prompt}}
+	replay := []Message{replayPrompt}
 	defer func() {
 		if opts.OnReplay != nil {
 			opts.OnReplay(replay)
@@ -534,7 +560,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					opts.OnCompaction(*resp.compaction.content)
 				}
 			} else {
-				hasDurableCompactionState = false
 				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
 		}
@@ -553,7 +578,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			for _, block := range resp.contentBlocks {
 				blocks = append(blocks, block)
 			}
-			messages = []agenticMessage{{Role: "assistant", Content: blocks}}
+			if resp.compaction.content != nil {
+				messages = []agenticMessage{{Role: "assistant", Content: blocks}}
+			} else {
+				messages = append(messages, agenticMessage{Role: "assistant", Content: blocks})
+			}
 		} else {
 			messages = append(messages, agenticMessage{
 				Role:    "assistant",
@@ -659,10 +688,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			continue
 		}
 
-		replayResults := make([]agenticBlock, 0, len(executed))
-		for _, exec := range executed {
-			replayResults = append(replayResults, agenticBlock{Type: "tool_result", ToolUseID: exec.block.ID, Content: anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit)), IsError: exec.isError})
-		}
+		// Persist the exact model-visible results, including resolved tool images.
+		replayResults := append([]agenticBlock(nil), toolResults...)
 		replayJSON, _ := json.Marshal(replayResults)
 		replay = append(replay, Message{Role: "user", ContentBlocks: replayJSON})
 		// Add tool results as user message.

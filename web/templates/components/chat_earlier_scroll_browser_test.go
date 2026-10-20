@@ -44,7 +44,9 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       const messages = document.querySelector('.messages');
       const anchor = document.getElementById('anchor');
       const offset = () => anchor.getBoundingClientRect().top - messages.getBoundingClientRect().top;
-      const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+      // ResizeObserver and scroll compensation run during rendering; wait for the
+      // frame after one has rendered rather than for wall-clock time.
+      const rendered = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const check = (actual, expected, label) => { if (Math.abs(actual-expected)>1) throw new Error(label+': '+actual+' expected '+expected); };
       const tracker = window.resolveScrollTracker('scrollTracker_'+messages.id, messages);
       window.initChatEarlierLoader(messages);
@@ -65,11 +67,11 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       messages.dispatchEvent(new Event('scroll'));
       const readingOffset = offset();
       document.getElementById('older').style.height = '750px';
-      await wait(60);
+      await rendered();
       check(offset(), readingOffset, 'hydration resize');
       // Streaming below the anchor must not affect its position.
       messages.lastElementChild.style.height = '900px';
-      await wait(60);
+      await rendered();
       check(offset(), readingOffset, 'streaming below reader');
       // Move into the newly loaded page before hydration completes.
       messages.dispatchEvent(new WheelEvent('wheel', {deltaY:-1000}));
@@ -79,7 +81,7 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       const olderOffset = () => oldest.getBoundingClientRect().top - messages.getBoundingClientRect().top;
       const readingOlderOffset = olderOffset();
       document.getElementById('older').style.height = '1050px';
-      await wait(60);
+      await rendered();
       check(olderOffset(), readingOlderOffset, 'hydration below newly visible reader');
       // Conversely, a queued downward scroll into the next row must retain
       // compensation for growth above that row in the very same turn.
@@ -89,10 +91,10 @@ func TestBrowserFunctional_EarlierPrependPreservesMovingReader(t *testing.T) {
       const nextOffset = () => older.getBoundingClientRect().top - messages.getBoundingClientRect().top;
       const readingNextOffset = nextOffset();
       oldest.style.height = '800px';
-      await wait(60);
+      await rendered();
       check(nextOffset(), readingNextOffset, 'queued scroll with hydration above reader');
       finishHydration();
-      await wait(80);
+      await rendered();
       check(nextOffset(), readingNextOffset, 'settled prepend');
       if (!tracker.userScrolledUp) throw new Error('reader became pinned');
       if (messages._earlierAnchor || messages.dataset.earlierRequestLoading === 'true' || messages.style.overflowAnchor) throw new Error('transaction not cleaned up');

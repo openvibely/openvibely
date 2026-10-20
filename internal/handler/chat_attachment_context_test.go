@@ -15,6 +15,7 @@ import (
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmcompatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
@@ -89,7 +90,7 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 			t.Run(string(provider)+"/"+state, func(t *testing.T) {
 				h, _, configs, stores := setupTestHandlerWithStores(t)
 				h.chatAttachmentRepo = stores.ChatAttachments
-				ctx := context.Background()
+				ctx := retrytest.Context()
 				agent := createAgent(t, configs)
 				project := createProject(t, h, "Wire attachments")
 				task := createTask(t, h, project.ID, "Edit document", func(task *models.Task) { task.Category = models.CategoryChat })

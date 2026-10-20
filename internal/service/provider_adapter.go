@@ -490,8 +490,13 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 		budget.FixedTokens += estimateDefaultProviderToolTokens(req.Agent.Provider)
 	}
 	budget.PendingTokens = estimatedUTF8Tokens(req.Message)
-	budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
-	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory) + estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
+	if req.Agent.Provider == models.ProviderOpenAI {
+		budget.HistoryTokens, budget.NativeStateTokens = llmopenai.EstimateContinuationTokens(req.ChatHistory, req.NativeCompactionStateJSON)
+	} else {
+		budget.NativeStateTokens = estimateNativeStateTokens(req)
+		budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+	}
+	budget.HistoryTokens += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimateRequestAttachmentTokens(req, att)
 	}
@@ -719,8 +724,21 @@ func openAIContextWindow(model string) int {
 	return defaultOpenAIContextWindow
 }
 
+func estimateNativeStateTokens(req llmcontracts.AgentRequest) int {
+	if req.Agent.Provider == models.ProviderAnthropic {
+		return anthropicclient.EstimateNativeCompactionTokens(req.NativeCompactionStateJSON)
+	}
+	return estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+}
+
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
-	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+	total := estimatedUTF8Tokens(req.Message)
+	if req.Agent.Provider == models.ProviderOpenAI {
+		history, native := llmopenai.EstimateContinuationTokens(req.ChatHistory, req.NativeCompactionStateJSON)
+		total += history + native
+	} else {
+		total += estimateNativeStateTokens(req) + estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+	}
 	total += estimatedUTF8Tokens(attachmentcontext.Text(req.Ctx))
 	total += estimatedUTF8Tokens(managedcontext.Text(req.Ctx))
 	total += estimateProviderSystemPromptTokens(req)
@@ -732,7 +750,6 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	for _, att := range req.Attachments {
 		total += estimateRequestAttachmentTokens(req, att)
 	}
-	total += estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	total += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	return total - savedApplicationContextTokens(req)
 }
@@ -1122,11 +1139,16 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
 		return req
 	}
-	if (strings.TrimSpace(checkpoint.ProviderStateJSON) != "" || strings.TrimSpace(checkpoint.ProviderSessionStateJSON) != "") && checkpoint.CompatibilityKey != providerCompatibilityKey(req.Agent) {
-		return req
-	}
-	if checkpoint.ModelConfigID != "" && req.Agent.ID != "" && checkpoint.ModelConfigID != req.Agent.ID {
-		return req
+	// Readable history remains portable even when the row also holds reasoning
+	// settings. Reject incompatible native compaction, but only clear session
+	// settings in the restored copy; do not discard its readable history.
+	compatible := checkpoint.CompatibilityKey == providerCompatibilityKey(req.Agent) &&
+		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
+	if !compatible {
+		if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
+			return req
+		}
+		checkpoint.ProviderSessionStateJSON = ""
 	}
 	restored := req
 	if checkpoint.Strategy == "local_summary_inflight" {
@@ -1429,7 +1451,7 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 	compacted.NativeCompactionStateJSON = ""
 	compacted.ForceNativeCompaction = false
 	compacted.Agent.ForceNativeCompaction = false
-	compacted.ChatHistory = restoreCompactedApplicationContext(compacted, compacted.ChatHistory)
+	compacted.ChatHistory = restoreCompactedApplicationContext(compacted, compacted.ChatHistory, history)
 	compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
 	return compacted, nil
 }
