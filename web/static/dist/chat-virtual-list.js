@@ -8,6 +8,8 @@
     const rowSelector = '.chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
     const messagesSelector = '#chat-messages, #task-thread-messages';
     const element = row => row.node?.isConnected ? row.node : row.placeholder;
+    const hasVisibleArea = messages => messages.isConnected && messages.clientWidth > 0 &&
+        messages.clientHeight > 0 && messages.getClientRects().length > 0;
 
     function estimate(model, width) {
         if (model.width === width && model.height > 0) return model.height;
@@ -148,7 +150,7 @@
         // Hidden workspaces have zero-sized rectangles for every row. Treating
         // those as intersections would render the entire transcript. ResizeObserver
         // schedules another pass when the chat area becomes visible again.
-        if (!list.messages.clientWidth || !list.messages.clientHeight || !list.messages.getClientRects().length) return [];
+        if (!hasVisibleArea(list.messages)) return [];
         list.observer.disconnect();
         collect(list);
         const width = list.messages.clientWidth;
@@ -267,6 +269,7 @@
         const restored = [], pending = [], anchors = [], scrollRestores = [];
         lists.forEach(list => {
             if (!root.contains(list.messages) && !list.messages.contains(root)) return;
+            if (options?.visibleOnly && !hasVisibleArea(list.messages)) return;
             list.observer.disconnect();
             collect(list);
             if (options?.renderLazy !== false) anchors.push(saveAnchor(list));
@@ -317,8 +320,10 @@
     document.addEventListener('keydown', function (event) {
         if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'f' ||
             (event.key.toLowerCase() === 'a' && !event.target.closest?.('input, textarea, [contenteditable="true"]')))) {
-            suspended = true;
-            window.materializeVirtualChatRows(document.body);
+            // Find/Select All in Changes must neither expand hidden chat nor
+            // suspend windowing when the reader returns to it.
+            suspended = Array.from(lists.values()).some(list => hasVisibleArea(list.messages));
+            window.materializeVirtualChatRows(document.body, {visibleOnly:true});
         } else if (event.key === 'Escape') {
             suspended = false;
             lists.forEach(list => list.schedule());
