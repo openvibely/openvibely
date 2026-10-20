@@ -34,6 +34,9 @@ func TestAttachmentContextPersistsAcrossAnthropicFollowups(t *testing.T) {
 		if requests >= 2 {
 			want = 2
 		}
+		if requests >= 4 {
+			want = 3
+		}
 		require.Equal(t, want, count)
 		if prefix != nil {
 			require.Equal(t, prefix, request.Messages[:len(prefix)], "followup must preserve the previous request prefix")
@@ -57,9 +60,12 @@ func TestAttachmentContextPersistsAcrossAnthropicFollowups(t *testing.T) {
 	AnthropicAPIHost = server.URL
 	defer func() { AnthropicAPIHost = old }()
 	var history []Message
-	for turn := 0; turn < 4; turn++ {
+	for turn := 0; turn < 6; turn++ {
 		if turn == 2 {
 			ctx = attachmentcontext.With(ctx, "/files/report.pdf\n/files/new.pdf")
+		}
+		if turn == 4 {
+			ctx = attachmentcontext.With(ctx, "")
 		}
 		client := NewWithAPIKey("test")
 		client.History = append([]Message(nil), history...)
@@ -73,14 +79,17 @@ func TestAttachmentContextPersistsAcrossAnthropicFollowups(t *testing.T) {
 		for _, m := range saved {
 			if strings.HasPrefix(m.Content, attachmentcontext.Marker+"\n") {
 				count++
+				if turn == 4 {
+					require.Contains(t, m.Content, "No files are currently attached")
+				}
 			}
 		}
-		if turn == 0 || turn == 2 {
+		if turn == 0 || turn == 2 || turn == 4 {
 			require.Equal(t, 1, count)
 		} else {
 			require.Zero(t, count, "unchanged context belongs to earlier replay")
 		}
 		history = append(history, saved...)
 	}
-	require.Equal(t, 4, requests)
+	require.Equal(t, 6, requests)
 }

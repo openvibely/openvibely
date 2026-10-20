@@ -99,9 +99,10 @@ func TestTaskThreadAttachmentContextRefreshesOnAddAndDelete(t *testing.T) {
 	require.NoError(t, h.attachmentRepo.Delete(ctx, att.ID))
 	require.Empty(t, attachmentcontext.Text(reqCtx))
 	history = attachmentcontext.Ensure(reqCtx, append(history, msg{"assistant", "done"}), read, mk)
-	require.Len(t, history, 3)
+	require.Len(t, history, 4)
 	require.Contains(t, history[0].text, "added.pdf", "already-sent context is not rewritten")
-	require.Equal(t, "done", history[len(history)-1].text, "empty file list must not inject a message")
+	require.Contains(t, history[len(history)-1].text, "No files are currently attached")
+	require.NotContains(t, history[len(history)-1].text, "added.pdf")
 }
 
 func TestMessageAttachmentsRouteByConversationType(t *testing.T) {
