@@ -459,20 +459,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							}
 						}
 
-						function liveEventsURL(projectID, taskID) {
-							var params = new URLSearchParams();
-							params.set('project_id', projectID);
-							if (taskID) params.set('task_id', taskID);
-							return '/events/live?' + params.toString();
-						}
-
-							var liveSSEHandlers = {
+						var liveSSEHandlers = {
 								onopen: function() {
 									console.log('[SSE-Live] Connected to shared live events');
 									window._tabVisibility.dispatchSSEEvent('sse-live-connected', {
 										reconnected: liveSSEHasConnected
 									});
 									liveSSEHasConnected = true;
+                                    if (window.htmx) htmx.trigger('body', 'alertUpdate');
 								},
 								onerror: function(err) {
 									console.error('[SSE-Live] Connection error:', err);
@@ -515,21 +509,16 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									'diff_snapshot': handleLiveEvent
 								}
 							};
-						function retargetLiveEvents(projectID, taskID) {
-							if (!projectID) {
-								if (window._sidebarSSE) window._sidebarSSE.close();
-								window._sidebarSSE = null;
-								return;
-							}
-							var url = liveEventsURL(projectID, taskID);
-							if (window._sidebarSSE) {
-								window._tabVisibility.retargetSSE('live-events', url);
-								return;
-							}
-							window._sidebarSSE = window._tabVisibility.registerSSE('live-events', url, liveSSEHandlers);
-						}
+						var liveScope = '';
+                        function retargetLiveEvents(projectID, taskID) {
+                            var scope = JSON.stringify([projectID || '', taskID || '']);
+                            if (scope === liveScope) return;
+                            liveScope = scope;
+                            if (window._sidebarSSE) window._sidebarSSE.close();
+                            window._sidebarSSE = projectID ? window.openVibelyLive.live(projectID, taskID, liveSSEHandlers) : null;
+                        }
 
-						function retargetLiveEventsForCurrentLocation() {
+                        function retargetLiveEventsForCurrentLocation() {
 							retargetLiveEvents(projectSelector && projectSelector.value, currentTaskID());
 						}
 

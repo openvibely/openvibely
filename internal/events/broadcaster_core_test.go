@@ -128,9 +128,11 @@ func TestBroadcasterCore_Lifecycle(t *testing.T) {
 }
 
 func TestBroadcasterCore_MaxSubscribersAndRecovery(t *testing.T) {
+	const limit = 3
 	b := newBroadcaster[broadcasterCoreTestEvent, broadcasterCoreTestSubscriber](1)
-	subs := make([]broadcasterCoreTestSubscriber, 0, MaxSubscribers)
-	for i := 0; i < MaxSubscribers; i++ {
+	b.maxSubscribers = limit
+	subs := make([]broadcasterCoreTestSubscriber, 0, limit)
+	for i := 0; i < limit; i++ {
 		sub, err := b.Subscribe()
 		if err != nil {
 			t.Fatalf("Subscribe #%d: %v", i, err)

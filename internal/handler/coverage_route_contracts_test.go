@@ -60,7 +60,7 @@ func TestSystemUpdateRoutesReturnUnavailableContractsWhenCoordinatorMissing(t *t
 		want   int
 	}{
 		{name: "state hidden", method: http.MethodGet, path: "/api/system/update", want: http.StatusNoContent},
-		{name: "events hidden", method: http.MethodGet, path: "/api/system/update/events", want: http.StatusNoContent},
+		{name: "obsolete events removed", method: http.MethodGet, path: "/api/system/update/events", want: http.StatusNotFound},
 		{name: "apply missing", method: http.MethodPost, path: "/api/system/update/apply", want: http.StatusNotFound},
 		{name: "cancel missing", method: http.MethodPost, path: "/api/system/update/cancel", want: http.StatusNotFound},
 	} {

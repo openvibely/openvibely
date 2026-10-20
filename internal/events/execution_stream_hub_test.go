@@ -197,9 +197,10 @@ func TestExecutionStreamHubPublishDoesNotBlockSlowSubscriber(t *testing.T) {
 }
 
 func TestExecutionStreamHubSubscriberLimitUsesTotalSubscribers(t *testing.T) {
-	hub := NewExecutionStreamHub()
-	unsubscribes := make([]func(), 0, MaxSubscribers)
-	for i := 0; i < MaxSubscribers; i++ {
+	const limit = 3
+	hub := NewExecutionStreamHubWithLimit(limit)
+	unsubscribes := make([]func(), 0, limit)
+	for i := 0; i < limit; i++ {
 		_, unsubscribe, err := hub.Subscribe(fmt.Sprintf("exec-%d", i))
 		if err != nil {
 			t.Fatalf("subscribe %d: %v", i, err)
@@ -207,7 +208,7 @@ func TestExecutionStreamHubSubscriberLimitUsesTotalSubscribers(t *testing.T) {
 		unsubscribes = append(unsubscribes, unsubscribe)
 	}
 	if _, _, err := hub.Subscribe("overflow"); err != ErrMaxSubscribers {
-		t.Fatalf("expected ErrMaxSubscribers after %d total subscribers, got %v", MaxSubscribers, err)
+		t.Fatalf("expected ErrMaxSubscribers after %d total subscribers, got %v", limit, err)
 	}
 	for _, unsubscribe := range unsubscribes {
 		unsubscribe()

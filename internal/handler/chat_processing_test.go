@@ -7278,12 +7278,17 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 	inProgressTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	assert.Equal(t, models.StatusRunning, inProgressTask.Status)
-	recorder := httptest.NewRecorder()
-	streamContext := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/", nil), recorder)
-	sentLen := 0
-	terminal, err := h.catchUpExecutionSSE(ctx, streamContext, followupExec.ID, &sentLen, false)
-	require.NoError(t, err)
-	assert.False(t, terminal, "DB catch-up must wait for merge reconciliation")
+	streamCtx, stopStream := context.WithCancel(ctx)
+	defer stopStream()
+	frames := make(chan liveFrame, 128)
+	go h.streamExecution(streamCtx, liveCommand{ExecID: followupExec.ID}, func(frame liveFrame) bool {
+		select {
+		case frames <- frame:
+			return true
+		case <-streamCtx.Done():
+			return false
+		}
+	})
 	for len(sub) > 0 {
 		ev := <-sub
 		assert.NotEqual(t, events.ExecutionStreamDone, ev.Type, "live stream completed before merge reconciliation")
@@ -7294,9 +7299,20 @@ func TestFollowupResetsMergeStatus(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("follow-up did not finish")
 	}
-	terminal, err = h.catchUpExecutionSSE(ctx, streamContext, followupExec.ID, &sentLen, false)
-	require.NoError(t, err)
-	assert.True(t, terminal)
+	terminalTimer := time.NewTimer(5 * time.Second)
+	defer terminalTimer.Stop()
+	waitingForTerminal := true
+	for waitingForTerminal {
+		select {
+		case frame := <-frames:
+			require.NotEqual(t, "error", frame.Event)
+			if frame.Event == "done" {
+				waitingForTerminal = false
+			}
+		case <-terminalTimer.C:
+			t.Fatal("WebSocket subscription did not complete after reconciliation")
+		}
+	}
 
 	// Verify execution completed
 	updatedExec, err := h.execRepo.GetByID(ctx, followupExec.ID)

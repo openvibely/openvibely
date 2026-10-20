@@ -98,11 +98,12 @@ func TestBroadcaster_PublishSubscribe(t *testing.T) {
 }
 
 func TestBroadcaster_MaxSubscribers(t *testing.T) {
-	b := NewBroadcaster()
+	const limit = 3
+	b := NewBroadcasterWithLimit(limit)
 
 	// Create subscribers up to the limit
-	subs := make([]Subscriber, 0, MaxSubscribers)
-	for i := 0; i < MaxSubscribers; i++ {
+	subs := make([]Subscriber, 0, limit)
+	for i := 0; i < limit; i++ {
 		sub, err := b.Subscribe()
 		if err != nil {
 			t.Fatalf("Subscribe #%d should succeed, got: %v", i, err)

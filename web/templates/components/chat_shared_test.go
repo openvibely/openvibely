@@ -516,8 +516,8 @@ func TestChatBubbleStreaming_ThreadCompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "stopThreadPolling()") {
 		t.Error("thread completion should stop thread polling dynamically when no pending rows exist")
 	}
-	if !strings.Contains(content, "restoreThreadPollingFallback()") {
-		t.Error("transport errors should restore polling as a fallback")
+	if strings.Contains(content, "eventSource.onerror") {
+		t.Error("transport errors must remain owned by the shared connection")
 	}
 }
 
@@ -678,8 +678,8 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "/thread/composer-action") {
 		t.Error("resume completion should refresh the primary composer action from the server")
 	}
-	if !strings.Contains(content, "restoreThreadPollingFallback()") {
-		t.Error("resume transport errors should restore polling as a fallback")
+	if strings.Contains(content, "eventSource.onerror") {
+		t.Error("resume transport errors must remain owned by the shared connection")
 	}
 	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
 		!strings.Contains(content, "var largeStreamRenderInterval = 50") {
@@ -688,8 +688,8 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "if (renderDelayTimer !== null)") {
 		t.Error("resume completion must cancel a pending delayed render before forcing the final render")
 	}
-	if strings.Count(content, "flushCumulativeContent();") != 2 {
-		t.Error("both resume-stream error paths must flush and cancel pending delayed output")
+	if strings.Count(content, "flushCumulativeContent();") != 1 {
+		t.Error("the resume-stream terminal error path must flush and cancel pending delayed output")
 	}
 	for _, snippet := range []string{
 		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
@@ -716,7 +716,7 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	content := buf.String()
 
 	// Verify EventSource is used for streaming
-	if !strings.Contains(content, "new EventSource") {
+	if !strings.Contains(content, "window.openVibelyLive.execution") {
 		t.Error("Missing EventSource for streaming")
 	}
 	if !strings.Contains(content, "window.registerChatStreamEventSource(execId, eventSource)") {
@@ -743,8 +743,8 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	if strings.Contains(content, "container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer)") {
 		t.Error("Streaming onmessage must not normalize and copy the entire accumulated response before the scheduled render")
 	}
-	if strings.Count(content, "flushBufferedOutput();") != 2 {
-		t.Error("both fresh-stream error paths must flush and cancel pending delayed output")
+	if strings.Count(content, "flushBufferedOutput();") != 1 {
+		t.Error("the fresh-stream terminal error path must flush and cancel pending delayed output")
 	}
 	for _, snippet := range []string{
 		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
@@ -828,6 +828,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  openVibelyLive: {execution: function() { return new FakeEventSource(); }},
   normalizeTranscriptMarkers: text => text.replace(/alias/g, 'normalized-alias'),
   renderStreamingContent(container, text) { renders++; container.rendered = text; },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
@@ -845,7 +846,7 @@ if (timers.size !== 1 || renders !== 1) process.exit(3);
 source.listeners.error({ data: 'boom' });
 if (renders !== 2 || timers.size !== 0 || cleared !== 1) process.exit(4);
 if (!appended.length || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(5);
-source.onerror({ data: 'boom' });
+source.listeners.error({ data: 'boom' });
 if (renders !== 2 || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(6);
 `
 	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
@@ -895,6 +896,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  openVibelyLive: {execution: function() { return new FakeEventSource(); }},
   renderStreamingContent() {},
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
   registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
@@ -905,7 +907,7 @@ global.window = {
 for (let attempt = 0; attempt < 5; attempt++) {
   const active = sources[sources.length - 1];
   active.listeners.error({ data: 'execution not found' });
-  active.onerror({ data: 'execution not found' });
+  active.listeners.error({ data: 'execution not found' });
   if (timers.size !== 1 || appended.length !== 0) process.exit(10 + attempt);
   const entry = timers.entries().next().value;
   timers.delete(entry[0]);
@@ -914,7 +916,7 @@ for (let attempt = 0; attempt < 5; attempt++) {
 if (sources.length !== 6 || appended.length !== 0) process.exit(20);
 const exhausted = sources[sources.length - 1];
 exhausted.listeners.error({ data: 'execution not found' });
-exhausted.onerror({ data: 'execution not found' });
+exhausted.listeners.error({ data: 'execution not found' });
 if (timers.size !== 0 || appended.length !== 1 || appended[0].textContent.indexOf('execution not found') === -1) process.exit(21);
 `
 	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
@@ -961,6 +963,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  openVibelyLive: {execution: function() { return new FakeEventSource(); }},
   normalizeTranscriptMarkers() { throw new Error('normalizer must not run in fallback'); },
   renderStreamingContent() { renders++; return Promise.reject(new Error('renderer failed')); },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
@@ -1278,6 +1281,7 @@ func TestBrowserFunctional_FailedAssistantTerminalErrorOrderingAndSmartScrollInC
 	window.EventSource = function(url) { this.url = url; this.listeners = {}; window.__eventSources.push(this); };
 	window.EventSource.prototype.addEventListener = function(type, callback) { this.listeners[type] = callback; };
 	window.EventSource.prototype.close = function() {};
+    window.openVibelyLive = {execution: function(id, offset) { return new window.EventSource("/events/chat/" + id + "?offset=" + offset); }};
 	window.renderChatMarkdown = function(text) { return '<div class="chat-markdown">' + String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</div>'; };
 	window.addCodeCopyButtons = function() {};
 	window.renderChatMarkdownLargeFallback = function(text) { var node = document.createElement('div'); node.innerHTML = window.renderChatMarkdown(text); return node; };
@@ -2582,7 +2586,7 @@ func TestUserScrollTracking(t *testing.T) {
 			}
 
 			// Verify EventSource connection setup
-			if !strings.Contains(content, "new EventSource") {
+			if !strings.Contains(content, "window.openVibelyLive.execution") {
 				t.Error("Missing EventSource setup")
 			}
 
@@ -4425,7 +4429,7 @@ func TestChatBubbleStreaming_UsesUTF8ByteOffsetInEventSourceURL(t *testing.T) {
 	if !strings.Contains(html, "function utf8ByteLength") || !strings.Contains(html, "streamTextEncoder.encode(value || '').length") {
 		t.Fatal("fresh stream should compute offsets as UTF-8 byte lengths")
 	}
-	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
+	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "window.openVibelyLive.execution(execId, streamOffset, streamProjectID)") {
 		t.Fatal("fresh stream EventSource URL should include current textBuffer byte offset")
 	}
 }
@@ -4448,7 +4452,7 @@ func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
 	for _, snippet := range []string{
 		"var cumulativeContent = container.getAttribute('data-raw-content') || '';",
 		"var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;",
-		"new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset))",
+		"window.openVibelyLive.execution(execId, streamOffset, streamProjectID)",
 		"function persistResumeStreamState(active)",
 		"streamOffset += utf8ByteLength(event.data);",
 		"container.setAttribute('data-initial-byte-length', String(streamOffset));",
@@ -5096,7 +5100,7 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errEndOffset := strings.Index(content[errIdx:], "eventSource.onerror")
+	errEndOffset := strings.Index(content[errIdx:], "connectExecutionStream();")
 	if errEndOffset <= 0 {
 		t.Fatal("ChatBubbleStreaming error handler boundary is missing")
 	}
@@ -5114,25 +5118,10 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		t.Error("error handler must expose its terminal render and transcript sync as an awaitable transition")
 	}
 
-	// onerror handler
-	oeIdx := strings.Index(content, "eventSource.onerror")
-	if oeIdx == -1 {
-		t.Fatal("ChatBubbleStreaming must have an onerror handler")
-	}
-	oeEnd := oeIdx + 2000
-	if oeEnd > len(content) {
-		oeEnd = len(content)
-	}
-	oeBody := content[oeIdx:oeEnd]
-	if !strings.Contains(oeBody, "scheduleExecutionStreamRetry()") {
-		t.Error("onerror handler must retry empty early stream failures before clearing chat streaming state")
-	}
-	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
-		t.Error("onerror handler must clear _chatStreamInProgress for chat (non-thread) context")
-	}
-	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
-		t.Error("onerror handler must re-evaluate plan prompt for chat (non-thread) context")
-	}
+    if strings.Contains(content,"eventSource.onerror") {
+        t.Error("network failures must not terminalize an execution subscription")
+    }
+
 }
 
 func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) {
@@ -5151,7 +5140,7 @@ func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) 
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errEnd := strings.Index(content[errIdx:], "eventSource.onerror = function")
+	errEnd := strings.Index(content[errIdx:], "connectExecutionStream();")
 	if errEnd == -1 {
 		t.Fatal("ChatBubbleStreaming must delimit its error event listener before onerror")
 	}

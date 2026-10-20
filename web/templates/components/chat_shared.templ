@@ -366,6 +366,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var streamingDots = document.currentScript.previousElementSibling;
 					var container = streamingDots.previousElementSibling;
 					var execId = container.getAttribute('data-exec-id');
+					// Capture the owning view's scope before navigation can change the selector.
+					var streamProjectRoot = container.closest('[data-project-id]');
+					var streamProjectID = streamProjectRoot ? streamProjectRoot.getAttribute('data-project-id') : '';
 					var thinkingIndicator = document.getElementById('streaming-thinking-' + execId);
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
@@ -397,16 +400,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 						}
 
-						function restoreThreadPollingFallback() {
-							if (!pauseTarget) return;
-							var pollingEl = document.getElementById(pauseTarget);
-							if (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;
-							var pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');
-							var pausedGet = pollingEl.getAttribute('data-paused-hx-get');
-							if (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);
-							if (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);
-							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
-						}
 
 						function refreshThreadComposerAction() {
 							if (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;
@@ -603,7 +596,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
 						}
@@ -770,30 +764,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 						});
 
-						eventSource.onerror = function(error) {
-							console.error('EventSource failed:', error);
-							eventSource.close();
-							removeThreadEventSource(eventSource);
-							removeChatEventSource(execId, eventSource);
-				if (textBuffer === '' && scheduleExecutionStreamRetry()) {
-					return;
-						}
-						if (streamTerminalHandled) return;
-						streamTerminalHandled = true;
-						flushBufferedOutput();
-						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-							// Hide thinking indicator and streaming dots, ensure content shows
-						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
-						if (streamingDots) streamingDots.classList.add('hidden');
-					container.classList.remove('hidden');
-						window._taskThreadStreamingActive = false;
-						if (isThread) {
-							restoreThreadPollingFallback();
-						} else {
-							window._chatStreamInProgress = false;
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-						}
-					};
+
 					}
 					connectExecutionStream();
 				})();
@@ -802,8 +773,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 	</div>
 }
 
-// ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress SSE stream.
-// The EventSource is initialized by _initThreadStreaming() after initial hydration or an
+// ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress execution stream.
+// The subscription is initialized by _initThreadStreaming() after initial hydration or an
 // authoritative Chat/Task Thread morph, since inline scripts do not re-execute after morph swaps.
 // Content is stored in data-raw-content (not as text content) so it renders formatted
 // immediately via the inline script, matching ChatBubble's pattern. This prevents
@@ -867,8 +838,8 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 }
 
 // ChatStreamingResumeInitScript installs the shared resume-stream initializer.
-// It finds [data-streaming-resume] containers without an active EventSource
-// and connects them to the SSE endpoint. Called on initial page load and
+// It finds [data-streaming-resume] containers without an active subscription
+// and subscribes them through the shared WebSocket. Called on initial page load and
 // after each authoritative transcript morph.
 templ ChatStreamingResumeInitScript() {
 	<script type="text/javascript">
@@ -880,6 +851,9 @@ templ ChatStreamingResumeInitScript() {
 				container._sseConnected = true;
 
 					var execId = container.getAttribute('data-exec-id');
+					// Capture the owning view's scope before navigation can change the selector.
+					var streamProjectRoot = container.closest('[data-project-id]');
+					var streamProjectID = streamProjectRoot ? streamProjectRoot.getAttribute('data-project-id') : '';
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
@@ -929,16 +903,6 @@ templ ChatStreamingResumeInitScript() {
 						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 					}
 
-					function restoreThreadPollingFallback() {
-						if (!pauseTarget) return;
-						var pollingEl = document.getElementById(pauseTarget);
-						if (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;
-						var pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');
-						var pausedGet = pollingEl.getAttribute('data-paused-hx-get');
-						if (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);
-						if (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);
-						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
-					}
 
 						function refreshThreadComposerAction() {
 							if (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;
@@ -1141,7 +1105,8 @@ templ ChatStreamingResumeInitScript() {
 
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
 							eventSource.onmessage = function(event) {
@@ -1268,25 +1233,7 @@ templ ChatStreamingResumeInitScript() {
 					}
 				});
 
-					eventSource.onerror = function(error) {
-						console.error('EventSource failed:', error);
-							eventSource.close();
-							removeResumeEventSource(eventSource);
-							if (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {
-								return;
-							}
-					if (streamTerminalHandled) return;
-					streamTerminalHandled = true;
-					flushCumulativeContent();
-					if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
-					if (streamingDots) streamingDots.classList.add('hidden');
-				container.classList.remove('hidden');
-					window._taskThreadStreamingActive = false;
-					if (pauseTarget) {
-						restoreThreadPollingFallback();
-					}
-				};
+
 				}
 				connectResumeExecutionStream();
 			});

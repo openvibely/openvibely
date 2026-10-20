@@ -3,6 +3,8 @@ package events
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/openvibely/openvibely/internal/livelimits"
 )
 
 // subscriberGuard serializes subscriber channel closure and records its terminal state.
@@ -28,6 +30,7 @@ type broadcaster[T any, S ~chan T] struct {
 	scopedSubscribers map[string]map[S]*subscriberGuard
 	scopedSnapshots   map[string][]broadcasterEntry[T, S]
 	bufferSize        int
+	maxSubscribers    int
 	deliveryAttempts  atomic.Uint64
 }
 
@@ -37,6 +40,7 @@ func newBroadcaster[T any, S ~chan T](bufferSize int) broadcaster[T, S] {
 		scopedSubscribers: make(map[string]map[S]*subscriberGuard),
 		scopedSnapshots:   make(map[string][]broadcasterEntry[T, S]),
 		bufferSize:        bufferSize,
+		maxSubscribers:    livelimits.DefaultLiveSubscriptions,
 	}
 }
 
@@ -52,7 +56,7 @@ func (b *broadcaster[T, S]) SubscribeScoped(scope string) (S, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if len(b.subscribers) >= MaxSubscribers {
+	if len(b.subscribers) >= b.maxSubscribers {
 		var zero S
 		return zero, ErrMaxSubscribers
 	}
