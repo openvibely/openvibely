@@ -50,7 +50,6 @@ func VSCodeCatalog() []Theme {
 		if catalog[i].CSS == nil {
 			catalog[i].CSS = make(map[string]string)
 		}
-		catalog[i].CSS["--ov-kanban-column-bg"] = vscodeKanbanColumns[catalog[i].ID]
 		catalog[i].CSS["--ov-subtle-border"] = subtleBorderColor(catalog[i].Semantic["surface"], catalog[i].Semantic["text"])
 		catalog[i].CSS["--ov-accent-tint"] = accentTintColor(catalog[i].Semantic["focus"])
 		catalog[i].CSS["--ov-daisy-primary"], catalog[i].CSS["--ov-daisy-primary-content"] = daisyPrimaryColors(catalog[i].Semantic["link"], catalog[i].Semantic["contentBg"])
