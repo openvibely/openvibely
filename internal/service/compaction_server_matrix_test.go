@@ -25,9 +25,9 @@ import (
 
 // No provider adapter is mocked: failures enter through HTTP responses and
 // traverse serialization, parsing, conversation recovery and service fallback.
-// Native success is covered by the provider client server tests. OpenAI native
-// in-turn failure is terminal (TestWebsocketCompactionFailureLeavesSteeringQueued),
-// so it must not be treated as a native-to-summary fallback here.
+// Native success and terminal OpenAI in-turn failures are covered by the
+// connected lifecycle tests. Successful summary cases also reload their saved
+// checkpoint through a fresh service and send a second follow-up.
 func TestCompactionServerSummaryMatrix(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
@@ -45,13 +45,15 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 					task := &models.Task{ProjectID: "default", Title: "compaction fixture", Category: models.CategoryBacklog, Status: models.StatusCompleted}
 					require.NoError(t, stores.Tasks.Create(context.Background(), task))
 					exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "CURRENT_REQUEST_739"}
-					require.NoError(t, stores.Executions.Create(context.Background(), exec))
+
 					dir := t.TempDir()
 					file := filepath.Join(dir, "evidence.txt")
 					require.NoError(t, os.WriteFile(file, []byte("TOOL_EVIDENCE_739"), 0600))
 					var mu sync.Mutex
 					var events []string
 					summaries, generations, lastSummarySize := 0, 0, 0
+					restarted := false
+					restartCalls := 0
 					handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, err := io.ReadAll(r.Body)
 						if err != nil {
@@ -73,6 +75,17 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							return
 						}
 						text := string(raw)
+						if restarted {
+							restartCalls++
+							if !strings.Contains(text, "RECOVERED_739") || !strings.Contains(text, "NEXT_FOLLOWUP_739") {
+								t.Error("restart lost saved summary or new prompt")
+							}
+							if strings.Contains(text, localContextCompactionInstruction) {
+								t.Error("restart unexpectedly recompacted")
+							}
+							compactionServerReply(w, provider, "RESTART_FINAL_739", "")
+							return
+						}
 						if strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
 							events = append(events, "summary")
 							summaries++
@@ -210,10 +223,18 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 					if phase == "preturn" {
 						req.ContextTokenEstimate = 190000
 					}
+					// Use real saved configuration IDs and persisted execution history.
+					req.Agent.ID = ""
+					req.Agent.Name = "fixture model"
+					require.NoError(t, stores.LLMConfigs.Create(ctx, &req.Agent))
+					oldExecution := models.Execution{TaskID: task.ID, AgentConfigID: req.Agent.ID, Status: models.ExecCompleted, PromptSent: "OLDER_REQUEST", Output: "OLDER_ANSWER"}
+					require.NoError(t, stores.Executions.Create(ctx, &oldExecution))
+					require.NoError(t, stores.Executions.Complete(ctx, oldExecution.ID, models.ExecCompleted, oldExecution.Output, "", 0, 0))
+					require.NoError(t, stores.Executions.Create(ctx, exec))
+					req.ExecID = exec.ID
+					req.ChatHistory = []models.Execution{oldExecution}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[provider], req)
-					mu.Lock()
-					defer mu.Unlock()
 					expected := []string{}
 					if phase == "preturn_native_failure" {
 						expected = append(expected, "native_failure")
@@ -245,6 +266,34 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 						require.Greater(t, summaries, 1)
 					default:
 						require.Equal(t, 1, summaries)
+					}
+					if success {
+						require.NoError(t, stores.Executions.Complete(ctx, exec.ID, models.ExecCompleted, result.Output, "", 0, 0))
+						checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, checkpointErr)
+						require.NotNil(t, checkpoint)
+						history, historyErr := stores.Executions.ListByTaskChronological(ctx, task.ID)
+						require.NoError(t, historyErr)
+						next := models.Execution{TaskID: task.ID, AgentConfigID: req.Agent.ID, Status: models.ExecRunning, PromptSent: "NEXT_FOLLOWUP_739"}
+						require.NoError(t, stores.Executions.Create(ctx, &next))
+						mu.Lock()
+						restarted = true
+						mu.Unlock()
+						req.ExecID = next.ID
+						req.Message = next.PromptSent
+						req.ChatHistory = history
+						req.ContextTokenEstimate = 0
+						req.ForceNativeCompaction = false
+						req.Agent.ForceNativeCompaction = false
+						fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+						nextResult, nextErr := fresh.callProviderWithCompaction(fresh.providerAdapters[provider], req)
+						require.NoError(t, nextErr)
+						require.Contains(t, nextResult.Output, "RESTART_FINAL_739")
+						require.Equal(t, 1, restartCalls)
+					} else {
+						saved, readErr := stores.Executions.GetByID(ctx, oldExecution.ID)
+						require.NoError(t, readErr)
+						require.Equal(t, "OLDER_ANSWER", saved.Output, "failure must preserve original history")
 					}
 				})
 			}
