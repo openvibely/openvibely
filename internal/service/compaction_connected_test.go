@@ -613,15 +613,17 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
 		for _, to := range providers {
-			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source", "partial_summary_source", "partial_steering_summary_source"}
+			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source", "partial_summary_source", "partial_steering_summary_source", "failed_summary_source", "failed_steering_summary_source"}
 			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
 			for _, mode := range modes {
 				t.Run(string(from)+"/"+string(to)+"/"+mode, func(t *testing.T) {
 					partialFailure := strings.HasPrefix(mode, "partial_")
-					steering := mode == "steering_summary_source" || mode == "partial_steering_summary_source"
-					inflight := partialFailure || mode == "inturn_summary_source" || mode == "steering_summary_source"
+					emptyFailure := strings.HasPrefix(mode, "failed_")
+					continuationFailure := partialFailure || emptyFailure
+					steering := mode == "steering_summary_source" || mode == "partial_steering_summary_source" || mode == "failed_steering_summary_source"
+					inflight := continuationFailure || mode == "inturn_summary_source" || mode == "steering_summary_source"
 					sourceSummary := mode == "summary_source" || inflight
 					ctx, cancel := context.WithTimeout(compactionTestContext(), 30*time.Second)
 					defer cancel()
@@ -717,6 +719,10 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 								emit(map[string]any{"type": "message_stop"})
 								return
 							}
+							if emptyFailure {
+								compactionServerError(w, 401, "authentication_error", "continuation failed")
+								return
+							}
 							if partialFailure {
 								compactionServerPartialFailure(w, provider)
 								return
@@ -755,7 +761,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if partialFailure && !strings.Contains(text, "POST_SUMMARY_PARTIAL") {
 							t.Error("destination lost partial answer after summary")
 						}
-						if !partialFailure && (sourceSummary || (mode == "native_source" && from == models.ProviderAnthropic)) && !strings.Contains(text, "SOURCE_FINAL") {
+						if !continuationFailure && (sourceSummary || (mode == "native_source" && from == models.ProviderAnthropic)) && !strings.Contains(text, "SOURCE_FINAL") {
 							t.Error("destination lost post-compaction source answer")
 						}
 						if from == models.ProviderAnthropic && mode == "native_source" {
@@ -837,7 +843,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
-					if partialFailure {
+					if continuationFailure {
 						require.Error(t, err)
 					} else {
 						require.NoError(t, err)
@@ -882,7 +888,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 					}
 					status := models.ExecCompleted
-					if partialFailure {
+					if continuationFailure {
 						status = models.ExecFailed
 					}
 					require.NoError(t, stores.Executions.Complete(ctx, first.ID, status, result.Output, "", 0, 0))
@@ -890,6 +896,11 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						saved, err := stores.Executions.GetByID(ctx, first.ID)
 						require.NoError(t, err)
 						require.Contains(t, saved.Output, "POST_SUMMARY_PARTIAL")
+					}
+					savedSource, err := stores.Executions.GetByID(ctx, first.ID)
+					require.NoError(t, err)
+					if continuationFailure {
+						require.Contains(t, savedSource.Output, "OLD_RAW_MUST_NOT_RETURN")
 					}
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
@@ -949,6 +960,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					require.Contains(t, result.Output, "RESTART_SWITCH_DONE")
 					require.Equal(t, 1, restarts)
 					require.Equal(t, before, summaries, "restart must reuse saved state")
+					afterSource, err := stores.Executions.GetByID(ctx, first.ID)
+					require.NoError(t, err)
+					require.Equal(t, savedSource.Output, afterSource.Output, "restoration must not change saved UI output")
 				})
 			}
 		}

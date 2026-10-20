@@ -951,9 +951,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	originalHistory := req.ChatHistory
 	uncompactedReq := req
+	// Apply the saved boundary before conversion can synthesize assistant
+	// messages from aggregate execution output already covered by a summary.
+	req = s.restoreCompactionCheckpoint(req)
 	if req.Agent.Provider != models.ProviderOpenAI {
-		// Reuse saved recovery before inspecting old OpenAI replay for opaque state.
-		req = s.restoreCompactionCheckpoint(req)
 		recoverySource := req
 		needsRecovery := hasOpaqueCompaction(req.ChatHistory)
 		req, replayErr = s.recoverPortableProviderHistory(req)
@@ -989,10 +990,6 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return res, err
 	}
 	uncompactedReq.ChatHistory = normalizeProviderReplay(req.Agent.Provider, uncompactedReq.ChatHistory, false)
-	if req.Agent.Provider == models.ProviderOpenAI {
-		req = s.restoreCompactionCheckpoint(req)
-	}
-	req.ChatHistory = normalizeProviderReplay(req.Agent.Provider, req.ChatHistory, false)
 	compactionStrategy := "none"
 	if req.NativeCompactionStateJSON != "" {
 		compactionStrategy = "provider_native_checkpoint"
@@ -1190,6 +1187,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 				}
 				if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Input) > 0 {
 					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
+					// This snapshot already contains the summary and continuation.
+					// Do not let cross-provider conversion append older UI output.
+					clearCompactedExecutionFallback(&restored.ChatHistory[0])
 					restored.NativeCompactionStateJSON = ""
 					restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 					return restored
@@ -1233,11 +1233,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 						// Only structured replay describes work after compaction.
 						// Aggregate UI fields still include the earlier work covered
 						// by the summary. Suppress fallback to them in this copy.
-						continuation[0].PromptSent = ""
-						continuation[0].Output = ""
-						continuation[0].ReasoningContent = ""
-						continuation[0].ErrorMessage = ""
-						continuation[0].Status = models.ExecCompleted
+						clearCompactedExecutionFallback(&continuation[0])
 					}
 					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), continuation...)
 					break
@@ -1248,6 +1244,17 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 	return restored
+}
+
+// Replay is authoritative after an in-turn summary. These aggregate fields
+// describe the entire execution, including text produced before compaction.
+// Only call on an outgoing copy; preserve the stored output for the UI.
+func clearCompactedExecutionFallback(execution *models.Execution) {
+	execution.PromptSent = ""
+	execution.Output = ""
+	execution.ReasoningContent = ""
+	execution.ErrorMessage = ""
+	execution.Status = models.ExecCompleted
 }
 
 func mergeCheckpointHistory(history, checkpoint []models.Execution, sourceExecutionID string) []models.Execution {
