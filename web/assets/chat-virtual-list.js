@@ -26,6 +26,9 @@
     }
     function saveAnchor(list) {
         const messages = list.messages;
+        // Hidden history may still be parsed, but zero-sized geometry must not
+        // replace the reading anchor saved before the workspace was hidden.
+        if (!hasVisibleArea(messages)) return function () {};
         // Settle pending non-virtual changes (such as an earlier image loading)
         // before taking ownership of the next row-height adjustment.
         window.compensateChatEarlierLayout?.(messages);
