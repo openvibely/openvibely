@@ -219,3 +219,13 @@ func TestNormalizeSemanticStatusForegroundsAreReadable(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeSemanticFallbackBorderStaysSoft(t *testing.T) {
+	semantic := normalizeSemantic("light", map[string]string{
+		"editor.background": "#F5F5F5",
+		"editor.foreground": "#333333",
+	})
+	if got := contrastRatio(semantic["border"], semantic["bg"]); got > 1.6 {
+		t.Fatalf("fallback border %s contrast = %.2f, want a soft divider", semantic["border"], got)
+	}
+}

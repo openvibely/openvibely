@@ -951,9 +951,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	originalHistory := req.ChatHistory
 	uncompactedReq := req
+	// Apply the saved boundary before conversion can synthesize assistant
+	// messages from aggregate execution output already covered by a summary.
+	req = s.restoreCompactionCheckpoint(req)
 	if req.Agent.Provider != models.ProviderOpenAI {
-		// Reuse saved recovery before inspecting old OpenAI replay for opaque state.
-		req = s.restoreCompactionCheckpoint(req)
 		recoverySource := req
 		needsRecovery := hasOpaqueCompaction(req.ChatHistory)
 		req, replayErr = s.recoverPortableProviderHistory(req)
@@ -970,7 +971,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			if n := len(req.ChatHistory); n > 0 && len(recoverySource.ChatHistory) > 0 {
 				req.ChatHistory[n-1].ID = recoverySource.ChatHistory[len(recoverySource.ChatHistory)-1].ID
 			}
-			s.persistCompactionCheckpoint(recoverySource, req, historyCompactionSummary(req.ChatHistory), "provider_recovery")
+			if err := s.persistCompactionCheckpoint(recoverySource, req, historyCompactionSummary(req.ChatHistory), "provider_recovery"); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
 			uncompactedReq = req
 		}
 	}
@@ -989,10 +992,6 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return res, err
 	}
 	uncompactedReq.ChatHistory = normalizeProviderReplay(req.Agent.Provider, uncompactedReq.ChatHistory, false)
-	if req.Agent.Provider == models.ProviderOpenAI {
-		req = s.restoreCompactionCheckpoint(req)
-	}
-	req.ChatHistory = normalizeProviderReplay(req.Agent.Provider, req.ChatHistory, false)
 	compactionStrategy := "none"
 	if req.NativeCompactionStateJSON != "" {
 		compactionStrategy = "provider_native_checkpoint"
@@ -1054,7 +1053,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d failure_category=%s", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, contextFailureCategory(compactErr))
 			return llmcontracts.AgentResult{}, compactErr
 		}
-		s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		if err := s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
 		req = compacted
 		budget = calculateRequestBudget(req)
 		req.ForceNativeCompaction = false
@@ -1121,7 +1122,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
 			return llmcontracts.AgentResult{}, compactErr
 		}
-		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		if err := s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
 		applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
 		return s.callCompactedRetry(adapter, req, compacted, err)
 	}
@@ -1131,7 +1134,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			applog.Infof("[agent-svc] context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
 			return llmcontracts.AgentResult{}, compactErr
 		}
-		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		if err := s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
 		applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
 		return s.callCompactedRetry(adapter, req, compacted, err)
 	}
@@ -1139,6 +1144,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 }
 
 func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
+	req.RestoredCompactionSourceExecutionID = ""
 	scope, ok := s.compactionScopeForRequest(req)
 	if !ok || s == nil || s.execRepo == nil {
 		return req
@@ -1149,6 +1155,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		return req
 	}
 	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
+		return req
+	}
+	if !s.checkpointWithinCurrentContext(req, scope, checkpoint) {
 		return req
 	}
 	// Readable history remains portable even when the row also holds reasoning
@@ -1179,6 +1188,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		checkpoint.ProviderSessionStateJSON = ""
 	}
 	restored := req
+	if len(checkpoint.History) > 0 || strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
+		restored.RestoredCompactionSourceExecutionID = checkpoint.SourceExecutionID
+	}
 	if checkpoint.Strategy == "local_summary_inflight" {
 		for i, execution := range req.ChatHistory {
 			if execution.ID != checkpoint.SourceExecutionID {
@@ -1190,6 +1202,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 				}
 				if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Input) > 0 {
 					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
+					// This snapshot already contains the summary and continuation.
+					// Do not let cross-provider conversion append older UI output.
+					clearCompactedExecutionFallback(&restored.ChatHistory[0])
 					restored.NativeCompactionStateJSON = ""
 					restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 					return restored
@@ -1222,7 +1237,20 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 					// Responses snapshots above contain the complete replacement
 					// history. Other providers save only the continuation after
 					// recovery, which must follow the saved summary.
-					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), req.ChatHistory[i:]...)
+					start := i
+					if len(execution.ReplayMessages) == 1 && strings.TrimSpace(execution.ReplayMessages[0].TranscriptJSON) == "[]" {
+						// Explicitly empty continuation: do not fall back to the
+						// execution's original prompt/output, already summarized.
+						start++
+					}
+					continuation := append([]models.Execution(nil), req.ChatHistory[start:]...)
+					if start == i {
+						// Only structured replay describes work after compaction.
+						// Aggregate UI fields still include the earlier work covered
+						// by the summary. Suppress fallback to them in this copy.
+						clearCompactedExecutionFallback(&continuation[0])
+					}
+					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), continuation...)
 					break
 				}
 			}
@@ -1231,6 +1259,76 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 	return restored
+}
+
+// A saved checkpoint may precede a scheduled run's clear-context boundary.
+// Inspect persisted history too: bounded followup history can omit that boundary.
+func (s *LLMService) checkpointWithinCurrentContext(req llmcontracts.AgentRequest, scope compactionScope, checkpoint *models.ChatCompactionCheckpoint) bool {
+	sourceID := checkpoint.SourceExecutionID
+	if req.ExecID != "" {
+		current, err := s.execRepo.GetByID(req.Ctx, req.ExecID)
+		if err != nil {
+			applog.Infof("[agent-svc] read current context boundary: %v", err)
+			return false
+		}
+		if current != nil && current.StartsNewContext {
+			return sourceID == current.ID
+		}
+	}
+	// Session-only rows contain no prior conversation to restore. Avoid paging
+	// through the thread merely to validate transport/configuration bookkeeping.
+	if len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" {
+		return true
+	}
+	inspect := func(history []models.Execution) (bool, bool) {
+		for i := len(history) - 1; i >= 0; i-- {
+			if sourceID != "" && history[i].ID == sourceID {
+				return true, true
+			}
+			if history[i].StartsNewContext {
+				return false, true
+			}
+		}
+		return false, false
+	}
+	if valid, found := inspect(req.ChatHistory); found {
+		return valid
+	}
+	before := req.ExecID
+	for {
+		var history []models.Execution
+		var err error
+		switch scope.Type {
+		case "task":
+			history, err = s.execRepo.ListByTaskChronologicalBefore(req.Ctx, scope.ID, before, 100)
+		case "chat_project":
+			history, err = s.execRepo.ListChatHistoryBefore(req.Ctx, scope.ID, before, 100)
+		default:
+			return true
+		}
+		if err != nil {
+			applog.Infof("[agent-svc] read checkpoint context boundary: %v", err)
+			return false
+		}
+		if valid, found := inspect(history); found {
+			return valid
+		}
+		if len(history) < 100 || history[0].ID == before {
+			return true
+		}
+		before = history[0].ID
+	}
+}
+
+// Replay is authoritative after an in-turn summary. These aggregate fields
+// describe the entire execution, including text produced before compaction.
+// Only call on an outgoing copy; preserve the stored output for the UI.
+func clearCompactedExecutionFallback(execution *models.Execution) {
+	execution.PromptSent = ""
+	execution.Output = ""
+	execution.ReasoningContent = ""
+	execution.ErrorMessage = ""
+	execution.Status = models.ExecCompleted
 }
 
 func mergeCheckpointHistory(history, checkpoint []models.Execution, sourceExecutionID string) []models.Execution {
@@ -1307,17 +1405,20 @@ func (s *LLMService) persistNativeProviderStateCheckpoint(req llmcontracts.Agent
 	}
 }
 
-func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmcontracts.AgentRequest, summary, strategy string) {
+func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmcontracts.AgentRequest, summary, strategy string) error {
 	if s == nil || s.execRepo == nil || len(compactedReq.ChatHistory) == 0 {
-		return
+		return nil
 	}
 	scope, ok := s.compactionScopeForRequest(originalReq)
 	if !ok {
-		return
+		return nil
 	}
 	sourceID := ""
 	if len(originalReq.ChatHistory) > 0 {
 		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
+	}
+	if sourceID == "" {
+		sourceID = originalReq.RestoredCompactionSourceExecutionID
 	}
 	if sourceID == "" && originalReq.NativeCompactionStateJSON != "" {
 		// A native checkpoint may cover every loaded execution. Carry its
@@ -1325,7 +1426,7 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 		checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(originalReq.Ctx, scope.Type, scope.ID)
 		if err != nil {
 			applog.Infof("[agent-svc] read native checkpoint boundary for summary: %v", err)
-			return
+			return err
 		}
 		if checkpoint != nil && checkpoint.ProviderStateJSON == originalReq.NativeCompactionStateJSON {
 			sourceID = checkpoint.SourceExecutionID
@@ -1334,7 +1435,7 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	if strategy == "local_summary" && sourceID != "" && sourceID == originalReq.ExecID {
 		strategy = "local_summary_inflight"
 	}
-	if err := s.execRepo.UpsertChatCompactionCheckpoint(originalReq.Ctx, models.ChatCompactionCheckpoint{
+	checkpoint := models.ChatCompactionCheckpoint{
 		ScopeType:         scope.Type,
 		ScopeID:           scope.ID,
 		ModelConfigID:     originalReq.Agent.ID,
@@ -1342,9 +1443,16 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 		SourceExecutionID: sourceID, History: compactedReq.ChatHistory,
 		Summary:  strings.TrimSpace(summary),
 		Strategy: strategy,
-	}); err != nil {
-		applog.Infof("[agent-svc] persist context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
 	}
+	save := s.execRepo.UpsertChatCompactionCheckpoint
+	if strategy == "local_summary_inflight" {
+		save = s.execRepo.SaveInTurnCompactionCheckpoint
+	}
+	if err := save(originalReq.Ctx, checkpoint); err != nil {
+		applog.Infof("[agent-svc] persist context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
+		return err
+	}
+	return nil
 }
 
 func (s *LLMService) compactionScopeForRequest(req llmcontracts.AgentRequest) (compactionScope, bool) {
@@ -1616,7 +1724,10 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 	if tokenBudget <= 0 {
 		return nil
 	}
-	history = llmopenai.UserMessageHistory(history)
+	// Decode Anthropic's saved messages through the same portable conversion
+	// used for provider switches. The shared extractor can then retain user
+	// text (including steering alongside tool results) with the same budget.
+	history = llmopenai.UserMessageHistory(normalizeProviderReplay(models.ProviderOpenAI, history, false))
 	retained := make([]models.Execution, 0, len(history))
 	remaining := tokenBudget
 	for i := len(history) - 1; i >= 0; i-- {

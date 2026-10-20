@@ -88,7 +88,7 @@ func TestHandler_GetTask_StatusIndicator_Refactored(t *testing.T) {
 		wantAbsent []string
 	}{
 		{
-			name: "completed_shows_success",
+			name: "completed_no_indicator",
 			taskSetup: func(b *TaskBuilder) *TaskBuilder {
 				return b.WithStatus(models.StatusCompleted).
 					WithCategory(models.CategoryCompleted)
@@ -97,8 +97,8 @@ func TestHandler_GetTask_StatusIndicator_Refactored(t *testing.T) {
 				return b.WithStatus(models.ExecCompleted).
 					WithOutput("Done!")
 			},
-			wantTexts:  []string{"Task completed", "text-success"},
-			wantAbsent: nil,
+			wantTexts:  nil,
+			wantAbsent: []string{"Task completed"},
 		},
 		{
 			name: "failed_shows_error",

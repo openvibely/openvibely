@@ -101,8 +101,18 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 
 func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool) []openaiclient.CompletionsHistoryMessage {
 	var out []openaiclient.CompletionsHistoryMessage
+	// Keep consecutive tool results together, even when Anthropic stores them
+	// in separate messages. Emit their images before the next ordinary message.
+	var toolImages []map[string]interface{}
+	flushImages := func() {
+		if len(toolImages) > 0 {
+			out = append(out, openaiclient.CompletionsHistoryMessage{Role: "user", ImageContent: toolImages})
+			toolImages = nil
+		}
+	}
 	for _, message := range messages {
 		if len(message.ContentBlocks) == 0 {
+			flushImages()
 			out = append(out, openaiclient.CompletionsHistoryMessage{Role: message.Role, Content: message.Content})
 			continue
 		}
@@ -116,6 +126,9 @@ func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool
 			current = openaiclient.CompletionsHistoryMessage{Role: message.Role}
 		}
 		for _, block := range blocks {
+			if block["type"] != "tool_result" {
+				flushImages()
+			}
 			switch block["type"] {
 			case "text":
 				text, _ := block["text"].(string)
@@ -132,19 +145,30 @@ func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool
 				id, _ := block["tool_use_id"].(string)
 				content, ok := block["content"].(string)
 				if !ok {
-					raw, _ := json.Marshal(block["content"])
-					content = string(raw)
+					if parts, array := block["content"].([]any); array {
+						var text []string
+						for _, part := range parts {
+							item, _ := part.(map[string]any)
+							switch item["type"] {
+							case "image":
+								toolImages = append(toolImages, anthropicImagePart(item))
+							case "text":
+								value, _ := item["text"].(string)
+								text = append(text, value)
+							default:
+								raw, _ := json.Marshal(part)
+								text = append(text, string(raw))
+							}
+						}
+						content = strings.Join(text, "\n")
+					} else {
+						raw, _ := json.Marshal(block["content"])
+						content = string(raw)
+					}
 				}
 				out = append(out, openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: id, Content: content})
 			case "image":
-				source, _ := block["source"].(map[string]any)
-				url, _ := source["url"].(string)
-				if source["type"] == "base64" {
-					media, _ := source["media_type"].(string)
-					data, _ := source["data"].(string)
-					url = "data:" + media + ";base64," + data
-				}
-				current.ImageContent = append(current.ImageContent, map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": url}})
+				current.ImageContent = append(current.ImageContent, anthropicImagePart(block))
 			default:
 				if !forSummary && (block["type"] == "thinking" || block["type"] == "redacted_thinking") {
 					// Provider-specific reasoning/signatures are not portable
@@ -159,7 +183,20 @@ func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool
 		}
 		flush()
 	}
+	flushImages()
 	return out
+}
+
+// Images returned by tools use the same portable image shape as user uploads.
+func anthropicImagePart(block map[string]any) map[string]interface{} {
+	source, _ := block["source"].(map[string]any)
+	url, _ := source["url"].(string)
+	if source["type"] == "base64" {
+		media, _ := source["media_type"].(string)
+		data, _ := source["data"].(string)
+		url = "data:" + media + ";base64," + data
+	}
+	return map[string]interface{}{"type": "image_url", "image_url": map[string]interface{}{"url": url}}
 }
 
 func completionsAnthropicSummaryMessages(messages []openaiclient.CompletionsHistoryMessage) []anthropicclient.Message {

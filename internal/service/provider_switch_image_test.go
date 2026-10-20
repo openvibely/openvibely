@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"testing"
 
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
@@ -121,6 +123,67 @@ func TestProviderSwitchParallelImages(t *testing.T) {
 					require.Equal(t, expected, events)
 				})
 			}
+		}
+	}
+}
+
+// Inspect structured content only: base64 embedded inside a JSON string is not an image.
+func containsStructuredImage(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		if v["type"] == "image" || v["type"] == "image_url" || v["type"] == "input_image" {
+			return true
+		}
+		for _, child := range v {
+			if containsStructuredImage(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if containsStructuredImage(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestAnthropicToolResultImageConversion(t *testing.T) {
+	transcript := `{"messages":[
+ {"role":"assistant","content_blocks":[{"type":"tool_use","id":"a","name":"view_image","input":{}},{"type":"tool_use","id":"b","name":"view_image","input":{}}]},
+ {"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"a","content":[{"type":"text","text":"image A"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QQ=="}}]},{"type":"tool_result","tool_use_id":"b","content":[{"type":"text","text":"image B"},{"type":"image","source":{"type":"url","url":"https://example.com/b.png"}}]}]},
+ {"role":"assistant","content":"done"}]}`
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderOpenAICompatible} {
+		for _, summary := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/summary=%t", provider, summary), func(t *testing.T) {
+				history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
+				converted := normalizeProviderReplay(provider, history, summary)
+				var messages []openaiclient.CompletionsHistoryMessage
+				require.NoError(t, json.Unmarshal([]byte(converted[0].ReplayMessages[0].TranscriptJSON), &messages))
+				require.Len(t, messages, 5)
+				require.Len(t, messages[0].ToolCalls, 2)
+				require.Equal(t, "tool", messages[1].Role)
+				require.Equal(t, "a", messages[1].ToolCallID)
+				require.Equal(t, "image A", messages[1].Content)
+				require.Equal(t, "tool", messages[2].Role)
+				require.Equal(t, "b", messages[2].ToolCallID)
+				require.Equal(t, "image B", messages[2].Content)
+				require.Equal(t, "user", messages[3].Role)
+				require.Equal(t, []map[string]interface{}{
+					{"type": "image_url", "image_url": map[string]interface{}{"url": "data:image/png;base64,QQ=="}},
+					{"type": "image_url", "image_url": map[string]interface{}{"url": "https://example.com/b.png"}},
+				}, messages[3].ImageContent)
+				require.Equal(t, "done", messages[4].Content)
+				require.Equal(t, transcript, history[0].ReplayMessages[0].TranscriptJSON)
+				input, err := summaryHistoryInput(provider, history)
+				require.NoError(t, err)
+				raw, err := json.Marshal(input)
+				require.NoError(t, err)
+				var body any
+				require.NoError(t, json.Unmarshal(raw, &body))
+				require.True(t, containsStructuredImage(body))
+			})
 		}
 	}
 }

@@ -265,6 +265,17 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
 			return nil, err
 		}
+		// Keep text actually delivered to the caller if this sampling attempt
+		// fails before it can publish a completed assistant message.
+		var partialText strings.Builder
+		streamOpts := *opts
+		streamOpts.OnText = func(text string) {
+			partialText.WriteString(text)
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
@@ -275,9 +286,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*completionsTurnResult, error) {
-			return c.sendCompletionsTurn(attemptCtx, messages, tools, opts)
+			return c.sendCompletionsTurn(attemptCtx, messages, tools, &streamOpts)
 		})
 		if err != nil {
+			if text := partialText.String(); text != "" {
+				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "assistant", Content: text})
+			}
 			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 

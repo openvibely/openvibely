@@ -10,8 +10,10 @@ import (
 // defaults: a darker canvas, lighter cards, soft borders and tinted states.
 type paletteSpec struct {
 	id, name, source, upstream, mode string
-	canvas, surface, raised, text    string
+	canvas, column, surface, raised  string
+	text                             string
 	muted, accent, link, codeBg      string
+	tabDivider                       string
 	info, success, warning, error    string
 	syntax                           map[string]string
 }
@@ -29,73 +31,73 @@ func paletteSpecs() []paletteSpec {
 	return []paletteSpec{
 		{
 			id: "openvibely-midnight", name: "OpenVibely Midnight", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
-			canvas: "#0E1217", surface: "#141A21", raised: "#1B232C", text: "#CDD6E0", muted: "#8A97A6", accent: "#2EC4B6",
+			canvas: "#0E1217", column: "#080A0D", surface: "#141A21", raised: "#1B232C", text: "#CDD6E0", muted: "#8A97A6", accent: "#2EC4B6",
 			info: "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
 			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#CDD6E0", "comment": "#637382", "title": "#82AAFF"},
 		},
 		{
 			id: "openvibely-dusk", name: "OpenVibely Dusk", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
-			canvas: "#15131C", surface: "#1B1924", raised: "#23202E", text: "#D9D4E8", muted: "#9C95B0", accent: "#A78BFA",
+			canvas: "#15131C", column: "#0D0C12", surface: "#1B1924", raised: "#23202E", text: "#D9D4E8", muted: "#9C95B0", accent: "#A78BFA",
 			info: "#7AB8F5", success: "#5FCB98", warning: "#E8B860", error: "#EF6F86",
 			syntax: map[string]string{"keyword": "#C4A1FF", "string": "#9BD8A6", "number": "#F5A97F", "function": "#7AB8F5", "type": "#F0C674", "variable": "#D9D4E8", "comment": "#6E6886", "title": "#7AB8F5"},
 		},
 		{
 			id: "openvibely-paper", name: "OpenVibely Paper", source: "OpenVibely palette", upstream: "OpenVibely", mode: "light",
-			canvas: "#F2F0EB", surface: "#FAF9F6", raised: "#FFFFFF", text: "#24221E", muted: "#69645B", accent: "#2563EB",
+			canvas: "#F2F0EB", column: "#E6E5E2", surface: "#FAF9F6", raised: "#FFFFFF", text: "#24221E", muted: "#69645B", accent: "#2563EB",
 			info: "#2563EB", success: "#15803D", warning: "#A16207", error: "#DC2626",
 			syntax: map[string]string{"keyword": "#A626A4", "string": "#50A14F", "number": "#986801", "function": "#4078F2", "type": "#C18401", "variable": "#E45649", "comment": "#85868D", "title": "#4078F2"},
 		},
 		{
 			id: "catppuccin-mocha", name: "Catppuccin Mocha", source: "Catppuccin palette (MIT)", upstream: "https://github.com/catppuccin/catppuccin", mode: "dark",
-			canvas: "#181825", surface: "#1E1E2E", text: "#CDD6F4", muted: "#A6ADC8", accent: "#CBA6F7", codeBg: "#11111B",
+			canvas: "#181825", column: "#11111B", surface: "#1E1E2E", text: "#CDD6F4", muted: "#A6ADC8", accent: "#CBA6F7", codeBg: "#11111B",
 			info: "#89DCEB", success: "#A6E3A1", warning: "#F9E2AF", error: "#F38BA8",
 			syntax: map[string]string{"keyword": "#CBA6F7", "string": "#A6E3A1", "number": "#FAB387", "function": "#89B4FA", "type": "#F9E2AF", "variable": "#CDD6F4", "comment": "#9399B2", "title": "#89B4FA"},
 		},
 		{
 			id: "catppuccin-latte", name: "Catppuccin Latte", source: "Catppuccin palette (MIT)", upstream: "https://github.com/catppuccin/catppuccin", mode: "light",
-			canvas: "#E6E9EF", surface: "#EFF1F5", raised: "#F6F7FA", text: "#4C4F69", muted: "#6C6F85", accent: "#8839EF", codeBg: "#DCE0E8",
+			canvas: "#E6E9EF", column: "#F9F9FB", surface: "#EFF1F5", raised: "#F6F7FA", text: "#4C4F69", muted: "#6C6F85", accent: "#8839EF", codeBg: "#DCE0E8",
 			info: "#1E66F5", success: "#40A02B", warning: "#DF8E1D", error: "#D20F39",
 			syntax: map[string]string{"keyword": "#8839EF", "string": "#40A02B", "number": "#FE640B", "function": "#1E66F5", "type": "#DF8E1D", "variable": "#4C4F69", "comment": "#7C7F93", "title": "#1E66F5"},
 		},
 		{
 			id: "tokyo-night", name: "Tokyo Night", source: "Tokyo Night palette (MIT)", upstream: "https://github.com/enkia/tokyo-night-vscode-theme", mode: "dark",
-			canvas: "#16161E", surface: "#1A1B26", text: "#C0CAF5", muted: "#9AA5CE", accent: "#7AA2F7",
+			canvas: "#16161E", column: "#0E0E14", surface: "#1A1B26", text: "#C0CAF5", muted: "#9AA5CE", accent: "#7AA2F7",
 			info: "#7DCFFF", success: "#9ECE6A", warning: "#E0AF68", error: "#F7768E",
 			syntax: map[string]string{"keyword": "#BB9AF7", "string": "#9ECE6A", "number": "#FF9E64", "function": "#7AA2F7", "type": "#2AC3DE", "variable": "#C0CAF5", "comment": "#565F89", "title": "#7AA2F7"},
 		},
 		{
 			id: "nord", name: "Nord", source: "Nord palette (MIT)", upstream: "https://github.com/nordtheme/nord", mode: "dark",
-			canvas: "#2E3440", surface: "#3B4252", raised: "#434C5E", text: "#ECEFF4", accent: "#88C0D0",
+			canvas: "#2E3440", column: "#272C36", surface: "#3B4252", raised: "#434C5E", text: "#ECEFF4", accent: "#88C0D0",
 			info: "#81A1C1", success: "#A3BE8C", warning: "#EBCB8B", error: "#BF616A",
 			syntax: map[string]string{"keyword": "#81A1C1", "string": "#A3BE8C", "number": "#B48EAD", "function": "#88C0D0", "type": "#8FBCBB", "variable": "#D8DEE9", "comment": "#7B88A1", "title": "#88C0D0"},
 		},
 		{
 			id: "dracula", name: "Dracula", source: "Dracula palette (MIT)", upstream: "https://github.com/dracula/dracula-theme", mode: "dark",
-			canvas: "#21222C", surface: "#282A36", text: "#F8F8F2", accent: "#BD93F9", codeBg: "#191A21",
+			canvas: "#21222C", column: "#191A22", surface: "#282A36", text: "#F8F8F2", accent: "#BD93F9", codeBg: "#191A21",
 			info: "#8BE9FD", success: "#50FA7B", warning: "#FFB86C", error: "#FF5555",
 			syntax: map[string]string{"keyword": "#FF79C6", "string": "#F1FA8C", "number": "#BD93F9", "function": "#50FA7B", "type": "#8BE9FD", "variable": "#F8F8F2", "comment": "#6272A4", "title": "#50FA7B"},
 		},
 		{
 			id: "rose-pine", name: "Rosé Pine", source: "Rosé Pine palette (MIT)", upstream: "https://github.com/rose-pine/rose-pine-theme", mode: "dark",
-			canvas: "#191724", surface: "#1F1D2E", raised: "#26233A", text: "#E0DEF4", muted: "#908CAA", accent: "#C4A7E7",
+			canvas: "#191724", column: "#11101A", surface: "#1F1D2E", raised: "#26233A", text: "#E0DEF4", muted: "#908CAA", accent: "#C4A7E7",
 			info: "#3E8FB0", success: "#9CCFD8", warning: "#F6C177", error: "#EB6F92",
 			syntax: map[string]string{"keyword": "#3E8FB0", "string": "#F6C177", "number": "#F6C177", "function": "#EBBCBA", "type": "#9CCFD8", "variable": "#E0DEF4", "comment": "#6E6A86", "title": "#C4A7E7"},
 		},
 		{
 			id: "rose-pine-dawn", name: "Rosé Pine Dawn", source: "Rosé Pine palette (MIT)", upstream: "https://github.com/rose-pine/rose-pine-theme", mode: "light",
-			canvas: "#F2E9E1", surface: "#FAF4ED", raised: "#FFFAF3", text: "#575279", muted: "#797593", accent: "#907AA9",
+			canvas: "#F2E9E1", column: "#F4EDE8", tabDivider: "#9893A5", surface: "#FAF4ED", raised: "#FFFAF3", text: "#575279", muted: "#797593", accent: "#907AA9",
 			info: "#286983", success: "#56949F", warning: "#EA9D34", error: "#B4637A",
 			syntax: map[string]string{"keyword": "#286983", "string": "#EA9D34", "number": "#D7827E", "function": "#D7827E", "type": "#56949F", "variable": "#575279", "comment": "#9893A5", "title": "#907AA9"},
 		},
 		{
 			id: "github-dark", name: "GitHub Dark", source: "GitHub Primer palette (MIT)", upstream: "https://github.com/primer/primitives", mode: "dark",
-			canvas: "#0D1117", surface: "#161B22", raised: "#1C2128", text: "#E6EDF3", muted: "#8B949E", accent: "#2F81F7", link: "#58A6FF",
+			canvas: "#0D1117", column: "#08090C", surface: "#161B22", raised: "#1C2128", text: "#E6EDF3", muted: "#8B949E", accent: "#2F81F7", link: "#58A6FF",
 			info: "#58A6FF", success: "#3FB950", warning: "#D29922", error: "#F85149",
 			syntax: map[string]string{"keyword": "#FF7B72", "string": "#A5D6FF", "number": "#79C0FF", "function": "#D2A8FF", "type": "#FFA657", "variable": "#FFA657", "comment": "#8B949E", "title": "#D2A8FF"},
 		},
 		{
 			id: "github-light", name: "GitHub Light", source: "GitHub Primer palette (MIT)", upstream: "https://github.com/primer/primitives", mode: "light",
-			canvas: "#F6F8FA", surface: "#FFFFFF", raised: "#FFFFFF", text: "#1F2328", muted: "#656D76", accent: "#0969DA",
+			canvas: "#F6F8FA", column: "#F0F0F0", surface: "#FFFFFF", raised: "#FFFFFF", text: "#1F2328", muted: "#656D76", accent: "#0969DA",
 			info: "#0969DA", success: "#1A7F37", warning: "#9A6700", error: "#D1242F",
 			syntax: map[string]string{"keyword": "#CF222E", "string": "#0A3069", "number": "#0550AE", "function": "#8250DF", "type": "#953800", "variable": "#953800", "comment": "#6E7781", "title": "#8250DF"},
 		},
@@ -170,6 +172,10 @@ func paletteTheme(spec paletteSpec) Theme {
 	}
 	css := themeCSSVars(semantic, syntax)
 	css["--ov-subtle-border"] = border
+	css["--ov-kanban-column-bg"] = spec.column
+	if spec.tabDivider != "" {
+		css["--ov-project-tab-divider"] = spec.tabDivider
+	}
 	css["--ov-accent-tint"] = accentTintColor(spec.accent)
 	css["--ov-daisy-primary"], css["--ov-daisy-primary-content"] = daisyPrimaryColors(link, spec.canvas)
 	kind := KindLight
