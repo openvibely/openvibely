@@ -334,6 +334,7 @@ type ExecutionStore interface {
 	TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error)
 	UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error
 	UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
+	SaveInTurnCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
 	UpsertChatProviderSessionState(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
 	UpsertSwarmParentResult(ctx context.Context, parentTaskID string, mergerExecutionID string, output string, diffOutput string, durationMs int64) error
 }
