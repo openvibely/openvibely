@@ -1218,6 +1218,7 @@ func TestChatInputContainerCSS_UsesSameSurfaceShadowAsMessageBubbles(t *testing.
 	html := buf.String()
 	for _, expected := range []string{
 		`box-shadow: var(--ov-chat-surface-shadow);`,
+		`--ov-chat-surface-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);`,
 		`--ov-chat-surface-shadow: none;`,
 	} {
 		if !strings.Contains(html, expected) {
