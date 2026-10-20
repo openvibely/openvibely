@@ -96,6 +96,30 @@ window.addEventListener('DOMContentLoaded',function(){
    await until(()=>document.querySelector('#tasks-page') && !document.querySelector('#chat-page-root'),'Tasks during Chat refresh');
    await wait(500);
    assert(location.pathname==='/tasks' && document.querySelector('#tasks-page'),'late Chat response replaced Tasks');
+   // A question resolved in another client must fence stale content without
+   // cancelling the destination URL or replacing the live draft.
+   document.querySelector('[data-nav-base="/chat"]').click();
+   await until(()=>document.querySelector('#chat-page-root'),'Chat preview before live question update');
+   assert(location.pathname==='/tasks','question race needs a pending Chat refresh');
+   const chatRoot=document.getElementById('chat-page-root');
+   const draft=chatRoot.querySelector('#chat-form textarea');
+   draft.value='Keep this draft during question resolution';
+   const revision=window._chatInputRevision;
+   window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{
+     type:'chat_user_input_resolved',project_id:chatRoot.getAttribute('data-project-id'),
+     input_request:{id:'resolved-in-other-client',completed:true}
+   }}));
+   assert(window._chatInputRevision>revision,'live resolution was not handled');
+   await until(()=>location.pathname==='/chat','Chat URL after live question resolution');
+   assert(document.getElementById('chat-page-root')===chatRoot,'stale refresh replaced newer live Chat state');
+   assert(draft.isConnected && draft.value==='Keep this draft during question resolution','stale refresh lost draft');
+   // HTMX still needs to commit the correct outgoing history entry.
+   history.back();
+   await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','back after question resolution');
+   document.querySelector('[data-nav-base="/chat"]').click();
+   await until(()=>document.querySelector('#chat-page-root') && location.pathname==='/chat','Chat after history back');
+   document.querySelector('[data-nav-base="/tasks"]').click();
+   await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','Tasks after question resolution');
    assert(!errors.length,'browser errors: '+JSON.stringify(errors));
    await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));

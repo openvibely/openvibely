@@ -249,6 +249,14 @@
         if (!currentRoot || !nextRoot || currentRoot.id !== nextRoot.id) return;
         const scope = currentRoot.id === 'task-thread-view' ? 'data-task-id' : 'data-project-id';
         if (currentRoot.getAttribute(scope) !== nextRoot.getAttribute(scope)) return;
+        // Live question events can supersede this snapshot without an HTMX
+        // write. Keep the current Chat state, but finish the navigation just as
+        // we do for a local write; cancelling the swap would strand the old URL.
+        if (currentRoot.id === 'chat-page-root' && typeof detail.xhr._chatInputRevision === 'number' &&
+            detail.xhr._chatInputRevision !== (window._chatInputRevision || 0)) {
+            noReplacement(detail);
+            return;
+        }
         detail._ovThreadRefresh = true;
         // Preserve unchanged execution DOM during an authoritative full-page swap.
         const pairs = new Map(Array.from(currentRoot.querySelectorAll('[data-exec-id][data-execution-revision]'), el => [el.id, el]));
