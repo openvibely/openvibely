@@ -234,3 +234,44 @@ func TestChatAttachmentContextIncludesFilesOutsideHistory(t *testing.T) {
 		require.Empty(t, params.ImageAttachments, "old files are references only")
 	}
 }
+
+func TestChatAttachmentContextRefreshesDuringRun(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Live chat files")
+	task := createTask(t, h, project.ID, "Chat", func(task *models.Task) { task.Category = models.CategoryChat })
+	exec := createExec(t, h, task.ID, agent.ID)
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: exec.ID, Message: "go"}
+	_, err := h.prepareChatAttachmentContext(ctx, &params)
+	require.NoError(t, err)
+	reqCtx := params.withAttachmentContext(ctx)
+	require.Empty(t, attachmentcontext.Text(reqCtx))
+	type msg struct{ role, text string }
+	read := func(m msg) (string, string) { return m.role, m.text }
+	makeMessage := func(s string) msg { return msg{"user", s} }
+	history := []msg{{"user", "go"}}
+	file := &models.ChatAttachment{ExecutionID: exec.ID, FileName: "added.pdf", FilePath: "/added.pdf", MediaType: "application/pdf"}
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, file))
+	history = attachmentcontext.Ensure(reqCtx, history, read, makeMessage)
+	require.Len(t, history, 2)
+	require.Contains(t, history[0].text, "added.pdf")
+	require.Equal(t, history, attachmentcontext.Ensure(reqCtx, history, read, makeMessage))
+	other := createProject(t, h, "Other chat files")
+	otherTask := createTask(t, h, other.ID, "Other chat", func(task *models.Task) { task.Category = models.CategoryChat })
+	otherExec := createExec(t, h, otherTask.ID, agent.ID)
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: otherExec.ID, FileName: "private.pdf", FilePath: "/private.pdf", MediaType: "application/pdf"}))
+	require.Equal(t, history, attachmentcontext.Ensure(reqCtx, history, read, makeMessage))
+	require.Error(t, h.chatAttachmentRepo.DeleteByIDForProject(ctx, file.ID, other.ID))
+	require.Contains(t, attachmentcontext.Text(reqCtx), "added.pdf")
+	require.NoError(t, h.chatAttachmentRepo.DeleteByIDForProject(ctx, file.ID, project.ID))
+	history = attachmentcontext.Ensure(reqCtx, append(history, msg{"assistant", "done"}), read, makeMessage)
+	require.Len(t, history, 4)
+	require.Contains(t, history[3].text, "No files are currently attached")
+	require.Equal(t, history, attachmentcontext.Ensure(reqCtx, history, read, makeMessage))
+	// Rollback uses the unscoped delete and must invalidate the same live source.
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, file))
+	require.Contains(t, attachmentcontext.Text(reqCtx), "added.pdf")
+	require.NoError(t, h.chatAttachmentRepo.Delete(ctx, file.ID))
+	require.Empty(t, attachmentcontext.Text(reqCtx))
+}
