@@ -102,10 +102,16 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							}
 							if restarted {
 								restartCalls++
+								if strings.Contains(text, "PRECOMPACTION_UI_OUTPUT") {
+									t.Error("reload used original execution output instead of empty continuation")
+								}
+								if strings.Contains(text, "read739") {
+									t.Error("reload restored a tool exchange already covered by summary")
+								}
 								if strings.Contains(text, "OLDER_ANSWER") {
 									t.Error("reload brought back history already covered by summary")
 								}
-								if !strings.Contains(text, "FINAL_739") {
+								if outcome != "continuation_overflow" && !strings.Contains(text, "FINAL_739") {
 									t.Error("reload lost the post-compaction answer")
 								}
 								if retainsAttachment && !strings.Contains(text, "image/png") {
@@ -357,8 +363,16 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 						default:
 							require.Equal(t, 1, summaries)
 						}
-						if success {
-							require.NoError(t, stores.Executions.Complete(ctx, exec.ID, models.ExecCompleted, result.Output, "", 0, 0))
+						if success || outcome == "continuation_overflow" {
+							status := models.ExecCompleted
+							savedOutput := result.Output
+							if !success {
+								status = models.ExecFailed
+								if provider == models.ProviderOpenAICompatible && !strings.HasPrefix(phase, "preturn") {
+									savedOutput = "PRECOMPACTION_UI_OUTPUT"
+								}
+							}
+							require.NoError(t, stores.Executions.Complete(ctx, exec.ID, status, savedOutput, "", 0, 0))
 							checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 							require.NoError(t, checkpointErr)
 							require.NotNil(t, checkpoint)
@@ -385,6 +399,11 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							require.NoError(t, nextErr)
 							require.Contains(t, nextResult.Output, "RESTART_FINAL_739")
 							require.Equal(t, 1, restartCalls)
+							if savedOutput == "PRECOMPACTION_UI_OUTPUT" {
+								saved, readErr := stores.Executions.GetByID(ctx, exec.ID)
+								require.NoError(t, readErr)
+								require.Equal(t, savedOutput, saved.Output, "UI output must remain saved")
+							}
 						} else {
 							saved, readErr := stores.Executions.GetByID(ctx, oldExecution.ID)
 							require.NoError(t, readErr)
