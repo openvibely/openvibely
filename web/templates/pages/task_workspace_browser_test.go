@@ -401,19 +401,9 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		switch r.URL.Path {
 		case "/ui/preferences":
 			w.WriteHeader(http.StatusNoContent)
-		case "/events/live":
-			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, ": connected\n\n")
-			w.(http.Flusher).Flush()
-			for {
-				select {
-				case event := <-fileEvents:
-					fmt.Fprintf(w, "event: file_modified\ndata: %s\n\n", event)
-					w.(http.Flusher).Flush()
-				case <-r.Context().Done():
-					return
-				}
-			}
+		case "/events/ws":
+			serveBrowserLiveFixture(w, r, fileEvents)
+
 		case "/tasks/workspace-task":
 			tab := r.URL.Query().Get("tab")
 			if tab == "" {

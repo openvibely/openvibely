@@ -5,11 +5,6 @@ import (
 	"errors"
 )
 
-// MaxSubscribers is the maximum number of concurrent SSE subscribers.
-// With multi-tab usage, each tab creates one SSE connection. This limit
-// prevents resource exhaustion from excessive open connections.
-const MaxSubscribers = 50
-
 // ErrMaxSubscribers is returned when the subscriber limit is reached
 var ErrMaxSubscribers = errors.New("maximum subscriber limit reached")
 
@@ -86,7 +81,16 @@ type Broadcaster struct {
 
 // NewBroadcaster creates a new event broadcaster
 func NewBroadcaster() *Broadcaster {
-	return &Broadcaster{core: newBroadcaster[TaskEvent, Subscriber](10)}
+	return NewBroadcasterWithLimit(0)
+}
+
+// NewBroadcasterWithLimit sets the subscriber budget. Nonpositive values use the default.
+func NewBroadcasterWithLimit(limit int) *Broadcaster {
+	b := &Broadcaster{core: newBroadcaster[TaskEvent, Subscriber](10)}
+	if limit > 0 {
+		b.core.maxSubscribers = limit
+	}
+	return b
 }
 
 // Subscribe adds a new subscriber and returns a channel for receiving events.

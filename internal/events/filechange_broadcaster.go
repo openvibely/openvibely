@@ -34,7 +34,16 @@ type FileChangeBroadcaster struct {
 
 // NewFileChangeBroadcaster creates a new file change event broadcaster
 func NewFileChangeBroadcaster() *FileChangeBroadcaster {
-	return &FileChangeBroadcaster{core: newBroadcaster[FileChangeEvent, FileChangeSubscriber](50)}
+	return NewFileChangeBroadcasterWithLimit(0)
+}
+
+// NewFileChangeBroadcasterWithLimit sets the subscriber budget. Nonpositive values use the default.
+func NewFileChangeBroadcasterWithLimit(limit int) *FileChangeBroadcaster {
+	b := &FileChangeBroadcaster{core: newBroadcaster[FileChangeEvent, FileChangeSubscriber](50)}
+	if limit > 0 {
+		b.core.maxSubscribers = limit
+	}
+	return b
 }
 
 // Subscribe adds a new subscriber and returns a channel for receiving events.
