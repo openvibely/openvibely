@@ -667,6 +667,20 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 // stageMessageAttachments retains pending uploads until delivery succeeds.
 // finish(false) rolls back published copies and metadata so delivery can retry.
 func (h *Handler) stageMessageAttachments(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
+	return h.stageMessageAttachmentsForDelivery(ctx, sessionID, execID, false)
+}
+
+func (h *Handler) stageSteeringAttachments(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
+	return h.stageMessageAttachmentsForDelivery(ctx, sessionID, execID, true)
+}
+
+// Each steering upload session has its own destination directory. Preview and
+// publication can therefore agree on a path before any files are copied.
+func steeringAttachmentDirectory(sessionID, execID string) string {
+	return filepath.Join(uploadsDir, "chat", execID, "steering", sessionID)
+}
+
+func (h *Handler) stageMessageAttachmentsForDelivery(ctx context.Context, sessionID, execID string, steering bool) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
 	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
 	if err != nil {
 		return "", nil, nil, nil, err
@@ -716,6 +730,9 @@ func (h *Handler) stageMessageAttachments(ctx context.Context, sessionID, execID
 
 	// Create execution-specific directory
 	execDir := filepath.Join(uploadsDir, "chat", execID)
+	if steering {
+		execDir = steeringAttachmentDirectory(sessionID, execID)
+	}
 	if err := os.MkdirAll(execDir, 0755); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("creating execution directory: %w", err)
 	}
@@ -736,7 +753,11 @@ func (h *Handler) stageMessageAttachments(ctx context.Context, sessionID, execID
 		}
 
 		srcPath := filepath.Join(pendingDir, file.Name())
-		destPath := filepath.Join(execDir, uniqueAttachmentName(execDir, file.Name(), usedNames))
+		destName := file.Name()
+		if !steering {
+			destName = uniqueAttachmentName(execDir, destName, usedNames)
+		}
+		destPath := filepath.Join(execDir, destName)
 		applog.Infof("[handler] attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s", sessionID, srcPath, execID, destPath)
 		if err := copyFileAtomically(srcPath, destPath); err != nil {
 			rollback()
@@ -1076,7 +1097,7 @@ func (h *Handler) previewSteeringAttachments(sessionID, executionID string, prov
 	}
 	var references []models.Attachment
 	for i := range attachments {
-		attachments[i].ReferencePath = filepath.Join(uploadsDir, "chat", executionID, attachments[i].FileName)
+		attachments[i].ReferencePath = filepath.Join(steeringAttachmentDirectory(sessionID, executionID), attachments[i].FileName)
 		if !isImageFile(attachments[i].FileName) {
 			references = append(references, attachments[i])
 		}
