@@ -102,6 +102,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							}
 							if restarted {
 								restartCalls++
+								if strings.Contains(text, "PRE_SUMMARY_ASSISTANT_TEXT") {
+									t.Error("reload restored assistant text already covered by summary")
+								}
 								if strings.Contains(text, "PRECOMPACTION_UI_OUTPUT") {
 									t.Error("reload used original execution output instead of empty continuation")
 								}
@@ -129,6 +132,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							if strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
 								events = append(events, "summary")
 								summaries++
+								if summaries == 1 && (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && !strings.Contains(text, "PRE_SUMMARY_ASSISTANT_TEXT") {
+									t.Error("summary missing pre-compaction assistant text")
+								}
 								key := "messages"
 								if provider == models.ProviderOpenAI {
 									key = "input"
@@ -186,7 +192,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								if media == "tool_image" {
 									tool = "view_image"
 								}
-								compactionServerToolReply(w, provider, file, tool)
+								compactionServerToolReply(w, provider, file, tool, "PRE_SUMMARY_ASSISTANT_TEXT")
 								return
 							}
 							if (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && generations == 2 {
@@ -373,6 +379,11 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								}
 							}
 							require.NoError(t, stores.Executions.Complete(ctx, exec.ID, status, savedOutput, "", 0, 0))
+							beforeReload, readErr := stores.Executions.GetByID(ctx, exec.ID)
+							require.NoError(t, readErr)
+							if !strings.HasPrefix(phase, "preturn") && savedOutput != "PRECOMPACTION_UI_OUTPUT" {
+								require.Contains(t, beforeReload.Output, "PRE_SUMMARY_ASSISTANT_TEXT")
+							}
 							checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 							require.NoError(t, checkpointErr)
 							require.NotNil(t, checkpoint)
@@ -399,6 +410,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							require.NoError(t, nextErr)
 							require.Contains(t, nextResult.Output, "RESTART_FINAL_739")
 							require.Equal(t, 1, restartCalls)
+							afterReload, readErr := stores.Executions.GetByID(ctx, exec.ID)
+							require.NoError(t, readErr)
+							require.Equal(t, beforeReload.Output, afterReload.Output, "restoration must not change saved UI output")
 							if savedOutput == "PRECOMPACTION_UI_OUTPUT" {
 								saved, readErr := stores.Executions.GetByID(ctx, exec.ID)
 								require.NoError(t, readErr)
@@ -428,16 +442,31 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 	args, _ := json.Marshal(map[string]string{"file_path": file})
 	switch provider {
 	case models.ProviderOpenAI:
+		var items []any
+		if file != "" && text != "" {
+			emit(map[string]any{"type": "response.output_text.delta", "delta": text})
+			prefix := map[string]any{"type": "message", "id": "before739", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}
+			items = append(items, prefix)
+			emit(map[string]any{"type": "response.output_item.done", "output_index": 0, "item": prefix})
+		}
 		var item map[string]any
 		if file != "" {
 			item = map[string]any{"type": "function_call", "id": "fc_read", "call_id": "read739", "name": "read_file", "arguments": string(args)}
 		} else {
 			item = map[string]any{"type": "message", "id": "msg739", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}
 		}
-		emit(map[string]any{"type": "response.output_item.done", "output_index": 0, "item": item})
-		emit(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp739", "status": "completed", "output": []any{item}, "usage": map[string]int{"input_tokens": 20, "output_tokens": 5}}})
+		emit(map[string]any{"type": "response.output_item.done", "output_index": len(items), "item": item})
+		items = append(items, item)
+		emit(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp739", "status": "completed", "output": items, "usage": map[string]int{"input_tokens": 20, "output_tokens": 5}}})
 	case models.ProviderAnthropic:
+		index := 0
 		emit(map[string]any{"type": "message_start", "message": map[string]any{"id": "msg739", "usage": map[string]int{"input_tokens": 20}}})
+		if file != "" && text != "" {
+			emit(map[string]any{"type": "content_block_start", "index": index, "content_block": map[string]any{"type": "text", "text": ""}})
+			emit(map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": text}})
+			emit(map[string]any{"type": "content_block_stop", "index": index})
+			index++
+		}
 		block := map[string]any{"type": "text", "text": ""}
 		delta := map[string]any{"type": "text_delta", "text": text}
 		stop := "end_turn"
@@ -446,16 +475,16 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 			delta = map[string]any{"type": "input_json_delta", "partial_json": string(args)}
 			stop = "tool_use"
 		}
-		emit(map[string]any{"type": "content_block_start", "index": 0, "content_block": block})
-		emit(map[string]any{"type": "content_block_delta", "index": 0, "delta": delta})
-		emit(map[string]any{"type": "content_block_stop", "index": 0})
+		emit(map[string]any{"type": "content_block_start", "index": index, "content_block": block})
+		emit(map[string]any{"type": "content_block_delta", "index": index, "delta": delta})
+		emit(map[string]any{"type": "content_block_stop", "index": index})
 		emit(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop}, "usage": map[string]int{"output_tokens": 5}})
 		emit(map[string]any{"type": "message_stop"})
 	default:
 		delta := map[string]any{"content": text}
 		stop := "stop"
 		if file != "" {
-			delta = map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "read739", "type": "function", "function": map[string]any{"name": "read_file", "arguments": string(args)}}}}
+			delta = map[string]any{"content": text, "tool_calls": []any{map[string]any{"index": 0, "id": "read739", "type": "function", "function": map[string]any{"name": "read_file", "arguments": string(args)}}}}
 			stop = "tool_calls"
 		}
 		emit(map[string]any{"choices": []any{map[string]any{"delta": delta, "finish_reason": stop}}})
@@ -463,9 +492,13 @@ func compactionServerReply(w http.ResponseWriter, provider models.LLMProvider, t
 	}
 }
 
-func compactionServerToolReply(w http.ResponseWriter, provider models.LLMProvider, file, tool string) {
+func compactionServerToolReply(w http.ResponseWriter, provider models.LLMProvider, file, tool string, text ...string) {
 	rec := httptest.NewRecorder()
-	compactionServerReply(rec, provider, "", file)
+	prefix := ""
+	if len(text) > 0 {
+		prefix = text[0]
+	}
+	compactionServerReply(rec, provider, prefix, file)
 	w.Header().Set("Content-Type", "text/event-stream")
 	fmt.Fprint(w, strings.ReplaceAll(rec.Body.String(), `"name":"read_file"`, `"name":"`+tool+`"`))
 }

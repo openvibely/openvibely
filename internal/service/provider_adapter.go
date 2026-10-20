@@ -1228,7 +1228,18 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 						// execution's original prompt/output, already summarized.
 						start++
 					}
-					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), req.ChatHistory[start:]...)
+					continuation := append([]models.Execution(nil), req.ChatHistory[start:]...)
+					if start == i {
+						// Only structured replay describes work after compaction.
+						// Aggregate UI fields still include the earlier work covered
+						// by the summary. Suppress fallback to them in this copy.
+						continuation[0].PromptSent = ""
+						continuation[0].Output = ""
+						continuation[0].ReasoningContent = ""
+						continuation[0].ErrorMessage = ""
+						continuation[0].Status = models.ExecCompleted
+					}
+					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), continuation...)
 					break
 				}
 			}
