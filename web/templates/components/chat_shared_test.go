@@ -4429,7 +4429,7 @@ func TestChatBubbleStreaming_UsesUTF8ByteOffsetInEventSourceURL(t *testing.T) {
 	if !strings.Contains(html, "function utf8ByteLength") || !strings.Contains(html, "streamTextEncoder.encode(value || '').length") {
 		t.Fatal("fresh stream should compute offsets as UTF-8 byte lengths")
 	}
-	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "window.openVibelyLive.execution(execId, streamOffset)") {
+	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "window.openVibelyLive.execution(execId, streamOffset, streamProjectID)") {
 		t.Fatal("fresh stream EventSource URL should include current textBuffer byte offset")
 	}
 }
@@ -4452,7 +4452,7 @@ func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
 	for _, snippet := range []string{
 		"var cumulativeContent = container.getAttribute('data-raw-content') || '';",
 		"var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;",
-		"window.openVibelyLive.execution(execId, streamOffset)",
+		"window.openVibelyLive.execution(execId, streamOffset, streamProjectID)",
 		"function persistResumeStreamState(active)",
 		"streamOffset += utf8ByteLength(event.data);",
 		"container.setAttribute('data-initial-byte-length', String(streamOffset));",
