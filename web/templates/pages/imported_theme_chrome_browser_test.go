@@ -122,7 +122,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 					browser.waitFor(theme.ID+" chat surfaces share card shadow", `(function(){var c=getComputedStyle(document.querySelector('#fixture-settings-card')).boxShadow;return String(c!=='none'&&['#fixture-bubble','#fixture-composer'].every(function(s){return getComputedStyle(document.querySelector(s)).boxShadow===c;}));})()`, "true")
 				}
 				browser.waitFor(theme.ID+" preserves default toggle geometry and fading", `window.toggleGeometry() === window.originalToggleGeometry ? 'true' : window.toggleGeometry() + ' expected ' + window.originalToggleGeometry`, "true")
-				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" && theme.ID != "openvibely-dark-classic" && theme.ID != "openvibely-dark-flat" {
+				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" && theme.ID != "openvibely-dark-flat" {
 					browser.waitFor(theme.ID+" consumes dedicated toggle colors", `JSON.stringify(['.theme-toggle-pill','.theme-toggle-thumb','.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'moon' : 'sun'),'.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')].map(function(selector, i) { var probe = document.getElementById('probe'); probe.style.color = 'var(--ov-mode-'+['track','thumb','active','inactive'][i]+')'; return getComputedStyle(document.querySelector(selector))[i < 2 ? 'backgroundColor' : 'color'] === getComputedStyle(probe).color; }))`, "[true,true,true,true]")
 				}
 			}
@@ -142,16 +142,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor("flat "+selector+" matches settings card", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.backgroundColor===b.backgroundColor&&a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
 		}
 		browser.waitFor("flat retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-classic');'ok'`)
-		browser.waitFor("classic retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, step := range []struct{ selector, color string }{{"#fixture-settings-card", "#1d232a"}, {"#fixture-bubble", "#2b3039"}, {"#fixture-composer", "#2b3039"}} {
-			browser.waitFor("classic "+step.selector+" keeps original color", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
-		}
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
-			browser.waitFor("classic "+selector+" has no shadow", `window.computed('`+selector+`', 'boxShadow')`, "none")
-			browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-flat');'ok'`)
 			browser.waitFor("flat "+selector+" has no shadow", `window.computed('`+selector+`', 'boxShadow')`, "none")
-			browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-classic');'ok'`)
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default dark retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
@@ -397,8 +389,5 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
 		}
 		browser.waitFor("native dark search uses card step", `window.near('.kanban-search', 'backgroundColor', '#22272e')`, "ok")
-		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-classic');'ok'`)
-		browser.waitFor("classic dark keeps default search surface", `String(window.computed('.kanban-search', 'backgroundColor') === window.themeColor('oklch(var(--b1))'))`, "true")
-		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 	})
 }
