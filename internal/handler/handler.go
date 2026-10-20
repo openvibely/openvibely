@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -63,7 +64,8 @@ type Handler struct {
 	chatInputRequests          *chatInputRequestBroker
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
-	liveSSEWriteObserver       func(int) // test seam invoked after a live SSE event is written
+	nativeLiveTickets          nativeLiveTickets
+	liveSocketCount            atomic.Int32
 	telegramService            *service.TelegramService
 	xService                   *service.XService
 	xServiceMu                 sync.RWMutex
@@ -742,7 +744,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/api/system/update", h.SystemUpdate)
 	e.POST("/api/system/update/apply", h.ApplySystemUpdate)
 	e.POST("/api/system/update/cancel", h.CancelSystemUpdate)
-	e.GET("/api/system/update/events", h.SystemUpdateEvents)
 
 	// Swagger API documentation
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
@@ -1127,9 +1128,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/insights/health-check", h.RunHealthCheck)
 	e.POST("/history/grade-ideas", h.GradeIdeas)
 
-	// Server-Sent Events for real-time updates
-	e.GET("/events/live", h.LiveEventsSSE)
-	e.GET("/events/chat/:exec_id", h.ChatStreamSSE)
+	// Shared browser/native WebSocket transport
+	e.GET("/events/ws", h.LiveWebSocket)
+	e.POST("/events/native-ticket", h.NativeLiveTicket)
 }
 
 // AppIconPNG serves the shared browser icon for server and desktop web views.
