@@ -4168,7 +4168,7 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 		"chat root must not clip the composer shadow")
 	assert.Contains(t, body, `class="relative flex-1 min-h-0 min-w-0"`,
 		"chat messages shell must anchor transcript controls")
-	assert.Contains(t, body, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 space-y-6`,
+	assert.Contains(t, body, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 space-y-6`,
 		"chat messages pane must be present")
 	assert.NotContains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden`,
 		"chat messages pane must not hard-clip chat bubble shadows")
