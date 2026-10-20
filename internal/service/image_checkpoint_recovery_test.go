@@ -38,16 +38,20 @@ func TestCompletionsSummaryRetainsImagesOnlyInInput(t *testing.T) {
 func TestFollowupAfterInflightSummaryRetainsRetryWork(t *testing.T) {
 	ctx := context.Background()
 	stores := teststores.New(t).Stores
+	task := &models.Task{ProjectID: "default", Title: "inflight retry", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+	require.NoError(t, stores.Tasks.Create(ctx, task))
+	active := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+	require.NoError(t, stores.Executions.Create(ctx, active))
 	svc := &LLMService{execRepo: stores.Executions}
-	req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: "active", TransportScope: "task:test", Agent: models.LLMConfig{Provider: models.ProviderOpenAI}, ChatHistory: []models.Execution{{ID: "active"}}}
+	req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: active.ID, TransportScope: "task:" + task.ID, Agent: models.LLMConfig{Provider: models.ProviderOpenAI}, ChatHistory: []models.Execution{{ID: active.ID}}}
 	compacted := req
 	compacted.ChatHistory = []models.Execution{{Output: "A completed", Status: models.ExecCompleted}}
-	svc.persistCompactionCheckpoint(req, compacted, "A completed", "local_summary")
-	checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", "test")
+	require.NoError(t, svc.persistCompactionCheckpoint(req, compacted, "A completed", "local_summary"))
+	checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 	require.NoError(t, err)
 	require.Equal(t, "local_summary_inflight", checkpoint.Strategy)
 	req.ExecID = "followup"
-	req.ChatHistory = []models.Execution{{ID: "old", Output: "old"}, {ID: "active", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"assistant","content":"A completed"},{"type":"function_call_output","call_id":"B","output":"B completed after summary"}]}`}}}}
+	req.ChatHistory = []models.Execution{{ID: "old", Output: "old"}, {ID: active.ID, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"assistant","content":"A completed"},{"type":"function_call_output","call_id":"B","output":"B completed after summary"}]}`}}}}
 	restored := svc.restoreCompactionCheckpoint(req)
 	require.Len(t, restored.ChatHistory, 1)
 	require.Contains(t, summaryHistoryText(t, req.Agent.Provider, restored.ChatHistory), "B completed after summary")
