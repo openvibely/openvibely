@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
@@ -510,11 +511,16 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
-		replay = managedcontext.SeedReplay(ctx, messages, replay, func(m agenticMessage) (string, string) {
+		readContext := func(m agenticMessage) (string, string) {
 			text, _ := m.Content.(string)
 			return m.Role, text
-		}, func(text string) Message { return Message{Role: "user", Content: text} })
-		messages = ensureAttachmentContext(ctx, messages)
+		}
+		makeReplayContext := func(text string) Message { return Message{Role: "user", Content: text} }
+		makeWireContext := func(text string) agenticMessage { return agenticMessage{Role: "user", Content: text} }
+		replay = managedcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
+		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		replay = attachmentcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
+		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 		}

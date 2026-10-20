@@ -3,6 +3,7 @@ package attachmentcontext
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -139,5 +140,33 @@ func TestSourceKeepsLastGoodOnError(t *testing.T) {
 	}
 	if !strings.Contains(Text(ctx), "a.pdf") {
 		t.Fatal("lost last good references")
+	}
+}
+
+func TestSeedReplayPreservesContextUpdatesAndPosition(t *testing.T) {
+	ctx := With(context.Background(), "/files/report.pdf")
+	for _, tail := range []message{{"user", "Read it"}, {"user", ""}, {"tool", "result"}} {
+		visible := []message{{"assistant", "earlier"}, tail}
+		replay := []message{tail}
+		seeded := SeedReplay(ctx, visible, replay, read, makeMessage)
+		wire := Ensure(ctx, visible, read, makeMessage)
+		if !reflect.DeepEqual(wire[1:], seeded) {
+			t.Fatalf("replay differs from wire: wire=%+v replay=%+v", wire, seeded)
+		}
+		if got := SeedReplay(ctx, wire, replay, read, makeMessage); !reflect.DeepEqual(got, replay) {
+			t.Fatalf("unchanged list copied again: %+v", got)
+		}
+		changed := With(ctx, "/files/report.pdf\n/files/new.pdf")
+		followup := append(append([]message(nil), wire...), message{"assistant", "done"}, message{"user", "next"})
+		got := SeedReplay(changed, followup, []message{{"user", "next"}}, read, makeMessage)
+		want := []message{makeMessage(Text(changed)), {"user", "next"}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("missing changed list: %+v", got)
+		}
+		for _, empty := range []context.Context{context.Background(), With(ctx, "")} {
+			if got := SeedReplay(empty, followup, replay, read, makeMessage); !reflect.DeepEqual(got, replay) {
+				t.Fatalf("empty source changed replay: %+v", got)
+			}
+		}
 	}
 }
