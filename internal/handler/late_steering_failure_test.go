@@ -2,12 +2,15 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/stretchr/testify/require"
 )
 
@@ -223,4 +226,128 @@ func TestSteeringDuplicateFilenamesKeepPreviewPaths(t *testing.T) {
 			require.ElementsMatch(t, []string{paths["first"], paths["second"]}, savedPaths)
 		})
 	}
+}
+
+func TestSteeringAttachmentRefreshFailureKeepsUploadForRetry(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryActive} {
+		for _, native := range []bool{true, false} {
+			name := string(category) + "/continuation"
+			if native {
+				name = string(category) + "/native"
+			}
+			t.Run(name, func(t *testing.T) {
+				h, _, configs := setupTestHandler(t)
+				useTempUploadsDir(t)
+				ctx := context.Background()
+				agent := createAgent(t, configs)
+				project := createProject(t, h, "Refresh failure")
+				task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Category = category; task.Status = models.StatusRunning })
+				exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+				pending := filepath.Join(uploadsDir, "chat", "pending", "refresh-test")
+				require.NoError(t, os.MkdirAll(pending, 0755))
+				require.NoError(t, os.WriteFile(filepath.Join(pending, "report.pdf"), []byte("report"), 0600))
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "refresh-test"}
+				if category == models.CategoryChat {
+					input.Scope = models.ThreadInputScopeChat
+				}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+				params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, ProjectID: project.ID, Agent: *agent}
+				key := task.ID
+				if category == models.CategoryChat {
+					key = attachmentcontext.ChatProjectKey(project.ID)
+				}
+				failRead := false
+				loads := 0
+				params.attachmentSource = attachmentcontext.NewSource(func(context.Context) (string, error) {
+					loads++
+					if failRead {
+						return "", errors.New("injected database read failure")
+					}
+					return "references", nil
+				}, key)
+				require.NoError(t, params.attachmentSource.Load(ctx))
+				batch, err := h.claimPendingSteeringInputs(ctx, &params)
+				require.NoError(t, err)
+				require.Len(t, batch.inputs, 1)
+				commit := h.preparedSteeringCommit(params, batch)
+				failRead = true
+				if native {
+					err = commit(ctx, nil)
+				} else {
+					err = h.prepareSteeringAttachmentDelivery(ctx, params, &batch)
+				}
+				require.ErrorContains(t, err, "couldn't refresh steering attachments; message was not sent")
+				require.Equal(t, 2, loads)
+				require.FileExists(t, filepath.Join(pending, "report.pdf"))
+				taskFiles, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+				require.NoError(t, err)
+				require.Empty(t, taskFiles)
+				chatFiles, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+				require.NoError(t, err)
+				require.Empty(t, chatFiles)
+				stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+				replay, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+				require.NoError(t, err)
+				require.Empty(t, replay[exec.ID])
+				failRead = false
+				if native {
+					require.NoError(t, commit(ctx, nil))
+					require.NoError(t, commit(ctx, nil))
+				} else {
+					require.NoError(t, h.prepareSteeringAttachmentDelivery(ctx, params, &batch))
+					require.NoError(t, h.commitPreparedSteeringInputs(ctx, params, batch))
+				}
+				require.Equal(t, 3, loads)
+				require.NoDirExists(t, pending)
+				stored, err = h.threadInputRepo.GetByID(ctx, input.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+			})
+		}
+	}
+}
+
+type failSteeringAttachmentRefreshStore struct{ persistence.AttachmentStore }
+
+func (s failSteeringAttachmentRefreshStore) ListByTask(ctx context.Context, taskID string) ([]models.Attachment, error) {
+	files, err := s.AttachmentStore.ListByTask(ctx, taskID)
+	if err == nil && len(files) > 0 {
+		return nil, errors.New("injected attachment refresh failure")
+	}
+	return files, err
+}
+
+func TestSteeringAttachmentRefreshFailurePreventsModelCall(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	h.workerSvc = nil
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Before send")
+	task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Status = models.StatusRunning })
+	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+	pending := filepath.Join(uploadsDir, "chat", "pending", "before-send")
+	require.NoError(t, os.MkdirAll(pending, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "report.pdf"), []byte("report"), 0600))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "before-send"}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+	originalStore := h.attachmentRepo
+	h.attachmentRepo = failSteeringAttachmentRefreshStore{originalStore}
+	mock := testutil.NewMockLLMCaller()
+	h.llmSvc.SetLLMCaller(mock)
+	h.processStreamingResponse(streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, Task: task, ProjectID: project.ID, Agent: *agent, Message: "go", IsTaskFollowup: true, suppressQueuedTurnPromotion: true})
+	require.Zero(t, mock.CallCount(), "do not send the steer if its attachment list cannot be loaded")
+	stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, stored.InputMode)
+	savedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Contains(t, savedExec.ErrorMessage, "couldn't refresh steering attachments")
+	require.FileExists(t, filepath.Join(pending, "report.pdf"))
+	files, err := originalStore.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, files)
 }

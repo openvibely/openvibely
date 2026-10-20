@@ -5076,7 +5076,7 @@ func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProv
 	require.FileExists(t, filepath.Join(pendingDir, "screen.png"))
 }
 
-func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenCommitFailsAfterProviderSuccess(t *testing.T) {
+func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenPublicationFailsBeforeSend(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -5129,8 +5129,7 @@ func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenCommitFailsAfterPr
 		suppressQueuedTurnPromotion: true,
 	})
 
-	require.Equal(t, 1, mock.CallCount())
-	require.Contains(t, mock.LastCall().Prompt, "commit should not strand me")
+	require.Zero(t, mock.CallCount(), "attachments must be ready before sending steering")
 	requeued, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 	require.NoError(t, err)
 	require.NotNil(t, requeued)
@@ -5139,7 +5138,7 @@ func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenCommitFailsAfterPr
 	require.Empty(t, requeued.TurnID)
 }
 
-func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommitFails(t *testing.T) {
+func TestProcessStreamingResponse_RequeuesEntireSteeringBatchWhenPublicationFailsBeforeSend(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -5205,12 +5204,12 @@ func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommit
 		suppressQueuedTurnPromotion: true,
 	})
 
-	require.Equal(t, 1, mock.CallCount())
+	require.Zero(t, mock.CallCount(), "attachments must be ready before sending steering")
 	storedFirst, err := h.threadInputRepo.GetByID(ctx, first.ID)
 	require.NoError(t, err)
 	require.NotNil(t, storedFirst)
-	require.Equal(t, models.ThreadInputApplied, storedFirst.InputStatus)
-	require.Equal(t, models.ThreadInputModeSteering, storedFirst.InputMode)
+	require.Equal(t, models.ThreadInputPending, storedFirst.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, storedFirst.InputMode)
 	storedSecond, err := h.threadInputRepo.GetByID(ctx, second.ID)
 	require.NoError(t, err)
 	require.NotNil(t, storedSecond)

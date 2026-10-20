@@ -1716,7 +1716,8 @@ func TestLLMService_ExecuteTaskWithAgent_SteeringFilesArePublishedOnlyOnDelivery
 	threadInputRepo := env.ThreadInputs
 	ctx := context.Background()
 
-	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, env.Projects, env.Schedules, env.Attachments)
+	store := &failingAttachmentListStore{AttachmentStore: env.Attachments}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, env.Projects, env.Schedules, store)
 	svc.SetThreadInputRepo(threadInputRepo)
 	testProvider := models.LLMProvider("task-mid-turn-steer-test")
 	task := &models.Task{ProjectID: "default", Title: "Steering file delivery", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
@@ -1751,6 +1752,15 @@ func TestLLMService_ExecuteTaskWithAgent_SteeringFilesArePublishedOnlyOnDelivery
 			require.Equal(t, models.ThreadInputPending, stored.InputStatus)
 
 			history := []any{map[string]any{"type": "message", "role": "user", "content": "change direction"}}
+			store.failAt = store.calls + 1
+			require.ErrorContains(t, input.Commit(req.Ctx, history), "couldn't refresh steering attachments")
+			require.DirExists(t, pending)
+			files, err = env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, files)
+			stored, err = threadInputRepo.GetByID(ctx, steeringID)
+			require.NoError(t, err)
+			require.Equal(t, models.ThreadInputPending, stored.InputStatus)
 			require.NoError(t, input.Commit(req.Ctx, history))
 			require.NoDirExists(t, pending)
 			files, err = env.Attachments.ListByTask(ctx, task.ID)

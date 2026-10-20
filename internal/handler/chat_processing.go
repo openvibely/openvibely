@@ -758,6 +758,13 @@ modelLoop:
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
 		}
+		if params.Agent.Provider != models.ProviderOpenAI && pendingSteering.count() > 0 {
+			if deliveryErr := h.prepareSteeringAttachmentDelivery(ctx, params, &pendingSteering); deliveryErr != nil {
+				h.requeueUncommittedSteering(ctx, params.ExecID, pendingSteering)
+				err = deliveryErr
+				break modelLoop
+			}
+		}
 		// Codex-style steering is owned by the active agentic turn. Active model
 		// sampling and its completed tools finish before pending input is drained.
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
@@ -769,6 +776,7 @@ modelLoop:
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
 		if err != nil || ctx.Err() != nil {
+			finishSteeringAttachments(pendingSteering, false)
 			if h.threadInputRepo != nil {
 				if markErr := h.threadInputRepo.MarkProviderSteeringAmbiguous(steeringCleanupContext(ctx), ambiguousSteeringIDs(err)); markErr != nil {
 					applog.Infof("[handler] processStreamingResponse exec=%s error preserving ambiguous OpenAI steering: %v", params.ExecID, markErr)
@@ -952,7 +960,8 @@ modelLoop:
 }
 
 type preparedSteeringBatch struct {
-	inputs []models.ThreadInput
+	inputs             []models.ThreadInput
+	attachmentFinishes map[string]func(bool)
 }
 
 type ambiguousSteeringError interface {
@@ -1005,7 +1014,7 @@ func removePreparedSteeringInputs(batch, remove preparedSteeringBatch) preparedS
 			kept = append(kept, input)
 		}
 	}
-	return preparedSteeringBatch{inputs: kept}
+	return preparedSteeringBatch{inputs: kept, attachmentFinishes: batch.attachmentFinishes}
 }
 
 func (h *Handler) waitForFinalSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
@@ -1391,31 +1400,53 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 	}
 }
 
+// prepareSteeringAttachmentDelivery validates the refreshed list before the
+// provider receives the steer. Pending uploads survive until delivery succeeds.
+func (h *Handler) prepareSteeringAttachmentDelivery(ctx context.Context, params streamingResponseParams, batch *preparedSteeringBatch) error {
+	if batch.attachmentFinishes == nil {
+		batch.attachmentFinishes = make(map[string]func(bool))
+	}
+	for _, input := range batch.inputs {
+		if input.AttachmentSessionID == "" || batch.attachmentFinishes[input.ID] != nil {
+			continue
+		}
+		_, _, _, finish, err := h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+		if err != nil {
+			finishSteeringAttachments(*batch, false)
+			return err
+		}
+		batch.attachmentFinishes[input.ID] = finish
+	}
+	if len(batch.attachmentFinishes) > 0 && params.attachmentSource != nil {
+		if err := params.attachmentSource.Load(ctx); err != nil {
+			finishSteeringAttachments(*batch, false)
+			return fmt.Errorf("couldn't refresh steering attachments; message was not sent: %w", err)
+		}
+	}
+	return nil
+}
+
+func finishSteeringAttachments(batch preparedSteeringBatch, committed bool) {
+	for id, finish := range batch.attachmentFinishes {
+		finish(committed)
+		delete(batch.attachmentFinishes, id)
+	}
+}
+
 func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch preparedSteeringBatch) llmcontracts.InitialSteeringCommit {
 	delivered := false
 	return func(ctx context.Context, history []any) error {
-		var finishes []func(bool)
-		committed := false
-		defer func() {
-			for i := len(finishes) - 1; i >= 0; i-- {
-				finishes[i](committed)
-			}
-		}()
 		if !delivered {
-			for _, input := range batch.inputs {
-				if input.AttachmentSessionID != "" {
-					_, _, _, finish, err := h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
-					if err != nil {
-						return err
-					}
-					finishes = append(finishes, finish)
-				}
+			if err := h.prepareSteeringAttachmentDelivery(ctx, params, &batch); err != nil {
+				return err
 			}
 		}
 		if err := h.threadInputRepo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history}); err != nil {
+			finishSteeringAttachments(batch, false)
 			return err
 		}
-		committed, delivered = true, true
+		finishSteeringAttachments(batch, true)
+		delivered = true
 		return nil
 	}
 }
@@ -1424,17 +1455,23 @@ func (h *Handler) commitPreparedSteeringInputs(ctx context.Context, params strea
 	if h.threadInputRepo == nil || batch.count() == 0 {
 		return nil
 	}
+	// Any inputs not marked applied retain their uploads for retry.
+	defer finishSteeringAttachments(batch, false)
 	for _, input := range batch.inputs {
-		finish := func(bool) {}
-		if input.AttachmentSessionID != "" {
-			var err error
-			_, _, _, finish, err = h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
-			if err != nil {
-				return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, err)
+		finish := batch.attachmentFinishes[input.ID]
+		if finish == nil {
+			finish = func(bool) {}
+			if input.AttachmentSessionID != "" {
+				var err error
+				_, _, _, finish, err = h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+				if err != nil {
+					return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, err)
+				}
 			}
 		}
 		err := h.threadInputRepo.MarkApplied(ctx, input.ID, params.ExecID, params.ExecID)
 		finish(err == nil)
+		delete(batch.attachmentFinishes, input.ID)
 		if err != nil {
 			return err
 		}
