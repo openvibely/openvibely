@@ -20,6 +20,15 @@
         const lines = Math.max(text.split('\n').length, Math.ceil(text.length / Math.max(30, width / 8)));
         return Math.max(28, Math.min(20000, lines * 24 + 16));
     }
+    // Match the renderer's large-content threshold. Entering the viewport must
+    // not cancel worker preparation and reparse an arbitrarily large row on the
+    // main thread. Explicit Find/print materialization still controls its own mode.
+    function canRenderImmediately(row) {
+        if (!row.lazy || row.ready) return true;
+        if (row.sourceSize === undefined) row.sourceSize = row.model.segments.reduce((size, segment) =>
+            size + (segment.content || '').length + (segment.resultOutput || '').length + (segment.secondary || '').length, 0);
+        return row.sourceSize < 64 * 1024;
+    }
     function sizePlaceholder(row, height, margins) {
         row.placeholder.style.cssText = 'height:' + height + 'px;min-height:' + height +
             'px;box-sizing:border-box;flex-shrink:0;margin-top:' + (margins?.marginTop || '0px') + ';margin-bottom:' + (margins?.marginBottom || '0px') + ';';
@@ -223,11 +232,10 @@
             const approaching = row.lazy && !row.ready && !row.loading &&
                 ((movement < 0 && rect.bottom >= bounds.top - lookahead && rect.top <= bounds.bottom) ||
                  (movement > 0 && rect.top <= bounds.bottom + lookahead && rect.bottom >= bounds.top));
-            // Initial hydration can await asynchronous work while hidden. During
-            // scrolling, an actual viewport row must commit before the next paint,
-            // including when the reader overtakes its background preparation.
-            const immediate = !hydrating && rect.bottom > bounds.top && rect.top < bounds.bottom;
-            if ((visible || approaching) && (!mounted || (row.lazy && !row.ready))) changes.push(() => mount(row, restored, immediate));
+            // Finish small viewport rows before paint. Large rows keep their
+            // asynchronous preparation even if scrolling overtakes the lookahead.
+            const immediate = !hydrating && rect.bottom > bounds.top && rect.top < bounds.bottom && canRenderImmediately(row);
+            if ((visible || approaching) && (!mounted || (row.lazy && !row.ready && (!row.loading || immediate)))) changes.push(() => mount(row, restored, immediate));
             if (mounted && row.lazy && row.ready && rect.height > 0) {
                 row.model.height = rect.height;
                 row.model.width = width;
@@ -248,19 +256,18 @@
         restore();
         if (!hydrating) {
             // A measured row can shrink enough to pull further placeholders into
-            // view. Finish that newly exposed window in this frame, not a chain
-            // of frames showing successively different estimates. Each pass
-            // consumes previously unmounted/unready rows, bounded by the list.
+            // view. Settle small/retained rows in this frame. A large pending row
+            // must be left to its worker rather than retried in this loop.
             for (let pass = 0; pass < list.rows.size; pass++) {
                 const exposed = [];
                 list.rows.forEach(row => {
-                    if (row.node?.isConnected && (!row.lazy || row.ready)) return;
+                    if (row.node?.isConnected && (!row.lazy || row.ready || (row.loading && !canRenderImmediately(row)))) return;
                     const rect = element(row).getBoundingClientRect();
                     if (rect.bottom > bounds.top && rect.top < bounds.bottom) exposed.push(row);
                 });
                 if (!exposed.length) break;
                 const keepPosition = saveAnchor(list), newlyMounted = [];
-                exposed.forEach(row => mount(row, newlyMounted, true));
+                exposed.forEach(row => mount(row, newlyMounted, canRenderImmediately(row)));
                 restoreScroll(newlyMounted);
                 keepPosition();
             }
