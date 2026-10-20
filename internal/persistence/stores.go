@@ -195,6 +195,7 @@ type ChatAttachmentStore interface {
 	ListByExecution(ctx context.Context, executionID string) ([]models.ChatAttachment, error)
 	ListByExecutionIDs(ctx context.Context, execIDs []string) (map[string][]models.ChatAttachment, error)
 	ListByTask(ctx context.Context, taskID string) ([]models.ChatAttachment, error)
+	ListByProject(ctx context.Context, projectID string) ([]models.ChatAttachment, error)
 }
 
 // ChatInputRequestStore persists pending chat input requests.
