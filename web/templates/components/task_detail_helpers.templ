@@ -270,22 +270,9 @@ func TaskLatestDuration(executions []models.Execution) string {
 	return ""
 }
 
-// TaskThreadStatusIndicator renders a success/failure status indicator at the bottom of thread messages.
-// Shows only when the task is completed or failed, providing clear visual feedback.
+// TaskThreadStatusIndicator renders a failure indicator at the bottom of thread messages.
 templ TaskThreadStatusIndicator(task *models.Task, executions []models.Execution) {
-	if task.Status == models.StatusCompleted {
-		<div data-task-terminal-status class="flex items-center justify-center gap-2 py-2">
-			<div class="flex items-center gap-2 text-success text-sm opacity-70">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-				</svg>
-				<span>Task completed</span>
-				if dur := TaskLatestDuration(executions); dur != "" {
-					<span class="opacity-60">({ dur })</span>
-				}
-			</div>
-		</div>
-	} else if task.Status == models.StatusFailed {
+	if task.Status == models.StatusFailed {
 		<div data-task-terminal-status class="flex items-center justify-center gap-2 py-2">
 			<div class="flex items-center gap-2 text-error text-sm opacity-70">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
