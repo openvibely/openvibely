@@ -57,3 +57,44 @@ func TestBrowserFunctional_VirtualHistoryPrependKeepsReadingPosition(t *testing.
 		}
 	}
 }
+
+func TestBrowserFunctional_HiddenPagingPreservesAnchorAndCleansUp(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';messages.style.overflowAnchor='none';
+ document.getElementById('pair').dataset.execStatus='completed';
+ const output=label=>Array.from({length:40},(_,i)=>label+' message '+i+' **formatted**.\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n').join('');
+ await window.renderStreamingContent(stream,output('latest'),false);
+ const loader=document.createElement('div'); loader.dataset.containerId=messages.id;loader.style.height='30px';messages.prepend(loader);
+ messages.scrollTop=100;await window.renderVisibleChatRows(messages);await paint();
+ const rect=messages.getBoundingClientRect();
+ const anchor=Array.from(messages.querySelectorAll('[data-chat-lazy-row]:not([data-virtual-chat-row])')).find(el=>el.getBoundingClientRect().bottom>rect.top&&el.getBoundingClientRect().top<rect.bottom);
+ const top=anchor.getBoundingClientRect().top;
+ window.prepareChatEarlierSwap(loader);
+ const workspace=document.createElement('section');messages.replaceWith(workspace);workspace.append(messages);workspace.style.display='none';await paint();
+ const older=document.createElement('div');older.dataset.executionPair='true';older.dataset.execStatus='completed';
+ const owner=document.createElement('div');owner.className='chat-bubble-assistant-msg';older.append(owner);loader.after(older);
+ window.applyChatBubbleTransforms=()=>window.renderStreamingContent(owner,output('older'),false);
+ window.afterChatEarlierSwap(loader);const restored=window.restoreChatEarlierScroll(messages);
+ await messages._chatEarlierHydrationPromise;await paint();await pause(80);
+ assert(messages._earlierAnchor,'discarded pending hidden anchor');
+ // Hiding again during visible-row rendering must keep the same transaction.
+ const renderVisible=window.renderVisibleChatRows;let hiddenAgain=false;
+ window.renderVisibleChatRows=async function(...args){await renderVisible(...args);if(!hiddenAgain){workspace.style.display='none';hiddenAgain=true;}};
+ workspace.style.display='';
+ for(let i=0;i<100&&!hiddenAgain;i++)await pause(10);
+ assert(hiddenAgain,'visible restoration did not start');await paint();
+ assert(messages._earlierAnchor,'second hide discarded pending anchor');
+ window.renderVisibleChatRows=renderVisible;workspace.style.display='';await restored;await paint();
+ assert(anchor.isConnected,'original reading row detached after revealing workspace');
+ assert(Math.abs(anchor.getBoundingClientRect().top-top)<3,'hidden paging moved reader by '+(anchor.getBoundingClientRect().top-top)+'px, scroll='+messages.scrollTop);
+ assert(!messages._earlierAnchor,'visible paging restoration did not finish');
+ // Navigating away while another hidden page settles must release its waiter.
+ window.prepareChatEarlierSwap(loader);workspace.style.display='none';
+ window.afterChatEarlierSwap(loader);const pending=window.restoreChatEarlierScroll(messages);
+ await messages._chatEarlierHydrationPromise;await paint();
+ messages.remove();document.dispatchEvent(new CustomEvent('htmx:afterSwap',{detail:{target:document.body}}));
+ const completed=await Promise.race([pending.then(()=>true),pause(500).then(()=>false)]);
+ assert(completed && !messages._earlierAnchor,'removed hidden transcript retained its paging transaction');
+ return {};
+ `)
+}
