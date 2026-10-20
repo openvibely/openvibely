@@ -1516,6 +1516,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				if err != nil {
 					return err
 				}
+				if err := attachmentSource.Load(commitCtx); err != nil {
+					finishAttachments(false)
+					return fmt.Errorf("couldn't refresh steering attachments; message was not sent: %w", err)
+				}
 				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
 					finishAttachments(false)
 					return err
