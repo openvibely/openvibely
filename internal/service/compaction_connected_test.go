@@ -613,13 +613,17 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
 		for _, to := range providers {
-			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source"}
+			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source", "partial_summary_source", "partial_steering_summary_source", "failed_summary_source", "failed_steering_summary_source"}
 			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
 			for _, mode := range modes {
 				t.Run(string(from)+"/"+string(to)+"/"+mode, func(t *testing.T) {
-					inflight := mode == "inturn_summary_source" || mode == "steering_summary_source"
+					partialFailure := strings.HasPrefix(mode, "partial_")
+					emptyFailure := strings.HasPrefix(mode, "failed_")
+					continuationFailure := partialFailure || emptyFailure
+					steering := mode == "steering_summary_source" || mode == "partial_steering_summary_source" || mode == "failed_steering_summary_source"
+					inflight := continuationFailure || mode == "inturn_summary_source" || mode == "steering_summary_source"
 					sourceSummary := mode == "summary_source" || inflight
 					ctx, cancel := context.WithTimeout(compactionTestContext(), 30*time.Second)
 					defer cancel()
@@ -631,6 +635,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					dir := t.TempDir()
 					file := filepath.Join(dir, "source.txt")
 					require.NoError(t, os.WriteFile(file, []byte("SOURCE_TOOL_EVIDENCE"), 0600))
+					if mode == "tool_image_source" {
+						file = connectedImageAttachment(t, dir).FilePath
+					}
 					sourceCalls, targetCalls, summaries, restarts := 0, 0, 0, 0
 					server := connectedModelServer(t, "websocket", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, _ := io.ReadAll(r.Body)
@@ -659,13 +666,13 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 									t.Error("request lost SOURCE_TOOL_EVIDENCE")
 								}
 							}
-							if mode == "steering_summary_source" {
+							if steering {
 								if !strings.Contains(text, "SOURCE_STEER") {
 									t.Error("request lost SOURCE_STEER")
 								}
 							}
 							summary := "SWITCH_SUMMARY HISTORY_EVIDENCE"
-							if mode == "steering_summary_source" {
+							if steering {
 								summary += " SOURCE_STEER"
 							}
 							if strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
@@ -676,8 +683,13 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						if stage == 0 {
 							sourceCalls++
+							if mode == "tool_image_source" && sourceCalls == 1 {
+								compactionServerToolReply(w, provider, file, "view_image")
+								return
+							}
+
 							if inflight && sourceCalls == 1 {
-								compactionServerToolReply(w, provider, file, "read_file")
+								compactionServerToolReply(w, provider, file, "read_file", "OLD_RAW_MUST_NOT_RETURN")
 								return
 							}
 							if inflight && sourceCalls == 2 {
@@ -707,14 +719,31 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 								emit(map[string]any{"type": "message_stop"})
 								return
 							}
+							if emptyFailure {
+								compactionServerError(w, 401, "authentication_error", "continuation failed")
+								return
+							}
+							if partialFailure {
+								compactionServerPartialFailure(w, provider)
+								return
+							}
 							compactionServerReply(w, provider, "SOURCE_FINAL", "")
 							return
+						}
+						if mode == "tool_image_source" {
+							var body any
+							if err := json.Unmarshal(raw, &body); err != nil {
+								t.Error(err)
+							}
+							if !containsStructuredImage(body) {
+								t.Error("destination lost structured tool-result image")
+							}
 						}
 						if sourceSummary {
 							if strings.Contains(text, "OLD_RAW_MUST_NOT_RETURN") {
 								t.Error("destination restored history already covered by summary")
 							}
-							if mode == "steering_summary_source" {
+							if steering {
 								if !strings.Contains(text, "SOURCE_STEER") {
 									t.Error("request lost SOURCE_STEER")
 								}
@@ -729,7 +758,10 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if (mode != "native_source" || from != models.ProviderOpenAI || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 							t.Error("destination lost saved older answer")
 						}
-						if (sourceSummary || (mode == "native_source" && from == models.ProviderAnthropic)) && !strings.Contains(text, "SOURCE_FINAL") {
+						if partialFailure && !strings.Contains(text, "POST_SUMMARY_PARTIAL") {
+							t.Error("destination lost partial answer after summary")
+						}
+						if !continuationFailure && (sourceSummary || (mode == "native_source" && from == models.ProviderAnthropic)) && !strings.Contains(text, "SOURCE_FINAL") {
 							t.Error("destination lost post-compaction source answer")
 						}
 						if from == models.ProviderAnthropic && mode == "native_source" {
@@ -784,7 +816,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					require.NoError(t, stores.Executions.Complete(ctx, old.ID, models.ExecCompleted, old.Output, "", 0, 0))
 					first := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecRunning, PromptSent: "SOURCE_REQUEST"}
 					require.NoError(t, stores.Executions.Create(ctx, &first))
-					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: dir}
+					req := llmcontracts.AgentRequest{ProjectID: "default", Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: dir}
 					if mode == "native_source" {
 						req.ContextTokenEstimate = 190000
 						if from == models.ProviderAnthropic {
@@ -799,7 +831,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						req.DisableNativeCompaction = true
 						req.Agent.DisableNativeCompaction = true
 					}
-					if mode == "steering_summary_source" {
+					if steering {
 						claimed := false
 						req.Ctx = llmcontracts.WithSteeringCallback(req.Ctx, func(context.Context) (string, error) {
 							if claimed {
@@ -809,11 +841,22 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							return "SOURCE_STEER", nil
 						})
 					}
-					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
-					require.NoError(t, err)
-					if inflight {
-						require.Equal(t, 3, sourceCalls)
+					if continuationFailure {
+						require.Error(t, err)
+					} else {
+						require.NoError(t, err)
+					}
+					if mode == "tool_image_source" {
+						require.Equal(t, 2, sourceCalls)
+					} else if inflight {
+						if partialFailure {
+							require.GreaterOrEqual(t, sourceCalls, 3)
+							require.LessOrEqual(t, sourceCalls, 9)
+						} else {
+							require.Equal(t, 3, sourceCalls)
+						}
 					} else {
 						require.Equal(t, 1, sourceCalls)
 					}
@@ -844,7 +887,21 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							require.Contains(t, checkpoint.ProviderStateJSON, "SOURCE_FINAL")
 						}
 					}
-					require.NoError(t, stores.Executions.Complete(ctx, first.ID, models.ExecCompleted, result.Output, "", 0, 0))
+					status := models.ExecCompleted
+					if continuationFailure {
+						status = models.ExecFailed
+					}
+					require.NoError(t, stores.Executions.Complete(ctx, first.ID, status, result.Output, "", 0, 0))
+					if partialFailure {
+						saved, err := stores.Executions.GetByID(ctx, first.ID)
+						require.NoError(t, err)
+						require.Contains(t, saved.Output, "POST_SUMMARY_PARTIAL")
+					}
+					savedSource, err := stores.Executions.GetByID(ctx, first.ID)
+					require.NoError(t, err)
+					if continuationFailure {
+						require.Contains(t, savedSource.Output, "OLD_RAW_MUST_NOT_RETURN")
+					}
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
 					second := models.Execution{TaskID: task.ID, AgentConfigID: target.ID, Status: models.ExecRunning, PromptSent: "SWITCH_REQUEST"}
@@ -865,7 +922,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					if mode == "summary" {
 						req.ContextTokenEstimate = 190000
 					}
-					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
@@ -896,13 +953,16 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						req.ChatHistory = history[1:]
 					}
 					req.ContextTokenEstimate = 0
-					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					before := summaries
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Contains(t, result.Output, "RESTART_SWITCH_DONE")
 					require.Equal(t, 1, restarts)
 					require.Equal(t, before, summaries, "restart must reuse saved state")
+					afterSource, err := stores.Executions.GetByID(ctx, first.ID)
+					require.NoError(t, err)
+					require.Equal(t, savedSource.Output, afterSource.Output, "restoration must not change saved UI output")
 				})
 			}
 		}

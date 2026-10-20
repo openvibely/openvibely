@@ -519,6 +519,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 		}
 		// Send request (streaming)
+		// Keep text actually delivered to the caller if this sampling attempt
+		// fails before it can publish a completed assistant message.
+		var partialText strings.Builder
+		streamOpts := *opts
+		streamOpts.OnText = func(text string) {
+			partialText.WriteString(text)
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+
 		resp, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
@@ -529,9 +540,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*turnResult, error) {
-			return c.sendAgenticTurn(attemptCtx, messages, tools, opts)
+			return c.sendAgenticTurn(attemptCtx, messages, tools, &streamOpts)
 		})
 		if err != nil {
+			if text := partialText.String(); text != "" {
+				replay = append(replay, Message{Role: "assistant", Content: text})
+			}
 			return nil, conversationError(categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err)), messages)
 		}
 

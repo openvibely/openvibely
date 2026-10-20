@@ -508,7 +508,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
 		}
 		b.waitFor("live summary", `document.getElementById('task-change-activity').hidden+':'+document.querySelector('[data-change-summary]').textContent.includes('3 files')`, "false:true")
-		b.waitFor("completed status and duration remain visible with changes", `(function(){var status=document.querySelector('[data-task-terminal-status]');return String(status && getComputedStyle(status).display!=='none' && status.getBoundingClientRect().height>0 && status.textContent.includes('Task completed') && status.textContent.includes('12s'))})()`, "true")
+		b.waitFor("no completed status label", `String(document.querySelector('[data-task-terminal-status]')===null)`, "true")
 		b.waitFor("summary first inside composer", `String(document.querySelector('#task-thread-form > #task-change-activity') !== null && document.getElementById('task-change-activity').getBoundingClientRect().bottom <= document.getElementById('pending-thread-inputs').getBoundingClientRect().top)`, "true")
 		b.evaluate(`htmx.ajax('GET', '/test/pending-inputs', {target:'#pending-thread-inputs',swap:'outerHTML'}); 'loading'`)
 		b.waitFor("changes stay above queued and steered rows after live replacement", `(function(){var bar=document.getElementById('task-change-activity'),rows=document.querySelectorAll('#pending-thread-inputs [data-thread-input-id]');return String(rows.length===2 && Array.from(rows).every(function(row){return bar.getBoundingClientRect().bottom<=row.getBoundingClientRect().top}) && document.querySelectorAll('#task-change-activity').length===1)})()`, "true")
@@ -857,5 +857,37 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
 		b.waitFor("create opens task composer in current project", `String(location.pathname==='/tasks/new' && new URLSearchParams(location.search).get('project_id')==='hover-project' && !!document.querySelector('input[aria-label="Task title"]') && !document.querySelector('dialog[open]'))`, "true")
 
+	})
+}
+
+// Deferred scripts execute with readyState=interactive before HTMX's
+// DOMContentLoaded handler has bound the selector's search listener.
+func TestBrowserFunctional_BreadcrumbOpensBeforeHTMXInitialization(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	selector := renderTerminalBrowserComponent(t, components.BreadcrumbSelector(models.BreadcrumbSelector{
+		ID: "startup-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results",
+	}))
+	page := `<!doctype html><html><head><script src="` + static.URL("vendor/htmx.min.js") + `"></script><script defer src="/open.js"></script></head><body>` + selector + `</body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(w, page)
+		case "/open.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = fmt.Fprint(w, `window.selectorOpenState=document.readyState;document.querySelector('[data-breadcrumb-selector-button]').click();`)
+		case "/results":
+			_ = components.BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: "Current", URL: "/tasks/one"}}, false, false).Render(r.Context(), w)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "breadcrumb-startup", func(b *composerFocusCDP) {
+		b.waitFor("opened before DOMContentLoaded", `String(window.selectorOpenState)`, "interactive")
+		b.waitFor("initial search results", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "1")
 	})
 }

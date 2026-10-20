@@ -194,20 +194,17 @@ func OpenVibelyThemes() []Theme {
 	return []Theme{
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
-		openVibelyContinuousTheme(),
+		openVibelyFlatTheme(),
 	}
 }
 
-// The continuous variant retains native dark styling and only joins the sidebar canvas.
-func openVibelyContinuousTheme() Theme {
+// The flat variant retains native dark styling with flat, bordered chat surfaces.
+func openVibelyFlatTheme() Theme {
 	theme := openVibelyDarkTheme()
-	theme.ID = "openvibely-dark-continuous"
-	theme.Name = "OpenVibely Dark Continuous"
+	theme.ID = "openvibely-dark-flat"
+	theme.Name = "OpenVibely Dark Flat"
 	theme.Source = "OpenVibely experimental"
-	theme.SearchText = theme.Name + " dark experimental continuous sidebar"
-	theme.Semantic["sidebarBg"] = theme.Semantic["contentBg"]
-	theme.Preview["sidebar"] = theme.Semantic["sidebarBg"]
-	theme.CSS = themeCSSVars(theme.Semantic, theme.Syntax)
+	theme.SearchText = theme.Name + " dark experimental flat outlined"
 	return theme
 }
 
@@ -234,8 +231,17 @@ func RuntimeCatalogJSON() string {
 			Roles [7]string         `json:"r"`
 		}
 		catalog := Catalog()
+		native := make(map[string]bool)
+		for _, theme := range OpenVibelyThemes() {
+			native[theme.ID] = true
+		}
 		runtime := make([]runtimeTheme, 0, len(catalog))
 		for _, theme := range catalog {
+			// Native themes are styled by the stylesheet; the browser never applies their variables.
+			if native[theme.ID] {
+				runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, Roles: toggleRuntimeRoles(theme)})
+				continue
+			}
 			css := make(map[string]string, len(theme.CSS)-3)
 			for name, value := range theme.CSS {
 				switch name {
@@ -245,6 +251,9 @@ func RuntimeCatalogJSON() string {
 					css[name] = value
 				}
 			}
+			card := scheduleTaskBackground(theme)
+			css["--ov-schedule-task-bg"] = card
+			css["--ov-schedule-selection-bg"] = scheduleSelectionBackground(theme, card)
 			runtime = append(runtime, runtimeTheme{
 				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css,
 				Roles: toggleRuntimeRoles(theme),

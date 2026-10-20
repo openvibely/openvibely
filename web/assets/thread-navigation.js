@@ -88,6 +88,10 @@
         if (Array.from(main.querySelectorAll('input[type="file"]')).some(input => input.files?.length)) return;
         if (Array.from(main.querySelectorAll('input[name="attachment_session_id"]')).some(input => input.value)) return;
         const clone = main.cloneNode(true);
+        // A cached composer is a new DOM instance and needs its own focus attempt.
+        clone.querySelectorAll('[data-composer-focus-initialized]').forEach(input => {
+            input.removeAttribute('data-composer-focus-initialized');
+        });
         clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
             // Older pages belong to the current reading session, not the shared
             // navigation cache. Rebuild the paging cursor for the retained window.
@@ -129,6 +133,12 @@
             node.setAttribute('data-cached-thread-source', String(sources.length - 1));
         });
         if (sources.length) {
+            // This shell no longer contains rendered messages. Reveal it only
+            // after the visible rows and scroll position are ready, just like a
+            // cold transcript; otherwise readers see its height grow in stages.
+            clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
+                messages.setAttribute('data-transcript-hydrating', 'true');
+            });
             const bootstrap = document.createElement('script');
             bootstrap.setAttribute('data-cached-thread-bootstrap', '');
             bootstrap.textContent = 'window.restoreCachedThreadSources(document.currentScript.parentElement);';
