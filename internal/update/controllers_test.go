@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/buildinfo"
+	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestHostedControllerAuthenticatesClaimsAssignedUpdateRenewsAndCancels(t *testing.T) {
@@ -335,7 +337,7 @@ func TestHostedAmbiguousLeaseRenewalReplaysStableKeyAndAdoptsAuthoritativeLease(
 		t.Fatal(err)
 	}
 
-	reconciled, terminal, err := controller.reconcileLeaseRenewal(context.Background(), active)
+	reconciled, terminal, err := controller.reconcileLeaseRenewal(retrytest.Context(), active)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1680,7 +1682,7 @@ func TestDockerAgentAmbiguousCreateAndStatusFailuresRemainRecoveryPending(t *tes
 		installer := &DockerAgentInstaller{API: api, Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, Drain: drain, StatePath: filepath.Join(root, "docker.json"), PollInterval: time.Millisecond}
 		target := Target{ID: "docker-test-target", Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}
 		release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}}, Target: target}
-		if err := installer.Apply(context.Background(), release); err != nil {
+		if err := installer.Apply(retrytest.Context(), release); err != nil {
 			t.Fatalf("HTTP retry did not recover accepted create: %v", err)
 		}
 		if installer.state.Status != "succeeded" || installer.state.RequestID != "request-1" {
@@ -1706,7 +1708,7 @@ func TestDockerAgentAmbiguousCreateAndStatusFailuresRemainRecoveryPending(t *tes
 		defer server.Close()
 		api, _ := NewAgentHTTPClient(server.URL, "secret", server.Client())
 		installer := &DockerAgentInstaller{API: api, StatePath: filepath.Join(t.TempDir(), "docker.json"), PollInterval: time.Millisecond, state: dockerPersistentState{RequestID: "request-1", Status: "replacing", CurrentVersion: "0.5.0", TargetVersion: "0.6.0", DrainGeneration: "generation"}}
-		if err := installer.Resume(context.Background()); !errors.Is(err, ErrUpdateRecoveryPending) {
+		if err := installer.Resume(retrytest.Context()); !errors.Is(err, ErrUpdateRecoveryPending) {
 			t.Fatalf("ambiguous status error=%v", err)
 		}
 		if installer.state.Status != "replacing" || installer.state.RequestID != "request-1" {
@@ -1779,7 +1781,7 @@ func TestHostedLostReadinessResponseReplaysClaimAndUsesAuthoritativeLease(t *tes
 	controller.renewInterval = 5 * time.Millisecond
 	done := make(chan error, 1)
 	go func() {
-		done <- controller.coordinate(context.Background(), HostedDirective{UpdateID: "assigned"}, state)
+		done <- controller.coordinate(retrytest.Context(), HostedDirective{UpdateID: "assigned"}, state)
 	}()
 	deadline := time.Now().Add(3 * time.Second)
 	for readyCalls.Load() < 3 && time.Now().Before(deadline) {
@@ -1861,7 +1863,13 @@ func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testi
 	controller := NewHostedController(api, drain, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, filepath.Join(root, "hosted.json"))
 	controller.state = state
 	controller.renewInterval = 5 * time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
+	// Allow the first replay immediately, then stay in the retry wait until
+	// cancellation. This preserves the lease observation without a busy loop.
+	retryReady := make(chan time.Time, 1)
+	retryReady <- time.Time{}
+	ctx, cancel := context.WithCancel(httpretry.WithRetryTimer(context.Background(), func(time.Duration) <-chan time.Time {
+		return retryReady
+	}))
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {

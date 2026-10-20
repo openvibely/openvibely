@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func resetSharedStateForTests() {
@@ -469,7 +470,7 @@ func TestHTTPMCPRetriesSameRPCRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 	server := &MCPServer{kind: "http", url: srv.URL, httpClient: srv.Client(), headers: map[string]string{"X-MCP-Token": "fixture"}}
-	_, err := server.call(context.Background(), "tools/list", nil)
+	_, err := server.call(retrytest.Context(), "tools/list", nil)
 	if err != nil || calls != 2 {
 		t.Fatalf("calls=%d err=%v", calls, err)
 	}

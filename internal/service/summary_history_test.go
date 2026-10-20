@@ -13,6 +13,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
@@ -231,7 +232,7 @@ func TestSummaryStructuredHistoryReachesProviderWire(t *testing.T) {
 					replay = `{"messages":[{"role":"user","content":"inspect file"},{"role":"assistant","content_blocks":[{"type":"tool_use","id":"read1","name":"read_file","input":{}}]},{"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"read1","content":"FILE_CONTENT"}]},{"role":"assistant","content":"file inspected"}]}`
 				}
 				oversizedContext := "CURRENT_SKILL_INDEX " + strings.Repeat("x", 5000000)
-				ctx := managedcontext.With(context.Background(), oversizedContext)
+				ctx := managedcontext.With(retrytest.Context(), oversizedContext)
 				ctx = attachmentcontext.With(ctx, "/uploads/current.txt")
 				req := llmcontracts.AgentRequest{Ctx: ctx, Operation: operation, ChatMode: models.ChatModeOrchestrate, ProjectInstructions: "PROJECT_RULE", ChatSystemContext: "CHAT_RULE", AgentDefinition: &models.Agent{SystemPrompt: "AGENT_RULE"}, Agent: models.LLMConfig{Provider: provider, Model: model, AuthMethod: route.auth, APIKey: "fixture", OAuthAccessToken: "fixture", OAuthExpiresAt: time.Now().Add(24 * time.Hour).UnixMilli(), BaseURL: server.URL + "/v1", PresetSlug: "vllm", OllamaBaseURL: server.URL, ContextWindow: 200000}}
 				svc := NewLLMService(nil, nil, nil, nil, nil, nil)
