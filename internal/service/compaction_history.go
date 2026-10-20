@@ -14,9 +14,41 @@ import (
 
 // Rebuild current application context before committing replacement history.
 // Adapters append dynamic context updates at dispatch.
-func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
+func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history []models.Execution, original ...[]models.Execution) []models.Execution {
 	out := make([]models.Execution, 0, len(history)+3)
 	var saved []models.Execution
+	// Replacement construction drops application messages. Recover their saved
+	// values before refreshing from current sources, which may be unavailable.
+	for _, source := range original {
+		messages, _ := summaryHistoryInput(req.Agent.Provider, source)
+		for _, raw := range messages {
+			var message struct {
+				Role          string
+				Content       json.RawMessage
+				ContentBlocks json.RawMessage `json:"content_blocks"`
+			}
+			if json.Unmarshal(raw, &message) != nil || message.Role != "user" {
+				continue
+			}
+			content := message.Content
+			if len(message.ContentBlocks) > 0 {
+				content = message.ContentBlocks
+			}
+			var text string
+			if json.Unmarshal(content, &text) != nil {
+				var blocks []struct{ Type, Text string }
+				_ = json.Unmarshal(content, &blocks)
+				for _, block := range blocks {
+					if block.Type == "text" || block.Type == "input_text" {
+						text += block.Text
+					}
+				}
+			}
+			if llmprompt.IsApplicationContext(text) {
+				saved = append(saved, models.Execution{PromptSent: text, Status: models.ExecCompleted, ContextKind: "application"})
+			}
+		}
+	}
 	for _, execution := range history {
 		if llmprompt.IsApplicationContext(execution.PromptSent) {
 			saved = append(saved, execution)
