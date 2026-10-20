@@ -1032,11 +1032,23 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		compactionStrategy = "provider_native"
 	}
 	if triggered && shouldUseLocalSummaryBeforeProviderWithBudget(req, budget) {
+		originalReq := req
 		if req.NativeCompactionStateJSON != "" {
-			req.ChatHistory = uncompactedReq.ChatHistory
+			if req.Agent.Provider == models.ProviderAnthropic {
+				history, err := portableAnthropicCheckpoint(req.NativeCompactionStateJSON)
+				if err != nil {
+					return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "read Anthropic checkpoint for summary", err)
+				}
+				// Native state precedes the executions restored after its boundary.
+				// Include its readable summary and continuation before clearing it.
+				req.ChatHistory = append(history, req.ChatHistory...)
+			} else {
+				req.ChatHistory = uncompactedReq.ChatHistory
+				originalReq = req
+				originalReq.NativeCompactionStateJSON = ""
+			}
 			req.NativeCompactionStateJSON = ""
 		}
-		originalReq := req
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
 		if compactErr != nil {
 			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d failure_category=%s", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, contextFailureCategory(compactErr))
@@ -1295,6 +1307,18 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	sourceID := ""
 	if len(originalReq.ChatHistory) > 0 {
 		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
+	}
+	if sourceID == "" && originalReq.NativeCompactionStateJSON != "" {
+		// A native checkpoint may cover every loaded execution. Carry its
+		// boundary forward so the next followup does not replay covered turns.
+		checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(originalReq.Ctx, scope.Type, scope.ID)
+		if err != nil {
+			applog.Infof("[agent-svc] read native checkpoint boundary for summary: %v", err)
+			return
+		}
+		if checkpoint != nil && checkpoint.ProviderStateJSON == originalReq.NativeCompactionStateJSON {
+			sourceID = checkpoint.SourceExecutionID
+		}
 	}
 	if strategy == "local_summary" && sourceID != "" && sourceID == originalReq.ExecID {
 		strategy = "local_summary_inflight"

@@ -347,9 +347,12 @@ func connectedAnthropicCompactionReply(w http.ResponseWriter, steered bool) {
 func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 	for _, phase := range []string{"preturn", "inturn", "steering"} {
 		for _, media := range []string{"text", "image", "tool_image"} {
-			for _, outcome := range []string{"none", "success", "null", "success_then_null"} {
+			for _, outcome := range []string{"none", "success", "null", "success_then_null", "success_then_summary", "success_then_summary_recent", "success_then_summary_failure"} {
 				compact := outcome != "none"
-				successful := outcome == "success" || outcome == "success_then_null"
+				summaryAfterNative := strings.HasPrefix(outcome, "success_then_summary")
+				summaryFails := outcome == "success_then_summary_failure"
+				withRecent := outcome == "success_then_summary_recent"
+				successful := outcome == "success" || outcome == "success_then_null" || summaryAfterNative
 				t.Run(fmt.Sprintf("%s/%s/%s", phase, media, outcome), func(t *testing.T) {
 					stores := teststores.New(t).Stores
 					ctx := compactionTestContext()
@@ -374,7 +377,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						require.NoError(t, png.Encode(f, img))
 						require.NoError(t, f.Close())
 					}
-					calls, native, nextCalls := 0, 0, 0
+					calls, native, nextCalls, summaries := 0, 0, 0, 0
 					checkpointStep := 1
 					if phase != "preturn" {
 						checkpointStep = 2
@@ -384,11 +387,48 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						raw, _ := io.ReadAll(r.Body)
 						text := string(raw)
 						if restarted {
+							isSummary := strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION")
+							if isSummary {
+								summaries++
+								if !summaryAfterNative {
+									t.Error("unexpected summary on reload")
+								}
+								for _, marker := range []string{"SAVED_NATIVE_ANTHROPIC", "FINAL_ANTHROPIC", "tool_result"} {
+									if !strings.Contains(text, marker) {
+										t.Errorf("summary omitted native checkpoint content: %s", marker)
+									}
+								}
+								if withRecent {
+									if !strings.Contains(text, "AFTER_NATIVE_ANSWER") || strings.Index(text, "SAVED_NATIVE_ANTHROPIC") > strings.Index(text, "AFTER_NATIVE_ANSWER") {
+										t.Error("summary must include newer execution after native checkpoint")
+									}
+								}
+								if strings.Contains(text, `"type":"compaction"`) {
+									t.Error("summary request must use readable history, not a native compaction block")
+								}
+								if media == "tool_image" && !strings.Contains(text, "image/png") {
+									t.Error("summary lost image from native continuation")
+								}
+								if phase == "steering" && !strings.Contains(text, "STEER_NATIVE") {
+									t.Error("summary lost steering in native checkpoint")
+								}
+								if summaryFails {
+									compactionServerError(w, 401, "authentication_error", "summary unavailable")
+								} else {
+									compactionServerReply(w, models.ProviderAnthropic, "REPLACEMENT_SUMMARY SAVED_NATIVE_ANTHROPIC FINAL_ANTHROPIC STEER_NATIVE", "")
+								}
+								return
+							}
 							nextCalls++
+							if summaryAfterNative {
+								if !strings.Contains(text, "REPLACEMENT_SUMMARY") || strings.Contains(text, "OLD_RESULT") {
+									t.Error("continuation must use replacement summary without replaying covered history")
+								}
+							}
 							if successful && !strings.Contains(text, "SAVED_NATIVE_ANTHROPIC") {
 								t.Error("restart lost native context")
 							}
-							if (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, "image/png") {
+							if !summaryAfterNative && (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, "image/png") {
 								t.Error("reload lost image")
 							}
 							if !successful && !strings.Contains(text, "CURRENT_NATIVE") {
@@ -500,6 +540,13 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							require.Less(t, calculateRequestBudget(budgetReq).NativeStateTokens, 5000)
 						}
 					}
+					boundaryID := active.ID
+					if withRecent {
+						recent := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "AFTER_NATIVE_REQUEST", Output: "AFTER_NATIVE_ANSWER"}
+						require.NoError(t, stores.Executions.Create(ctx, &recent))
+						require.NoError(t, stores.Executions.Complete(ctx, recent.ID, models.ExecCompleted, recent.Output, "", 0, 0))
+						boundaryID = recent.ID
+					}
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
 					next := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "NEXT_NATIVE"}
@@ -511,11 +558,50 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					req.Message = next.PromptSent
 					req.ChatHistory = history
 					req.ContextTokenEstimate = 0
+					var nativeCheckpoint *models.ChatCompactionCheckpoint
+					if summaryAfterNative {
+						// Force the later request above the safe limit. Only the
+						// checkpoint contains SAVED_NATIVE_ANTHROPIC.
+						nativeCheckpoint, err = stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, err)
+						req.ContextTokenEstimate = 190000
+					}
 					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
+					if summaryFails {
+						require.Error(t, err)
+						require.Equal(t, 1, summaries)
+						require.Zero(t, nextCalls)
+						saved, readErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, readErr)
+						require.Equal(t, nativeCheckpoint, saved, "failed summary must leave durable native checkpoint intact")
+						return
+					}
 					require.NoError(t, err)
 					require.Contains(t, result.Output, "NEXT_NATIVE_DONE")
 					require.Equal(t, 1, nextCalls)
+					if summaryAfterNative {
+						require.Equal(t, 1, summaries)
+						saved, readErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, readErr)
+						require.Empty(t, saved.ProviderStateJSON)
+						require.Equal(t, "local_summary", saved.Strategy)
+						require.Equal(t, boundaryID, saved.SourceExecutionID)
+						require.Contains(t, saved.Summary, "SAVED_NATIVE_ANTHROPIC")
+						require.NoError(t, stores.Executions.Complete(ctx, next.ID, models.ExecCompleted, result.Output, "", 0, 0))
+						history, readErr = stores.Executions.ListByTaskChronological(ctx, task.ID)
+						require.NoError(t, readErr)
+						last := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "NEXT_NATIVE_RELOAD"}
+						require.NoError(t, stores.Executions.Create(ctx, &last))
+						req.ExecID, req.Message = last.ID, last.PromptSent
+						req.ChatHistory = history
+						req.ContextTokenEstimate = 0
+						fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						_, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
+						require.NoError(t, err)
+						require.Equal(t, 2, nextCalls)
+						require.Equal(t, 1, summaries, "reload must reuse the new checkpoint")
+					}
 				})
 			}
 		}
