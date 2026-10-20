@@ -455,18 +455,23 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 	}
-	// If attachments are present, build multimodal content blocks for the prompt
+	replayPrompt := Message{Role: "user", Content: prompt}
+	// If attachments are present, preserve the same multimodal prompt for replay.
 	if len(opts.Attachments) > 0 {
 		contentBlocks, blockErr := buildContentBlocks(prompt, opts.Attachments)
 		if blockErr != nil {
 			return nil, fmt.Errorf("build content blocks: %w", blockErr)
 		}
 		messages = append(messages, agenticMessage{Role: "user", Content: contentBlocks})
+		replayPrompt.ContentBlocks, blockErr = json.Marshal(contentBlocks)
+		if blockErr != nil {
+			return nil, fmt.Errorf("encode prompt replay content blocks: %w", blockErr)
+		}
 	} else {
 		messages = append(messages, agenticMessage{Role: "user", Content: prompt})
 	}
 
-	replay := []Message{{Role: "user", Content: prompt}}
+	replay := []Message{replayPrompt}
 	defer func() {
 		if opts.OnReplay != nil {
 			opts.OnReplay(replay)

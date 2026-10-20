@@ -101,6 +101,18 @@ func TestExecutionEnvironmentSurvivesFreshAdaptersAndDirectoryChanges(t *testing
 	}
 }
 
+func TestReplayImageBudgetDoesNotCountBase64AsText(t *testing.T) {
+	for _, size := range []int{100, 1000000} {
+		blocks := json.RawMessage(fmt.Sprintf(`[{"type":"text","text":"question"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"%s"}}]`, strings.Repeat("A", size)))
+		saved, err := json.Marshal(anthropicEnvironmentReplay{Messages: []anthropicclient.Message{{Role: "user", Content: "question", ContentBlocks: blocks}}})
+		require.NoError(t, err)
+		history := []models.Execution{{Status: models.ExecCompleted, PromptSent: "question", ReplayMessages: []models.ExecutionReplayMessage{{UserContent: "question", TranscriptJSON: string(saved)}}}}
+		tokens := EstimateHistoryTokens(history)
+		require.GreaterOrEqual(t, tokens, 2000)
+		require.Less(t, tokens, 2100, "image bytes must not inflate the history estimate")
+	}
+}
+
 func TestEnvironmentReplayBudgetCountsChangesOnce(t *testing.T) {
 	first, second := executionenv.Context(t.TempDir()), executionenv.Context(t.TempDir())
 	var history []models.Execution

@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func zipTool(t *testing.T, name, body string) []byte {
@@ -57,7 +59,7 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r, err := manager.Resolve(context.Background(), []Dependency{dep})
+			r, err := manager.Resolve(retrytest.Context(), []Dependency{dep})
 			if err != nil || len(r) != 1 || r[0].Error != "" {
 				t.Errorf("resolve: %v %v", r, err)
 			}
@@ -68,7 +70,7 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 		t.Fatalf("downloaded %d times", calls.Load())
 	}
 	server.Close()
-	result, err := manager.Resolve(context.Background(), []Dependency{dep})
+	result, err := manager.Resolve(retrytest.Context(), []Dependency{dep})
 	if err != nil || result[0].Status != "cached" {
 		t.Fatalf("offline cache: %v %v", result, err)
 	}
@@ -76,7 +78,7 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A broken offline cache must fail within the caller's retry budget.
-	retryCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	retryCtx, cancel := context.WithTimeout(retrytest.Context(), 100*time.Millisecond)
 	defer cancel()
 	result, err = manager.Resolve(retryCtx, []Dependency{dep})
 	if err != nil || result[0].Executable != "" || result[0].Error == "" {

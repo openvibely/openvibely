@@ -18,6 +18,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -133,7 +134,7 @@ func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
 	})}
-	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "test"})
+	resp, err := client.Send(retrytest.Context(), "Hello", &SendOptions{Model: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
