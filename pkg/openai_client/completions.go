@@ -64,6 +64,10 @@ type CompletionsOptions struct {
 	// ToolFilter can deny tool execution by name at runtime.
 	ToolFilter func(name string) bool
 
+	// OnToolBoundarySteering consumes pending text after all tool results and
+	// images have been appended, before the next model request.
+	OnToolBoundarySteering func(context.Context) (string, error)
+
 	// Callbacks for real-time output
 	OnText       func(text string)
 	OnToolUse    func(name string, input json.RawMessage)
@@ -397,6 +401,17 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		for _, message := range imageMessages {
 			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: message.Content.([]map[string]interface{})})
 		}
+		if opts.OnToolBoundarySteering != nil {
+			steering, err := opts.OnToolBoundarySteering(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("tool-boundary steering: %w", err)
+			}
+			if steering = strings.TrimSpace(steering); steering != "" {
+				messages = append(messages, completionsMessage{Role: "user", Content: steering})
+				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", Content: steering})
+			}
+		}
+
 	}
 
 	result.Text = allText.String()
