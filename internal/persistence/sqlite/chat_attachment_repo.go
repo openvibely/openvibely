@@ -8,6 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 )
 
 type ChatAttachmentRepo struct {
@@ -19,25 +20,35 @@ func NewChatAttachmentRepo(db *sql.DB) *ChatAttachmentRepo {
 }
 
 func (r *ChatAttachmentRepo) Create(ctx context.Context, att *models.ChatAttachment) error {
-	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return createChatAttachmentWithExecutor(ctx, conn, att)
+	var projectID string
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		var err error
+		projectID, err = createChatAttachmentWithExecutor(ctx, conn, att)
+		return err
 	})
+	if err == nil {
+		attachmentcontext.Invalidate(attachmentcontext.ChatProjectKey(projectID))
+	}
+	return err
 }
 
 // CreateInTx persists a chat attachment using the caller's store transaction.
+// The caller must invalidate ChatProjectKey after committing the transaction.
 func (r *ChatAttachmentRepo) CreateInTx(ctx context.Context, tx persistence.Tx, att *models.ChatAttachment) error {
 	exec, err := executorFromTx(tx)
 	if err != nil {
 		return err
 	}
-	return createChatAttachmentWithExecutor(ctx, exec, att)
+	_, err = createChatAttachmentWithExecutor(ctx, exec, att)
+	return err
 }
 
-func createChatAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att *models.ChatAttachment) error {
+func createChatAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att *models.ChatAttachment) (string, error) {
+	var projectID string
 	query := `
 			INSERT INTO chat_attachments (execution_id, file_name, file_path, media_type, file_size, project_id)
 			VALUES (?, ?, ?, ?, ?, (SELECT t.project_id FROM executions e JOIN tasks t ON t.id = e.task_id WHERE e.id = ?))
-			RETURNING id, created_at
+			RETURNING id, created_at, project_id
 		`
 	err := exec.QueryRowContext(ctx, query, att.ExecutionID,
 		att.FileName,
@@ -45,11 +56,11 @@ func createChatAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att
 		att.MediaType,
 		att.FileSize,
 		att.ExecutionID,
-	).Scan(&att.ID, &att.CreatedAt)
+	).Scan(&att.ID, &att.CreatedAt, &projectID)
 	if err != nil {
-		return fmt.Errorf("creating chat attachment: %w", err)
+		return "", fmt.Errorf("creating chat attachment: %w", err)
 	}
-	return nil
+	return projectID, nil
 }
 
 func (r *ChatAttachmentRepo) GetByID(ctx context.Context, id string) (*models.ChatAttachment, error) {
@@ -241,17 +252,20 @@ func (r *ChatAttachmentRepo) ListByExecutionIDs(ctx context.Context, execIDs []s
 }
 
 func (r *ChatAttachmentRepo) Delete(ctx context.Context, id string) error {
-	query := `DELETE FROM chat_attachments WHERE id = ?`
-	result, err := execBoundSQLite(ctx, r.db, query, id)
+	return r.deleteChatAttachment(ctx, `DELETE FROM chat_attachments WHERE id = ? RETURNING project_id`, id)
+}
+
+func (r *ChatAttachmentRepo) deleteChatAttachment(ctx context.Context, query string, args ...any) error {
+	var projectID sql.NullString
+	err := queryRowBoundSQLite(ctx, r.db, query, args...).Scan(&projectID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("chat attachment not found")
+	}
 	if err != nil {
 		return fmt.Errorf("deleting chat attachment: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("chat attachment not found")
+	if projectID.Valid {
+		attachmentcontext.Invalidate(attachmentcontext.ChatProjectKey(projectID.String))
 	}
 	return nil
 }
@@ -265,19 +279,9 @@ func (r *ChatAttachmentRepo) DeleteByIDForProject(ctx context.Context, id, proje
 			JOIN tasks t ON t.id = e.task_id
 			WHERE e.id = chat_attachments.execution_id AND t.project_id = ?
 		)
+ RETURNING project_id
 	`
-	result, err := execBoundSQLite(ctx, r.db, query, id, projectID)
-	if err != nil {
-		return fmt.Errorf("deleting chat attachment for project: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("chat attachment not found")
-	}
-	return nil
+	return r.deleteChatAttachment(ctx, query, id, projectID)
 }
 
 const selectAllChatAttachmentFilePathsSQL = `SELECT file_path FROM chat_attachments UNION ALL SELECT file_path FROM task_attachments`

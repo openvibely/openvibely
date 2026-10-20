@@ -38,10 +38,26 @@ func (h *Handler) prepareChatAttachmentContext(ctx context.Context, params *stre
 	if h.chatAttachmentRepo == nil || params.ProjectID == "" {
 		return files, nil
 	}
-	attachments, err := h.chatAttachmentRepo.ListByProject(ctx, params.ProjectID)
-	if err != nil {
+	projectID := params.ProjectID
+	var attachments []models.ChatAttachment
+	source := attachmentcontext.NewSource(func(loadCtx context.Context) (string, error) {
+		var err error
+		attachments, err = h.chatAttachmentRepo.ListByProject(loadCtx, projectID)
+		if err != nil {
+			return "", err
+		}
+		var references string
+		for _, file := range attachments {
+			attached := models.Attachment{FileName: file.FileName, FilePath: file.FilePath, MediaType: file.MediaType, FileSize: file.FileSize}
+			references = combineContexts(references, fmt.Sprintf("Attachment turn %s\n%s", file.ExecutionID, llmprompt.BuildAttachmentReferences([]models.Attachment{attached})))
+		}
+		return references, nil
+	}, attachmentcontext.ChatProjectKey(projectID))
+	if err := source.Load(ctx); err != nil {
 		return nil, fmt.Errorf("load conversation attachments: %w", err)
 	}
+	params.attachmentSource = source
+	params.historicalAttachmentContext = source.References(ctx)
 	seen := make(map[string]bool, len(files))
 	for _, file := range files {
 		seen[file.FilePath] = true
@@ -51,7 +67,6 @@ func (h *Handler) prepareChatAttachmentContext(ctx context.Context, params *stre
 			FileName: file.FileName, FilePath: file.FilePath,
 			MediaType: file.MediaType, FileSize: file.FileSize,
 		}
-		params.historicalAttachmentContext = combineContexts(params.historicalAttachmentContext, fmt.Sprintf("Attachment turn %s\n%s", file.ExecutionID, llmprompt.BuildAttachmentReferences([]models.Attachment{attached})))
 		if !seen[file.FilePath] {
 			seen[file.FilePath] = true
 			files = append(files, attached)

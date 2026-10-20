@@ -114,6 +114,9 @@ var generations = struct {
 	byKey map[string]uint64
 }{byKey: map[string]uint64{}}
 
+// ChatProjectKey scopes Chat-page attachment changes separately from task files.
+func ChatProjectKey(projectID string) string { return "chat-project:" + projectID }
+
 // Invalidate marks every Source watching key as stale. Callers invalidate only
 // after the attachment change is committed so the next reload observes it.
 func Invalidate(key string) {
