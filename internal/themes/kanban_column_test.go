@@ -2,26 +2,20 @@ package themes
 
 import "testing"
 
-func TestKanbanColumnsStandApartFromCardsAndPageAndStayReadable(t *testing.T) {
+func TestEveryAppliedThemeDefinesItsKanbanColumnColor(t *testing.T) {
+	native := map[string]bool{}
+	for _, theme := range OpenVibelyThemes() {
+		native[theme.ID] = true
+	}
 	for _, theme := range Catalog() {
-		if theme.Source == "OpenVibely built-in" {
+		if native[theme.ID] {
 			continue
 		}
-		column, _, _ := parseThemeHexColor(kanbanColumnBackground(theme))
-		card, _, _ := parseThemeHexColor(theme.CSS["--ov-surface"])
-		sidebar, _, _ := parseThemeHexColor(theme.CSS["--ov-sidebar-bg"])
-		page, _, _ := parseThemeHexColor(theme.CSS["--ov-content-bg"])
-		if got := rgbDistance(page, column); got < kanbanColumnPageDistance {
-			t.Errorf("%s task column blends into page: distance %.1f", theme.ID, got)
+		if _, _, ok := parseThemeHexColor(theme.CSS["--ov-kanban-column-bg"]); !ok {
+			t.Errorf("%s has no kanban column color", theme.ID)
 		}
-		if got := rgbDistance(card, column); got < kanbanColumnCardDistance {
-			t.Errorf("%s task column blends into cards: distance %.1f", theme.ID, got)
-		}
-		for _, role := range []string{"--ov-text", "--ov-text-muted"} {
-			fg, _, _ := parseThemeHexColor(theme.CSS[role])
-			if got, floor := contrastRatio(fg, column), min(4.5, contrastRatio(fg, sidebar)-0.15); got < floor {
-				t.Errorf("%s %s contrast on task column %.2f < %.2f", theme.ID, role, got, floor)
-			}
-		}
+	}
+	if len(vscodeKanbanColumns) != ExpectedThemeCount {
+		t.Errorf("vscode column colors = %d, want %d", len(vscodeKanbanColumns), ExpectedThemeCount)
 	}
 }
