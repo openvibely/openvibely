@@ -102,6 +102,8 @@ window.addEventListener('DOMContentLoaded',function(){
    await until(()=>document.querySelector('#chat-page-root'),'Chat preview before live question update');
    assert(location.pathname==='/tasks','question race needs a pending Chat refresh');
    const chatRoot=document.getElementById('chat-page-root');
+   const livePair=chatRoot.querySelector('[data-execution-pair]');
+   assert(livePair,'cached Chat is missing its execution');
    const draft=chatRoot.querySelector('#chat-form textarea');
    draft.value='Keep this draft during question resolution';
    const revision=window._chatInputRevision;
@@ -113,11 +115,18 @@ window.addEventListener('DOMContentLoaded',function(){
    await until(()=>location.pathname==='/chat','Chat URL after live question resolution');
    assert(document.getElementById('chat-page-root')===chatRoot,'stale refresh replaced newer live Chat state');
    assert(draft.isConnected && draft.value==='Keep this draft during question resolution','stale refresh lost draft');
+   // swap:none must not let hx-preserve move live executions into the discarded response.
+   assert(livePair.isConnected && chatRoot.contains(livePair),'stale refresh detached live execution');
+   await until(()=>livePair.querySelector('.stream-tool'),'live tool output after stale refresh');
+   assert(getComputedStyle(document.getElementById('chat-messages')).visibility==='visible','stale refresh hid transcript');
    // HTMX still needs to commit the correct outgoing history entry.
    history.back();
    await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','back after question resolution');
-   document.querySelector('[data-nav-base="/chat"]').click();
-   await until(()=>document.querySelector('#chat-page-root') && location.pathname==='/chat','Chat after history back');
+   history.forward();
+   await until(()=>document.querySelector('#chat-page-root') && location.pathname==='/chat','forward after question resolution');
+   await until(()=>document.querySelector('#chat-messages .stream-tool'),'forward transcript rendered');
+   await until(()=>getComputedStyle(document.getElementById('chat-messages')).visibility==='visible','forward transcript visible');
+   assert(document.getElementById('chat-messages').innerText.includes('Read project chat output'),'forward lost user message');
    document.querySelector('[data-nav-base="/tasks"]').click();
    await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','Tasks after question resolution');
    assert(!errors.length,'browser errors: '+JSON.stringify(errors));

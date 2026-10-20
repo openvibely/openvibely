@@ -182,6 +182,10 @@
         document.body.appendChild(target);
         detail.target = target;
         detail.swapOverride = 'none';
+        // swap:none still processes hx-preserve and out-of-band elements. Drop
+        // the stale markup too, or HTMX can detach live execution rows while
+        // preparing a response that will never be inserted.
+        detail.serverResponse = '';
         detail.shouldSwap = true;
         setTimeout(() => target.remove(), 0);
     }
