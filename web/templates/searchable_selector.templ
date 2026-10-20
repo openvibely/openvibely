@@ -217,9 +217,10 @@ templ searchableSelectorScript() {
 				reconcileHighlight(root, true);
                 position(root); state.search.focus(); state.search.select();
 				if (root.hasAttribute('data-searchable-selector-local') || !window.htmx) return;
-				// HTMX binds hx-trigger listeners on DOMContentLoaded; a search fired earlier is dropped.
-				if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { if (state.dialog.open) htmx.trigger(state.search, 'search'); }, {once: true});
-				else htmx.trigger(state.search, 'search');
+				// The trigger is usable before HTMX's DOMContentLoaded initialization.
+				// Process this selector explicitly so its first search cannot be dropped.
+				htmx.process(root);
+				htmx.trigger(state.search, 'search');
 			}
 			listen(document, 'click', function(event) {
 				var root = rootFor(event.target); if (!root) return;

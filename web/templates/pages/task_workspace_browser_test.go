@@ -859,3 +859,35 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 
 	})
 }
+
+// Deferred scripts execute with readyState=interactive before HTMX's
+// DOMContentLoaded handler has bound the selector's search listener.
+func TestBrowserFunctional_BreadcrumbOpensBeforeHTMXInitialization(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	selector := renderTerminalBrowserComponent(t, components.BreadcrumbSelector(models.BreadcrumbSelector{
+		ID: "startup-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results",
+	}))
+	page := `<!doctype html><html><head><script src="` + static.URL("vendor/htmx.min.js") + `"></script><script defer src="/open.js"></script></head><body>` + selector + `</body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprint(w, page)
+		case "/open.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = fmt.Fprint(w, `window.selectorOpenState=document.readyState;document.querySelector('[data-breadcrumb-selector-button]').click();`)
+		case "/results":
+			_ = components.BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: "Current", URL: "/tasks/one"}}, false, false).Render(r.Context(), w)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "breadcrumb-startup", func(b *composerFocusCDP) {
+		b.waitFor("opened before DOMContentLoaded", `String(window.selectorOpenState)`, "interactive")
+		b.waitFor("initial search results", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "1")
+	})
+}
