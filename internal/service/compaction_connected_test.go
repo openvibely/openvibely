@@ -528,7 +528,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	for _, from := range providers {
 		for _, to := range providers {
 			modes := []string{"below_limit", "summary"}
-			if from == models.ProviderOpenAI {
+			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
 			for _, mode := range modes {
@@ -572,6 +572,23 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						if stage == 0 {
 							sourceCalls++
+							if from == models.ProviderAnthropic && mode == "native_source" {
+								if !strings.Contains(text, "context_management") || !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+									t.Error("Anthropic native compaction missing configuration or history")
+								}
+								w.Header().Set("Content-Type", "text/event-stream")
+								emit := func(event any) { raw, _ := json.Marshal(event); fmt.Fprintf(w, "data: %s\n\n", raw) }
+								emit(map[string]any{"type": "message_start", "message": map[string]any{"id": "native_source", "usage": map[string]int{"input_tokens": 30}}})
+								emit(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "compaction", "content": nil}})
+								emit(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "compaction_delta", "content": "ANTHROPIC_NATIVE_SUMMARY HISTORY_EVIDENCE RECOVER_ONLY_FROM_DB"}})
+								emit(map[string]any{"type": "content_block_stop", "index": 0})
+								emit(map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "text", "text": ""}})
+								emit(map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "text_delta", "text": "SOURCE_FINAL"}})
+								emit(map[string]any{"type": "content_block_stop", "index": 1})
+								emit(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}, "usage": map[string]int{"output_tokens": 10}})
+								emit(map[string]any{"type": "message_stop"})
+								return
+							}
 							compactionServerReply(w, provider, "SOURCE_FINAL", "")
 							return
 						}
@@ -581,8 +598,11 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if to != models.ProviderOpenAI && strings.Contains(text, "OPAQUE_SOURCE") {
 							t.Error("destination received opaque OpenAI state")
 						}
-						if (mode != "native_source" || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+						if (mode != "native_source" || from != models.ProviderOpenAI || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 							t.Error("destination lost saved older answer")
+						}
+						if mode == "native_source" && from == models.ProviderAnthropic && !strings.Contains(text, "SOURCE_FINAL") {
+							t.Error("destination lost post-compaction source answer")
 						}
 						if stage == 1 {
 							targetCalls++
@@ -628,11 +648,24 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: t.TempDir()}
 					if mode == "native_source" {
 						req.ContextTokenEstimate = 190000
+						if from == models.ProviderAnthropic {
+							req.ContextTokenEstimate = 110000
+						}
 					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, sourceCalls)
+					if mode == "native_source" {
+						checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, checkpointErr)
+						require.NotNil(t, checkpoint)
+						require.NotEmpty(t, checkpoint.ProviderStateJSON)
+						if from == models.ProviderAnthropic {
+							require.Contains(t, checkpoint.ProviderStateJSON, "ANTHROPIC_NATIVE_SUMMARY")
+							require.Contains(t, checkpoint.ProviderStateJSON, "SOURCE_FINAL")
+						}
+					}
 					require.NoError(t, stores.Executions.Complete(ctx, first.ID, models.ExecCompleted, result.Output, "", 0, 0))
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
@@ -653,7 +686,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
-					if mode == "summary" || (mode == "native_source" && to != models.ProviderOpenAI) {
+					if mode == "summary" || (mode == "native_source" && from == models.ProviderOpenAI && to != models.ProviderOpenAI) {
 						require.Positive(t, summaries)
 					} else {
 						require.Zero(t, summaries)
