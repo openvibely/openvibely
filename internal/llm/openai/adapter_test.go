@@ -17,6 +17,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -262,7 +263,7 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
 	adapter := New(nil, nil, nil, nil)
-	text, usage, err := adapter.CallDirect(context.Background(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}, {FileName: "screenshot.png", FilePath: screenshotPath, MediaType: "image/png"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
+	text, usage, err := adapter.CallDirect(retrytest.Context(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}, {FileName: "screenshot.png", FilePath: screenshotPath, MediaType: "image/png"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
 	if err != nil {
 		t.Fatalf("CallDirect: %v", err)
 	}
@@ -839,7 +840,7 @@ func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
 	adapter := New(nil, nil, nil, nil)
-	_, _, err := adapter.CallDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
+	_, _, err := adapter.CallDirect(retrytest.Context(), "HOOK PROMPT", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, ".", "SENTINEL_AGENT_PROMPT", true, false, true)
 	if err != nil {
@@ -874,7 +875,7 @@ func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
 	adapter := New(nil, nil, nil, nil)
-	_, _, err := adapter.CallDirect(context.Background(), "DO WORK", nil, models.LLMConfig{
+	_, _, err := adapter.CallDirect(retrytest.Context(), "DO WORK", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, ".", "SENTINEL_AGENT_PROMPT", true, false, false)
 	if err != nil {
@@ -907,7 +908,7 @@ func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 
 	adapter := New(nil, nil, nil, nil)
-	_, _, err := adapter.CallDirect(context.Background(), "COMMIT SUMMARY PROMPT", nil, models.LLMConfig{
+	_, _, err := adapter.CallDirect(retrytest.Context(), "COMMIT SUMMARY PROMPT", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
 	}, ".", "SENTINEL_PROJECT_INSTRUCTIONS", true, true, false)
 	if err != nil {
@@ -949,7 +950,7 @@ func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
 
 	adapter := New(nil, nil, nil, nil)
-	out, textOnly, usage, err := adapter.CallStreaming(context.Background(), "Finish this", nil, models.LLMConfig{
+	out, textOnly, usage, err := adapter.CallStreaming(retrytest.Context(), "Finish this", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "medium",
 	}, "exec-agentic-stream", "project-1", "", "project instructions", nil)
 	if err != nil {
@@ -993,7 +994,7 @@ func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) 
 	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
 
-	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "list", Access: llmcontracts.RuntimeToolAccessRead}}})
+	ctx := llmcontracts.WithRuntimeTools(retrytest.Context(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "list", Access: llmcontracts.RuntimeToolAccessRead}}})
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, `[{"type":"compaction","encrypted_content":"opaque-checkpoint"}]`)
 	adapter := New(nil, nil, nil, nil)
 	out, usage, err := adapter.CallChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
@@ -1088,7 +1089,7 @@ func TestCompactionActivityInTaskAndChatResponses(t *testing.T) {
 	for _, chat := range []bool{false, true} {
 		t.Run(fmt.Sprint(chat), func(t *testing.T) {
 			adapter := New(nil, nil, nil, nil)
-			ctx := llmcontracts.WithNativeCompactionStateJSON(context.Background(), `[{"type":"message","role":"user","content":"previous work"}]`)
+			ctx := llmcontracts.WithNativeCompactionStateJSON(retrytest.Context(), `[{"type":"message","role":"user","content":"previous work"}]`)
 			var output string
 			var err error
 			if chat {
@@ -1130,7 +1131,7 @@ func TestCallDirectSendsPDFReference(t *testing.T) {
 	original := openaiclient.OpenAIAPIBaseURL
 	openaiclient.OpenAIAPIBaseURL = server.URL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
-	_, _, err := New(nil, nil, nil, nil).CallDirect(context.Background(), "Analyze", []models.Attachment{{FileName: "report.pdf", FilePath: path, MediaType: "application/pdf"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", Model: "test-model"}, "", "", true, false, false)
+	_, _, err := New(nil, nil, nil, nil).CallDirect(retrytest.Context(), "Analyze", []models.Attachment{{FileName: "report.pdf", FilePath: path, MediaType: "application/pdf"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", Model: "test-model"}, "", "", true, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

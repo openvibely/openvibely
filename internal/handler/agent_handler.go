@@ -1139,10 +1139,8 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 				return generatedAgentResponse{}, lastErr
 			}
 			activePrompt = buildGenerateAgentStrictRetryPrompt(prompt, parseErr)
-			select {
-			case <-generateCtx.Done():
-				return generatedAgentResponse{}, generateCtx.Err()
-			case <-time.After(generateAgentTransientRetryDelay):
+			if err := httpretry.Wait(generateCtx, generateAgentTransientRetryDelay); err != nil {
+				return generatedAgentResponse{}, err
 			}
 			continue
 		}
@@ -1163,10 +1161,8 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 				return generatedAgentResponse{}, lastErr
 			}
 			activePrompt = buildGenerateAgentStrictRetryPrompt(prompt, err)
-			select {
-			case <-generateCtx.Done():
-				return generatedAgentResponse{}, generateCtx.Err()
-			case <-time.After(generateAgentTransientRetryDelay):
+			if err := httpretry.Wait(generateCtx, generateAgentTransientRetryDelay); err != nil {
+				return generatedAgentResponse{}, err
 			}
 			continue
 		}
@@ -1183,10 +1179,8 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 		}
 
 		applog.Infof("[handler] GenerateAgent transient generation failure attempt=%d/%d model=%s prompt_len=%d err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, len(activePrompt), err)
-		select {
-		case <-generateCtx.Done():
-			return generatedAgentResponse{}, generateCtx.Err()
-		case <-time.After(generateAgentTransientRetryDelay):
+		if err := httpretry.Wait(generateCtx, generateAgentTransientRetryDelay); err != nil {
+			return generatedAgentResponse{}, err
 		}
 	}
 

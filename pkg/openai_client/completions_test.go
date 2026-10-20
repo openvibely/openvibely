@@ -16,6 +16,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestCompletionsContinuationPreflightUsesByteEstimate(t *testing.T) {
@@ -72,7 +73,7 @@ func TestSendCompletionsRetriesStreamTimeoutBeforeOutput(t *testing.T) {
 	})}
 
 	var streamed strings.Builder
-	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+	resp, err := client.SendCompletions(retrytest.Context(), "test", &CompletionsOptions{
 		DisableTools: true,
 		OnText: func(text string) {
 			streamed.WriteString(text)
@@ -110,7 +111,7 @@ func TestSendCompletionsRetriesStreamAfterOutputFromTurnState(t *testing.T) {
 	})}
 
 	var streamed strings.Builder
-	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+	resp, err := client.SendCompletions(retrytest.Context(), "test", &CompletionsOptions{
 		DisableTools: true,
 		OnText: func(text string) {
 			streamed.WriteString(text)
