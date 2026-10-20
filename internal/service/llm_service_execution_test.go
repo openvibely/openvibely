@@ -1708,6 +1708,93 @@ func TestLLMService_ExecuteTaskWithAgent_DrainsLocalSteering(t *testing.T) {
 	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
 }
 
+func TestLLMService_ExecuteTaskWithAgent_SteeringFilesArePublishedOnlyOnDelivery(t *testing.T) {
+	env := teststores.New(t)
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	threadInputRepo := env.ThreadInputs
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, env.Projects, env.Schedules, env.Attachments)
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-mid-turn-steer-test")
+	task := &models.Task{ProjectID: "default", Title: "Steering file delivery", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	svc.taskSvc = &TaskService{uploadsDir: t.TempDir()}
+	pending := filepath.Join(svc.taskSvc.uploadsDir, "chat", "pending", "steering-files")
+	require.NoError(t, os.MkdirAll(pending, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "report.txt"), []byte("original report"), 0o644))
+	var steeringID string
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			steering := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID,
+				AgentConfigID: req.Agent.ID, ExpectedTurnID: req.ExecID, Content: "change direction", AttachmentSessionID: "steering-files",
+			}
+			require.NoError(t, threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, req.ExecID))
+			steeringID = steering.ID
+			callback := llmcontracts.LocalSteeringCallbackFromContext(req.Ctx)
+			require.NotNil(t, callback)
+			input, err := callback(req.Ctx)
+			require.NoError(t, err)
+			require.NotNil(t, input.Commit)
+			// A failed delivery rolls back copies but preserves the source for retry.
+			require.Error(t, input.Commit(req.Ctx, []any{make(chan int)}))
+			require.DirExists(t, pending)
+			files, err := env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, files)
+			stored, err := threadInputRepo.GetByID(ctx, steeringID)
+			require.NoError(t, err)
+			require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+
+			history := []any{map[string]any{"type": "message", "role": "user", "content": "change direction"}}
+			require.NoError(t, input.Commit(req.Ctx, history))
+			require.NoDirExists(t, pending)
+			files, err = env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			fileID := files[0].ID
+
+			// History failures and later checkpoints must never revisit the upload.
+			require.Error(t, input.Commit(req.Ctx, []any{make(chan int)}))
+			for i := 0; i < 3; i++ {
+				history = append(history, map[string]any{"type": "message", "role": "assistant", "content": fmt.Sprintf("checkpoint %d", i)})
+				require.NoError(t, input.Commit(req.Ctx, history))
+			}
+			files, err = env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			require.Equal(t, fileID, files[0].ID)
+			data, err := os.ReadFile(files[0].FilePath)
+			require.NoError(t, err)
+			require.Equal(t, "original report", string(data))
+			replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{req.ExecID})
+			require.NoError(t, err)
+			require.Len(t, replay[req.ExecID], 1)
+			require.Contains(t, replay[req.ExecID][0].TranscriptJSON, "checkpoint 2")
+			// Recovery uses persisted applied status, not the callback's lifetime.
+			requeued, err := threadInputRepo.RequeuePendingSteeringForExecution(ctx, req.ExecID)
+			require.NoError(t, err)
+			require.Empty(t, requeued)
+
+			return llmcontracts.AgentResult{Output: "done", TextOnlyOutput: "done", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	require.NoError(t, err)
+	require.NotEmpty(t, steeringID)
+	stored, err := threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+}
+
 func TestLLMService_ExecuteTaskWithAgent_QueuesSteeringAtTerminalBoundary(t *testing.T) {
 	env := teststores.New(t)
 	llmConfigRepo := env.LLMConfigs
