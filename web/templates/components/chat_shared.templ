@@ -1775,7 +1775,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// breadcrumb focus belongs to navigation, not a new editing choice.
 					if (active.matches('[data-breadcrumb-selector-button]') && active.closest('#task-detail-content')) return active;
 					if (!active.matches('[data-nav-base]')) return null;
-					return active.getAttribute('data-nav-base') === window.location.pathname ? active : null;
+					var displayedPath = window.openVibelyDisplayedURL ? new URL(window.openVibelyDisplayedURL(), window.location.href).pathname : window.location.pathname;
+					return active.getAttribute('data-nav-base') === displayedPath ? active : null;
 				}
 
 				function _rememberComposerFocusNavigationTrigger(event) {
@@ -5234,8 +5235,11 @@ templ ChatAutoScrollScript() {
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
 				var sourceText = textBuffer;
+				// Promoting an enhanced SVG to lazy rows discards its live figure and
+				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
 				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
-					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable);
+					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable) &&
+					!container.querySelector('.chat-svg-preview');
 				var projectionKey = _thinkingStateKey(container);
 				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
 				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;
