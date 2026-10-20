@@ -127,9 +127,11 @@ func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
 			rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
 			require.NoError(t, err)
 			require.Empty(t, rows)
-			files, err := os.ReadDir(filepath.Join(uploadsDir, "chat", exec.ID))
-			require.NoError(t, err)
-			require.Empty(t, files)
+			require.NoError(t, filepath.WalkDir(filepath.Join(uploadsDir, "chat", exec.ID), func(path string, entry os.DirEntry, err error) error {
+				require.NoError(t, err)
+				require.True(t, entry.IsDir(), "rollback left a file: %s", path)
+				return nil
+			}))
 			writeUpload("second")
 			require.NoError(t, commit(ctx, nil))
 			require.NoError(t, commit(ctx, nil), "successful commits may be called again")
@@ -140,6 +142,85 @@ func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
 			for _, session := range []string{"first", "second"} {
 				require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", session))
 			}
+		})
+	}
+}
+
+func TestSteeringDuplicateFilenamesKeepPreviewPaths(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryChat} {
+		t.Run(string(category), func(t *testing.T) {
+			h, _, configs := setupTestHandler(t)
+			useTempUploadsDir(t)
+			ctx := context.Background()
+			agent := createAgent(t, configs)
+			agent.Provider = models.ProviderOpenAI
+			project := createProject(t, h, "Steering paths")
+			task := createTask(t, h, project.ID, "steering", func(task *models.Task) {
+				task.Category, task.Status, task.AgentID = category, models.StatusRunning, &agent.ID
+			})
+			exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+			// A prior upload already occupies the original filename.
+			original := filepath.Join(uploadsDir, "chat", exec.ID, "report.pdf")
+			require.NoError(t, os.MkdirAll(filepath.Dir(original), 0o755))
+			require.NoError(t, os.WriteFile(original, []byte("original"), 0o644))
+			paths := make(map[string]string)
+			for _, session := range []string{"first", "second"} {
+				source := filepath.Join(uploadsDir, "chat", "pending", session, "report.pdf")
+				require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+				require.NoError(t, os.WriteFile(source, []byte(session), 0o644))
+				text, files, err := h.previewSteeringAttachments(session, exec.ID, agent.Provider)
+				require.NoError(t, err)
+				require.Len(t, files, 1)
+				paths[session] = files[0].ReferencePath
+				require.Contains(t, text, paths[session])
+				require.NotEqual(t, original, paths[session])
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: session}
+				if category == models.CategoryChat {
+					input.Scope = models.ThreadInputScopeChat
+				}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+			}
+			require.NotEqual(t, paths["first"], paths["second"])
+			params := streamingResponseParams{ExecID: exec.ID, Agent: *agent}
+			batch, err := h.claimPendingSteeringInputs(ctx, &params)
+			require.NoError(t, err)
+			require.Len(t, batch.inputs, 2)
+			for _, input := range batch.inputs {
+				require.Contains(t, input.Content, paths[input.AttachmentSessionID])
+			}
+			commit := h.preparedSteeringCommit(params, batch)
+			require.Error(t, commit(ctx, []any{make(chan int)}))
+			for session, path := range paths {
+				_, files, err := h.previewSteeringAttachments(session, exec.ID, agent.Provider)
+				require.NoError(t, err)
+				require.Len(t, files, 1)
+				require.Equal(t, path, files[0].ReferencePath, "retry must retain the original reference")
+			}
+			require.NoError(t, commit(ctx, nil))
+			require.NoError(t, commit(ctx, nil))
+			for session, path := range paths {
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, session, string(data))
+			}
+			data, err := os.ReadFile(original)
+			require.NoError(t, err)
+			require.Equal(t, "original", string(data))
+			var savedPaths []string
+			if category == models.CategoryChat {
+				rows, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+				require.NoError(t, err)
+				for _, row := range rows {
+					savedPaths = append(savedPaths, row.FilePath)
+				}
+			} else {
+				rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+				require.NoError(t, err)
+				for _, row := range rows {
+					savedPaths = append(savedPaths, row.FilePath)
+				}
+			}
+			require.ElementsMatch(t, []string{paths["first"], paths["second"]}, savedPaths)
 		})
 	}
 }
