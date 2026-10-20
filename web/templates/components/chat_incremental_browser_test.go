@@ -605,3 +605,64 @@ func TestBrowserFunctional_LazyTranscriptMatchesEagerRenderer(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_LazyTranscriptUpdatesDuringFind(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ document.getElementById('pair').dataset.execStatus='completed';
+ const main=document.createElement('main'); main.id='main-content';
+ messages.before(main); main.append(messages);
+ let source='';
+ for(let i=0;i<80;i++) source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await materializeVirtualChatRows(messages);
+ assert(stream.querySelectorAll('.stream-tool').length===80,'Find omitted history');
+ // A refresh must update existing rows and render new rows while Find is active.
+ await renderStreamingContent(stream,source.replace('Message 0','Updated message 0')+'Fresh answer',false);
+ await paint();
+ assert(stream.textContent.includes('Updated message 0'),'Find left an existing row stale');
+ assert(stream.textContent.includes('Fresh answer'),'Find left new content blank');
+ // Navigation must resume windowing without requiring Escape from the old page.
+ document.dispatchEvent(new CustomEvent('htmx:beforeSwap',{detail:{target:main,shouldSwap:true}}));
+ const next=document.createElement('div'); stream.replaceWith(next);
+ await renderStreamingContent(next,source,false); await paint();
+ assert(next.querySelectorAll('.stream-tool').length>0,'new transcript is blank after Find');
+ assert(next.querySelectorAll('.stream-tool').length<25,'Find suspension leaked across navigation');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await materializeVirtualChatRows(messages);
+ document.dispatchEvent(new CustomEvent('htmx:historyRestore'));
+ await paint();
+ assert(next.querySelectorAll('.stream-tool').length<25,'history restoration did not resume windowing');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptHiddenWorkspace(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
+ let source='';
+ for(let i=0;i<180;i++) source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ source+='Final visible answer';
+ let renders=0; const markdown=window.renderChatMarkdown;
+ window.renderChatMarkdown=function(...args){renders++; return markdown.apply(this,args)};
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,defaultPinned:true}); await paint();
+ assert(stream.textContent.includes('Final visible answer'),'initial visible window missing');
+ const before=renders;
+ workspace.style.display='none'; await paint(); await renderVisibleChatRows(messages); await paint();
+ assert(renders===before,'hiding workspace rendered offscreen history');
+ // An authoritative update can also arrive while Changes is open.
+ await renderStreamingContent(stream,source+' Updated while hidden',false); await paint();
+ assert(renders===before,'hidden refresh rendered history');
+ workspace.style.display='';
+ // No explicit refresh: revealing the workspace must wake the ResizeObserver.
+ for(let i=0;i<100 && !stream.textContent.includes('Updated while hidden');i++) await pause(10);
+ assert(stream.textContent.includes('Updated while hidden'),'revealing workspace left new content blank');
+ assert(stream.querySelectorAll('.stream-tool').length<25,'revealing workspace rendered the whole history');
+ return {renders};
+ `)
+}
