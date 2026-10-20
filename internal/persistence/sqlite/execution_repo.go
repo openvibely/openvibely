@@ -1095,6 +1095,26 @@ func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, chec
 	if r == nil || r.db == nil {
 		return nil
 	}
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return upsertChatCompactionCheckpoint(ctx, conn, checkpoint)
+	})
+}
+
+// SaveInTurnCompactionCheckpoint commits the summary and an explicitly empty
+// continuation together. UI output and reasoning are not changed.
+func (r *ExecutionRepo) SaveInTurnCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
+	if checkpoint.SourceExecutionID == "" || checkpoint.Strategy != "local_summary_inflight" {
+		return fmt.Errorf("in-turn compaction requires its source execution and strategy")
+	}
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := upsertChatCompactionCheckpoint(ctx, tx, checkpoint); err != nil {
+			return err
+		}
+		return replaceExecutionReplayMessages(ctx, tx, checkpoint.SourceExecutionID, []models.ExecutionReplayMessage{{TranscriptJSON: "[]"}})
+	})
+}
+
+func upsertChatCompactionCheckpoint(ctx context.Context, executor sqlExecutor, checkpoint models.ChatCompactionCheckpoint) error {
 	history := make([]checkpointExecution, len(checkpoint.History))
 	for i, execution := range checkpoint.History {
 		history[i] = checkpointExecution{Execution: execution, Replay: execution.ReplayMessages, RetainedUserMessage: execution.RetainedUserMessage}
@@ -1103,7 +1123,7 @@ func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, chec
 	if err != nil {
 		return fmt.Errorf("marshal chat compaction checkpoint: %w", err)
 	}
-	_, err = execBoundSQLite(ctx, r.db, `
+	_, err = executor.ExecContext(ctx, `
 		INSERT INTO chat_compaction_checkpoints (
 			scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
