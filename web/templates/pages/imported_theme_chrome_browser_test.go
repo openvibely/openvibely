@@ -132,7 +132,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-continuous');'ok'`)
 		browser.waitFor("continuous sidebar joins canvas", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('body', 'backgroundColor'))`, "true")
-		browser.waitFor("continuous sidebar has no contrasting edge", `String(window.computed('#sidebar', 'borderRightColor') === window.computed('#sidebar', 'backgroundColor'))`, "true")
+		browser.waitFor("continuous sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
 		browser.waitFor("continuous retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default sidebar restored", `window.near('#sidebar', 'backgroundColor', '#1d232a')`, "ok")
