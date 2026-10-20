@@ -198,16 +198,13 @@ func OpenVibelyThemes() []Theme {
 	}
 }
 
-// The continuous variant retains native dark styling and only joins the sidebar canvas.
+// The continuous variant retains native dark styling with flat, bordered chat surfaces.
 func openVibelyContinuousTheme() Theme {
 	theme := openVibelyDarkTheme()
 	theme.ID = "openvibely-dark-continuous"
 	theme.Name = "OpenVibely Dark Continuous"
 	theme.Source = "OpenVibely experimental"
 	theme.SearchText = theme.Name + " dark experimental continuous sidebar"
-	theme.Semantic["sidebarBg"] = theme.Semantic["contentBg"]
-	theme.Preview["sidebar"] = theme.Semantic["sidebarBg"]
-	theme.CSS = themeCSSVars(theme.Semantic, theme.Syntax)
 	return theme
 }
 
