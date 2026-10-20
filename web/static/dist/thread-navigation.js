@@ -289,6 +289,11 @@
         detail.serverResponse = next.innerHTML;
     }, true);
     document.addEventListener('htmx:afterSwap', function (event) {
+        // Direct cached swaps do not carry eventInfo into afterSwap detail.
+        // Mark them while restoration is synchronous, before page handlers run.
+        if (restoringEntry && event.detail.target?.id === 'main-content') {
+            event.detail._ovCachedPreview = true;
+        }
         // HTMX does not carry custom beforeSwap fields into afterSwap. Restore
         // the refresh marker before task handlers decide whether to reset scroll.
         if (event.detail.target?.id === 'main-content' && composerRefreshes.has(event.detail.xhr)) {

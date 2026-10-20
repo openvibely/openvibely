@@ -4691,7 +4691,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     }, true);
                     document.addEventListener('htmx:beforeRequest', function(event) {
                         const detail = event.detail;
-                        if (!detail.target || detail.target.id !== 'main-content') return;
+                        if (event.defaultPrevented || !detail.target || detail.target.id !== 'main-content') return;
                         const previous = currentPageRequest;
                         currentPageRequest = detail.xhr;
                         if (previous && previous !== detail.xhr && previous.readyState !== 4) previous.abort();
