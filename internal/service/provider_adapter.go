@@ -1148,6 +1148,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
 		return req
 	}
+	if !s.checkpointWithinCurrentContext(req, scope, checkpoint) {
+		return req
+	}
 	// Readable history remains portable even when the row also holds reasoning
 	// settings. Reject incompatible native compaction, but only clear session
 	// settings in the restored copy; do not discard its readable history.
@@ -1244,6 +1247,65 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 	return restored
+}
+
+// A saved checkpoint may precede a scheduled run's clear-context boundary.
+// Inspect persisted history too: bounded followup history can omit that boundary.
+func (s *LLMService) checkpointWithinCurrentContext(req llmcontracts.AgentRequest, scope compactionScope, checkpoint *models.ChatCompactionCheckpoint) bool {
+	sourceID := checkpoint.SourceExecutionID
+	if req.ExecID != "" {
+		current, err := s.execRepo.GetByID(req.Ctx, req.ExecID)
+		if err != nil {
+			applog.Infof("[agent-svc] read current context boundary: %v", err)
+			return false
+		}
+		if current != nil && current.StartsNewContext {
+			return sourceID == current.ID
+		}
+	}
+	// Session-only rows contain no prior conversation to restore. Avoid paging
+	// through the thread merely to validate transport/configuration bookkeeping.
+	if len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" {
+		return true
+	}
+	inspect := func(history []models.Execution) (bool, bool) {
+		for i := len(history) - 1; i >= 0; i-- {
+			if sourceID != "" && history[i].ID == sourceID {
+				return true, true
+			}
+			if history[i].StartsNewContext {
+				return false, true
+			}
+		}
+		return false, false
+	}
+	if valid, found := inspect(req.ChatHistory); found {
+		return valid
+	}
+	before := req.ExecID
+	for {
+		var history []models.Execution
+		var err error
+		switch scope.Type {
+		case "task":
+			history, err = s.execRepo.ListByTaskChronologicalBefore(req.Ctx, scope.ID, before, 100)
+		case "chat_project":
+			history, err = s.execRepo.ListChatHistoryBefore(req.Ctx, scope.ID, before, 100)
+		default:
+			return true
+		}
+		if err != nil {
+			applog.Infof("[agent-svc] read checkpoint context boundary: %v", err)
+			return false
+		}
+		if valid, found := inspect(history); found {
+			return valid
+		}
+		if len(history) < 100 || history[0].ID == before {
+			return true
+		}
+		before = history[0].ID
+	}
 }
 
 // Replay is authoritative after an in-turn summary. These aggregate fields
