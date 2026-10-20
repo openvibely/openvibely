@@ -1136,6 +1136,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 }
 
 func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
+	req.RestoredCompactionSourceExecutionID = ""
 	scope, ok := s.compactionScopeForRequest(req)
 	if !ok || s == nil || s.execRepo == nil {
 		return req
@@ -1179,6 +1180,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		checkpoint.ProviderSessionStateJSON = ""
 	}
 	restored := req
+	if len(checkpoint.History) > 0 || strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
+		restored.RestoredCompactionSourceExecutionID = checkpoint.SourceExecutionID
+	}
 	if checkpoint.Strategy == "local_summary_inflight" {
 		for i, execution := range req.ChatHistory {
 			if execution.ID != checkpoint.SourceExecutionID {
@@ -1404,6 +1408,9 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	sourceID := ""
 	if len(originalReq.ChatHistory) > 0 {
 		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
+	}
+	if sourceID == "" {
+		sourceID = originalReq.RestoredCompactionSourceExecutionID
 	}
 	if sourceID == "" && originalReq.NativeCompactionStateJSON != "" {
 		// A native checkpoint may cover every loaded execution. Carry its

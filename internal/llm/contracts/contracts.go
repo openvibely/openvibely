@@ -87,6 +87,10 @@ type AgentRequest struct {
 	ProjectID              string // Authoritative project scope for provider-side live events and attribution
 	TransportScope         string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
 	ChatHistory            []models.Execution
+	// RestoredCompactionSourceExecutionID is the covered execution boundary of
+	// the checkpoint restored into this request. Preserve it when recompaction
+	// contains only synthetic summary/context messages with no execution IDs.
+	RestoredCompactionSourceExecutionID string
 	// SummaryInput contains provider-formatted history for a tools-disabled
 	// summary request. Message is the separate, final summarization instruction.
 	SummaryInput        []json.RawMessage
