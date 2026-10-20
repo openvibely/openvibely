@@ -5662,7 +5662,9 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		"else if (window.cleanAssistantMessages) hydrationPromise = window.cleanAssistantMessages(container)",
 		"container._chatEarlierHydrationPromise = Promise.resolve(hydrationPromise)",
 		"var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve()",
-		"Promise.resolve(hydrationPromise).then(function()",
+		"await hydrationPromise",
+		"await window.waitForChatTranscriptViewport(container)",
+		"await window.renderVisibleChatRows(container)",
 		"!event.detail.successful",
 		"loader.setAttribute('hx-swap', 'outerHTML show:none')",
 	}

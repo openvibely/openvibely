@@ -4065,6 +4065,10 @@ templ ChatAutoScrollScript() {
 				rememberChatEarlierLayout(container);
 			};
 
+			function chatEarlierHasViewport(container) {
+				return container.isConnected && container.clientHeight > 0 && container.clientWidth > 0 && container.getClientRects().length > 0;
+			}
+
 			function rememberChatEarlierLayout(container) {
 				var anchor = container._earlierAnchor;
 				var top = container.getBoundingClientRect().top;
@@ -4075,9 +4079,27 @@ templ ChatAutoScrollScript() {
 				});
 			}
 
+			// Virtual rows preserve the reader themselves. Rebase the paging transaction
+			// after that compensation so its observer does not apply the same delta again.
+			window.acknowledgeChatEarlierLayout = function(container) {
+				var anchor = container._earlierAnchor;
+				if (!anchor || !chatEarlierHasViewport(container)) return;
+				anchor.position = anchor.pair && anchor.pair.isConnected
+					? anchor.pair.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+					: container.scrollHeight;
+				rememberChatEarlierLayout(container);
+			};
+
 			function compensateChatEarlierLayout(container) {
 				var anchor = container._earlierAnchor;
 				if (!anchor || !container.isConnected) return;
+				if (!chatEarlierHasViewport(container)) { anchor.hidden = true; return; }
+				// display:none can clamp scrollTop to zero. That is not new reader
+				// intent: resume from the last visible layout before applying growth.
+				if (anchor.hidden) {
+					container.scrollTop = anchor.scrollTop;
+					anchor.hidden = false;
+				}
 				// Scroll events are queued: rendering may already have resized the DOM.
 				// Select the reader's new row using the last compensated layout, then
 				// measure that row's movement. Selecting from the resized DOM loses
@@ -4106,6 +4128,8 @@ templ ChatAutoScrollScript() {
 				anchor.position = position;
 				rememberChatEarlierLayout(container);
 			}
+
+			window.compensateChatEarlierLayout = compensateChatEarlierLayout;
 
 			function setAllEarlierLoadersIdle(container) {
 				container.querySelectorAll('[data-earlier-loader="true"]').forEach(function(loader) {
@@ -4200,17 +4224,36 @@ templ ChatAutoScrollScript() {
 			}
 
 			window.restoreChatEarlierScroll = function(container) {
-				if (!container) return;
+				if (!container || !container._earlierAnchor) return;
 				var anchor = container._earlierAnchor;
+				if (anchor.restorePromise) return anchor.restorePromise;
 				var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
-				Promise.resolve(hydrationPromise).then(function() {
-					requestAnimationFrame(function() {
+				anchor.restorePromise = (async function() {
+					await hydrationPromise;
+					// Older history can arrive while Changes hides the transcript. Retain
+					// the anchor until there is real geometry, including if it hides again
+					// while visible rows are being rendered.
+					while (container.isConnected && container._earlierAnchor === anchor) {
+						if (!chatEarlierHasViewport(container)) anchor.hidden = true;
+						if (window.waitForChatTranscriptViewport && !await window.waitForChatTranscriptViewport(container)) break;
 						if (container._earlierAnchor !== anchor) return;
+						if (!chatEarlierHasViewport(container)) break;
+						compensateChatEarlierLayout(container);
+						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(container);
+						await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+						if (container._earlierAnchor !== anchor) return;
+						if (!chatEarlierHasViewport(container)) continue;
 						compensateChatEarlierLayout(container);
 						delete container._chatEarlierHydrationPromise;
 						clearChatEarlierRestoreState(container);
-					});
-				});
+						return;
+					}
+					if (!container.isConnected && container._earlierAnchor === anchor) {
+						delete container._chatEarlierHydrationPromise;
+						clearChatEarlierRestoreState(container);
+					}
+				})();
+				return anchor.restorePromise;
 			};
 
 				window.pruneChatExecutionWindow = function(containerOrID) {
