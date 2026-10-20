@@ -780,3 +780,97 @@ func TestBrowserFunctional_HiddenTranscriptHydrationWaitsForViewport(t *testing.
  return {};
  `)
 }
+
+func TestBrowserFunctional_VirtualScrollFillsVisibleRowsBeforePaint(t *testing.T) {
+	report := runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.width='640px'; messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ let source='';
+ for(let i=0;i<40;i++) source+='[Thinking]\nreason '+i+'\n[/Thinking]\n'+(i%10===0?'Large **paragraph**.\n\n'.repeat(4000):'Message '+i)+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});
+ await paint();
+ let blanks=0, frames=0, missing=[], longestFrameMS=0;
+ const check=()=>{
+   const bounds=messages.getBoundingClientRect();
+   for(const row of stream._chatVirtualRows) {
+     const el=row.node?.isConnected?row.node:row.placeholder;
+     const rect=el.getBoundingClientRect();
+     if(rect.bottom>bounds.top+1 && rect.top<bounds.bottom-1 && !row.ready) {blanks++;missing.push({frame:frames,index:row.index,top:rect.top-bounds.top,height:rect.height,loading:!!row.loading,children:row.node?.childElementCount})}
+   }
+   frames++;
+ };
+ // These are already loaded execution rows, not a network/history page fetch.
+ for(let step=0;step<100;step++) {
+   const started=performance.now();
+   messages.scrollTop=Math.max(0,messages.scrollTop-180);
+   const bounds=messages.getBoundingClientRect();
+   const reading=stream._chatVirtualRows.filter(row=>row.ready && row.node?.isConnected).map(row=>({node:row.node,top:row.node.getBoundingClientRect().top})).find(row=>row.top>=bounds.top && row.top<bounds.bottom);
+   messages.dispatchEvent(new Event('scroll'));
+   await new Promise(resolve=>requestAnimationFrame(()=>{check();resolve()}));
+   longestFrameMS=Math.max(longestFrameMS,performance.now()-started);
+   if(reading) assert(reading.node.isConnected && Math.abs(reading.node.getBoundingClientRect().top-reading.top)<3,'rendering moved an already visible message at step '+step);
+ }
+ assert(blanks===0,'visible unrendered rows across scroll frames: '+blanks+' / '+frames+' '+JSON.stringify(missing));
+ return {blanks,frames,longestFrameMS};
+ `)
+	t.Logf("scroll frames: %s", report)
+}
+
+func TestBrowserFunctional_VirtualScrollOvertakesBackgroundPreparation(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.height='80px'; messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ let rejectBackground, backgroundCalls=0, foregroundCalls=0;
+ const models=Array.from({length:10},()=>({kind:'using',segments:[]}));
+ await installChatVirtualRows(stream,{models},(node,model,index,synchronous)=>{
+   if(index===0 && !synchronous) {
+     backgroundCalls++;
+     return new Promise((resolve,reject)=>{rejectBackground=reject});
+   }
+   if(index===0) foregroundCalls++;
+   node.style.height='180px'; node.textContent='Ready message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});
+ await paint();
+ messages.scrollTop=300; messages.dispatchEvent(new Event('scroll')); await paint();
+ assert(backgroundCalls===1 && rejectBackground,'offscreen row did not start background preparation');
+ messages.scrollTop=0; messages.dispatchEvent(new Event('scroll'));
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ const row=stream._chatVirtualRows[0];
+ assert(foregroundCalls===1 && row.ready && row.node.textContent==='Ready message 0','visible row waited for background work');
+ // A superseded worker must not replace the committed row with its fallback.
+ rejectBackground(new Error('superseded preparation')); await pause(0); await paint();
+ assert(row.ready && row.loading===null && row.node.textContent==='Ready message 0','late background failure overwrote the visible message');
+ assert(stream.querySelectorAll('[data-chat-lazy-row]:not([data-virtual-chat-row])').length<6,'lookahead left offscreen rows mounted');
+ return {backgroundCalls,foregroundCalls};
+ `)
+}
+
+func TestBrowserFunctional_VirtualScrollSettlesEstimatedHeightsBeforePaint(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const models=Array.from({length:180},()=>({kind:'using',segments:[]}));
+ await installChatVirtualRows(stream,{models},(node,model,index)=>{
+   node.style.height='24px'; node.textContent='Short message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true}); await paint();
+ // A scrollbar jump encounters estimates that shrink as the window mounts.
+ messages.scrollTop=3000; messages.dispatchEvent(new Event('scroll'));
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ const bounds=messages.getBoundingClientRect();
+ const empty=stream._chatVirtualRows.filter(row=>{
+   const node=row.node?.isConnected?row.node:row.placeholder, rect=node.getBoundingClientRect();
+   return rect.bottom>bounds.top+1 && rect.top<bounds.bottom-1 && (!row.ready || !row.node?.isConnected);
+ });
+ assert(empty.length===0,'height changes exposed unrendered rows for a frame: '+empty.length);
+ return {};
+ `)
+}
