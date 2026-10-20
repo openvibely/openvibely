@@ -666,3 +666,39 @@ func TestBrowserFunctional_LazyTranscriptHiddenWorkspace(t *testing.T) {
  return {renders};
  `)
 }
+
+func TestBrowserFunctional_LazyTranscriptFindSkipsHiddenWorkspace(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
+ let source='';
+ for(let i=0;i<180;i++) source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ let renders=0; const markdown=window.renderChatMarkdown;
+ window.renderChatMarkdown=function(...args){renders++; return markdown.apply(this,args)};
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,defaultPinned:true}); await paint();
+ const before=renders, mounted=stream.querySelectorAll('.stream-tool').length;
+ assert(mounted>0 && mounted<25,'fixture did not virtualize');
+ workspace.style.display='none'; await paint();
+ for(const modifiers of [{ctrlKey:true},{metaKey:true}]) {
+  for(const key of ['f','a']) {
+   document.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,...modifiers}));
+   await paint();
+   assert(renders===before,'Find/Select All rendered hidden Markdown');
+   assert(stream.querySelectorAll('.stream-tool').length===mounted,'Find/Select All mounted hidden tools');
+  }
+ }
+ // No Escape: Find in Changes must not leave chat windowing suspended.
+ workspace.style.display=''; await paint(); await renderVisibleChatRows(messages); await paint();
+ assert(stream.querySelectorAll('.stream-tool').length>0,'returning to chat left it blank');
+ assert(stream.querySelectorAll('.stream-tool').length<25,'hidden Find disabled windowing on return');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await paint();
+ assert(stream.querySelectorAll('.stream-tool').length===180,'Find omitted visible transcript history');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await paint();
+ assert(stream.querySelectorAll('.stream-tool').length<25,'Escape did not resume windowing');
+ return {renders};
+ `)
+}
