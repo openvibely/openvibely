@@ -24,7 +24,7 @@ func TestRosePineDawnTabDividerStandsOutOnTitleBar(t *testing.T) {
 	}
 	divider, _, _ := parseThemeHexColor(theme.CSS["--ov-project-tab-divider"])
 	column, _, _ := parseThemeHexColor(theme.CSS["--ov-kanban-column-bg"])
-	if got := contrastRatio(divider, column); got < 1.3 {
-		t.Errorf("tab divider contrast on title bar %.2f < 1.3", got)
+	if got := contrastRatio(divider, column); got < 2.5 {
+		t.Errorf("tab divider contrast on title bar %.2f < 2.5", got)
 	}
 }
