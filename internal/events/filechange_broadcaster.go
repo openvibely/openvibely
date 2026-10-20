@@ -39,11 +39,11 @@ func NewFileChangeBroadcaster() *FileChangeBroadcaster {
 
 // NewFileChangeBroadcasterWithLimit sets the subscriber budget. Nonpositive values use the default.
 func NewFileChangeBroadcasterWithLimit(limit int) *FileChangeBroadcaster {
-	core := newBroadcaster[FileChangeEvent, FileChangeSubscriber](50)
+	b := &FileChangeBroadcaster{core: newBroadcaster[FileChangeEvent, FileChangeSubscriber](50)}
 	if limit > 0 {
-		core.maxSubscribers = limit
+		b.core.maxSubscribers = limit
 	}
-	return &FileChangeBroadcaster{core: core}
+	return b
 }
 
 // Subscribe adds a new subscriber and returns a channel for receiving events.
