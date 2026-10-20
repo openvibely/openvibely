@@ -1404,7 +1404,7 @@ func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch p
 		if !delivered {
 			for _, input := range batch.inputs {
 				if input.AttachmentSessionID != "" {
-					_, _, _, finish, err := h.stageMessageAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+					_, _, _, finish, err := h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
 					if err != nil {
 						return err
 					}
@@ -1428,7 +1428,7 @@ func (h *Handler) commitPreparedSteeringInputs(ctx context.Context, params strea
 		finish := func(bool) {}
 		if input.AttachmentSessionID != "" {
 			var err error
-			_, _, _, finish, err = h.stageMessageAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+			_, _, _, finish, err = h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
 			if err != nil {
 				return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, err)
 			}

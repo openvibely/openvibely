@@ -123,7 +123,7 @@ func TestSteeringDocumentReferenceUsesCommittedPath(t *testing.T) {
 	text, files, err := h.previewSteeringAttachments(session, "exec", models.ProviderOpenAI)
 	require.NoError(t, err)
 	require.Len(t, files, 1)
-	target := filepath.Join(uploadsDir, "chat", "exec", "report.pdf")
+	target := filepath.Join(uploadsDir, "chat", "exec", "steering", session, "report.pdf")
 	require.Contains(t, text, target)
 	require.NotContains(t, text, source)
 	require.Equal(t, source, files[0].FilePath)
