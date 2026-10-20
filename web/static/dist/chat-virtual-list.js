@@ -26,22 +26,40 @@
     }
     function saveAnchor(list) {
         const messages = list.messages;
+        // Hidden history may still be parsed, but zero-sized geometry must not
+        // replace the reading anchor saved before the workspace was hidden.
+        if (!hasVisibleArea(messages)) return function () {};
+        // Settle pending non-virtual changes (such as an earlier image loading)
+        // before taking ownership of the next row-height adjustment.
+        window.compensateChatEarlierLayout?.(messages);
         const bounds = messages.getBoundingClientRect();
         const pinned = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 2;
         let anchor = null;
+        // While older history settles, newly inserted estimates can overlap the
+        // viewport. Keep following the execution the reader was already viewing,
+        // rather than switching the anchor to one of those temporary estimates.
+        const earlierPair = messages._earlierAnchor?.pair;
+        const earlierBounds = earlierPair?.isConnected ? earlierPair.getBoundingClientRect() : null;
+        const readingPair = earlierBounds && earlierBounds.bottom > bounds.top && earlierBounds.top < bounds.bottom ? earlierPair : null;
+        if (readingPair && earlierBounds.top >= bounds.top) anchor = {row:{node:readingPair}, top:earlierBounds.top};
         // Map insertion order can differ from DOM order after prepending history.
         list.rows.forEach(row => {
             const el = element(row);
-            if (!el.isConnected) return;
+            if (!el.isConnected || (readingPair && !readingPair.contains(el))) return;
             const rect = el.getBoundingClientRect();
             if (rect.bottom > bounds.top && rect.top < bounds.bottom && (!anchor || rect.top < anchor.top)) anchor = {row, top:rect.top};
         });
         return function () {
+            let restored = pinned;
             if (pinned) messages.scrollTop = messages.scrollHeight;
             else if (anchor) {
                 const row = anchor.row.lazy ? (anchor.row.owner._chatVirtualRows?.[anchor.row.index] || anchor.row) : anchor.row;
-                if (element(row).isConnected) messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top;
+                if (element(row).isConnected) {
+                    messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top;
+                    restored = true;
+                }
             }
+            if (restored) window.acknowledgeChatEarlierLayout?.(messages);
         };
     }
     window.preserveChatVirtualScroll = function (node, commit) {

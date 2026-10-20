@@ -107,6 +107,7 @@ templ TaskWorkspaceScript() {
 			var wasDiff = !changes.classList.contains('hidden');
 			var messages = root.querySelector('#task-thread-messages');
 			if (diff && !wasDiff) {
+				if (messages && window.compensateChatEarlierLayout) window.compensateChatEarlierLayout(messages);
 				var tracker = window._taskThreadPageTracker;
 				scrollState = messages ? {
 					scrollTop: messages.scrollTop,
@@ -143,6 +144,9 @@ templ TaskWorkspaceScript() {
 					if (tracker) tracker.userScrolledUp = scrollState.userScrolledUp;
 					window._taskThreadUserScrolledUp = scrollState.userScrolledUp;
 					messages.scrollTop = scrollState.userScrolledUp ? scrollState.scrollTop : messages.scrollHeight;
+					// History may have been prepended while this workspace was hidden.
+					// Restore its logical anchor before the first visible frame.
+					if (window.compensateChatEarlierLayout) window.compensateChatEarlierLayout(messages);
 				}
 				if (wasDiff && returnFocus && returnFocus.isConnected && push !== false) returnFocus.focus({preventScroll:true});
 				else if (wasDiff && push !== false) _focusTaskThreadComposer(back);
