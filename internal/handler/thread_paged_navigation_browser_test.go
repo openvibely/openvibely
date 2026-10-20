@@ -35,7 +35,12 @@ func TestTaskHiddenPagedScrollStabilityInChrome(t *testing.T) {
 	testTaskPagedCachedNavigation(t, "hidden")
 }
 
+func TestTaskHiddenLargeRowScrollStabilityInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, "hidden-row")
+}
+
 func testTaskPagedCachedNavigation(t *testing.T, mode string) {
+	hiddenRow := mode == "hidden-row"
 	bounded := mode == "bounded"
 	hiddenPaging := mode == "hidden"
 	scrollStability := mode == "scroll" || hiddenPaging
@@ -65,6 +70,10 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	}
 	samples[len(samples)-1].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\n"+strings.Repeat("tool output line\n", 100)+"[/Tool]\n", 120) + "Final answer.\n"
 
+	if hiddenRow {
+		samples[len(samples)-1].Output = strings.Repeat("Large **paragraph**.\n\n", 4000) + strings.Repeat("[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n", 30) + "Latest message."
+	}
+
 	if scrollStability {
 		for i := range samples {
 			samples[i].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\nresult\n[/Tool]\n", 40)
@@ -86,7 +95,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	path := "/tasks/" + task.ID
 	runner := fmt.Sprintf(`<script>
  window.addEventListener('DOMContentLoaded',()=>{
- const bounded=%t, scrollStability=%t, hiddenPaging=%t;
+ const bounded=%t, scrollStability=%t, hiddenPaging=%t, hiddenRow=%t;
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
  const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
@@ -96,6 +105,30 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
  function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
  (async()=>{
   await until(visible,'initial messages'); await wait(150);
+  if(hiddenRow){
+   const m=messages(),paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   const owner=Array.from(m.querySelectorAll('[data-chat-virtual-owner]')).find(o=>o._chatVirtualRows?.[0]?.model.segments.some(s=>(s.content||'').length>=65536));
+   if(!owner)throw Error('Missing large owner');const large=owner._chatVirtualRows[0];
+   if(large.ready)throw Error('Large row already rendered');let release;const original=window.renderChatMarkdownAsync;
+   window.renderChatMarkdownAsync=function(text,...args){if(text.length<65536)return original.call(this,text,...args);return new Promise(resolve=>{release=()=>resolve(original.call(this,text,...args))})};
+   m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));
+   m.scrollTop+=large.placeholder.getBoundingClientRect().bottom-m.getBoundingClientRect().top+50;
+   m.dispatchEvent(new Event('scroll'));await paint();await until(()=>release && large.loading,'large row preparing');
+   const bounds=m.getBoundingClientRect();
+   const reading=owner._chatVirtualRows.find(row=>row.ready && row.node?.isConnected && row.node.getBoundingClientRect().top>=bounds.top && row.node.getBoundingClientRect().top<bounds.bottom);
+   if(!reading)throw Error('Missing reading anchor');const top=reading.node.getBoundingClientRect().top;
+   window.taskWorkspace.openChanges();release();await until(()=>large.ready,'large row finished hidden');
+   for(let cycle=0;cycle<3;cycle++){
+    window.taskWorkspace.openThread();
+    // Check before the first visible paint, then again after virtual layout settles.
+    const check=()=>{const el=reading.node.isConnected?reading.node:reading.placeholder;const shift=el.getBoundingClientRect().top-top;if(Math.abs(shift)>3)throw Error('Hidden large-row completion moved reading position '+shift+'px')};
+    check();await paint();check();
+    if(cycle<2)window.taskWorkspace.openChanges();
+   }
+   if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   await fetch('/browser-result?status=pass');return;
+  }
+
   if(scrollStability){
    const m=messages(), paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
    for(let page=0;page<4;page++){
@@ -159,7 +192,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
   }
   await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
- });</script>`, bounded, scrollStability, hiddenPaging, "/tasks/"+other.ID, other.ID, path, task.ID)
+ });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
