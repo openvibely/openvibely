@@ -13,6 +13,7 @@ type paletteSpec struct {
 	canvas, column, surface, raised  string
 	text                             string
 	muted, accent, link, codeBg      string
+	tabDivider                       string
 	info, success, warning, error    string
 	syntax                           map[string]string
 }
@@ -84,7 +85,7 @@ func paletteSpecs() []paletteSpec {
 		},
 		{
 			id: "rose-pine-dawn", name: "Rosé Pine Dawn", source: "Rosé Pine palette (MIT)", upstream: "https://github.com/rose-pine/rose-pine-theme", mode: "light",
-			canvas: "#F2E9E1", column: "#F4EDE8", surface: "#FAF4ED", raised: "#FFFAF3", text: "#575279", muted: "#797593", accent: "#907AA9",
+			canvas: "#F2E9E1", column: "#F4EDE8", tabDivider: "#CECACD", surface: "#FAF4ED", raised: "#FFFAF3", text: "#575279", muted: "#797593", accent: "#907AA9",
 			info: "#286983", success: "#56949F", warning: "#EA9D34", error: "#B4637A",
 			syntax: map[string]string{"keyword": "#286983", "string": "#EA9D34", "number": "#D7827E", "function": "#D7827E", "type": "#56949F", "variable": "#575279", "comment": "#9893A5", "title": "#907AA9"},
 		},
@@ -172,6 +173,9 @@ func paletteTheme(spec paletteSpec) Theme {
 	css := themeCSSVars(semantic, syntax)
 	css["--ov-subtle-border"] = border
 	css["--ov-kanban-column-bg"] = spec.column
+	if spec.tabDivider != "" {
+		css["--ov-project-tab-divider"] = spec.tabDivider
+	}
 	css["--ov-accent-tint"] = accentTintColor(spec.accent)
 	css["--ov-daisy-primary"], css["--ov-daisy-primary-content"] = daisyPrimaryColors(link, spec.canvas)
 	kind := KindLight
