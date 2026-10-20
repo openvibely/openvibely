@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
@@ -253,13 +254,18 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}()
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
-		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
+		readContext := func(m completionsMessage) (string, string) {
 			text, _ := m.Content.(string)
 			return m.Role, text
-		}, func(text string) CompletionsHistoryMessage {
+		}
+		makeReplayContext := func(text string) CompletionsHistoryMessage {
 			return CompletionsHistoryMessage{Role: "user", Content: text}
-		})
-		messages = ensureCompletionsAttachments(ctx, messages)
+		}
+		makeWireContext := func(text string) completionsMessage { return completionsMessage{Role: "user", Content: text} }
+		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
+		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		currentTranscript = attachmentcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
+		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
 		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
