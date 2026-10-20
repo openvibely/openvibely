@@ -140,7 +140,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-raised');'ok'`)
 		browser.waitFor("raised retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
 		for _, selector := range []string{"#fixture-settings-card", "#sidebar"} {
-			browser.waitFor("raised "+selector+" uses chat bubble color", `window.near('`+selector+`', 'backgroundColor', '#2b3039')`, "ok")
+			browser.waitFor("raised "+selector+" uses default dark color", `window.near('`+selector+`', 'backgroundColor', '#1d232a')`, "ok")
 		}
 		browser.waitFor("raised bubble keeps color without shadow", `(function(){var a=getComputedStyle(document.querySelector('#fixture-bubble'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow==='none'&&a.borderTopWidth==='0px');})()`, "true")
 		browser.waitFor("raised composer keeps color without shadow", `(function(){var a=getComputedStyle(document.querySelector('#fixture-composer'));return String(window.rgbOf(a.backgroundColor).join()==='43,48,57'&&a.boxShadow==='none');})()`, "true")

@@ -209,20 +209,13 @@ func openVibelyContinuousTheme() Theme {
 	return theme
 }
 
-// The raised variant retains native dark styling with cards drawn in the chat bubble color.
+// The raised variant retains native dark styling with shadowless chat surfaces.
 func openVibelyRaisedTheme() Theme {
 	theme := openVibelyDarkTheme()
 	theme.ID = "openvibely-dark-raised"
 	theme.Name = "OpenVibely Dark Raised"
 	theme.Source = "OpenVibely experimental"
-	theme.SearchText = theme.Name + " dark experimental raised cards"
-	for _, role := range []string{"bg", "sidebarBg", "surface", "surfaceRaised", "inputBg"} {
-		theme.Semantic[role] = "#2B3039"
-	}
-	theme.Preview["bg"] = theme.Semantic["bg"]
-	theme.Preview["sidebar"] = theme.Semantic["sidebarBg"]
-	theme.Preview["surface"] = theme.Semantic["surface"]
-	theme.CSS = themeCSSVars(theme.Semantic, theme.Syntax)
+	theme.SearchText = theme.Name + " dark experimental raised"
 	return theme
 }
 
