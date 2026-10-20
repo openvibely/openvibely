@@ -121,18 +121,8 @@ func TestTaskThreadStatusIndicator_Completed(t *testing.T) {
 		t.Fatalf("render failed: %v", err)
 	}
 
-	body := buf.String()
-	if body == "" {
-		t.Fatal("expected non-empty output for completed task")
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("Task completed")) {
-		t.Error("expected 'Task completed' text in output")
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("text-success")) {
-		t.Error("expected success styling class")
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("5s")) {
-		t.Error("expected duration '5s' in output")
+	if body := buf.String(); body != "" {
+		t.Errorf("expected empty output for completed task, got %q", body)
 	}
 }
 
