@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -89,7 +90,7 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 				for _, outcome := range []string{"below_limit", "success", "failure"} {
 					t.Run(transport+"/"+phase+"/"+media+"/"+outcome, func(t *testing.T) {
 						stores := teststores.New(t).Stores
-						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						ctx, cancel := context.WithTimeout(compactionTestContext(), 30*time.Second)
 						defer cancel()
 						agent := models.LLMConfig{Name: "connected model", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", ContextWindow: 200000}
 						if strings.HasSuffix(transport, "_v2") {
@@ -332,7 +333,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 			for _, compact := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/compact=%t", phase, media, compact), func(t *testing.T) {
 					stores := teststores.New(t).Stores
-					ctx := context.Background()
+					ctx := compactionTestContext()
 					agent := models.LLMConfig{Name: "native Anthropic", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", ContextWindow: 200000, CompactionThreshold: 100000, MaxTokens: 1000}
 					require.NoError(t, stores.LLMConfigs.Create(ctx, &agent))
 					task := &models.Task{ProjectID: "default", Title: "native Anthropic", Category: models.CategoryBacklog, Status: models.StatusCompleted}
@@ -459,7 +460,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 			}
 			for _, mode := range modes {
 				t.Run(string(from)+"/"+string(to)+"/"+mode, func(t *testing.T) {
-					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					ctx, cancel := context.WithTimeout(compactionTestContext(), 30*time.Second)
 					defer cancel()
 					stores := teststores.New(t).Stores
 					task := &models.Task{ProjectID: "default", Title: "switch lifecycle", Category: models.CategoryBacklog, Status: models.StatusCompleted}
@@ -611,7 +612,7 @@ func TestConnectedImageFollowupLifecycle(t *testing.T) {
 					provider = models.ProviderOpenAICompatible
 					model = "fixture"
 				}
-				ctx := context.Background()
+				ctx := compactionTestContext()
 				stores := teststores.New(t).Stores
 				task := &models.Task{ProjectID: "default", Title: "images", Category: models.CategoryBacklog, Status: models.StatusCompleted}
 				require.NoError(t, stores.Tasks.Create(ctx, task))
@@ -707,4 +708,13 @@ func connectedImageAttachment(t *testing.T, dir string) models.Attachment {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	return models.Attachment{FileName: "fixture.png", FilePath: path, MediaType: "image/png", FileSize: info.Size()}
+}
+
+// Keep real retry decisions and attempts, but make their timers ready immediately.
+func compactionTestContext() context.Context {
+	return httpretry.WithRetryTimer(context.Background(), func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time, 1)
+		ready <- time.Time{}
+		return ready
+	})
 }
