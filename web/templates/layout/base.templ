@@ -2816,7 +2816,7 @@ html[data-ov-theme-layer="custom"] #desktop-project-titlebar { box-shadow: inset
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"][aria-selected="true"]::before { border-width: 1px; border-bottom: 0; }
 [data-ov-theme-layer="custom"] .desktop-project-tab[data-selected="true"]::before { background: radial-gradient(circle at 0 0, transparent 9px, var(--project-tab-contour) 9px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
 [data-ov-theme-layer="custom"] .desktop-project-tab[data-selected="true"]::after { background: radial-gradient(circle at 100% 0, transparent 9px, var(--project-tab-contour) 9px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
-[data-ov-theme-layer="custom"] .desktop-project-tab:not([data-selected="true"])::after { background-color: var(--ov-border) !important; }
+[data-ov-theme-layer="custom"] .desktop-project-tab:not([data-selected="true"])::after { background-color: var(--ov-project-tab-divider, var(--ov-border)) !important; }
 [data-ov-theme-layer="custom"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"],
 [data-ov-theme-layer="custom"] .desktop-project-tab [data-close-project]:enabled:hover,
 [data-ov-theme-layer="custom"] #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]),
