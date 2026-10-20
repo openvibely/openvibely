@@ -65,18 +65,29 @@
             }
         });
         return function () {
+            if (!hasVisibleArea(messages)) return false;
             let restored = pinned;
             if (pinned) messages.scrollTop = messages.scrollHeight;
             else if (anchor) {
                 const row = anchor.row.lazy ? (anchor.row.owner._chatVirtualRows?.[anchor.row.index] || anchor.row) : anchor.row;
-                if (element(row).isConnected) {
-                    messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top;
+                if (messages.contains(element(row))) {
+                    const viewportShift = messages.getBoundingClientRect().top - bounds.top;
+                    messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top - viewportShift;
                     restored = true;
                 }
             }
             if (restored) window.acknowledgeChatEarlierLayout?.(messages);
+            return restored;
         };
     }
+    // Capture before hiding a workspace. Async rows can finish while it has no
+    // geometry; restore the same message relative to the viewport after reveal.
+    window.captureChatVirtualScroll = function (messages) {
+        if (!hasVisibleArea(messages)) return null;
+        const list = ensureList(messages);
+        collect(list);
+        return saveAnchor(list);
+    };
     window.preserveChatVirtualScroll = function (node, commit) {
         const list = lists.get(node.closest(messagesSelector));
         const restore = list && !list.bulk && saveAnchor(list);
