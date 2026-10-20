@@ -70,13 +70,12 @@ func TestEnsureAppendsChangesWithoutRewritingHistory(t *testing.T) {
 
 	empty := With(context.Background(), "")
 	got = Ensure(empty, items, read, makeMessage)
-	if len(got) != len(items) {
-		t.Fatalf("empty file list must add nothing: %+v", got)
+	want = []message{items[0], items[1], makeMessage(emptyText), items[2]}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("removing all files must preserve history and add a notice: %+v", got)
 	}
-	for i := range items {
-		if got[i] != items[i] {
-			t.Fatalf("empty file list rewrote history: %+v", got)
-		}
+	if again := Ensure(empty, got, read, makeMessage); !reflect.DeepEqual(again, got) {
+		t.Fatalf("repeated empty notice: %+v", again)
 	}
 	if got := Ensure(empty, []message{{"user", "go"}}, read, makeMessage); len(got) != 1 {
 		t.Fatalf("no files ever attached must add nothing: %+v", got)
@@ -163,10 +162,19 @@ func TestSeedReplayPreservesContextUpdatesAndPosition(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("missing changed list: %+v", got)
 		}
-		for _, empty := range []context.Context{context.Background(), With(ctx, "")} {
-			if got := SeedReplay(empty, followup, replay, read, makeMessage); !reflect.DeepEqual(got, replay) {
-				t.Fatalf("empty source changed replay: %+v", got)
-			}
+		if got := SeedReplay(context.Background(), followup, replay, read, makeMessage); !reflect.DeepEqual(got, replay) {
+			t.Fatalf("missing source changed replay: %+v", got)
+		}
+		empty := With(ctx, "")
+		cleared := SeedReplay(empty, followup, []message{{"user", "next"}}, read, makeMessage)
+		if !reflect.DeepEqual(cleared, []message{makeMessage(emptyText), {"user", "next"}}) {
+			t.Fatalf("empty notice missing from replay: %+v", cleared)
+		}
+		if got := SeedReplay(empty, Ensure(empty, followup, read, makeMessage), replay, read, makeMessage); !reflect.DeepEqual(got, replay) {
+			t.Fatalf("empty notice copied again: %+v", got)
+		}
+		if got := SeedReplay(empty, visible, replay, read, makeMessage); !reflect.DeepEqual(got, replay) {
+			t.Fatalf("notice added without prior file list: %+v", got)
 		}
 	}
 }
