@@ -823,14 +823,14 @@ func TestHandler_ChatMessageWithExec_GeneratesCorrectHTML(t *testing.T) {
 		t.Error("expected data-exec-id attribute in streaming message div")
 	}
 
-	// Should contain SSE connection code
-	if !strings.Contains(body, "EventSource") {
-		t.Error("expected EventSource code for SSE streaming")
+	// Should subscribe through the document-wide transport.
+	if !strings.Contains(body, "window.openVibelyLive.execution") {
+		t.Error("expected shared execution subscription")
 	}
 
-	// Should contain the SSE endpoint path
-	if !strings.Contains(body, "/events/chat/") {
-		t.Error("expected SSE endpoint path in JavaScript")
+	// Per-execution HTTP streaming has been removed.
+	if strings.Contains(body, "/events/chat/") || strings.Contains(body, "new EventSource") {
+		t.Error("obsolete SSE transport in JavaScript")
 	}
 
 	// Should read exec ID from data attribute
@@ -904,67 +904,6 @@ func TestHandler_ChatSend_CreatesTaskWithChatCategory(t *testing.T) {
 		if cat == models.CategoryChat {
 			t.Error("CategoryChat should not be in AllCategories to prevent it from appearing in kanban board")
 		}
-	}
-}
-
-func TestWriteSSEData_SingleLine(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "Hello world")
-
-	body := rec.Body.String()
-	expected := "data: Hello world\n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
-	}
-}
-
-func TestWriteSSEData_MultiLine(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "Line 1\nLine 2\nLine 3")
-
-	body := rec.Body.String()
-	expected := "data: Line 1\ndata: Line 2\ndata: Line 3\n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
-	}
-}
-
-func TestWriteSSEData_EmptyString(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "")
-
-	body := rec.Body.String()
-	expected := "data: \n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
-	}
-}
-
-func TestWriteSSEData_TrailingNewline(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "Content with trailing newline\n")
-
-	body := rec.Body.String()
-	// "Content with trailing newline\n" splits into ["Content with trailing newline", ""]
-	expected := "data: Content with trailing newline\ndata: \n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
 	}
 }
 
@@ -1615,30 +1554,6 @@ func TestHandler_Chat_RendersSendButtonWhenNoActiveTurn(t *testing.T) {
 	assertContains(t, rec, `<path d="M2 3l20 9-20 9 5-9-5-9z"></path>`)
 	assertNotContains(t, rec, `data-tooltip-disabled aria-label="Stop response"`)
 	assertNotContains(t, rec, `/chat/stop`)
-}
-
-func TestHandler_ChatStreamSSE_EmitsDoneForCancelledExecution(t *testing.T) {
-	h, e, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Cancelled SSE Project")
-	task := createTask(t, h, project.ID, "Cancelled Chat SSE", func(tk *models.Task) {
-		tk.Category = models.CategoryChat
-		tk.Status = models.StatusCancelled
-		tk.AgentID = &agent.ID
-	})
-	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecCancelled
-		ex.PromptSent = "stopped chat"
-	})
-	require.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, "partial output"))
-
-	req := httptest.NewRequest(http.MethodGet, "/events/chat/"+exec.ID, nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "event: done")
-	assertContains(t, rec, "data: cancelled")
 }
 
 func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
@@ -4723,7 +4638,7 @@ func TestHandler_Chat_PlanCompletionPrompt_MultiTurnRegression(t *testing.T) {
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
-	// Verify that per-exec stream error/onerror handlers (in ChatBubbleStreaming)
+	// Verify that per-execution terminal error handlers (in ChatBubbleStreaming)
 	// clear _chatStreamInProgress and re-evaluate the plan prompt. Without this,
 	// the flag stays stuck true after a streaming failure and blocks prompt evaluation.
 	h, e, llmConfigRepo := setupTestHandler(t)
@@ -4762,7 +4677,7 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	// The handler body with isThread branch can be ~1200 chars.
 	errIdx := strings.Index(body, "eventSource.addEventListener('error'")
 	require.NotEqual(t, -1, errIdx, "streaming bubble must have error event listener")
-	errEndOffset := strings.Index(body[errIdx:], "eventSource.onerror")
+	errEndOffset := strings.Index(body[errIdx:], "connectExecutionStream();")
 	require.Greater(t, errEndOffset, 0, "streaming bubble error handler boundary must exist")
 	errBody := body[errIdx : errIdx+errEndOffset]
 
@@ -4778,21 +4693,8 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	assert.Contains(t, errBody, "evaluatePlanCompletionPrompt",
 		"streaming bubble error handler must re-evaluate plan prompt for chat context")
 
-	// onerror handler too
-	oeIdx := strings.Index(body, "eventSource.onerror")
-	require.NotEqual(t, -1, oeIdx, "streaming bubble must have onerror handler")
-	oeEnd := oeIdx + 2000
-	if oeEnd > len(body) {
-		oeEnd = len(body)
-	}
-	oeBody := body[oeIdx:oeEnd]
+	assert.NotContains(t, body, "eventSource.onerror", "connection recovery must not clear execution streaming state")
 
-	assert.Contains(t, oeBody, "scheduleExecutionStreamRetry()",
-		"streaming bubble onerror must reconnect before failing empty streams")
-	assert.Contains(t, oeBody, "_chatStreamInProgress = false",
-		"streaming bubble onerror must clear _chatStreamInProgress for chat context")
-	assert.Contains(t, oeBody, "evaluatePlanCompletionPrompt",
-		"streaming bubble onerror must re-evaluate plan prompt for chat context")
 }
 
 func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
@@ -5495,7 +5397,7 @@ func createRunningChatStreamExecution(t *testing.T, tc *TestContext, output stri
 func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.ExecutionStatus, taskStatus models.TaskStatus, output, errMsg string) *models.Execution {
 	t.Helper()
 	ctx := context.Background()
-	task := &models.Task{ProjectID: "default", Title: "SSE task", Prompt: "stream", Category: models.CategoryChat, Status: taskStatus}
+	task := &models.Task{ProjectID: "default", Title: fmt.Sprintf("Stream %d", time.Now().UnixNano()), Prompt: "stream", Category: models.CategoryChat, Status: taskStatus}
 	require.NoError(t, tc.taskRepo.Create(ctx, task))
 	agent, err := tc.llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
@@ -5515,73 +5417,6 @@ func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.
 	return updated
 }
 
-type synchronizedResponseRecorder struct {
-	*httptest.ResponseRecorder
-	mu sync.RWMutex
-}
-
-func newSynchronizedResponseRecorder() *synchronizedResponseRecorder {
-	return &synchronizedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
-}
-
-func (r *synchronizedResponseRecorder) Write(data []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ResponseRecorder.Write(data)
-}
-
-func (r *synchronizedResponseRecorder) WriteHeader(statusCode int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ResponseRecorder.WriteHeader(statusCode)
-}
-
-func (r *synchronizedResponseRecorder) Flush() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ResponseRecorder.Flush()
-}
-
-func (r *synchronizedResponseRecorder) BodyString() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.Body.String()
-}
-
-func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*synchronizedResponseRecorder, context.CancelFunc, chan error) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	path := "/events/chat/" + execID
-	if rawQuery != "" {
-		path += "?" + rawQuery
-	}
-	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
-	rec := newSynchronizedResponseRecorder()
-	e := echo.New()
-	c := e.NewContext(req, rec)
-	c.SetParamNames("exec_id")
-	c.SetParamValues(execID)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- h.ChatStreamSSE(c)
-	}()
-	return rec, cancel, errCh
-}
-
-func waitForSSEBody(t *testing.T, rec *synchronizedResponseRecorder, want string) string {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		body := rec.BodyString()
-		if strings.Contains(body, want) {
-			return body
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.BodyString())
-	return ""
-}
-
 func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStreamHub, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -5592,153 +5427,4 @@ func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStream
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %d execution stream subscribers; got %d", want, hub.SubscriberCount())
-}
-
-func stopChatStreamSSETest(t *testing.T, cancel context.CancelFunc, errCh <-chan error) {
-	t.Helper()
-	cancel()
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for ChatStreamSSE to stop")
-	}
-}
-
-func TestChatStreamSSE_StreamsHubDeltaBeforeDBUpdate(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-	exec := createRunningChatStreamExecution(t, tc, "")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "")
-	defer stopChatStreamSSETest(t, cancel, errCh)
-	waitForExecutionStreamSubscribers(t, hub, 1)
-
-	hub.Publish(events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamDelta, Delta: "instant", Offset: len("instant")})
-	body := waitForSSEBody(t, rec, "data: instant")
-	assert.Contains(t, body, "data: instant\n\n")
-
-	persisted, err := tc.execRepo.GetByID(context.Background(), exec.ID)
-	require.NoError(t, err)
-	require.NotNil(t, persisted)
-	assert.Empty(t, persisted.Output, "live hub delta should not depend on a DB output update")
-}
-
-func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, "missing-exec", "")
-	defer cancel()
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("missing execution stream did not return")
-	}
-	assert.Contains(t, rec.BodyString(), "event: error\ndata: execution not found\n\n")
-	assert.Equal(t, 0, hub.SubscriberCount())
-}
-
-func TestChatStreamSSE_DBFallbackHonorsOffsetAndClampsMidRune(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	exec := createRunningChatStreamExecution(t, tc, "héllo")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=2")
-	defer stopChatStreamSSETest(t, cancel, errCh)
-
-	body := waitForSSEBody(t, rec, "data: éllo")
-	assert.Contains(t, body, "data: éllo\n\n")
-	assert.NotContains(t, body, "\ufffd")
-}
-
-func TestChatStreamSSE_ReplaysTerminalOutputBeforeTerminalEvent(t *testing.T) {
-	cases := []struct {
-		name          string
-		execStatus    models.ExecutionStatus
-		taskStatus    models.TaskStatus
-		errMsg        string
-		terminalEvent string
-	}{
-		{name: "completed", execStatus: models.ExecCompleted, taskStatus: models.StatusCompleted, terminalEvent: "event: done\ndata: completed\n\n"},
-		{name: "failed", execStatus: models.ExecFailed, taskStatus: models.StatusFailed, errMsg: "db failure", terminalEvent: "event: error\ndata: db failure\n\n"},
-		{name: "cancelled", execStatus: models.ExecCancelled, taskStatus: models.StatusCancelled, errMsg: "cancelled", terminalEvent: "event: done\ndata: cancelled\n\n"},
-	}
-	for _, tcse := range cases {
-		t.Run(tcse.name, func(t *testing.T) {
-			tc := NewStoreTestContext(t)
-			hub := events.NewExecutionStreamHub()
-			tc.handler.SetExecutionStreamHub(hub)
-			exec := createChatStreamExecution(t, tc, tcse.execStatus, tcse.taskStatus, "héllo final", tcse.errMsg)
-
-			rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=2")
-			defer cancel()
-
-			body := waitForSSEBody(t, rec, tcse.terminalEvent)
-			missingOutput := "data: éllo final\n\n"
-			outputIndex := strings.Index(body, missingOutput)
-			terminalIndex := strings.Index(body, tcse.terminalEvent)
-			require.NotEqual(t, -1, outputIndex, "body=%q", body)
-			require.NotEqual(t, -1, terminalIndex, "body=%q", body)
-			assert.Less(t, outputIndex, terminalIndex, "missing DB output should be replayed before terminal event")
-			assert.NotContains(t, body, "�")
-			select {
-			case err := <-errCh:
-				require.NoError(t, err)
-			case <-time.After(2 * time.Second):
-				t.Fatal("terminal stream did not return")
-			}
-		})
-	}
-}
-
-func TestChatStreamSSE_HubErrorReplaysDBOutputBeforeExactHubError(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-	exec := createRunningChatStreamExecution(t, tc, "hello durable tail")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=6")
-	defer cancel()
-	waitForExecutionStreamSubscribers(t, hub, 1)
-
-	hub.Close(exec.ID, events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamError, Error: "hub exact failure"})
-	body := waitForSSEBody(t, rec, "data: hub exact failure")
-	missingOutput := "data: durable tail\n\n"
-	terminalEvent := "event: error\ndata: hub exact failure\n\n"
-	outputIndex := strings.Index(body, missingOutput)
-	terminalIndex := strings.Index(body, terminalEvent)
-	require.NotEqual(t, -1, outputIndex, "body=%q", body)
-	require.NotEqual(t, -1, terminalIndex, "body=%q", body)
-	assert.Less(t, outputIndex, terminalIndex, "missing DB output should be replayed before hub error")
-	assert.NotContains(t, body, "event: error\ndata: \n\n")
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("terminal error stream did not return")
-	}
-}
-
-func TestChatStreamSSE_TerminalErrorFramesMultilineData(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-	exec := createRunningChatStreamExecution(t, tc, "")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "")
-	defer cancel()
-	waitForExecutionStreamSubscribers(t, hub, 1)
-
-	hub.Close(exec.ID, events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamError, Error: "line one\nline two"})
-	body := waitForSSEBody(t, rec, "data: line two")
-	assert.Contains(t, body, "event: error\ndata: line one\ndata: line two\n\n")
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("terminal error stream did not return")
-	}
 }
