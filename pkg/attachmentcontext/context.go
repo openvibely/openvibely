@@ -44,27 +44,54 @@ func isContext(role, content string) bool {
 	return role == "user" && strings.HasPrefix(content, Marker+"\n")
 }
 
-// Ensure appends the current attachment list only when it differs from the
-// latest one in items. Earlier lists stay in place so already-sent history is
-// never rewritten. The new list goes before the trailing user request (never
-// between a tool call and its results). Without a configured context the items
-// are returned unchanged. An empty file list also leaves history unchanged.
-func Ensure[T any](ctx context.Context, items []T, read func(T) (string, string), makeMessage func(string) T) []T {
+// updateText returns an update only when the latest retained list differs.
+func updateText[T any](ctx context.Context, items []T, read func(T) (string, string)) string {
 	if ctx == nil || ctx.Value(key{}) == nil {
-		return items
+		return ""
 	}
 	text := Text(ctx)
 	if text == "" {
-		return items
+		return ""
 	}
-	latest := ""
 	for i := len(items) - 1; i >= 0; i-- {
 		if role, content := read(items[i]); isContext(role, content) {
-			latest = content
+			if content == text {
+				return ""
+			}
 			break
 		}
 	}
-	if latest == text {
+	return text
+}
+
+// SeedReplay saves a newly injected file list in this turn's durable replay.
+// visible must be the assembled conversation before Ensure. Lists already in
+// earlier history are not copied into each turn. Placement matches Ensure.
+func SeedReplay[T, R any](ctx context.Context, visible []T, replay []R, read func(T) (string, string), makeMessage func(string) R) []R {
+	text := updateText(ctx, visible, read)
+	if text == "" {
+		return replay
+	}
+	at := len(replay)
+	if len(visible) > 0 && at > 0 {
+		role, content := read(visible[len(visible)-1])
+		if role == "user" && content != "" && !isContext(role, content) {
+			at--
+		}
+	}
+	out := append([]R(nil), replay[:at]...)
+	out = append(out, makeMessage(text))
+	return append(out, replay[at:]...)
+}
+
+// Ensure appends the current attachment list only when it differs from the
+// latest one in items. Earlier lists stay in place so already-sent history is
+// never rewritten. The new list goes before the trailing user request (never
+// between a tool call and its results). Without a configured context or with an
+// empty file list, history is unchanged.
+func Ensure[T any](ctx context.Context, items []T, read func(T) (string, string), makeMessage func(string) T) []T {
+	text := updateText(ctx, items, read)
+	if text == "" {
 		return items
 	}
 	at := len(items)
