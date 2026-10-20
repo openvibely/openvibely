@@ -102,6 +102,12 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							}
 							if restarted {
 								restartCalls++
+								if strings.Contains(text, "OLDER_ANSWER") {
+									t.Error("reload brought back history already covered by summary")
+								}
+								if !strings.Contains(text, "FINAL_739") {
+									t.Error("reload lost the post-compaction answer")
+								}
 								if retainsAttachment && !strings.Contains(text, "image/png") {
 									t.Error("reload lost attached image")
 								}
@@ -356,6 +362,10 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 							require.NoError(t, checkpointErr)
 							require.NotNil(t, checkpoint)
+							if !strings.HasPrefix(phase, "preturn") {
+								require.Equal(t, exec.ID, checkpoint.SourceExecutionID, "in-turn summary must cover the active execution")
+								require.Equal(t, "local_summary_inflight", checkpoint.Strategy)
+							}
 							history, historyErr := stores.Executions.ListByTaskChronological(ctx, task.ID)
 							require.NoError(t, historyErr)
 							next := models.Execution{TaskID: task.ID, AgentConfigID: req.Agent.ID, Status: models.ExecRunning, PromptSent: "NEXT_FOLLOWUP_739"}

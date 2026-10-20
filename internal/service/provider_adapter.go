@@ -1216,6 +1216,17 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	}
 	if len(checkpoint.History) > 0 || strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
 		restored.ChatHistory = mergeCheckpointHistory(req.ChatHistory, checkpoint.History, checkpoint.SourceExecutionID)
+		if checkpoint.Strategy == "local_summary_inflight" {
+			for i, execution := range req.ChatHistory {
+				if execution.ID == checkpoint.SourceExecutionID {
+					// Responses snapshots above contain the complete replacement
+					// history. Other providers save only the continuation after
+					// recovery, which must follow the saved summary.
+					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), req.ChatHistory[i:]...)
+					break
+				}
+			}
+		}
 	}
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON

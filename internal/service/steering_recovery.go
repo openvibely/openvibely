@@ -201,6 +201,11 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 		execution.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}
 		history = append(history, execution)
 	}
+	// Recovery contains the conversation through the active execution. Record
+	// that boundary so restoration does not append the covered executions again.
+	if len(history) > 0 {
+		history[len(history)-1].ID = req.ExecID
+	}
 	state.mu.Lock()
 	state.providerHistory = history
 	state.mu.Unlock()
