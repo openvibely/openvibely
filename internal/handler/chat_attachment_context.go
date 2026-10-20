@@ -35,10 +35,10 @@ func (h *Handler) prepareChatAttachmentContext(ctx context.Context, params *stre
 	if task := h.taskThreadForAttachments(ctx, params); task != nil {
 		return h.prepareTaskThreadAttachmentContext(ctx, params, *task, files)
 	}
-	if h.chatAttachmentRepo == nil || params.TaskID == "" {
+	if h.chatAttachmentRepo == nil || params.ProjectID == "" {
 		return files, nil
 	}
-	attachments, err := h.chatAttachmentRepo.ListByTask(ctx, params.TaskID)
+	attachments, err := h.chatAttachmentRepo.ListByProject(ctx, params.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("load conversation attachments: %w", err)
 	}
