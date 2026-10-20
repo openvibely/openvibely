@@ -23,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -434,6 +435,21 @@ func TestSlackService_SocketEventAuthorizationFailureRedelivery(t *testing.T) {
 func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery(t *testing.T) {
 	svc, db, taskRepo, _, _, receiptRepo, projectID := newSlackSocketIngressTestService(t)
 	svc.SetUploadsDir(t.TempDir())
+	loads := 0
+	source := attachmentcontext.NewSource(func(ctx context.Context) (string, error) {
+		loads++
+		files, err := db.ChatAttachments.ListByProject(ctx, projectID)
+		if err != nil {
+			return "", err
+		}
+		var refs []string
+		for _, file := range files {
+			refs = append(refs, file.FileName)
+		}
+		return strings.Join(refs, "\n"), nil
+	}, attachmentcontext.ChatProjectKey(projectID))
+	require.NoError(t, source.Load(context.Background()))
+	require.Empty(t, source.References(context.Background()))
 	acks := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
 	downloads := 0
@@ -467,6 +483,9 @@ func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery
 	require.Len(t, downloadedPaths, 1)
 	require.NoFileExists(t, downloadedPaths[0], "failed atomic handoff must remove the published attachment")
 
+	require.Empty(t, source.References(context.Background()))
+	require.Equal(t, 1, loads, "failed handoff must not invalidate the source")
+
 	chatAttachmentRepo := db.ChatAttachments
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.handleSocketEvent(context.Background(), nil, event)
@@ -482,6 +501,12 @@ func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery
 	require.NoError(t, err)
 	require.Len(t, attachments, 1)
 	require.FileExists(t, attachments[0].FilePath)
+	require.Contains(t, source.References(context.Background()), "evidence.txt")
+	require.Equal(t, 2, loads, "successful handoff must refresh the existing source")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 2, downloads, "duplicate events must not download again")
+	require.Contains(t, source.References(context.Background()), "evidence.txt")
+	require.Equal(t, 2, loads, "duplicate events must not invalidate the source")
 }
 
 func TestSlackService_SocketEventRepeatedAttachmentDownloadFailureRedelivery(t *testing.T) {
