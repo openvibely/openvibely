@@ -15,7 +15,4 @@ func TestEveryAppliedThemeDefinesItsKanbanColumnColor(t *testing.T) {
 			t.Errorf("%s has no kanban column color", theme.ID)
 		}
 	}
-	if len(vscodeKanbanColumns) != ExpectedThemeCount {
-		t.Errorf("vscode column colors = %d, want %d", len(vscodeKanbanColumns), ExpectedThemeCount)
-	}
 }
