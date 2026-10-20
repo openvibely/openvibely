@@ -20,18 +20,25 @@ import (
 // Loading older history leaves the latest execution offscreen. A fast warm
 // response must not preserve its serialized placeholders before hydration finishes.
 func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
-	testTaskPagedCachedNavigation(t, false, false)
+	testTaskPagedCachedNavigation(t, "cache")
 }
 
 func TestTaskBoundedCachedHistoryInChrome(t *testing.T) {
-	testTaskPagedCachedNavigation(t, true, false)
+	testTaskPagedCachedNavigation(t, "bounded")
 }
 
 func TestTaskPagedScrollStabilityInChrome(t *testing.T) {
-	testTaskPagedCachedNavigation(t, false, true)
+	testTaskPagedCachedNavigation(t, "scroll")
 }
 
-func testTaskPagedCachedNavigation(t *testing.T, bounded, scrollStability bool) {
+func TestTaskHiddenPagedScrollStabilityInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, "hidden")
+}
+
+func testTaskPagedCachedNavigation(t *testing.T, mode string) {
+	bounded := mode == "bounded"
+	hiddenPaging := mode == "hidden"
+	scrollStability := mode == "scroll" || hiddenPaging
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -79,7 +86,7 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded, scrollStability bool) 
 	path := "/tasks/" + task.ID
 	runner := fmt.Sprintf(`<script>
  window.addEventListener('DOMContentLoaded',()=>{
- const bounded=%t, scrollStability=%t;
+ const bounded=%t, scrollStability=%t, hiddenPaging=%t;
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
  const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
@@ -98,10 +105,19 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded, scrollStability bool) 
     const anchor=m.querySelector(':scope > [data-execution-pair]'), before=anchor.getBoundingClientRect().top;
     const count=m.querySelectorAll(':scope > [data-execution-pair]').length;
     let recording=true,maxShift=0;const trace=[];
-    const sample=()=>{if(!recording)return;const top=anchor.getBoundingClientRect().top;maxShift=Math.max(maxShift,Math.abs(top-before));trace.push({top,scroll:m.scrollTop,restoring:m.dataset.earlierAnchorRestoring,guard:!!m._earlierAnchor});requestAnimationFrame(sample)};
+    const sample=()=>{if(!recording)return;if(!m.clientHeight){requestAnimationFrame(sample);return;}const top=anchor.getBoundingClientRect().top;maxShift=Math.max(maxShift,Math.abs(top-before));trace.push({top,scroll:m.scrollTop,restoring:m.dataset.earlierAnchorRestoring,guard:!!m._earlierAnchor});requestAnimationFrame(sample)};
     requestAnimationFrame(sample);
     m.dispatchEvent(new WheelEvent('wheel',{deltaY:-200,bubbles:true}));
+    if(hiddenPaging){
+     await until(()=>m.dataset.earlierRequestLoading==='true','request started');
+     window.taskWorkspace.openChanges();
+    }
     await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>count,'page appended');
+    if(hiddenPaging){
+     await wait(200);
+     if(!m._earlierAnchor)throw Error('Paging anchor discarded while Chat hidden');
+     window.taskWorkspace.openThread();
+    }
     await until(()=>m.dataset.earlierAnchorRestoring!=='true','page hydration');await paint();await wait(100);recording=false;
     if(maxShift>3)throw Error('Page '+page+' moved visible content by '+maxShift+'px from '+before+' '+JSON.stringify(trace)+' '+debug());
     if(!visible())throw Error('Page '+page+' left empty viewport');
@@ -143,7 +159,7 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded, scrollStability bool) 
   }
   await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
- });</script>`, bounded, scrollStability, "/tasks/"+other.ID, other.ID, path, task.ID)
+ });</script>`, bounded, scrollStability, hiddenPaging, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -160,6 +176,9 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded, scrollStability bool) 
 		if strings.HasPrefix(r.URL.Path, "/events") {
 			w.WriteHeader(204)
 			return
+		}
+		if hiddenPaging && r.URL.Query().Get("before") != "" {
+			time.Sleep(150 * time.Millisecond)
 		}
 		if bounded && r.URL.Path == path && r.Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
 			time.Sleep(200 * time.Millisecond)
