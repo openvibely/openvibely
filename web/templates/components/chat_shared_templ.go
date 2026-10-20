@@ -2318,7 +2318,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "\" class=\"chat-execution-pair space-y-6\" data-execution-pair=\"true\" data-exec-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 137, "\" class=\"chat-execution-pair space-y-4\" data-execution-pair=\"true\" data-exec-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2396,7 +2396,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "\" class=\"chat-execution-pair space-y-6\" data-execution-pair=\"true\" data-exec-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "\" class=\"chat-execution-pair space-y-4\" data-execution-pair=\"true\" data-exec-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2500,7 +2500,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "\" class=\"chat-execution-pair space-y-6\" data-execution-pair=\"true\" data-exec-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, "\" class=\"chat-execution-pair space-y-4\" data-execution-pair=\"true\" data-exec-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2602,7 +2602,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "\" class=\"chat-execution-pair space-y-6\" data-execution-pair=\"true\" data-exec-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "\" class=\"chat-execution-pair space-y-4\" data-execution-pair=\"true\" data-exec-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
