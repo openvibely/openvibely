@@ -324,6 +324,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
+		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
@@ -381,6 +382,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
+		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
@@ -442,25 +444,26 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
-		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
-		Model:               strings.TrimSpace(req.Agent.Model),
-		ContextWindow:       contextWindow,
-		MaxOutputTokens:     maxOutput,
-		Temperature:         compatibleTemperature(req.Agent),
-		System:              systemPrompt,
-		WorkDir:             effectiveWorkDir(workDir),
-		DisableTools:        disableTools,
-		SkipDefaultTools:    chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		Attachments:         attachments,
-		ExtraTools:          runtimeTools(ctx),
-		ExtraHeaders:        extraHeaders,
-		FinalizeRequest:     finalizeRequest,
-		ExtraBody:           extraBody,
-		ToolExecutor:        toolExecutor(ctx, workDir),
-		ToolFilter:          toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		OnText:              streamText(sw),
-		OnToolUse:           streamToolUse(sw),
-		OnToolResult:        streamToolResult(sw),
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		ContinueFromHistory:    llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:                  strings.TrimSpace(req.Agent.Model),
+		ContextWindow:          contextWindow,
+		MaxOutputTokens:        maxOutput,
+		Temperature:            compatibleTemperature(req.Agent),
+		System:                 systemPrompt,
+		WorkDir:                effectiveWorkDir(workDir),
+		DisableTools:           disableTools,
+		SkipDefaultTools:       chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		Attachments:            attachments,
+		ExtraTools:             runtimeTools(ctx),
+		ExtraHeaders:           extraHeaders,
+		FinalizeRequest:        finalizeRequest,
+		ExtraBody:              extraBody,
+		ToolExecutor:           toolExecutor(ctx, workDir),
+		ToolFilter:             toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		OnText:                 streamText(sw),
+		OnToolUse:              streamToolUse(sw),
+		OnToolResult:           streamToolResult(sw),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
