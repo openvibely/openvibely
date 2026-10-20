@@ -425,6 +425,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
+							if (status !== 'failed' && status !== 'cancelled') return;
 							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 						var wrap = document.createElement('div');
 						wrap.id = 'task-thread-terminal-status';
@@ -956,7 +957,8 @@ templ ChatStreamingResumeInitScript() {
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
-						if (!messages || document.getElementById('task-thread-terminal-status')) return;
+						if (status !== 'failed' && status !== 'cancelled') return;
+							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 					var wrap = document.createElement('div');
 					wrap.id = 'task-thread-terminal-status';
 					wrap.className = 'flex items-center justify-center gap-2 py-2';

@@ -1393,7 +1393,7 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 		wantTexts  []string
 		wantAbsent []string
 	}{
-		{"completed_shows_success", models.StatusCompleted, models.CategoryCompleted, models.ExecCompleted, "Done!", "", true, []string{"Task completed", "text-success"}, nil},
+		{"completed_no_indicator", models.StatusCompleted, models.CategoryCompleted, models.ExecCompleted, "Done!", "", true, nil, []string{"Task completed"}},
 		{"failed_shows_error", models.StatusFailed, models.CategoryCompleted, models.ExecFailed, strings.Repeat("partial generated output\n", 80), "something went wrong", true, []string{"Task failed", "text-error"}, nil},
 		{"running_no_indicator", models.StatusRunning, models.CategoryActive, models.ExecRunning, "", "", false, nil, []string{"Task completed", "Task failed"}},
 	}
