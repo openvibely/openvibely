@@ -87,11 +87,11 @@ func NewChatBroadcaster() *ChatBroadcaster {
 
 // NewChatBroadcasterWithLimit sets the subscriber budget. Nonpositive values use the default.
 func NewChatBroadcasterWithLimit(limit int) *ChatBroadcaster {
-	core := newBroadcaster[ChatEvent, ChatSubscriber](10)
+	b := &ChatBroadcaster{core: newBroadcaster[ChatEvent, ChatSubscriber](10)}
 	if limit > 0 {
-		core.maxSubscribers = limit
+		b.core.maxSubscribers = limit
 	}
-	return &ChatBroadcaster{core: core}
+	return b
 }
 
 // Subscribe adds a new subscriber and returns a channel for receiving events.
