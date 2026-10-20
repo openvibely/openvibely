@@ -960,24 +960,9 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 
 `
 			w.WriteHeader(http.StatusNoContent)
-		case "/events/live":
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			flusher, ok := w.(http.Flusher)
-			if !ok {
-				t.Fatal("test response writer does not support SSE flushing")
-			}
-			w.WriteHeader(http.StatusOK)
-			flusher.Flush()
-			for {
-				select {
-				case event := <-liveEvents:
-					_, _ = w.Write([]byte(event))
-					flusher.Flush()
-				case <-r.Context().Done():
-					return
-				}
-			}
+        case "/events/ws":
+            serveBrowserLiveFixture(w,r,liveEvents)
+
 		case "/tasks":
 			var out bytes.Buffer
 			if r.Header.Get("HX-Request") != "" {

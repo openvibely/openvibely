@@ -316,8 +316,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if (!chatRoot) return;
 				var projectId = chatRoot.getAttribute('data-project-id');
 
-				// Track /events/chat/:exec_id EventSources so reconnect swaps/navigation
-				// cannot leak stale streams and consume browser connection slots.
+				// Track execution subscription handles so reconnect swaps/navigation
+				// release stale views without closing the shared WebSocket.
 				window._chatEventSources = window._chatEventSources || [];
 				window._chatEventSourceByExec = window._chatEventSourceByExec || {};
 				window.registerChatStreamEventSource = function(execId, eventSource) {
@@ -1007,7 +1007,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var streamOffset = utf8ByteLength(textBuffer);
 							contentDiv._sseConnected = true;
 							contentDiv.setAttribute('data-initial-byte-length', String(streamOffset));
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							eventSource = window.openVibelyLive.execution(execId, streamOffset);
+							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 							if (window.registerChatStreamEventSource) {
 								window.registerChatStreamEventSource(execId, eventSource);
 							}
@@ -1124,23 +1125,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 							});
 
-							eventSource.onerror = function() {
-								eventSource.close();
-								if (window.unregisterChatStreamEventSource) {
-									window.unregisterChatStreamEventSource(execId, eventSource);
-								}
-								if (textBuffer === '' && streamRetryCount < 5) {
-									streamRetryCount++;
-									setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
-									return;
-								}
-								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-								thinking.classList.add('hidden');
-						dots.classList.add('hidden');
-						contentDiv.classList.remove('hidden');
-						window._chatStreamInProgress = false;
-						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-					};
+
 					}
 					connectChatExecutionStream();
 

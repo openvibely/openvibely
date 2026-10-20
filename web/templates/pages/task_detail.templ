@@ -1932,7 +1932,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						if (!taskId || data.task_id !== taskId) return;
 						if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') {
 							// TaskThreadLiveEventsScript owns these events. It appends the
-							// authoritative execution fragment and attaches /events/chat/:exec_id
+							// authoritative execution fragment and attaches an execution subscription
 							// without replacing #thread-content or closing the fresh stream.
 							return;
 						}

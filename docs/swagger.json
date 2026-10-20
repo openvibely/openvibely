@@ -1275,28 +1275,6 @@
                 }
             }
         },
-        "/api/system/update/events": {
-            "get": {
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "system"
-                ],
-                "summary": "Stream system update events",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "204": {
-                        "description": "No Content"
-                    }
-                }
-            }
-        },
         "/api/tasks/reference-catalog": {
             "get": {
                 "description": "Returns the complete compact task projection used to resolve terminal task references. Chat, non-visible scheduled, and nested swarm-child tasks are omitted because they are not top-level Kanban cards.",

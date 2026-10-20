@@ -2,8 +2,6 @@ package pages
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,30 +26,17 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 		if static.ServeAsset(w, r) {
 			return
 		}
-		if r.URL.Path == "/events/live" {
-			w.Header().Set("Content-Type", "text/event-stream")
-			io.WriteString(w, ": connected\n\n")
-			w.(http.Flusher).Flush()
-			for {
-				select {
-				case <-r.Context().Done():
-					return
-				case data := <-liveEvents:
-					if data == "disconnect-and-publish" {
-						missedPublication.Store(true)
-						return
-					}
-					var event struct {
-						Type string `json:"type"`
-					}
-					if json.Unmarshal([]byte(data), &event) != nil {
-						return
-					}
-					fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data)
-					w.(http.Flusher).Flush()
+		if r.URL.Path == "/events/ws" {
+			serveBrowserLiveFixture(w, r, liveEvents, func(text string) bool {
+				if text == "disconnect-and-publish" {
+					missedPublication.Store(true)
+					return true
 				}
-			}
+				return false
+			})
+			return
 		}
+
 		if r.URL.Path == "/emit" {
 			data, _ := io.ReadAll(r.Body)
 			liveEvents <- string(data)

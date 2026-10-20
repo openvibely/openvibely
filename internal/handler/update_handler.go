@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -60,33 +59,4 @@ func (h *Handler) CancelSystemUpdate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, err.Error())
 	}
 	return c.JSON(http.StatusOK, h.updateCoordinator.Snapshot())
-}
-
-// SystemUpdateEvents streams update progress states.
-// @Summary Stream system update events
-// @Tags system
-// @Produce text/event-stream
-// @Success 200 {string} string
-// @Success 204
-// @Router /api/system/update/events [get]
-func (h *Handler) SystemUpdateEvents(c echo.Context) error {
-	if h.updateCoordinator == nil || !h.updateCoordinator.Visible() {
-		return c.NoContent(http.StatusNoContent)
-	}
-	c.Response().Header().Set(echo.HeaderContentType, "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-store")
-	c.Response().WriteHeader(http.StatusOK)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.Request().Context().Done():
-			return nil
-		case <-ticker.C:
-			if _, err := fmt.Fprintf(c.Response(), "event: update\ndata: %q\n\n", h.updateCoordinator.Snapshot().State); err != nil {
-				return nil
-			}
-			c.Response().Flush()
-		}
-	}
 }
