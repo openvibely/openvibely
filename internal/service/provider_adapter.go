@@ -1222,7 +1222,13 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 					// Responses snapshots above contain the complete replacement
 					// history. Other providers save only the continuation after
 					// recovery, which must follow the saved summary.
-					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), req.ChatHistory[i:]...)
+					start := i
+					if len(execution.ReplayMessages) == 1 && strings.TrimSpace(execution.ReplayMessages[0].TranscriptJSON) == "[]" {
+						// Explicitly empty continuation: do not fall back to the
+						// execution's original prompt/output, already summarized.
+						start++
+					}
+					restored.ChatHistory = append(append([]models.Execution(nil), checkpoint.History...), req.ChatHistory[start:]...)
 					break
 				}
 			}
