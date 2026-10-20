@@ -6,7 +6,7 @@ The server response remains authoritative. Cached task navigation requests an em
 
 Visible message HTML and tool-control event handlers are rebuilt from cached data. Matching source reuses cached row descriptions; changed source is projected again. Only a rendered revision held on a live DOM node can skip hydration; serialized revision attributes alone cannot.
 
-Cached Chat previews do not advance the authoritative input revision, so their pending refresh can still commit the destination URL. Sidebar same-page checks use the displayed route while that refresh is pending; cancelled duplicate clicks do not abort the active navigation.
+Cached Chat previews do not advance the authoritative input revision, so their pending refresh can still commit the destination URL. If a live question update supersedes that refresh, navigation commits without replacing the newer Chat state; ordinary stale transcript updates remain rejected. Sidebar same-page checks use the displayed route while that refresh is pending; cancelled duplicate clicks do not abort the active navigation.
 
 While a preview is visible, an inert template retains the outgoing history element until HTMX commits navigation. This prevents saving the destination under the previous URL, including when a warm navigation is aborted by another navigation. Browser back/forward remains owned by HTMX.
 
