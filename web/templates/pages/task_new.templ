@@ -299,8 +299,8 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
 }
 
 templ NewTaskAdvancedOptions() {
-<div class="card bg-base-200/50 border border-base-300 mt-3">
-									<div class="card-body p-3 space-y-3">
+<div class="mt-3">
+									<div class="space-y-3">
 										<label class="label cursor-pointer justify-start gap-2 p-0">
 											<input type="checkbox" name="swarm_mode" id="create-task-swarm-mode-toggle" onchange="document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)" class="toggle toggle-sm toggle-primary"/>
 											<span class="label-text font-medium">Swarm mode</span>

@@ -81,7 +81,7 @@
                 const chosen = selection().has(card.dataset.taskId);
                 card.classList.toggle('task-selected', chosen);
                 const label = card.querySelector('[data-kanban-checkbox]');
-                if (label) { label.classList.toggle('hidden', !selected.length); label.querySelector('input').checked = chosen; }
+                if (label) { label.classList.toggle('hidden', !chosen); label.querySelector('input').checked = chosen; }
             });
             col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; button.disabled = !visible.length; });
             const noResults = col.querySelector('[data-kanban-no-results]');

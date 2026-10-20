@@ -1,11 +1,13 @@
 package pages
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -48,7 +50,9 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 			component = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
 		case r.URL.Path == "/tasks/a" || r.URL.Path == "/tasks/b" || r.URL.Path == "/tasks/c":
 			task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
-			if r.Header.Get("HX-Request") == "true" {
+			if r.Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+				component = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil, components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30))
+			} else if r.Header.Get("HX-Request") == "true" {
 				component = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil)
 			} else {
 				component = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil)
@@ -57,7 +61,8 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if err := component.Render(r.Context(), w); err != nil {
+		// Superseded navigations are aborted by the browser mid-response.
+		if err := component.Render(r.Context(), w); err != nil && r.Context().Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
 			t.Error(err)
 		}
 	}))
@@ -154,7 +159,8 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("KeyL", `Object.assign({shiftKey:true},`+command+`)`)
-		b.waitFor("last task toggles back", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+		// A cached preview shows task b before the server response replaces it; the menu must open on the committed page.
+		b.waitFor("last task toggles back", `document.getElementById('task-detail-content').dataset.taskId+':'+!document.querySelector('template[hx-history-elt]')`, "b:true")
 		b.waitFor("last task composer focus", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		key("KeyK", command)
 		b.waitFor("task menu options", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "3")

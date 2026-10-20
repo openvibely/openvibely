@@ -496,7 +496,13 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 	}
 	transcript := client.LastCompletionsTranscript()
 	if len(transcript) == 0 {
-		return callErr
+		if !llmcontracts.HistoryContinuationFromContext(ctx) {
+			return callErr
+		}
+		// A summary already replaced this execution's earlier exchanges.
+		// Persist an explicit empty continuation even if the first request
+		// failed, instead of leaving its pre-compaction replay in storage.
+		transcript = []openaiclient.CompletionsHistoryMessage{}
 	}
 	transcriptJSON, err := json.Marshal(transcript)
 	if err != nil {

@@ -91,7 +91,7 @@ templ historyContent(history *models.History, currentProjectID string) {
 		</div>
 
 		<!-- Summary Stats -->
-		<div class="stats shadow w-full mb-6 bg-base-100">
+		<div class="stats shadow-sm border border-base-300 w-full mb-6 bg-base-100">
 			<div class="stat">
 				<div class="stat-title">Total Executions</div>
 				<div class="stat-value text-xl">{ fmt.Sprintf("%d", history.Summary.TotalExecutions) }</div>
@@ -178,7 +178,7 @@ templ historyExecutionCard(de models.HistoryExecution, currentProjectID string) 
 }
 templ projectChangesSection(pc *models.ProjectChanges) {
 	<!-- Code Change Stats -->
-	<div class="stats shadow w-full mb-4 bg-base-100">
+	<div class="stats shadow-sm border border-base-300 w-full mb-4 bg-base-100">
 		<div class="stat">
 			<div class="stat-figure text-primary">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
