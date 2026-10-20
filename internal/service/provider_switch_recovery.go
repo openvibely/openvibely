@@ -8,6 +8,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	"github.com/openvibely/openvibely/internal/models"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -260,4 +261,75 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 	var err error
 	req.ChatHistory, err = readableCompactedHistory(history)
 	return req, err
+}
+
+// portableAnthropicCheckpoint preserves the native summary and continuation
+// without carrying compaction blocks or signed reasoning into another session.
+func portableAnthropicCheckpoint(raw string) ([]models.Execution, error) {
+	var envelope struct {
+		Version  int `json:"version"`
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.Version != 1 {
+		var block struct {
+			Type    string
+			Content *string
+		}
+		if err := json.Unmarshal([]byte(raw), &block); err != nil || block.Type != "compaction" || block.Content == nil {
+			return nil, fmt.Errorf("invalid Anthropic checkpoint")
+		}
+		envelope.Messages = append(envelope.Messages, struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}{Role: "assistant", Content: json.RawMessage("[" + raw + "]")})
+	}
+	var messages []anthropicclient.Message
+	foundSummary := false
+	for _, message := range envelope.Messages {
+		var text string
+		if json.Unmarshal(message.Content, &text) == nil {
+			messages = append(messages, anthropicclient.Message{Role: message.Role, Content: text})
+			continue
+		}
+		var blocks []map[string]any
+		if err := json.Unmarshal(message.Content, &blocks); err != nil {
+			return nil, err
+		}
+		var portable []map[string]any
+		for _, block := range blocks {
+			switch block["type"] {
+			case "compaction":
+				summary, ok := block["content"].(string)
+				if ok && strings.TrimSpace(summary) != "" {
+					foundSummary = true
+					portable = append(portable, map[string]any{"type": "text", "text": "Conversation summary:\n" + summary})
+				}
+			case "thinking", "redacted_thinking":
+				// These signatures belong to the original provider session.
+			default:
+				portable = append(portable, block)
+			}
+		}
+		if len(portable) > 0 {
+			encoded, err := json.Marshal(portable)
+			if err != nil {
+				return nil, err
+			}
+			messages = append(messages, anthropicclient.Message{Role: message.Role, ContentBlocks: encoded})
+		}
+	}
+	if !foundSummary {
+		return nil, fmt.Errorf("Anthropic checkpoint has no readable summary")
+	}
+	encoded, err := json.Marshal(map[string]any{"messages": messages})
+	if err != nil {
+		return nil, err
+	}
+	return []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_recovery", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(encoded)}}}}, nil
 }

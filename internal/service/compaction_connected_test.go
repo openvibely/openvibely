@@ -347,9 +347,12 @@ func connectedAnthropicCompactionReply(w http.ResponseWriter, steered bool) {
 func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 	for _, phase := range []string{"preturn", "inturn", "steering"} {
 		for _, media := range []string{"text", "image", "tool_image"} {
-			for _, outcome := range []string{"none", "success", "null", "success_then_null"} {
+			for _, outcome := range []string{"none", "success", "null", "success_then_null", "success_then_summary", "success_then_summary_recent", "success_then_summary_failure"} {
 				compact := outcome != "none"
-				successful := outcome == "success" || outcome == "success_then_null"
+				summaryAfterNative := strings.HasPrefix(outcome, "success_then_summary")
+				summaryFails := outcome == "success_then_summary_failure"
+				withRecent := outcome == "success_then_summary_recent"
+				successful := outcome == "success" || outcome == "success_then_null" || summaryAfterNative
 				t.Run(fmt.Sprintf("%s/%s/%s", phase, media, outcome), func(t *testing.T) {
 					stores := teststores.New(t).Stores
 					ctx := compactionTestContext()
@@ -374,7 +377,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						require.NoError(t, png.Encode(f, img))
 						require.NoError(t, f.Close())
 					}
-					calls, native, nextCalls := 0, 0, 0
+					calls, native, nextCalls, summaries := 0, 0, 0, 0
 					checkpointStep := 1
 					if phase != "preturn" {
 						checkpointStep = 2
@@ -384,11 +387,48 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						raw, _ := io.ReadAll(r.Body)
 						text := string(raw)
 						if restarted {
+							isSummary := strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION")
+							if isSummary {
+								summaries++
+								if !summaryAfterNative {
+									t.Error("unexpected summary on reload")
+								}
+								for _, marker := range []string{"SAVED_NATIVE_ANTHROPIC", "FINAL_ANTHROPIC", "tool_result"} {
+									if !strings.Contains(text, marker) {
+										t.Errorf("summary omitted native checkpoint content: %s", marker)
+									}
+								}
+								if withRecent {
+									if !strings.Contains(text, "AFTER_NATIVE_ANSWER") || strings.Index(text, "SAVED_NATIVE_ANTHROPIC") > strings.Index(text, "AFTER_NATIVE_ANSWER") {
+										t.Error("summary must include newer execution after native checkpoint")
+									}
+								}
+								if strings.Contains(text, `"type":"compaction"`) {
+									t.Error("summary request must use readable history, not a native compaction block")
+								}
+								if media == "tool_image" && !strings.Contains(text, "image/png") {
+									t.Error("summary lost image from native continuation")
+								}
+								if phase == "steering" && !strings.Contains(text, "STEER_NATIVE") {
+									t.Error("summary lost steering in native checkpoint")
+								}
+								if summaryFails {
+									compactionServerError(w, 401, "authentication_error", "summary unavailable")
+								} else {
+									compactionServerReply(w, models.ProviderAnthropic, "REPLACEMENT_SUMMARY SAVED_NATIVE_ANTHROPIC FINAL_ANTHROPIC STEER_NATIVE", "")
+								}
+								return
+							}
 							nextCalls++
+							if summaryAfterNative {
+								if !strings.Contains(text, "REPLACEMENT_SUMMARY") || strings.Contains(text, "OLD_RESULT") {
+									t.Error("continuation must use replacement summary without replaying covered history")
+								}
+							}
 							if successful && !strings.Contains(text, "SAVED_NATIVE_ANTHROPIC") {
 								t.Error("restart lost native context")
 							}
-							if (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, "image/png") {
+							if !summaryAfterNative && (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, "image/png") {
 								t.Error("reload lost image")
 							}
 							if !successful && !strings.Contains(text, "CURRENT_NATIVE") {
@@ -500,6 +540,13 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							require.Less(t, calculateRequestBudget(budgetReq).NativeStateTokens, 5000)
 						}
 					}
+					boundaryID := active.ID
+					if withRecent {
+						recent := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "AFTER_NATIVE_REQUEST", Output: "AFTER_NATIVE_ANSWER"}
+						require.NoError(t, stores.Executions.Create(ctx, &recent))
+						require.NoError(t, stores.Executions.Complete(ctx, recent.ID, models.ExecCompleted, recent.Output, "", 0, 0))
+						boundaryID = recent.ID
+					}
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
 					next := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "NEXT_NATIVE"}
@@ -511,11 +558,50 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					req.Message = next.PromptSent
 					req.ChatHistory = history
 					req.ContextTokenEstimate = 0
+					var nativeCheckpoint *models.ChatCompactionCheckpoint
+					if summaryAfterNative {
+						// Force the later request above the safe limit. Only the
+						// checkpoint contains SAVED_NATIVE_ANTHROPIC.
+						nativeCheckpoint, err = stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, err)
+						req.ContextTokenEstimate = 190000
+					}
 					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
+					if summaryFails {
+						require.Error(t, err)
+						require.Equal(t, 1, summaries)
+						require.Zero(t, nextCalls)
+						saved, readErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, readErr)
+						require.Equal(t, nativeCheckpoint, saved, "failed summary must leave durable native checkpoint intact")
+						return
+					}
 					require.NoError(t, err)
 					require.Contains(t, result.Output, "NEXT_NATIVE_DONE")
 					require.Equal(t, 1, nextCalls)
+					if summaryAfterNative {
+						require.Equal(t, 1, summaries)
+						saved, readErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, readErr)
+						require.Empty(t, saved.ProviderStateJSON)
+						require.Equal(t, "local_summary", saved.Strategy)
+						require.Equal(t, boundaryID, saved.SourceExecutionID)
+						require.Contains(t, saved.Summary, "SAVED_NATIVE_ANTHROPIC")
+						require.NoError(t, stores.Executions.Complete(ctx, next.ID, models.ExecCompleted, result.Output, "", 0, 0))
+						history, readErr = stores.Executions.ListByTaskChronological(ctx, task.ID)
+						require.NoError(t, readErr)
+						last := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "NEXT_NATIVE_RELOAD"}
+						require.NoError(t, stores.Executions.Create(ctx, &last))
+						req.ExecID, req.Message = last.ID, last.PromptSent
+						req.ChatHistory = history
+						req.ContextTokenEstimate = 0
+						fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+						_, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
+						require.NoError(t, err)
+						require.Equal(t, 2, nextCalls)
+						require.Equal(t, 1, summaries, "reload must reuse the new checkpoint")
+					}
 				})
 			}
 		}
@@ -527,12 +613,14 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
 		for _, to := range providers {
-			modes := []string{"below_limit", "summary"}
-			if from == models.ProviderOpenAI {
+			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source"}
+			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
 			for _, mode := range modes {
 				t.Run(string(from)+"/"+string(to)+"/"+mode, func(t *testing.T) {
+					inflight := mode == "inturn_summary_source" || mode == "steering_summary_source"
+					sourceSummary := mode == "summary_source" || inflight
 					ctx, cancel := context.WithTimeout(compactionTestContext(), 30*time.Second)
 					defer cancel()
 					stores := teststores.New(t).Stores
@@ -540,6 +628,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					require.NoError(t, stores.Tasks.Create(ctx, task))
 					provider := from
 					stage := 0
+					dir := t.TempDir()
+					file := filepath.Join(dir, "source.txt")
+					require.NoError(t, os.WriteFile(file, []byte("SOURCE_TOOL_EVIDENCE"), 0600))
 					sourceCalls, targetCalls, summaries, restarts := 0, 0, 0, 0
 					server := connectedModelServer(t, "websocket", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, _ := io.ReadAll(r.Body)
@@ -563,7 +654,20 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							if !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 								t.Error("switch summary lost saved older answer")
 							}
+							if inflight {
+								if !strings.Contains(text, "SOURCE_TOOL_EVIDENCE") {
+									t.Error("request lost SOURCE_TOOL_EVIDENCE")
+								}
+							}
+							if mode == "steering_summary_source" {
+								if !strings.Contains(text, "SOURCE_STEER") {
+									t.Error("request lost SOURCE_STEER")
+								}
+							}
 							summary := "SWITCH_SUMMARY HISTORY_EVIDENCE"
+							if mode == "steering_summary_source" {
+								summary += " SOURCE_STEER"
+							}
 							if strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 								summary += " RECOVER_ONLY_FROM_DB"
 							}
@@ -572,8 +676,49 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						if stage == 0 {
 							sourceCalls++
+							if inflight && sourceCalls == 1 {
+								compactionServerToolReply(w, provider, file, "read_file")
+								return
+							}
+							if inflight && sourceCalls == 2 {
+								if !strings.Contains(text, "SOURCE_TOOL_EVIDENCE") {
+									t.Error("request lost SOURCE_TOOL_EVIDENCE")
+								}
+								compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
+								return
+							}
+							if sourceSummary && (!strings.Contains(text, "SWITCH_SUMMARY") || !strings.Contains(text, "SOURCE_REQUEST")) {
+								t.Error("source generation missing summary or current request")
+							}
+							if from == models.ProviderAnthropic && mode == "native_source" {
+								if !strings.Contains(text, "context_management") || !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+									t.Error("Anthropic native compaction missing configuration or history")
+								}
+								w.Header().Set("Content-Type", "text/event-stream")
+								emit := func(event any) { raw, _ := json.Marshal(event); fmt.Fprintf(w, "data: %s\n\n", raw) }
+								emit(map[string]any{"type": "message_start", "message": map[string]any{"id": "native_source", "usage": map[string]int{"input_tokens": 30}}})
+								emit(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "compaction", "content": nil}})
+								emit(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "compaction_delta", "content": "ANTHROPIC_NATIVE_SUMMARY HISTORY_EVIDENCE RECOVER_ONLY_FROM_DB"}})
+								emit(map[string]any{"type": "content_block_stop", "index": 0})
+								emit(map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "text", "text": ""}})
+								emit(map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "text_delta", "text": "SOURCE_FINAL"}})
+								emit(map[string]any{"type": "content_block_stop", "index": 1})
+								emit(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}, "usage": map[string]int{"output_tokens": 10}})
+								emit(map[string]any{"type": "message_stop"})
+								return
+							}
 							compactionServerReply(w, provider, "SOURCE_FINAL", "")
 							return
+						}
+						if sourceSummary {
+							if strings.Contains(text, "OLD_RAW_MUST_NOT_RETURN") {
+								t.Error("destination restored history already covered by summary")
+							}
+							if mode == "steering_summary_source" {
+								if !strings.Contains(text, "SOURCE_STEER") {
+									t.Error("request lost SOURCE_STEER")
+								}
+							}
 						}
 						if !strings.Contains(text, "HISTORY_EVIDENCE") {
 							t.Error("destination lost history")
@@ -581,8 +726,22 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if to != models.ProviderOpenAI && strings.Contains(text, "OPAQUE_SOURCE") {
 							t.Error("destination received opaque OpenAI state")
 						}
-						if (mode != "native_source" || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
+						if (mode != "native_source" || from != models.ProviderOpenAI || to != models.ProviderOpenAI) && !strings.Contains(text, "RECOVER_ONLY_FROM_DB") {
 							t.Error("destination lost saved older answer")
+						}
+						if (sourceSummary || (mode == "native_source" && from == models.ProviderAnthropic)) && !strings.Contains(text, "SOURCE_FINAL") {
+							t.Error("destination lost post-compaction source answer")
+						}
+						if from == models.ProviderAnthropic && mode == "native_source" {
+							if !strings.Contains(text, "ANTHROPIC_NATIVE_SUMMARY") {
+								t.Error("destination lost native summary")
+							}
+							if strings.Contains(text, `"type":"compaction"`) {
+								t.Error("destination received incompatible native block")
+							}
+						}
+						if sourceSummary && !strings.Contains(text, "SWITCH_SUMMARY") {
+							t.Error("destination lost source summary")
 						}
 						if stage == 1 {
 							targetCalls++
@@ -620,19 +779,71 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						return a
 					}
 					source, target := config(from), config(to)
-					old := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecCompleted, PromptSent: "HISTORY_EVIDENCE", Output: "RECOVER_ONLY_FROM_DB"}
+					old := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecCompleted, PromptSent: "HISTORY_EVIDENCE", Output: "RECOVER_ONLY_FROM_DB OLD_RAW_MUST_NOT_RETURN"}
 					require.NoError(t, stores.Executions.Create(ctx, &old))
 					require.NoError(t, stores.Executions.Complete(ctx, old.ID, models.ExecCompleted, old.Output, "", 0, 0))
 					first := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecRunning, PromptSent: "SOURCE_REQUEST"}
 					require.NoError(t, stores.Executions.Create(ctx, &first))
-					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: t.TempDir()}
+					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: first.ID, Agent: source, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: first.PromptSent, ChatHistory: []models.Execution{old}, WorkDir: dir}
 					if mode == "native_source" {
 						req.ContextTokenEstimate = 190000
+						if from == models.ProviderAnthropic {
+							req.ContextTokenEstimate = 110000
+						}
+					}
+					if mode == "summary_source" {
+						req.ContextTokenEstimate = 190000
+						req.DisableNativeCompaction = true
+					}
+					if inflight {
+						req.DisableNativeCompaction = true
+						req.Agent.DisableNativeCompaction = true
+					}
+					if mode == "steering_summary_source" {
+						claimed := false
+						req.Ctx = llmcontracts.WithSteeringCallback(req.Ctx, func(context.Context) (string, error) {
+							if claimed {
+								return "", nil
+							}
+							claimed = true
+							return "SOURCE_STEER", nil
+						})
 					}
 					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[from], req)
 					require.NoError(t, err)
-					require.Equal(t, 1, sourceCalls)
+					if inflight {
+						require.Equal(t, 3, sourceCalls)
+					} else {
+						require.Equal(t, 1, sourceCalls)
+					}
+					if sourceSummary {
+						require.Equal(t, 1, summaries)
+						checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, err)
+						require.NotNil(t, checkpoint)
+						require.Empty(t, checkpoint.ProviderStateJSON)
+						require.Equal(t, source.ID, checkpoint.ModelConfigID)
+						if inflight {
+							require.Equal(t, first.ID, checkpoint.SourceExecutionID)
+							require.Equal(t, "local_summary_inflight", checkpoint.Strategy)
+						} else {
+							require.Equal(t, old.ID, checkpoint.SourceExecutionID)
+							require.Equal(t, "local_summary", checkpoint.Strategy)
+						}
+						require.Contains(t, checkpoint.Summary, "SWITCH_SUMMARY")
+						require.Contains(t, checkpoint.Summary, "RECOVER_ONLY_FROM_DB")
+					}
+					if mode == "native_source" {
+						checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, checkpointErr)
+						require.NotNil(t, checkpoint)
+						require.NotEmpty(t, checkpoint.ProviderStateJSON)
+						if from == models.ProviderAnthropic {
+							require.Contains(t, checkpoint.ProviderStateJSON, "ANTHROPIC_NATIVE_SUMMARY")
+							require.Contains(t, checkpoint.ProviderStateJSON, "SOURCE_FINAL")
+						}
+					}
 					require.NoError(t, stores.Executions.Complete(ctx, first.ID, models.ExecCompleted, result.Output, "", 0, 0))
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
@@ -640,10 +851,15 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					require.NoError(t, stores.Executions.Create(ctx, &second))
 					provider = to
 					stage = 1
+					req.Ctx = ctx
 					req.Agent = target
 					req.ExecID = second.ID
 					req.Message = second.PromptSent
 					req.ChatHistory = history
+					if mode == "summary_source" || (from == models.ProviderAnthropic && mode == "native_source") {
+						// Only recent executions are loaded; older facts must come from the checkpoint.
+						req.ChatHistory = history[1:]
+					}
 					req.ContextTokenEstimate = 0
 					req.DisableNativeCompaction = true
 					if mode == "summary" {
@@ -653,7 +869,16 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
-					if mode == "summary" || (mode == "native_source" && to != models.ProviderOpenAI) {
+					if from == models.ProviderAnthropic && mode == "native_source" {
+						saved, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, err)
+						require.Empty(t, saved.ProviderStateJSON)
+						require.Equal(t, target.ID, saved.ModelConfigID)
+						require.Equal(t, "provider_recovery", saved.Strategy)
+					}
+					if sourceSummary {
+						require.Equal(t, 1, summaries, "switch must reuse the source summary")
+					} else if mode == "summary" || (mode == "native_source" && from == models.ProviderOpenAI && to != models.ProviderOpenAI) {
 						require.Positive(t, summaries)
 					} else {
 						require.Zero(t, summaries)
@@ -667,6 +892,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					req.ExecID = third.ID
 					req.Message = third.PromptSent
 					req.ChatHistory = history
+					if mode == "summary_source" {
+						req.ChatHistory = history[1:]
+					}
 					req.ContextTokenEstimate = 0
 					fresh = NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
 					before := summaries

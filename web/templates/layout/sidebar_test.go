@@ -540,7 +540,7 @@ func TestSidebar_MousedownEarlyNavigationSignal(t *testing.T) {
 	}
 
 	// mousedown handler must skip same-page navigation (consistent with beforeRequest)
-	if !strings.Contains(html, "window.location.pathname === navBase") {
+	if !strings.Contains(html, "displayedPath() === navBase") || !strings.Contains(html, "window.openVibelyDisplayedURL()") {
 		t.Fatal("mousedown handler must skip same-page navigation check")
 	}
 }

@@ -4084,7 +4084,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024",
+		"var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024",
 		"window.codeRangesAsync(textBuffer, container, true)",
 		"targetProperty = 'thinkingRenderedContent'",
 		"pendingThinkingRenderedContent = seg.thinkingRenderedContent",
@@ -5345,7 +5345,6 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 		"var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;",
 		"previous.userScrolledUp && !userScrolledUp && intentRevision <= (previous.intentRevision || 0)",
 		"if (typeof self.onIntentChange === 'function') self.onIntentChange();",
-		"messages.style.visibility = 'hidden';",
 		"Promise.resolve(options.renderPromise)",
 		"if (!options.waitForImages) return Promise.resolve();",
 		"img[data-chat-attachment-image=\"true\"]",
@@ -5368,7 +5367,7 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 	}
 }
 
-func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testing.T) {
+func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	task := &models.Task{ID: "thread-stable-hydration", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 	var buf bytes.Buffer
 	if err := TaskThreadView(task, []models.Execution{{ID: "exec-1", Status: models.ExecCompleted, Output: "# rendered later"}}, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
@@ -5376,14 +5375,14 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
 		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
 	}
 	if !strings.Contains(content, "waitForImages: true,") {
-		t.Fatal("task thread initial reveal must wait for historical attachment image load and decode")
+		t.Fatal("task thread scroll stabilization must track historical attachment image load and decode")
 	}
 }
 
@@ -5472,7 +5471,7 @@ func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 	if !strings.Contains(content, "target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content'") {
 		t.Fatal("main-content navigation must synchronously identify the outgoing task thread")
 	}
-	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content')")
+	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh)")
 	if mainContentStart < 0 {
 		t.Fatal("task-detail navigation must release detached task-thread state")
 	}
@@ -5493,7 +5492,7 @@ func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"else if (target && target.id === 'main-content')",
+		"else if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh)",
 		"document.body.addEventListener('htmx:historyRestore'",
 		"_initializeFreshTaskThreadOpen();",
 	} {
@@ -5546,7 +5545,7 @@ func TestCleanAssistantMessagesReturnsQueuedRenderCompletion(t *testing.T) {
 		"var scheduledRender = window.scheduleChatElementRender(el, raw);",
 		"renderPromises.push(scheduledRender);",
 		"if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);",
-		"var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';",
+		"var renderedRevision = el._renderedRevision || '';",
 		"if (renderedRevision === revision && hasRenderedContent) return;",
 		"container.setAttribute('data-rendered-revision', renderRevision);",
 		"el.setAttribute('data-rendered-revision', revision);",
@@ -5711,7 +5710,8 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 
 	html := `<!doctype html><html><head><meta charset="utf-8"><style>
 		#fixture-root { width: 480px; }
-		.transcript { height: 200px; overflow-y: auto; visibility: hidden; }
+		.transcript { height: 200px; overflow-y: auto; }
+        [data-transcript-hydrating="true"] { visibility: hidden; }
 		.pair { height: 120px; }
 	</style><script>window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); }; window.cancelAnimationFrame = clearTimeout;</script></head><body><main id="fixture-root"><div id="messages" class="transcript" data-transcript-hydrating="true"><div class="pair" data-execution-pair="true"></div><div class="pair" data-execution-pair="true"></div></div></main>` + chatScript.String() + `<script>
 	window.addEventListener('DOMContentLoaded', function() {
@@ -5984,7 +5984,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		var resolveHydration;
 		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
 		var restored = window.restoreChatTranscriptScroll({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
-		if (messages.style.visibility !== 'hidden') fail('initial transcript was revealed before hydration settled');
+		if (getComputedStyle(messages).visibility !== 'hidden') fail('cold transcript revealed partial history while hydration was pending');
 		pair(messages); pair(messages); pair(messages);
 		resolveHydration();
 		Promise.resolve(restored).then(async function() {

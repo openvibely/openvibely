@@ -1259,6 +1259,9 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// HTMX request: return just the task detail content partial
 	if isHTMX {
+		if c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+			return h.getTaskThread(c, data, defaultTab)
+		}
 		return h.renderTaskDetailContentData(c, data, defaultTab)
 	}
 
@@ -3550,6 +3553,12 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 
 // GetTaskThread returns the task thread view (for polling updates)
 func (h *Handler) GetTaskThread(c echo.Context) error {
+	return h.getTaskThread(c, nil, "chat")
+}
+
+// A cached task-page refresh includes the bounded thread in the page response.
+// Normal thread requests retain their existing paging and polling behavior.
+func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, selectedTab string) error {
 	taskID := c.Param("taskId")
 	ctx := c.Request().Context()
 	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
@@ -3560,7 +3569,11 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		task *models.Task
 		err  error
 	)
-	if isPoll && beforeExecID == "" {
+	if detail != nil {
+		task = detail.task
+		// These query parameters apply to /thread, not a full task page.
+		limit, beforeExecID, isPoll = taskThreadWindowLimitDefault, "", false
+	} else if isPoll && beforeExecID == "" {
 		task, err = h.taskSvc.GetThreadRenderMetadata(ctx, taskID)
 	} else {
 		task, err = h.taskSvc.GetByID(ctx, taskID)
@@ -3624,12 +3637,14 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return render(c, http.StatusOK, components.TaskThreadPollView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, preservedExecIDs, pickerDefaultAgentID))
 	}
 	thread := components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, pickerDefaultAgentID)
-	if c.Get("newTaskThread") == true {
-		data, err := h.loadTaskDetailContentData(ctx, taskID)
+	if detail == nil && c.Get("newTaskThread") == true {
+		detail, err = h.loadTaskDetailContentData(ctx, taskID)
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, "chat", data.reviewComments, thread))
+	}
+	if detail != nil {
+		return render(c, http.StatusOK, pages.TaskDetailContent(detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
 	}
 	return render(c, http.StatusOK, thread)
 }

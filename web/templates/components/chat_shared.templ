@@ -2320,6 +2320,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// New-task forms have no transcript history to recover.
 					var root = form.closest('#task-thread-view, #chat-page-root');
 					if (!root) return [];
+					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(root, {renderLazy:false});
 					var entries = [];
 					root.querySelectorAll('.chat-bubble-user-msg .chat-bubble-inner > div:first-child, #pending-thread-inputs [data-pending-input-content]').forEach(function(node) {
 						var message = node.textContent || '';
@@ -3631,6 +3632,7 @@ templ ChatAutoScrollScript() {
 						var form = target && target.closest ? target.closest('form[data-input-id]') : null;
 						if (form && form.getAttribute('hx-target') !== '#' + el.id) return;
 						if (!form && target && target !== document.body && target !== document.documentElement && !el.contains(target)) return;
+						if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(el, {renderLazy:false});
 						var bubbles = Array.from(el.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg')).filter(function(bubble) {
 							return bubble.getClientRects().length && getComputedStyle(bubble).visibility !== 'hidden';
 						});
@@ -3880,7 +3882,27 @@ templ ChatAutoScrollScript() {
 				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
 				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
 				if (tracker) tracker.userScrolledUp = !pinned;
-				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
+				// Keep an already-rendered cached transcript visible. Cold history is
+				// revealed as one batch after rendering, before images or fonts settle.
+				// Visibility is controlled by a data attribute, not an inline style:
+				// HTMX's delayed style settling must not hide it again after this reveal.
+				if (pinned) messages.scrollTop = messages.scrollHeight;
+				else if (state) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+				window.observeChatTranscriptLayout({
+					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
+				});
+				var rendered = Promise.resolve(options.renderPromise).catch(function() { return false; }).then(async function() {
+					if (!messages.isConnected) return;
+					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+					if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
+					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+					if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
+					if (!messages.isConnected) return;
+					messages.style.visibility = '';
+					messages.removeAttribute('data-transcript-hydrating');
+					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
+				});
 
 				function waitForImages() {
 					if (!options.waitForImages) return Promise.resolve();
@@ -3930,7 +3952,7 @@ templ ChatAutoScrollScript() {
 						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
 					});
 				}
-				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
+				return rendered.then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
 					if (!messages.isConnected) return false;
 					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
 					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
@@ -4499,6 +4521,9 @@ templ ChatAutoScrollScript() {
 								var resolved = document.getElementById(messagesEl.id);
 								if (resolved) liveMessages = resolved;
 							}
+							if (liveMessages !== messagesEl || !messagesEl.isConnected) return;
+							var tracker = window['scrollTracker_' + messagesEl.id];
+							if (tracker && !tracker.shouldAutoScroll()) return;
 							if (liveMessages && window.chatAutoScroll) {
 								window.chatAutoScroll.scrollToBottom(liveMessages, !!smooth);
 							}
@@ -5014,6 +5039,8 @@ templ ChatAutoScrollScript() {
 				container.classList.remove('whitespace-pre-wrap');
 				var state = container._incrementalChat;
 				if (!state || state.tail.parentNode !== container || !text.startsWith(state.source)) {
+					if (window.discardChatVirtualRows) window.discardChatVirtualRows(container);
+					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(container, {renderLazy:false});
 					var tail = document.createElement('div');
 					tail.style.display = 'contents';
 					while (container.firstChild) tail.appendChild(container.firstChild);
@@ -5036,17 +5063,18 @@ templ ChatAutoScrollScript() {
 				// Hydration may have rendered sections beyond the boundary into this tail.
 				// Snapshot them before replacing it with only the committed prefix.
 				var thinkingStates = boundary ? Array.from(state.tail.querySelectorAll('details.stream-thinking'), function(d) { return d.open; }) : [];
-				var options = { offset: state.renderOffset, ordinal: state.ordinal };
+				var options = { offset: state.renderOffset, ordinal: state.ordinal, stable: !!boundary };
 				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
 				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
 				if (boundary) {
-					var remainingThinkingStates = thinkingStates.slice(state.tail.querySelectorAll('details.stream-thinking').length);
+					var remainingThinkingStates = thinkingStates.slice(state.tail._chatVirtualData ? state.tail._chatVirtualData.models.filter(function(row) { return row.kind === 'thinking'; }).length : state.tail.querySelectorAll('details.stream-thinking').length);
 					// Compaction activities share the styling class but are not tool calls.
-					state.ordinal += state.tail.querySelectorAll('.stream-tool[data-tool-render-id]').length;
+					state.ordinal += state.tail._chatVirtualData ? state.tail._chatVirtualData.models.filter(function(row) { return row.kind === 'using'; }).length : state.tail.querySelectorAll('.stream-tool[data-tool-render-id]').length;
 					state.offset += boundary;
 					state.renderOffset += (state.tail.getAttribute('data-raw-content') || '').length;
 					state.tail.removeAttribute('data-raw-content');
 					state.tail.removeAttribute('data-raw-revision');
+					state.tail.setAttribute('data-chat-stable-segment', 'true');
 					state.tail = document.createElement('div');
 					state.tail.style.display = 'contents';
 					container.appendChild(state.tail);
@@ -5139,7 +5167,9 @@ templ ChatAutoScrollScript() {
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
 				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
-				var renderedRevision = container._renderedRevision || container.getAttribute('data-rendered-revision') || '';
+				// Serialized HTML retains revision attributes but loses event handlers.
+				// Only a revision owned by this live node can skip hydration.
+				var renderedRevision = container._renderedRevision || '';
 				var hasRenderedContent = !!(container.textContent && container.textContent.trim()) || !!(container.querySelector && container.querySelector('*'));
 				if (renderedRevision === renderRevision && hasRenderedContent) return Promise.resolve(true);
 				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
@@ -5203,7 +5233,13 @@ templ ChatAutoScrollScript() {
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
-				var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024;
+				var sourceText = textBuffer;
+				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
+					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable);
+				var projectionKey = _thinkingStateKey(container);
+				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
+				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;
+				var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || options?.preparedSegments?.some(function(seg) { return (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length >= 64 * 1024; }));
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -5227,7 +5263,7 @@ templ ChatAutoScrollScript() {
 					var rawCodeRanges = [];
 					var codeRanges = [];
 					var transcriptToolRanges = [];
-					var segments = [];
+					var segments = options?.preparedSegments ? options.preparedSegments.map(function(seg) { return Object.assign({}, seg); }) : [];
 					function toolBlockRanges(text, protectedRanges) {
 						var ranges = [], protectedIndex = 0;
 						var opener = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?/gm;
@@ -5473,7 +5509,7 @@ templ ChatAutoScrollScript() {
 						return cleaned && /\n[ \t]*$/.test(raw) ? cleaned + '\n' : cleaned;
 					}
 					function prepareLargeMarkdownSegments() {
-						if (!shouldYieldPreparation) return true;
+						if (!shouldYieldPreparation || virtualOwner) return true;
 						while (markdownPreparationIndex < segments.length) {
 							var segment = segments[markdownPreparationIndex];
 							var source = '';
@@ -5547,7 +5583,59 @@ templ ChatAutoScrollScript() {
 						prepareLargeMarkdownSegments
 				];
 
+				function projectRows() {
+					var rows = [], text = '', thinking = [];
+					function flushTextRow() {
+						if (cleanPreparedText(text)) rows.push({kind:'text', segments:[{type:'text',content:text}]});
+						text = '';
+					}
+					function flushThinkingRow() {
+						if (thinking.length) rows.push({kind:'thinking', segments:thinking});
+						thinking = [];
+					}
+					segments.forEach(function(seg, index) {
+						if (seg.type === 'tool_result' || seg.type === 'compaction_end') return;
+						if (seg.type === 'text') {
+							var nextThinking = false;
+							for (var next = index + 1; next < segments.length; next++) {
+								if (segments[next].type === 'thinking') { nextThinking = true; break; }
+								if (segments[next].type !== 'text') break;
+							}
+							if (thinking.length && nextThinking && seg.content.trim().length < 100) thinking.push(seg);
+							else text += seg.content;
+						} else if (seg.type === 'thinking') {
+							if (!seg.content.trim()) return;
+							if (text.trim()) { flushThinkingRow(); flushTextRow(); }
+							thinking.push(seg);
+						} else {
+							flushThinkingRow(); flushTextRow();
+							rows.push({kind:seg.type, segments:[seg]});
+						}
+					});
+					flushThinkingRow(); flushTextRow();
+					return rows;
+				}
+				if (cachedProjection) {
+					preparationPhases = [];
+					textBuffer = cachedProjection.normalized;
+				} else if (options?.preparedSegments) {
+					preparationPhases = [prepareLargeMarkdownSegments];
+				}
 				function renderPreparedSegments() {
+					if (virtualOwner && window.installChatVirtualRows) {
+						var data = cachedProjection || {key:projectionKey, source:sourceText, normalized:textBuffer, offset:options?.offset || 0, models:projectRows()};
+						container.classList.remove('whitespace-pre-wrap');
+						window.setChatRawContent(container, textBuffer);
+						var toolStateKey = container._chatToolStateKey || projectionKey;
+						// Models contain only source data and measurements; no rendered DOM.
+						return window.installChatVirtualRows(container, data, function(node, model, index, synchronous) {
+							node._chatStreamStateKey = model.kind === 'thinking' ? toolStateKey + ':thinking:' + (data.offset + (model.segments[0].index || 0)) : projectionKey + ':row:' + index;
+							node._chatToolStateKey = toolStateKey;
+							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments});
+						});
+					}
+			if (!options?.virtualRow && window.discardChatVirtualRows) window.discardChatVirtualRows(container);
+			if (!options?.virtualRow && window.materializeVirtualChatRows) window.materializeVirtualChatRows(container, {renderLazy:false});
 
 			// Save open state of existing thinking sections before clearing.
 			// Uses both a local array (fast path for same-call re-renders) and a
@@ -6043,11 +6131,12 @@ templ ChatAutoScrollScript() {
 				flushThinking();
 				flushText();
 				container.classList.remove('whitespace-pre-wrap');
-				window.setChatRawContent(container, textBuffer);
+				if (!options?.virtualRow) window.setChatRawContent(container, textBuffer);
 				if (window.prepareChatMath) window.prepareChatMath(renderFragment, container);
 				if (window.prepareChatSVG) window.prepareChatSVG(renderFragment, container);
                 window.OVFileViewer?.prepareStream(renderFragment, container);
-				container.replaceChildren(renderFragment);
+				if (options?.virtualRow && window.preserveChatVirtualScroll) window.preserveChatVirtualScroll(container, function() { container.replaceChildren(renderFragment); container.style.minHeight = ''; });
+				else container.replaceChildren(renderFragment);
 				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(container);
 
 			// Restore open state of thinking sections from before re-render
@@ -6063,18 +6152,22 @@ templ ChatAutoScrollScript() {
 
 			// Restore per-tool output scroll positions without synchronously measuring
 			// every tool body. CSS overflow:auto handles non-overflowing bodies.
-			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-				var toolID = el.getAttribute('data-tool-render-id') || '';
-				var rowKind = el.getAttribute('data-tool-row') || '';
-				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
-				if (!state || state.pinned) {
-					el.scrollTop = Number.MAX_SAFE_INTEGER;
-					el.setAttribute('data-scroll-pinned', 'true');
-				} else {
-					el.scrollTop = state.scrollTop;
-					el.setAttribute('data-scroll-pinned', 'false');
-				}
-			});
+			function restoreToolRows() {
+				container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
+					var toolID = el.getAttribute('data-tool-render-id') || '';
+					var rowKind = el.getAttribute('data-tool-row') || '';
+					var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
+					if (!state || state.pinned) {
+						el.scrollTop = Number.MAX_SAFE_INTEGER;
+						el.setAttribute('data-scroll-pinned', 'true');
+					} else {
+						el.scrollTop = state.scrollTop;
+						el.setAttribute('data-scroll-pinned', 'false');
+					}
+				});
+			}
+			if (options?.virtualRow && window.restoreChatVirtualRowScroll) window.restoreChatVirtualRowScroll(container, restoreToolRows);
+			else restoreToolRows();
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
 				window.convertTaskLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
@@ -6082,6 +6175,7 @@ templ ChatAutoScrollScript() {
 			if (window.convertTaskEditLinksInMessage) {
 				window.convertTaskEditLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
 			}
+			if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(container);
 			}
 				function fillLargeToolOutputChunks(done, fail) {
 					var outputIndex = 0;
@@ -6377,7 +6471,7 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					var renderedRevision = el._renderedRevision || '';
 					if (renderedRevision === revision && hasRenderedContent) return;
 					if (el._renderingRevision === revision) {
 						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
@@ -6427,7 +6521,7 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					var renderedRevision = el._renderedRevision || '';
 					if (renderedRevision === revision && hasRenderedContent) return;
 					if (el._renderingRevision === revision) {
 						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
