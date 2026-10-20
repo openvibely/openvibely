@@ -24,6 +24,8 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
@@ -82,10 +84,7 @@ func connectedModelServer(t *testing.T, transport string, handler http.Handler) 
 func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 	for _, transport := range []string{"http", "websocket", "http_v2", "websocket_v2"} {
 		for _, phase := range []string{"preturn", "inturn", "steering"} {
-			mediaCases := []string{"text", "image"}
-			if phase == "inturn" {
-				mediaCases = append(mediaCases, "tool_image")
-			}
+			mediaCases := []string{"text", "image", "tool_image"}
 			for _, media := range mediaCases {
 				for _, outcome := range []string{"below_limit", "success", "failure"} {
 					t.Run(transport+"/"+phase+"/"+media+"/"+outcome, func(t *testing.T) {
@@ -114,9 +113,16 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 						var mu sync.Mutex
 						generations, compactions, summaries, followups := 0, 0, 0, 0
 						restarted, claimed := false, false
+						sawToolImage := false
 						initial := []any{map[string]any{"type": "message", "role": "user", "content": "OLD_REQUEST"}}
 						if media == "image" {
 							initial = append(initial, map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + strings.Repeat("A", 1000000)}}})
+						}
+						if media == "tool_image" && phase != "inturn" {
+							initial = append(initial,
+								map[string]any{"type": "function_call", "call_id": "previous_image", "name": "view_image", "arguments": "{}"},
+								map[string]any{"type": "function_call_output", "call_id": "previous_image", "output": "TOOL_CONNECTED"},
+								map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + strings.Repeat("A", 1000000)}}})
 						}
 						native, _ := json.Marshal(initial)
 						handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +134,9 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 							text := string(raw)
 							mu.Lock()
 							defer mu.Unlock()
+							if strings.Contains(text, "input_image") {
+								sawToolImage = true
+							}
 							if restarted {
 								followups++
 								if strings.Contains(text, localContextCompactionInstruction) || strings.HasSuffix(r.URL.Path, "/compact") {
@@ -154,6 +163,11 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 							}
 							if strings.HasSuffix(r.URL.Path, "/responses/compact") || strings.Contains(text, "compaction_trigger") {
 								compactions++
+								// WebSocket v2 may refer to the preceding request rather
+								// than resend its image bytes.
+								if media == "tool_image" && !strings.Contains(text, "input_image") && !(sawToolImage && strings.Contains(text, "previous_response_id")) {
+									t.Error("native compaction request lost tool image")
+								}
 								if outcome == "below_limit" {
 									t.Error("image or duplicate history triggered compaction")
 								}
@@ -189,6 +203,9 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 								compactionServerError(w, 401, "stop", "stop")
 								return
 							}
+							if generations == 1 && media == "tool_image" && phase == "steering" && !strings.Contains(text, "input_image") {
+								t.Error("initial steering request lost saved tool image")
+							}
 							if generations == 1 && phase != "preturn" {
 								rec := httptest.NewRecorder()
 								tool := ""
@@ -210,7 +227,7 @@ func TestConnectedOpenAICompactionLifecycle(t *testing.T) {
 							if phase == "steering" && !strings.Contains(text, "STEER_CONNECTED") {
 								t.Error("continuation lost steering")
 							}
-							if media == "tool_image" && outcome == "below_limit" && !strings.Contains(text, "input_image") {
+							if media == "tool_image" && outcome == "below_limit" && (phase != "steering" || strings.HasPrefix(transport, "http")) && !strings.Contains(text, "input_image") {
 								t.Error("view_image bytes missing from continuation")
 							}
 							compactionServerReply(w, models.ProviderOpenAI, "FINAL_CONNECTED", "")
@@ -329,9 +346,11 @@ func connectedAnthropicCompactionReply(w http.ResponseWriter, steered bool) {
 
 func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 	for _, phase := range []string{"preturn", "inturn", "steering"} {
-		for _, media := range []string{"text", "image"} {
-			for _, compact := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/%s/compact=%t", phase, media, compact), func(t *testing.T) {
+		for _, media := range []string{"text", "image", "tool_image"} {
+			for _, outcome := range []string{"none", "success", "null", "success_then_null"} {
+				compact := outcome != "none"
+				successful := outcome == "success" || outcome == "success_then_null"
+				t.Run(fmt.Sprintf("%s/%s/%s", phase, media, outcome), func(t *testing.T) {
 					stores := teststores.New(t).Stores
 					ctx := compactionTestContext()
 					agent := models.LLMConfig{Name: "native Anthropic", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", ContextWindow: 200000, CompactionThreshold: 100000, MaxTokens: 1000}
@@ -344,15 +363,36 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					require.NoError(t, stores.Executions.Create(ctx, &active))
 					file := filepath.Join(t.TempDir(), "read.txt")
 					require.NoError(t, os.WriteFile(file, []byte("TOOL_NATIVE"), 0600))
+					imagePath := ""
+					if media == "tool_image" {
+						imagePath = filepath.Join(filepath.Dir(file), "large.png")
+						img := image.NewNRGBA(image.Rect(0, 0, 600, 600))
+						_, err := rand.New(rand.NewSource(1)).Read(img.Pix)
+						require.NoError(t, err)
+						f, err := os.Create(imagePath)
+						require.NoError(t, err)
+						require.NoError(t, png.Encode(f, img))
+						require.NoError(t, f.Close())
+					}
 					calls, native, nextCalls := 0, 0, 0
+					checkpointStep := 1
+					if phase != "preturn" {
+						checkpointStep = 2
+					}
 					claimed, restarted := false, false
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, _ := io.ReadAll(r.Body)
 						text := string(raw)
 						if restarted {
 							nextCalls++
-							if compact && !strings.Contains(text, "SAVED_NATIVE_ANTHROPIC") {
+							if successful && !strings.Contains(text, "SAVED_NATIVE_ANTHROPIC") {
 								t.Error("restart lost native context")
+							}
+							if (media == "tool_image" || (media == "image" && !successful)) && !strings.Contains(text, "image/png") {
+								t.Error("reload lost image")
+							}
+							if !successful && !strings.Contains(text, "CURRENT_NATIVE") {
+								t.Error("reload lost original prompt")
 							}
 							if phase == "steering" && !strings.Contains(text, "STEER_NATIVE") {
 								t.Error("restart lost steering")
@@ -364,10 +404,15 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							return
 						}
 						calls++
+						if strings.Contains(text, localContextCompactionInstruction) {
+							t.Error("unexpected summary")
+							compactionServerError(w, 401, "stop", "stop")
+							return
+						}
 						if calls == 1 && media == "image" && !strings.Contains(text, "image/png") {
 							t.Error("initial image missing")
 						}
-						if calls > 3 {
+						if calls > checkpointStep+1 {
 							t.Error("unexpected extra request")
 							compactionServerError(w, 401, "stop", "stop")
 							return
@@ -379,15 +424,32 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 						if phase == "steering" && calls == 2 && !strings.Contains(text, "STEER_NATIVE") {
 							t.Error("steer missing from request before compaction")
 						}
-						if compact && native == 0 {
+						if calls == checkpointStep {
 							if !strings.Contains(text, "compact_20260112") {
 								t.Error("native compaction not enabled on wire")
 							}
 							if phase == "inturn" && !strings.Contains(text, "TOOL_NATIVE") {
 								t.Error("tool result missing")
 							}
+							if compact {
+								native++
+							}
+							tool, path := "read_file", file
+							if media == "tool_image" {
+								tool, path = "view_image", imagePath
+							}
+							connectedAnthropicLifecycleReply(w, outcome, strings.Contains(text, "STEER_NATIVE"), tool, path)
+							return
+						}
+						if !successful && (!strings.Contains(text, "CURRENT_NATIVE") || !strings.Contains(text, "OLD_NATIVE")) {
+							t.Error("failed/no compaction lost prior context")
+						}
+						if media == "tool_image" && !strings.Contains(text, "image/png") {
+							t.Error("tool image absent after compaction")
+						}
+						if outcome == "success_then_null" {
 							native++
-							connectedAnthropicCompactionReply(w, strings.Contains(text, "STEER_NATIVE"))
+							connectedAnthropicLifecycleReply(w, "null", false, "", "")
 							return
 						}
 						compactionServerReply(w, models.ProviderAnthropic, "FINAL_ANTHROPIC", "")
@@ -396,7 +458,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					oldHost := anthropicclient.AnthropicAPIHost
 					anthropicclient.AnthropicAPIHost = server.URL
 					defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
-					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: active.ID, Agent: agent, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, WorkDir: filepath.Dir(file), Message: active.PromptSent, ChatHistory: []models.Execution{old}}
+					req := llmcontracts.AgentRequest{ProjectID: "default", Ctx: ctx, ExecID: active.ID, Agent: agent, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, WorkDir: filepath.Dir(file), Message: active.PromptSent, ChatHistory: []models.Execution{old}}
 					if media == "image" {
 						req.Attachments = []models.Attachment{connectedImageAttachment(t, filepath.Dir(file))}
 					}
@@ -412,20 +474,31 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 							return "STEER_NATIVE", nil
 						})
 					}
-					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err := svc.callProviderWithCompaction(svc.providerAdapters[agent.Provider], req)
 					require.NoError(t, err)
 					if compact {
-						require.Equal(t, 1, native)
+						want := 1
+						if outcome == "success_then_null" {
+							want = 2
+						}
+						require.Equal(t, want, native)
 					} else {
 						require.Zero(t, native)
 					}
 					require.NoError(t, stores.Executions.Complete(ctx, active.ID, models.ExecCompleted, result.Output, "", 0, 0))
-					if compact {
+					if successful {
 						saved, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 						require.NoError(t, err)
 						require.NotNil(t, saved)
 						require.Contains(t, saved.ProviderStateJSON, "SAVED_NATIVE_ANTHROPIC")
+						if media == "tool_image" {
+							require.Contains(t, saved.ProviderStateJSON, "image/png")
+							require.Greater(t, len(saved.ProviderStateJSON), 800000)
+							budgetReq := req
+							budgetReq.NativeCompactionStateJSON = saved.ProviderStateJSON
+							require.Less(t, calculateRequestBudget(budgetReq).NativeStateTokens, 5000)
+						}
 					}
 					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
 					require.NoError(t, err)
@@ -438,7 +511,7 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 					req.Message = next.PromptSent
 					req.ChatHistory = history
 					req.ContextTokenEstimate = 0
-					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[agent.Provider], req)
 					require.NoError(t, err)
 					require.Contains(t, result.Output, "NEXT_NATIVE_DONE")
@@ -731,4 +804,117 @@ func compactionTestContext() context.Context {
 		ready <- time.Time{}
 		return ready
 	})
+}
+
+func TestConnectedRepeatedSummaryPreservesSavedReferences(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+		for _, phase := range []string{"preturn", "provider_overflow"} {
+			t.Run(string(provider)+"/"+phase, func(t *testing.T) {
+				t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+				ctx := compactionTestContext()
+				stores := teststores.New(t).Stores
+				task := &models.Task{ProjectID: "default", Title: "references", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+				require.NoError(t, stores.Tasks.Create(ctx, task))
+				model := "gpt-5.3-codex"
+				if provider == models.ProviderAnthropic {
+					model = "claude-opus-5-5"
+				} else if provider == models.ProviderOpenAICompatible {
+					model = "fixture"
+				}
+				summaries, generations := 0, 0
+				roundNeedsSummary, overflowSent := false, false
+				server := connectedModelServer(t, "http", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					raw, _ := io.ReadAll(r.Body)
+					text := string(raw)
+					if strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
+						summaries++
+						compactionServerReply(w, provider, "SUMMARY_WITHOUT_REFERENCES", "")
+						return
+					}
+					if phase == "provider_overflow" && roundNeedsSummary && !overflowSent {
+						overflowSent = true
+						compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
+						return
+					}
+					generations++
+					if !strings.Contains(text, "/uploads/saved-report.pdf") {
+						t.Errorf("request missing %s", "/uploads/saved-report.pdf")
+					}
+					if !strings.Contains(text, "SAVED_KNOWLEDGE_INDEX") {
+						t.Errorf("request missing %s", "SAVED_KNOWLEDGE_INDEX")
+					}
+					compactionServerReply(w, provider, "DONE", "")
+				}))
+				defer server.Close()
+				oldAI, oldAnth := openaiclient.OpenAIAPIBaseURL, anthropicclient.AnthropicAPIHost
+				openaiclient.OpenAIAPIBaseURL, anthropicclient.AnthropicAPIHost = server.URL+"/v1/", server.URL
+				defer func() { openaiclient.OpenAIAPIBaseURL, anthropicclient.AnthropicAPIHost = oldAI, oldAnth }()
+				agent := models.LLMConfig{Name: "saved references", Provider: provider, Model: model, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1", ContextWindow: 200000, DisableNativeCompaction: true, PresetSlug: "vllm"}
+				require.NoError(t, stores.LLMConfigs.Create(ctx, &agent))
+				old := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "OLD"}
+				require.NoError(t, stores.Executions.Create(ctx, &old))
+				sourceCtx := attachmentcontext.With(ctx, "/uploads/saved-report.pdf")
+				sourceCtx = managedcontext.With(sourceCtx, "SAVED_KNOWLEDGE_INDEX")
+				savedHistory := restoreCompactedApplicationContext(llmcontracts.AgentRequest{Ctx: sourceCtx}, buildCompactedReplacementHistory(nil, "OLD_SUMMARY"))
+				require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: task.ID, ModelConfigID: agent.ID, CompatibilityKey: providerCompatibilityKey(agent), SourceExecutionID: old.ID, Strategy: "local_summary", History: savedHistory, Summary: "OLD_SUMMARY"}))
+				for round := 0; round < 3; round++ {
+					history, err := stores.Executions.ListByTaskChronological(ctx, task.ID)
+					require.NoError(t, err)
+					active := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: fmt.Sprintf("FOLLOWUP_%d", round)}
+					require.NoError(t, stores.Executions.Create(ctx, &active))
+					req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: active.ID, Agent: agent, Operation: llmcontracts.OperationStreaming, Followup: true, TransportScope: "task:" + task.ID, Message: active.PromptSent, ChatHistory: history, DisableNativeCompaction: true}
+					roundNeedsSummary, overflowSent = round < 2, false
+					if round < 2 && phase == "preturn" {
+						req.ContextTokenEstimate = 190000
+					}
+					svc := NewLLMService(nil, stores.Executions, nil, nil, nil, nil)
+					result, err := svc.callProviderWithCompaction(svc.providerAdapters[provider], req)
+					require.NoError(t, err)
+					require.NoError(t, stores.Executions.Complete(ctx, active.ID, models.ExecCompleted, result.Output, "", 0, 0))
+					checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+					require.NoError(t, err)
+					require.NotNil(t, checkpoint)
+					encoded, err := json.Marshal(checkpoint.History)
+					require.NoError(t, err)
+					require.Contains(t, string(encoded), "/uploads/saved-report.pdf")
+					require.Contains(t, string(encoded), "SAVED_KNOWLEDGE_INDEX")
+				}
+				require.Equal(t, 2, summaries)
+				require.Equal(t, 3, generations)
+			})
+		}
+	}
+}
+
+// Return a compaction result followed by a tool request, so the test observes
+// context both during continuation and after durable checkpoint restoration.
+func connectedAnthropicLifecycleReply(w http.ResponseWriter, outcome string, steered bool, tool, path string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	emit := func(v any) { raw, _ := json.Marshal(v); fmt.Fprintf(w, "data: %s\n\n", raw) }
+	emit(map[string]any{"type": "message_start", "message": map[string]any{"id": "native", "usage": map[string]int{"input_tokens": 30}}})
+	if outcome != "none" {
+		emit(map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "compaction"}})
+		if outcome != "null" {
+			summary := "SAVED_NATIVE_ANTHROPIC"
+			if steered {
+				summary += " STEER_NATIVE"
+			}
+			emit(map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "compaction_delta", "content": summary}})
+		}
+		emit(map[string]any{"type": "content_block_stop", "index": 0})
+	}
+	emit(map[string]any{"type": "content_block_start", "index": 1, "content_block": map[string]any{"type": "text", "text": ""}})
+	emit(map[string]any{"type": "content_block_delta", "index": 1, "delta": map[string]any{"type": "text_delta", "text": "FINAL_ANTHROPIC"}})
+	emit(map[string]any{"type": "content_block_stop", "index": 1})
+	stop := "end_turn"
+	if tool != "" {
+		stop = "tool_use"
+		key := "file_path"
+		args, _ := json.Marshal(map[string]string{key: path})
+		emit(map[string]any{"type": "content_block_start", "index": 2, "content_block": map[string]any{"type": "tool_use", "id": "post_compaction_tool", "name": tool}})
+		emit(map[string]any{"type": "content_block_delta", "index": 2, "delta": map[string]any{"type": "input_json_delta", "partial_json": string(args)}})
+		emit(map[string]any{"type": "content_block_stop", "index": 2})
+	}
+	emit(map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop}, "usage": map[string]int{"output_tokens": 10}})
+	emit(map[string]any{"type": "message_stop"})
 }
