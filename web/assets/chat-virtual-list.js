@@ -144,7 +144,11 @@
         cancelAnimationFrame(list.frame);
         list.frame = null;
         if (!list.messages.isConnected) { destroy(list); return []; }
-        if (suspended || list.selecting || (!hydrating && list.messages.getAttribute('data-transcript-hydrating') === 'true')) return [];
+        if (!hydrating && list.messages.getAttribute('data-transcript-hydrating') === 'true') return [];
+        // Hidden workspaces have zero-sized rectangles for every row. Treating
+        // those as intersections would render the entire transcript. ResizeObserver
+        // schedules another pass when the chat area becomes visible again.
+        if (!list.messages.clientWidth || !list.messages.clientHeight || !list.messages.getClientRects().length) return [];
         list.observer.disconnect();
         collect(list);
         const width = list.messages.clientWidth;
@@ -171,7 +175,9 @@
             const protectedRow = mounted && (row.loading || row.node.contains(document.activeElement) ||
                 (selection && !selection.isCollapsed && selection.containsNode(row.node, true)) ||
                 row.node.querySelector('video, audio, iframe, [data-chat-input-request-id]'));
-            const visible = (!row.lazy && list.rows.size < 40) || protectedRow ||
+            // Find/selection retain all rows, but must still render newly added
+            // or updated content instead of freezing it as empty placeholders.
+            const visible = suspended || list.selecting || (!row.lazy && list.rows.size < 40) || protectedRow ||
                 (rect.bottom >= bounds.top - buffer && rect.top <= bounds.bottom + buffer);
             if (visible && (!mounted || (row.lazy && !row.ready))) changes.push(() => mount(row, restored));
             if (mounted && row.lazy && row.ready && rect.height > 0) {
@@ -293,7 +299,13 @@
         }));
     };
     document.addEventListener('htmx:beforeSwap', function (event) {
-        if (event.detail.shouldSwap !== false && event.detail.target) window.materializeVirtualChatRows(event.detail.target, {renderLazy:false});
+        if (event.detail.shouldSwap === false || !event.detail.target) return;
+        if (event.detail.target.id === 'main-content') suspended = false;
+        window.materializeVirtualChatRows(event.detail.target, {renderLazy:false});
+    });
+    document.addEventListener('htmx:historyRestore', function () {
+        suspended = false;
+        lists.forEach(list => list.schedule());
     });
     document.addEventListener('htmx:beforeHistorySave', function (event) {
         window.materializeVirtualChatRows(event.detail.historyElt, {renderLazy:false});
