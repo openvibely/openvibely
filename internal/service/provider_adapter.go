@@ -971,7 +971,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			if n := len(req.ChatHistory); n > 0 && len(recoverySource.ChatHistory) > 0 {
 				req.ChatHistory[n-1].ID = recoverySource.ChatHistory[len(recoverySource.ChatHistory)-1].ID
 			}
-			s.persistCompactionCheckpoint(recoverySource, req, historyCompactionSummary(req.ChatHistory), "provider_recovery")
+			if err := s.persistCompactionCheckpoint(recoverySource, req, historyCompactionSummary(req.ChatHistory), "provider_recovery"); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
 			uncompactedReq = req
 		}
 	}
@@ -1051,7 +1053,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d failure_category=%s", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, contextFailureCategory(compactErr))
 			return llmcontracts.AgentResult{}, compactErr
 		}
-		s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		if err := s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
 		req = compacted
 		budget = calculateRequestBudget(req)
 		req.ForceNativeCompaction = false
@@ -1118,7 +1122,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
 			return llmcontracts.AgentResult{}, compactErr
 		}
-		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		if err := s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
 		applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
 		return s.callCompactedRetry(adapter, req, compacted, err)
 	}
@@ -1128,7 +1134,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			applog.Infof("[agent-svc] context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
 			return llmcontracts.AgentResult{}, compactErr
 		}
-		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		if err := s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
 		applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
 		return s.callCompactedRetry(adapter, req, compacted, err)
 	}
@@ -1397,13 +1405,13 @@ func (s *LLMService) persistNativeProviderStateCheckpoint(req llmcontracts.Agent
 	}
 }
 
-func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmcontracts.AgentRequest, summary, strategy string) {
+func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmcontracts.AgentRequest, summary, strategy string) error {
 	if s == nil || s.execRepo == nil || len(compactedReq.ChatHistory) == 0 {
-		return
+		return nil
 	}
 	scope, ok := s.compactionScopeForRequest(originalReq)
 	if !ok {
-		return
+		return nil
 	}
 	sourceID := ""
 	if len(originalReq.ChatHistory) > 0 {
@@ -1418,7 +1426,7 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 		checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(originalReq.Ctx, scope.Type, scope.ID)
 		if err != nil {
 			applog.Infof("[agent-svc] read native checkpoint boundary for summary: %v", err)
-			return
+			return err
 		}
 		if checkpoint != nil && checkpoint.ProviderStateJSON == originalReq.NativeCompactionStateJSON {
 			sourceID = checkpoint.SourceExecutionID
@@ -1427,7 +1435,7 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	if strategy == "local_summary" && sourceID != "" && sourceID == originalReq.ExecID {
 		strategy = "local_summary_inflight"
 	}
-	if err := s.execRepo.UpsertChatCompactionCheckpoint(originalReq.Ctx, models.ChatCompactionCheckpoint{
+	checkpoint := models.ChatCompactionCheckpoint{
 		ScopeType:         scope.Type,
 		ScopeID:           scope.ID,
 		ModelConfigID:     originalReq.Agent.ID,
@@ -1435,9 +1443,16 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 		SourceExecutionID: sourceID, History: compactedReq.ChatHistory,
 		Summary:  strings.TrimSpace(summary),
 		Strategy: strategy,
-	}); err != nil {
-		applog.Infof("[agent-svc] persist context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
 	}
+	save := s.execRepo.UpsertChatCompactionCheckpoint
+	if strategy == "local_summary_inflight" {
+		save = s.execRepo.SaveInTurnCompactionCheckpoint
+	}
+	if err := save(originalReq.Ctx, checkpoint); err != nil {
+		applog.Infof("[agent-svc] persist context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
+		return err
+	}
+	return nil
 }
 
 func (s *LLMService) compactionScopeForRequest(req llmcontracts.AgentRequest) (compactionScope, bool) {
