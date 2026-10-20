@@ -604,6 +604,14 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if mode == "native_source" && from == models.ProviderAnthropic && !strings.Contains(text, "SOURCE_FINAL") {
 							t.Error("destination lost post-compaction source answer")
 						}
+						if from == models.ProviderAnthropic && mode == "native_source" {
+							if !strings.Contains(text, "ANTHROPIC_NATIVE_SUMMARY") {
+								t.Error("destination lost native summary")
+							}
+							if strings.Contains(text, `"type":"compaction"`) {
+								t.Error("destination received incompatible native block")
+							}
+						}
 						if stage == 1 {
 							targetCalls++
 							if !strings.Contains(text, "SWITCH_REQUEST") {
@@ -677,6 +685,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					req.ExecID = second.ID
 					req.Message = second.PromptSent
 					req.ChatHistory = history
+					if from == models.ProviderAnthropic && mode == "native_source" {
+						req.ChatHistory = history[1:]
+					}
 					req.ContextTokenEstimate = 0
 					req.DisableNativeCompaction = true
 					if mode == "summary" {
@@ -686,6 +697,13 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
+					if from == models.ProviderAnthropic && mode == "native_source" {
+						saved, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, err)
+						require.Empty(t, saved.ProviderStateJSON)
+						require.Equal(t, target.ID, saved.ModelConfigID)
+						require.Equal(t, "provider_recovery", saved.Strategy)
+					}
 					if mode == "summary" || (mode == "native_source" && from == models.ProviderOpenAI && to != models.ProviderOpenAI) {
 						require.Positive(t, summaries)
 					} else {
