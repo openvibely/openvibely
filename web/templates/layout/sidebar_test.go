@@ -736,7 +736,7 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 		`id="sidebar-logout-label" type="submit" class="ov-menu-option w-full" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
 		`.sidebar-theme-toggle-container {`,
-		`min-height: 3.25rem;`,
+		`min-height: 3.5rem;`,
 		`align-items: center;`,
 		`.sidebar-user-trigger {`,
 		`min-height: 24px !important;`,
