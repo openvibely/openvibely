@@ -23,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
@@ -57,7 +58,7 @@ func TestOpenAIProviderAdapterCanonicalizesModelOverrides(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
 	adapter := &openAIProviderAdapter{adapter: llmopenai.New(nil, nil, nil, nil)}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
-		Ctx: context.Background(), Operation: llmcontracts.OperationDirect, Message: "hello", RawDirectPrompt: true, DisableTools: true,
+		Ctx: retrytest.Context(), Operation: llmcontracts.OperationDirect, Message: "hello", RawDirectPrompt: true, DisableTools: true,
 		Agent:           models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1"},
 		AgentDefinition: &models.Agent{Model: " GPT-6-SOL "},
 	})
@@ -651,11 +652,12 @@ func TestProviderContextBudget_LargeHistoryAndOversizedPendingAreHandledSeparate
 	var requests []llmcontracts.AgentRequest
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		requests = append(requests, req)
+		if req.Operation == llmcontracts.OperationDirect {
+			// Summary calls send full history; only the provider decides if it fits.
+			return llmcontracts.AgentResult{Output: "bounded history summary"}, nil
+		}
 		if err := ensureRequestFitsWithBudget(req, calculateRequestBudget(req), "test provider-bound request"); err != nil {
 			t.Fatalf("oversized provider request %d: %v", len(requests), err)
-		}
-		if req.Operation == llmcontracts.OperationDirect {
-			return llmcontracts.AgentResult{Output: "bounded history summary"}, nil
 		}
 		return llmcontracts.AgentResult{Output: "ok"}, nil
 	})
@@ -670,7 +672,7 @@ func TestProviderContextBudget_LargeHistoryAndOversizedPendingAreHandledSeparate
 		t.Fatal(err)
 	}
 	if len(requests) != 2 || requests[0].Operation != llmcontracts.OperationDirect || requests[1].Operation != llmcontracts.OperationStreaming {
-		t.Fatalf("requests = %#v, want bounded summary then continuation", requests)
+		t.Fatalf("requests = %#v, want summary then bounded continuation", requests)
 	}
 	if requests[1].Message == original || !strings.Contains(requests[1].Message, "Full input:") {
 		t.Fatal("oversized pending input was not handled independently after history compaction")
@@ -755,20 +757,20 @@ func TestProviderContextCompactionFallback_RetriesStreamingRequestOnceForSupport
 			if llmcontracts.RuntimeToolsFromContext(retry.Ctx) == nil {
 				t.Fatal("retry dropped runtime tools")
 			}
-			if len(retry.ChatHistory) != 3 {
+			if len(retry.ChatHistory) != 4 {
 				t.Fatalf("compacted history length = %d, want retained users plus summary", len(retry.ChatHistory))
 			}
-			if retry.ChatHistory[0].PromptSent != "old user" || retry.ChatHistory[1].PromptSent != "new user" {
+			if retry.ChatHistory[0].PromptSent != "old user" || retry.ChatHistory[2].PromptSent != "new user" {
 				t.Fatalf("retained user messages should remain chronological, got %#v", retry.ChatHistory)
 			}
-			if got := retry.ChatHistory[2].Output; !strings.Contains(got, compactedHistorySummaryPrefix) || !strings.Contains(got, "completed: old work") {
+			if got := retry.ChatHistory[3].PromptSent; !strings.Contains(got, compactedHistorySummaryPrefix) || !strings.Contains(got, "completed: old work") {
 				t.Fatalf("retry history missing protected summary prefix/content: %q", got)
 			}
 		})
 	}
 }
 
-func TestProviderContextCompactionFallback_CompactedRetryOverflowUsesLastResortOnce(t *testing.T) {
+func TestProviderContextCompactionFallback_CompactedRetryOverflowPreservesSummary(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	var logBuf bytes.Buffer
 	oldLogWriter := log.Writer()
@@ -793,19 +795,20 @@ func TestProviderContextCompactionFallback_CompactedRetryOverflowUsesLastResortO
 	for i := range history {
 		history[i] = models.Execution{PromptSent: fmt.Sprintf("prompt-%02d", i), Output: "out", Status: models.ExecCompleted}
 	}
-	res, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "current", nil, models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "model"}, "exec-1", history, "", "/tmp/work", nil)
-	if err != nil || res.Output != "last resort ok" {
-		t.Fatalf("result=%#v err=%v, want last resort success", res, err)
+	_, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "current", nil, models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "model"}, "exec-1", history, "", "/tmp/work", nil)
+	if !recognizedContextLengthError(err) {
+		t.Fatalf("expected overflow after preserving summary, got %v", err)
 	}
-	if len(requests) != 4 {
-		t.Fatalf("provider calls = %d, want original + summary + compacted retry + last resort", len(requests))
+	if len(requests) != 3 {
+		t.Fatalf("provider calls = %d, want original + summary + compacted retry", len(requests))
 	}
-	if len(requests[3].ChatHistory) != 20 || requests[3].ChatHistory[0].PromptSent != "prompt-05" {
-		t.Fatalf("last resort history = %#v", requests[3].ChatHistory)
+	if !strings.Contains(historyCompactionSummary(requests[2].ChatHistory), "summary") {
+		t.Fatal("successful summary was discarded")
 	}
-	if got := logBuf.String(); !strings.Contains(got, "strategy=last_resort") || !strings.Contains(got, "failure_category=context_window_exceeded") {
-		t.Fatalf("structured last-resort decision log missing: %s", got)
+	if strings.Contains(logBuf.String(), "strategy=last_resort") {
+		t.Fatal("must not fall back to pre-summary history")
 	}
+
 }
 
 func TestProviderContextCompactionFallback_SummaryOverflowDropsOldestAndRetries(t *testing.T) {
@@ -824,7 +827,7 @@ func TestProviderContextCompactionFallback_SummaryOverflowDropsOldestAndRetries(
 			if !req.DisableTools || !req.Agent.DisableNativeCompaction {
 				t.Fatal("summary must disable tools and recursive compaction")
 			}
-			summaryPrompts = append(summaryPrompts, req.Message)
+			summaryPrompts = append(summaryPrompts, summaryInputText(req.SummaryInput))
 			if len(summaryPrompts) == 1 {
 				return llmcontracts.AgentResult{}, fmt.Errorf("prompt is too long for context window")
 			}
@@ -873,7 +876,7 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	if retained[1].PromptSent != "tail" {
 		t.Fatalf("newest retained message should be last = %#v", retained)
 	}
-	if retained[1].ID != "" {
+	if retained[1].ID != "execution-with-stored-replay" || retained[1].ContextKind != "user" {
 		t.Fatal("retained prompt must not hydrate the original execution's tool replay")
 	}
 	if got := retained[0].PromptSent; !strings.Contains(got, "omitted") {
@@ -941,13 +944,13 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 		wantSummary    bool
 	}{
 		{name: "reported usage includes native state", reportedTokens: 139302},
-		{name: "oversized checkpoint restores transcript", reportedTokens: 190000, wantSummary: true},
+		{name: "oversized checkpoint preserves native summary", reportedTokens: 190000, wantSummary: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := teststores.New(t).Executions
 			ctx := context.Background()
 			agent := models.LLMConfig{ID: "model", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5", ContextWindow: 200000}
-			state := `[{"type":"text","text":"` + strings.Repeat("x", 274000) + `"}]`
+			state := `{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"NATIVE_ONLY_FACT ` + strings.Repeat("x", 274000) + `"},{"type":"text","text":"NATIVE_CONTINUATION"}]}]}`
 			req := llmcontracts.AgentRequest{
 				Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true,
 				TransportScope: "chat:project:checkpoint-followup",
@@ -957,7 +960,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 			if err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{
 				ScopeType: "chat_project", ScopeID: req.ProjectID, ModelConfigID: agent.ID,
 				CompatibilityKey: providerCompatibilityKey(agent), SourceExecutionID: "source",
-				Strategy: "anthropic", ProviderStateJSON: state,
+				Strategy: "anthropic_context_management", ProviderStateJSON: state,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -974,8 +977,14 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 					if got.NativeCompactionStateJSON != "" {
 						t.Fatal("local summary or continuation retained native state")
 					}
-					if calls == 1 && (got.Operation != llmcontracts.OperationDirect || !strings.Contains(got.Message, "original answer")) {
-						t.Fatal("must summarize original transcript before continuation")
+					if calls == 1 {
+						input := summaryInputText(got.SummaryInput)
+						if got.Operation != llmcontracts.OperationDirect || !strings.Contains(input, "NATIVE_ONLY_FACT") || !strings.Contains(input, "NATIVE_CONTINUATION") {
+							t.Fatal("must summarize native summary and continuation")
+						}
+						if strings.Contains(input, "original answer") {
+							t.Fatal("must not replace checkpoint with covered execution text")
+						}
 					}
 					if calls == 2 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
 						t.Fatal("continuation lost pending message or summary")
@@ -1023,11 +1032,11 @@ func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 			}
 			return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
 		case 2:
-			if req.Operation != llmcontracts.OperationDirect || !strings.Contains(req.Message, "original answer") {
+			if req.Operation != llmcontracts.OperationDirect || !strings.Contains(summaryInputText(req.SummaryInput), "original answer") {
 				t.Fatalf("summary must use original transcript: %#v", req)
 			}
 		case 3:
-			if len(req.ChatHistory) != 2 || req.ChatHistory[0].ID != "" || !strings.Contains(req.ChatHistory[1].Output, "text summary") {
+			if len(req.ChatHistory) != 3 || req.ChatHistory[1].ContextKind != "user" || !strings.Contains(req.ChatHistory[2].PromptSent, "text summary") {
 				t.Fatalf("expected synthetic summary context: %#v", req)
 			}
 		default:
@@ -1157,8 +1166,8 @@ func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPe
 		return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok"}, nil
 	})
 	history := []models.Execution{
-		{ID: "old", PromptSent: strings.Repeat("o", 28000), Output: "old", Status: models.ExecCompleted},
-		{ID: "source", PromptSent: strings.Repeat("n", 28000), Output: "new", Status: models.ExecCompleted},
+		{ID: "old", PromptSent: "inspect old work", Output: strings.Repeat("o", 28000), Status: models.ExecCompleted},
+		{ID: "source", PromptSent: "inspect new work", Output: strings.Repeat("n", 28000), Status: models.ExecCompleted},
 	}
 	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 20000}, ProjectID: "project-1", ChatHistory: history}
 	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
@@ -1193,8 +1202,8 @@ func TestProviderContextCompactionFallback_OllamaProactiveSummaryAndPersistence(
 		return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok"}, nil
 	})
 	history := []models.Execution{
-		{ID: "old", PromptSent: strings.Repeat("o", 28000), Output: "old", Status: models.ExecCompleted},
-		{ID: "source", PromptSent: strings.Repeat("n", 28000), Output: "new", Status: models.ExecCompleted},
+		{ID: "old", PromptSent: "inspect old work", Output: strings.Repeat("o", 28000), Status: models.ExecCompleted},
+		{ID: "source", PromptSent: "inspect new work", Output: strings.Repeat("n", 28000), Status: models.ExecCompleted},
 	}
 	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOllama, Model: "compat", ContextWindow: 20000}, ProjectID: "project-1", ChatHistory: history}
 	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
@@ -1230,7 +1239,7 @@ func TestProviderContextCompactionFallback_RestoresDurableCheckpointOnFollowingT
 	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
 		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
 	}
-	if len(got.ChatHistory) != 2 || !strings.Contains(got.ChatHistory[0].Output, "summary") || got.ChatHistory[1].PromptSent != "new" {
+	if len(got.ChatHistory) != 3 || !strings.Contains(got.ChatHistory[1].PromptSent, "summary") || got.ChatHistory[2].PromptSent != "new" {
 		t.Fatalf("restored history = %#v", got.ChatHistory)
 	}
 }
@@ -1261,7 +1270,7 @@ func TestProviderSessionState_PersistsWithoutReplacingCompactionCheckpoint(t *te
 		t.Fatalf("checkpoint = %#v", checkpoint)
 	}
 	restored := svc.restoreCompactionCheckpoint(req)
-	if restored.ProviderSessionStateJSON != state || restored.NativeCompactionStateJSON != `[{"type":"compaction"}]` || len(restored.ChatHistory) != 1 {
+	if restored.ProviderSessionStateJSON != state || restored.NativeCompactionStateJSON != `[{"type":"compaction"}]` || len(restored.ChatHistory) != 2 {
 		t.Fatalf("restored request = %#v", restored)
 	}
 
@@ -1311,33 +1320,6 @@ func TestProviderContextCompactionFallback_NativeFailureFallsBackAndCachesUnsupp
 	}
 }
 
-func TestProviderContextCompactionFallback_LastResortTruncationAfterStrategiesFail(t *testing.T) {
-	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
-	var requests []llmcontracts.AgentRequest
-	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		requests = append(requests, req)
-		if req.Operation == llmcontracts.OperationDirect {
-			return llmcontracts.AgentResult{}, fmt.Errorf("summary provider unavailable")
-		}
-		if len(requests) == 3 {
-			return llmcontracts.AgentResult{Output: "truncated ok"}, nil
-		}
-		return llmcontracts.AgentResult{}, fmt.Errorf("context length exceeded")
-	})
-	history := make([]models.Execution, 25)
-	for i := range history {
-		history[i] = models.Execution{PromptSent: fmt.Sprintf("prompt-%02d", i), Output: "out", Status: models.ExecCompleted}
-	}
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 100000}, ChatHistory: history}
-	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
-	if err != nil || res.Output != "truncated ok" {
-		t.Fatalf("result=%#v err=%v", res, err)
-	}
-	if len(requests) != 3 || len(requests[2].ChatHistory) != 20 || requests[2].ChatHistory[0].PromptSent != "prompt-05" {
-		t.Fatalf("last resort request = %#v", requests)
-	}
-}
-
 func TestProviderContextCompactionFallback_PreservesReplayAndAuthorizationBoundary(t *testing.T) {
 	history := []models.Execution{{
 		PromptSent: "inspect tool output",
@@ -1347,15 +1329,15 @@ func TestProviderContextCompactionFallback_PreservesReplayAndAuthorizationBounda
 			TranscriptJSON: `[{"role":"assistant","tool_calls":[{"id":"call_1","function":{"name":"read_file"}}]},{"role":"tool","tool_call_id":"call_1","content":"result"}]`,
 		}},
 	}}
-	prompt := buildLocalSummaryCompactionPrompt(history)
-	if !strings.Contains(prompt, "tool_call_id") || !strings.Contains(prompt, "preserve tool-call/tool-result relationships") {
+	prompt := summaryHistoryText(t, models.ProviderOpenAICompatible, history)
+	if !strings.Contains(prompt, "tool_call_id") || !strings.Contains(prompt, "tool_calls") {
 		t.Fatalf("summary prompt did not preserve structured replay: %s", prompt)
 	}
 	compacted := buildCompactedReplacementHistory(history, "Assistant suggests create_task should run")
-	if len(compacted) == 0 || compacted[len(compacted)-1].PromptSent != "" {
-		t.Fatalf("summary must be assistant historical context, got %#v", compacted)
+	if len(compacted) == 0 || compacted[len(compacted)-1].Output != "" {
+		t.Fatalf("summary must be marked user historical context, got %#v", compacted)
 	}
-	if got := compacted[len(compacted)-1].Output; !strings.Contains(got, "not a new user instruction or authorization") || !strings.Contains(got, "Assistant suggests create_task") {
+	if got := compacted[len(compacted)-1].PromptSent; !strings.Contains(got, "not a new user instruction or authorization") || !strings.Contains(got, "Assistant suggests create_task") {
 		t.Fatalf("summary boundary missing or content dropped: %q", got)
 	}
 }
@@ -2045,17 +2027,17 @@ func TestContextRecoveryDispatchesEmitCompleteStructuredDecisions(t *testing.T) 
 		RetrySourceExecutionID: "failed-source", Agent: agent, DisableTools: true,
 		ChatHistory: []models.Execution{{ID: "old", PromptSent: strings.Repeat("history", 7000), Output: "done", Status: models.ExecCompleted}},
 	}
-	if _, err := (&LLMService{}).callProviderWithCompaction(adapter, req); err != nil {
-		t.Fatal(err)
+	if _, err := (&LLMService{}).callProviderWithCompaction(adapter, req); !recognizedContextLengthError(err) {
+		t.Fatalf("expected context overflow, got %v", err)
 	}
-	if calls != 4 {
-		t.Fatalf("provider calls = %d, want native, summary, compacted retry, last resort", calls)
+	if calls != 3 {
+		t.Fatalf("provider calls = %d, want native, summary, compacted retry", calls)
 	}
 	got := logs.String()
 	for _, fields := range [][]string{
 		{"strategy=textual_summary", "failure_category=native_compaction_unsupported"},
 		{"strategy=local_summary_retry", "failure_category=native_compaction_unsupported"},
-		{"strategy=last_resort", "failure_category=context_window_exceeded"},
+		{"strategy=failed", "failure_category=context_window_exceeded"},
 	} {
 		for _, field := range fields {
 			if !strings.Contains(got, field) {
@@ -2272,17 +2254,17 @@ func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
 		b.ReportMetric(float64(len(req.ChatHistory[0].PromptSent)), "history_bytes/op")
 	})
 
-	b.Run("last_resort_truncation", func(b *testing.B) {
+	b.Run("summary_failure", func(b *testing.B) {
 		svc := &LLMService{}
 		calls := 0
 		adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-			phase := calls % 3
+			phase := calls % 2
 			calls++
 			if phase == 0 {
 				return llmcontracts.AgentResult{}, errors.New("context length exceeded")
 			}
 			if req.Operation == llmcontracts.OperationDirect {
-				return llmcontracts.AgentResult{}, errors.New("summary provider unavailable")
+				return llmcontracts.AgentResult{}, errors.New("summary authentication failed")
 			}
 			return llmcontracts.AgentResult{Output: "ok"}, nil
 		})
@@ -2298,8 +2280,8 @@ func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
-				b.Fatal(err)
+			if _, err := svc.callProviderWithCompaction(adapter, req); !llmcontracts.ErrorIs(err, llmcontracts.ErrorLocalCompactionFailed) {
+				b.Fatalf("expected summary failure, got %v", err)
 			}
 		}
 		b.StopTimer()
@@ -2334,7 +2316,7 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 					t.Fatal("summary must not stream private contents")
 				}
 				if fail {
-					return llmcontracts.AgentResult{}, errors.New("summary unavailable")
+					return llmcontracts.AgentResult{}, errors.New("summary authentication failed")
 				}
 				return llmcontracts.AgentResult{Output: "private summary"}, nil
 			})
@@ -2386,8 +2368,8 @@ func TestAttachmentContextSurvivesRestoredCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "/uploads/report.docx") {
-		t.Fatal("checkpoint fixture unexpectedly includes references")
+	if !strings.Contains(string(body), "/uploads/report.docx") {
+		t.Fatal("restored history must contain current attachment references")
 	}
 	if !strings.Contains(attachmentcontext.Text(got.Ctx), "/uploads/report.docx") {
 		t.Fatalf("restored request lost attachment path: history=%s current=%s", body, got.Message)
@@ -2414,8 +2396,8 @@ func TestOllamaCompactionUsesCompatibleWire(t *testing.T) {
 	defer server.Close()
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "continue", Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "local", OllamaBaseURL: server.URL, ContextWindow: 20000, DefaultMaxTokens: 2000, CompactionThreshold: 12000}, ChatHistory: []models.Execution{
-		{ID: "old", PromptSent: strings.Repeat("o", 28000), Output: "old", Status: models.ExecCompleted},
-		{ID: "new", PromptSent: strings.Repeat("n", 28000), Output: "new", Status: models.ExecCompleted},
+		{ID: "old", PromptSent: "inspect old work", Output: strings.Repeat("o", 28000), Status: models.ExecCompleted},
+		{ID: "new", PromptSent: "inspect new work", Output: strings.Repeat("n", 28000), Status: models.ExecCompleted},
 	}}
 	_, err := svc.callProviderWithContextCompactionFallback(svc.providerAdapters[models.ProviderOllama], req)
 	if err != nil {

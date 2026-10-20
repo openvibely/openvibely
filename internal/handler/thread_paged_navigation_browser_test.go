@@ -1,0 +1,157 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/stretchr/testify/require"
+)
+
+// Loading older history leaves the latest execution offscreen. A fast warm
+// response must not preserve its serialized placeholders before hydration finishes.
+func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, false)
+}
+
+func TestTaskBoundedCachedHistoryInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, true)
+}
+
+func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, e, configs := setupTestHandler(t)
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Paged navigation")
+	task := createTask(t, h, project.ID, "Paged task", func(t *models.Task) { t.Status = models.StatusCompleted; t.Category = models.CategoryCompleted })
+	other := createTask(t, h, project.ID, "Other task")
+	type sample struct {
+		Prompt string
+		Output string
+	}
+	var samples []sample
+	for i := 0; i < 10; i++ {
+		samples = append(samples, sample{fmt.Sprintf("Prompt %d", i), strings.Repeat("A paragraph of **formatted text**.\n\n", 20)})
+	}
+	samples[len(samples)-1].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\n"+strings.Repeat("tool output line\n", 100)+"[/Tool]\n", 120) + "Final answer.\n"
+
+	for i, s := range samples {
+		if s.Output == "" {
+			continue
+		}
+		ex := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecCompleted
+			ex.PromptSent = s.Prompt
+			ex.StartedAt = time.Unix(int64(i+1), 0)
+			ex.IsFollowup = i > 0
+		})
+		require.NoError(t, h.execRepo.Complete(t.Context(), ex.ID, models.ExecCompleted, s.Output, "", 0, 0))
+	}
+	path := "/tasks/" + task.ID
+	runner := fmt.Sprintf(`<script>
+ window.addEventListener('DOMContentLoaded',()=>{
+ const bounded=%t;
+ const wait=ms=>new Promise(r=>setTimeout(r,ms));
+ async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
+ const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+ const messages=()=>document.getElementById('task-thread-messages');
+ const view=()=>document.getElementById('task-thread-view');
+ function debug(){const m=messages();return JSON.stringify({errors,queue:window._chatContentRenderQueue?.length,active:window._chatContentRenderActive,top:m?.scrollTop,height:m?.scrollHeight,viewport:m?.clientHeight,hydrating:m?.dataset.transcriptHydrating,owners:Array.from(m?.querySelectorAll('[data-chat-virtual-owner]')||[],o=>({rows:o._chatVirtualRows?.length,text:o.textContent.length,revision:!!o._renderedRevision,rendering:!!o._renderingRevision,scheduled:!!o._scheduledChatRender,active:!!o._activeScheduledChatRender,raw:!!o.getAttribute('data-raw-content'),class:o.className,rect:[o.getBoundingClientRect().top,o.getBoundingClientRect().height],ready:o._chatVirtualRows?.filter(r=>r.ready).length}))})}
+ function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
+ (async()=>{
+  await until(visible,'initial messages'); await wait(150);
+  const m=messages();m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));m.scrollTop=0;m.dispatchEvent(new Event('scroll'));
+  await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>5,'older page');
+  await until(()=>m.dataset.earlierAnchorRestoring!=='true','older page settled');await wait(150);
+  for(let round=0;round<2;round++){
+   const pairs=Array.from(messages().querySelectorAll(':scope > [data-execution-pair]'));
+   const older=pairs.slice(0,-5).flatMap(pair=>window.captureChatVirtualData(pair));
+   const latest=pairs.slice(-5).flatMap(pair=>window.captureChatVirtualData(pair));
+   if(bounded && (!older.length||!latest.length))throw Error('Missing parsed history fixture');
+   await openVibelyNavigate(%q);await until(()=>view()?.dataset.taskId===%q,'other task');
+   if(bounded){
+    if(older.some(data=>window.findCachedChatVirtualData(data.key,data.source)))throw Error('Older row models survived in cache');
+    if(!latest.every(data=>window.findCachedChatVirtualData(data.key,data.source)))throw Error('Latest row models missing from cache');
+   }
+   let previewCount=null,previewCursorValid=false;
+   const preview=event=>{if(event.detail._ovCachedPreview){const t=document.createElement('template');t.innerHTML=event.detail.serverResponse;previewCount=t.content.querySelectorAll('[data-execution-pair]').length;const loader=t.content.querySelector('[data-earlier-loader]'),first=t.content.querySelector('[data-execution-pair]');previewCursorValid=!!loader && new URL(loader.getAttribute('hx-get'),location.href).searchParams.get('before')===first?.dataset.execId && loader.dataset.loading!=='true'}};
+   document.addEventListener('htmx:beforeSwap',preview,true);
+   await openVibelyNavigate(%q);await until(()=>view()?.dataset.taskId===%q,'return task');
+   document.removeEventListener('htmx:beforeSwap',preview,true);
+   if(bounded && !previewCursorValid)throw Error('Cached preview cannot reload earlier history');
+   if(bounded && previewCount!==5)throw Error('Expected five cached executions, got '+previewCount);
+   await until(visible,'visible returned messages');await wait(200);
+   if(!visible())throw Error('Returned messages disappeared '+debug());
+   if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   if(bounded){
+    const current=messages(),loader=current.querySelector('[data-earlier-loader]');
+    const first=current.querySelector(':scope > [data-execution-pair]');
+    if(!loader||new URL(loader.getAttribute('hx-get'),location.href).searchParams.get('before')!==first.dataset.execId)throw Error('Wrong cached history cursor');
+    current.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));current.scrollTop=0;current.dispatchEvent(new Event('scroll'));
+    await until(()=>current.querySelectorAll(':scope > [data-execution-pair]').length===10,'reloaded older page');
+    await until(()=>current.dataset.earlierAnchorRestoring!=='true','reloaded older page settled');await wait(150);
+   }
+  }
+  await fetch('/browser-result?status=pass');
+ })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
+ });</script>`, bounded, "/tasks/"+other.ID, other.ID, path, task.ID)
+	results := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			select {
+			case results <- r.URL.Query().Get("status"):
+			default:
+			}
+			w.WriteHeader(204)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/events") {
+			w.WriteHeader(204)
+			return
+		}
+		if bounded && r.URL.Path == path && r.Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if r.URL.Path == path && r.Header.Get("HX-Request") != "true" {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, r)
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1)))
+			return
+		}
+		e.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	var outcome string
+	select {
+	case outcome = <-results:
+	case <-ctx.Done():
+		outcome = "timeout"
+	}
+	stopHandlerBrowserProcess(cmd)
+	require.Equal(t, "pass", outcome, stderr.String())
+}

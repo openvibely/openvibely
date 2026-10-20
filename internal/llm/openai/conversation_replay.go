@@ -26,14 +26,13 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	return nil
 }
 
+// responsesHistoryRecorder saves only the current provider conversation.
 func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, []any) error {
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
 	return func(ctx context.Context, items []any) error {
-		raw, err := json.Marshal(struct {
-			Input []any `json:"responses_input"`
-		}{items})
+		raw, err := json.Marshal(map[string]any{"responses_input": items})
 		if err != nil {
 			return err
 		}
@@ -137,6 +136,12 @@ func completionsReplayInput(raw string) []any {
 // Completions fallback. Provider-only reasoning/compaction items are not chat messages.
 func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
 	var result []openaiclient.CompletionsHistoryMessage
+	pending := make(map[string]bool)
+	var deferred []openaiclient.CompletionsHistoryMessage
+	flushDeferred := func() {
+		result = append(result, deferred...)
+		deferred = nil
+	}
 	for _, raw := range items {
 		var item struct {
 			Type, Role, Name, Arguments, Output string
@@ -148,12 +153,23 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 		}
 		switch item.Type {
 		case "function_call":
+			pending[item.CallID] = true
 			call := openaiclient.CompletionsToolCall{ID: item.CallID, Type: "function"}
 			call.Function.Name = item.Name
 			call.Function.Arguments = item.Arguments
+			// Responses emits parallel calls as separate items. Completions
+			// requires them in one assistant message before their tool results.
+			if n := len(result); n > 0 && result[n-1].Role == "assistant" && len(result[n-1].ToolCalls) > 0 {
+				result[n-1].ToolCalls = append(result[n-1].ToolCalls, call)
+				continue
+			}
 			result = append(result, openaiclient.CompletionsHistoryMessage{Role: "assistant", ToolCalls: []openaiclient.CompletionsToolCall{call}})
 		case "function_call_output":
 			result = append(result, openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: item.CallID, Content: item.Output})
+			delete(pending, item.CallID)
+			if len(pending) == 0 {
+				flushDeferred()
+			}
 		case "message", "":
 			if item.Role == "" {
 				continue
@@ -176,8 +192,28 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 					}
 				}
 			}
+			// Responses may place view_image user messages between parallel
+			// results. Chat Completions requires all results before user messages.
+			if message.Role == "user" && len(pending) > 0 {
+				deferred = append(deferred, message)
+				continue
+			}
+			if message.Role == "assistant" {
+				// Do not move deferred content across an assistant turn, even
+				// when the saved transcript has missing tool results.
+				flushDeferred()
+				clear(pending)
+			}
 			result = append(result, message)
 		}
 	}
+	// Preserve images even when the saved transcript ends mid-tool-round.
+	flushDeferred()
 	return result
+}
+
+// ResponsesSummaryMessages translates a saved Responses conversation for a
+// summary call after switching providers. Tool calls and results stay paired.
+func ResponsesSummaryMessages(items []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
+	return responsesCompletionsMessages(items)
 }

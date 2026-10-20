@@ -64,6 +64,10 @@ type CompletionsOptions struct {
 	// ToolFilter can deny tool execution by name at runtime.
 	ToolFilter func(name string) bool
 
+	// OnToolBoundarySteering consumes pending text after all tool results and
+	// images have been appended, before the next model request.
+	OnToolBoundarySteering func(context.Context) (string, error)
+
 	// Callbacks for real-time output
 	OnText       func(text string)
 	OnToolUse    func(name string, input json.RawMessage)
@@ -240,12 +244,6 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	if !opts.ContinueFromHistory {
 		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt, ImageContent: promptBlocks}}
 	}
-	currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
-		text, _ := m.Content.(string)
-		return m.Role, text
-	}, func(text string) CompletionsHistoryMessage {
-		return CompletionsHistoryMessage{Role: "user", Content: text}
-	})
 
 	// Publish completed exchanges even when a subsequent request is cancelled.
 	defer func() {
@@ -255,8 +253,16 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}()
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, func(m completionsMessage) (string, string) {
+			text, _ := m.Content.(string)
+			return m.Role, text
+		}, func(text string) CompletionsHistoryMessage {
+			return CompletionsHistoryMessage{Role: "user", Content: text}
+		})
 		messages = ensureCompletionsAttachments(ctx, messages)
-		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
+		// Summary compaction sends first and trims only after provider overflow.
+		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
 			return nil, err
 		}
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
@@ -395,6 +401,17 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		for _, message := range imageMessages {
 			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: message.Content.([]map[string]interface{})})
 		}
+		if opts.OnToolBoundarySteering != nil {
+			steering, err := opts.OnToolBoundarySteering(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("tool-boundary steering: %w", err)
+			}
+			if steering = strings.TrimSpace(steering); steering != "" {
+				messages = append(messages, completionsMessage{Role: "user", Content: steering})
+				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", Content: steering})
+			}
+		}
+
 	}
 
 	result.Text = allText.String()

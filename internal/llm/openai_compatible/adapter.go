@@ -284,6 +284,17 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		}
 		client.SetCompletionsHistory(history)
 	}
+	if req.SummaryInput != nil {
+		var history []openaiclient.CompletionsHistoryMessage
+		for _, raw := range req.SummaryInput {
+			var message openaiclient.CompletionsHistoryMessage
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
+			}
+			history = append(history, message)
+		}
+		client.SetCompletionsHistory(history)
+	}
 
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
@@ -307,8 +318,13 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	default:
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
+	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
+		systemPrompt = preserved
+	}
+
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
+		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
@@ -366,6 +382,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
+		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
@@ -427,25 +444,26 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
-		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
-		Model:               strings.TrimSpace(req.Agent.Model),
-		ContextWindow:       contextWindow,
-		MaxOutputTokens:     maxOutput,
-		Temperature:         compatibleTemperature(req.Agent),
-		System:              systemPrompt,
-		WorkDir:             effectiveWorkDir(workDir),
-		DisableTools:        disableTools,
-		SkipDefaultTools:    chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		Attachments:         attachments,
-		ExtraTools:          runtimeTools(ctx),
-		ExtraHeaders:        extraHeaders,
-		FinalizeRequest:     finalizeRequest,
-		ExtraBody:           extraBody,
-		ToolExecutor:        toolExecutor(ctx, workDir),
-		ToolFilter:          toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		OnText:              streamText(sw),
-		OnToolUse:           streamToolUse(sw),
-		OnToolResult:        streamToolResult(sw),
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		ContinueFromHistory:    llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:                  strings.TrimSpace(req.Agent.Model),
+		ContextWindow:          contextWindow,
+		MaxOutputTokens:        maxOutput,
+		Temperature:            compatibleTemperature(req.Agent),
+		System:                 systemPrompt,
+		WorkDir:                effectiveWorkDir(workDir),
+		DisableTools:           disableTools,
+		SkipDefaultTools:       chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		Attachments:            attachments,
+		ExtraTools:             runtimeTools(ctx),
+		ExtraHeaders:           extraHeaders,
+		FinalizeRequest:        finalizeRequest,
+		ExtraBody:              extraBody,
+		ToolExecutor:           toolExecutor(ctx, workDir),
+		ToolFilter:             toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		OnText:                 streamText(sw),
+		OnToolUse:              streamToolUse(sw),
+		OnToolResult:           streamToolResult(sw),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
@@ -731,6 +749,11 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Completio
 		}
 	}
 	return messages
+}
+
+// SummaryHistory uses the same structured replay as a continuing conversation.
+func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistoryMessage {
+	return buildClientHistory(history)
 }
 
 func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessage, bool) {

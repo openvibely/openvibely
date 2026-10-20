@@ -159,16 +159,32 @@ func TestManagedKnowledgeIndependentControlsAndMaintenance(t *testing.T) {
 		p := models.SkillMemoryPermissions{ReadSkills: mask&1 != 0, WriteSkills: mask&2 != 0, ReadMemories: mask&4 != 0, WriteMemories: mask&8 != 0}
 		project.SkillMemoryPermissions = &p
 		require.NoError(t, stores.Projects.Update(ctx, project))
-		for _, chat := range []bool{true, false} {
-			turnCtx := worker.prepareMainModelKnowledge(ctx, task, chat)
+		for _, mode := range []string{"chat", "task", "followup"} {
+			chat := mode == "chat"
+			base := ctx
+			if mode == "followup" {
+				base = WithTaskThreadLifecycleTurn(base)
+			}
+			turnCtx := worker.prepareMainModelKnowledge(base, task, chat)
 			rt := llmcontracts.RuntimeToolsFromContext(turnCtx)
 			require.Equal(t, p.ReadSkills, strings.Contains(managedcontext.Text(turnCtx), "documents"))
 			require.Equal(t, p.ReadMemories, strings.Contains(managedcontext.Text(turnCtx), "chat_memory.md"))
 			history := []string{"Summarize this document", priorIndex, "Summary", "Change the title"}
 			updated := managedcontext.Ensure(turnCtx, history, func(s string) (string, string) { return "user", s }, func(s string) string { return s })
-			require.Equal(t, []string{history[0], managedcontext.Text(turnCtx), history[2], history[3]}, updated)
-			require.Equal(t, p.ReadSkills, strings.Contains(updated[1], "documents"), "disabled skill index must leave history")
-			require.Equal(t, p.ReadMemories, strings.Contains(updated[1], "chat_memory.md"), "disabled memory index must leave history")
+			text := managedcontext.Text(turnCtx)
+			anyAllowed := p.ReadSkills || p.ReadMemories || !chat && (p.WriteSkills || p.WriteMemories)
+			require.Equal(t, anyAllowed, text != "", "mask=%d mode=%s", mask, mode)
+			require.Equal(t, history[:3], updated[:3])
+			require.Equal(t, history[3], updated[len(updated)-1])
+			if text != "" {
+				require.Contains(t, updated, text)
+			} else {
+				require.Contains(t, updated[len(updated)-2], "No skills or memory index")
+			}
+
+			for _, name := range []string{"skill_view", "memory_view", "skill_manage", "agent_skill_manage", "memory_save", "memory_delete"} {
+				require.Equal(t, rt.HasDefinition(name), strings.Contains(text, name), "mask=%d mode=%s tool=%s", mask, mode, name)
+			}
 			for name, allowed := range map[string]bool{"skill_view": p.ReadSkills, "memory_view": p.ReadMemories, "memory_save": !chat && p.WriteMemories, "memory_delete": !chat && p.WriteMemories, "skill_manage": !chat && p.WriteSkills} {
 				require.Equal(t, allowed, rt.HasDefinition(name), "mask=%d chat=%t tool=%s", mask, chat, name)
 				if !allowed {
@@ -467,4 +483,83 @@ func TestManagedScopedSearchChecksEachFile(t *testing.T) {
 		require.Contains(t, out, "public.md")
 		require.Contains(t, out, "public-alias.md")
 	}
+}
+
+// Resolve the prompt on every request, including grants/revocations inside a turn.
+func TestManagedKnowledgeInstructionsFollowIndividualAgentGrants(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	project.SkillMemoryPermissions = &models.SkillMemoryPermissions{WriteSkills: true, WriteMemories: true}
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	agent := &models.Agent{ID: "prompt-grants", Key: "prompt_grants", Name: "Prompt grants", Enabled: true, ProjectID: project.ID}
+	require.NoError(t, stores.Agents.Create(ctx, agent))
+	worker := NewWorkerService(nil, 0, stores.Projects)
+	worker.SetLifecycleAgentRepo(stores.Agents)
+	task := models.Task{ID: "prompt-task", ProjectID: project.ID, AgentDefinitionID: &agent.ID}
+	for _, mode := range []string{"chat", "task", "followup"} {
+		t.Run(mode, func(t *testing.T) {
+			base := ctx
+			if mode == "followup" {
+				base = WithTaskThreadLifecycleTurn(base)
+			}
+			turn := worker.prepareMainModelKnowledge(base, task, mode == "chat")
+			for _, grant := range []string{"memory_save", "memory_delete", "skill_manage", "agent_skill_manage", ""} {
+				agent.Tools = nil
+				if grant != "" {
+					agent.Tools = []string{grant}
+				}
+				require.NoError(t, stores.Agents.Update(ctx, agent))
+				text := managedcontext.Text(turn)
+				require.Equal(t, mode != "chat" && grant != "", text != "", "grant=%s", grant)
+				for _, name := range []string{"skill_view", "memory_view", "memory_save", "memory_delete", "skill_manage", "agent_skill_manage"} {
+					// Match tool words, since agent_skill_manage contains skill_manage.
+					require.Equal(t, mode != "chat" && name == grant, strings.Contains(text, "Use "+name+" "), "grant=%s name=%s text=%s", grant, name, text)
+				}
+			}
+			agent.Tools = []string{"memory_save"}
+			agent.Enabled = false
+			require.NoError(t, stores.Agents.Update(ctx, agent))
+			require.Empty(t, managedcontext.Text(turn))
+			agent.Enabled = true
+			require.NoError(t, stores.Agents.Update(ctx, agent))
+		})
+	}
+}
+
+func TestManagedKnowledgeRevocationAndRestorationPreservesResults(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	worker := NewWorkerService(nil, 0, stores.Projects)
+	turn := worker.prepareMainModelKnowledge(ctx, models.Task{ID: "refresh", ProjectID: project.ID}, false)
+	type message struct{ role, text string }
+	read := func(m message) (string, string) { return m.role, m.text }
+	makeMessage := func(s string) message { return message{"user", s} }
+	result := message{"tool", "Loaded skill instructions and memory result"}
+	history := []message{makeMessage(managedcontext.Text(turn)), result, makeMessage(managedcontext.Text(turn)), {"user", "Follow up"}}
+	project.SkillMemoryPermissions = &models.SkillMemoryPermissions{}
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	require.Empty(t, managedcontext.Text(turn))
+	history = managedcontext.Ensure(turn, history, read, makeMessage)
+	require.Len(t, history, 5)
+	require.Equal(t, result, history[1])
+	require.Contains(t, history[3].text, "No skills or memory index")
+	project.SkillMemoryPermissions = &models.SkillMemoryPermissions{ReadMemories: true}
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	history = managedcontext.Ensure(turn, history, read, makeMessage)
+	require.Len(t, history, 6)
+	require.Equal(t, result, history[1])
+	require.Equal(t, managedcontext.Text(turn), history[4].text)
+	require.Equal(t, history, managedcontext.Ensure(turn, history, read, makeMessage))
+	// Compaction dropped the index: restore it once on the next request.
+	compacted := []message{{"user", "Conversation summary"}}
+	restored := managedcontext.Ensure(turn, compacted, read, makeMessage)
+	require.Len(t, restored, 2)
+	require.Equal(t, restored, managedcontext.Ensure(turn, restored, read, makeMessage))
+	// Later runtime composition can narrow access further than the project grants.
+	rt := llmcontracts.RuntimeToolsFromContext(turn)
+	filtered := *rt
+	filtered.Filter = func(string) (bool, bool) { return false, true }
+	require.Empty(t, managedcontext.Text(llmcontracts.WithRuntimeTools(turn, &filtered)))
 }

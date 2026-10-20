@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestPrepareRequestAppliesRequiredHeadersAndExactBodySignature(t *testing.T) {
@@ -393,7 +395,7 @@ func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
 		RefreshHeaders:          map[string]string{"X-Refresh-Header": "refresh-value"},
 		RefreshParameters:       map[string]string{"audience": "custom-api"},
 	}
-	tokens, err := Refresh(context.Background(), NewHTTPClient(time.Second, true), cfg, "old-refresh", RefreshOptions{
+	tokens, err := Refresh(retrytest.Context(), NewHTTPClient(time.Second, true), cfg, "old-refresh", RefreshOptions{
 		ClientID: "client-id", ClientSecret: "client-secret",
 	})
 	if err != nil {

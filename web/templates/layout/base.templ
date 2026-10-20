@@ -186,6 +186,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
 			<script defer src={ static.URL("kanban.js") }></script>
+			<script defer src={ static.URL("thread-navigation.js") }></script>
+			<script defer src={ static.URL("chat-virtual-list.js") }></script>
 			<script>
 			window.appendPendingThreadInputEditButton = function(actions) {
 				var button = document.createElement('button');
@@ -1035,6 +1037,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					max-width: none;
 					padding-left: 16px;
 				}
+				/* Data attributes are not replayed by HTMX's delayed style settling. */
+				[data-transcript-hydrating="true"] { visibility: hidden; }
 				.chat-bubble-user-msg,
 				.chat-bubble-assistant-msg {
 					color: hsl(var(--bc));
@@ -4687,10 +4691,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     }, true);
                     document.addEventListener('htmx:beforeRequest', function(event) {
                         const detail = event.detail;
-                        if (!detail.target || detail.target.id !== 'main-content') return;
+                        if (event.defaultPrevented || !detail.target || detail.target.id !== 'main-content') return;
                         const previous = currentPageRequest;
                         currentPageRequest = detail.xhr;
                         if (previous && previous !== detail.xhr && previous.readyState !== 4) previous.abort();
+                        if (!event.defaultPrevented && window.showCachedThreadNavigation) window.showCachedThreadNavigation(detail);
                     });
                     document.addEventListener('htmx:beforeSwap', function(event) {
                         const detail = event.detail;

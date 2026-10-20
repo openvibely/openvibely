@@ -138,8 +138,12 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 	if json.Unmarshal([]byte(raw), &messages) != nil {
 		return
 	}
+	var original []json.RawMessage
+	if json.Unmarshal([]byte(raw), &original) != nil {
+		return
+	}
 	history := make([]models.Execution, 0, len(messages))
-	for _, message := range messages {
+	for i, message := range messages {
 		execution := models.Execution{Status: models.ExecCompleted}
 		var plain string
 		if json.Unmarshal(message.Content, &plain) == nil {
@@ -180,7 +184,27 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 		if len(message.ToolCalls) > 0 && string(message.ToolCalls) != "null" {
 			execution.Output += "\nTool calls: " + string(message.ToolCalls)
 		}
+		// Keep the provider's message shape for summary requests. The execution's
+		// text fields retain user instructions and support text-only fallback paths.
+		transcript := "[" + string(original[i]) + "]"
+		if anthropicFailure != nil {
+			replay := anthropicclient.Message{Role: message.Role}
+			if json.Unmarshal(message.Content, &replay.Content) != nil {
+				replay.ContentBlocks = message.Content
+			}
+			encoded, encodeErr := json.Marshal(map[string]any{"messages": []anthropicclient.Message{replay}})
+			if encodeErr != nil {
+				return
+			}
+			transcript = string(encoded)
+		}
+		execution.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}
 		history = append(history, execution)
+	}
+	// Recovery contains the conversation through the active execution. Record
+	// that boundary so restoration does not append the covered executions again.
+	if len(history) > 0 {
+		history[len(history)-1].ID = req.ExecID
 	}
 	state.mu.Lock()
 	state.providerHistory = history

@@ -1,6 +1,7 @@
 package update
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -261,6 +262,8 @@ func TestStopDarwinAppBundleProcessResolvesExecutableAliases(t *testing.T) {
 	}
 	port := freeTCPPort(t)
 	cmd := exec.Command(realExecutable, "serve", "--listen", "127.0.0.1:"+port)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +276,8 @@ func TestStopDarwinAppBundleProcessResolvesExecutableAliases(t *testing.T) {
 		case <-time.After(time.Second):
 		}
 	})
-	deadline := time.Now().Add(5 * time.Second)
+	// The first exec of a freshly built binary includes macOS code-signature
+	// validation, which is unbounded under load; wait for readiness or exit.
 	for {
 		resp, err := http.Get("http://127.0.0.1:" + port + "/health")
 		if err == nil {
@@ -282,10 +286,11 @@ func TestStopDarwinAppBundleProcessResolvesExecutableAliases(t *testing.T) {
 				break
 			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("fixture did not start")
+		select {
+		case err := <-done:
+			t.Fatalf("fixture exited before becoming healthy: %v\n%s", err, stderr.String())
+		case <-time.After(20 * time.Millisecond):
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
 	if err := stopDarwinAppBundleProcess(context.Background(), filepath.Join(aliasRoot, "OpenVibely"), "http://127.0.0.1:"+port+"/health", nil); err != nil {
 		t.Fatal(err)

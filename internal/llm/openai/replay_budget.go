@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -31,6 +32,25 @@ func EffectiveReplayHistory(history []models.Execution) []models.Execution {
 // OpenAI, including checkpoint replacement and image-specific token estimates.
 func EstimateHistoryTokens(history []models.Execution) int {
 	return openaiclient.EstimateResponsesInputTokens(HistoryInputItems(history))
+}
+
+// EstimateContinuationTokens follows SendAgentic's input assembly: a complete
+// replay replaces the initial native checkpoint; plain messages append to it.
+// Native items use the same image-aware estimator as replay items.
+func EstimateContinuationTokens(history []models.Execution, nativeJSON string) (historyTokens, nativeTokens int) {
+	var native []any
+	if json.Unmarshal([]byte(nativeJSON), &native) == nil {
+		nativeTokens = openaiclient.EstimateResponsesInputTokens(native)
+	}
+	for _, message := range buildClientHistory(history) {
+		if len(message.ResponsesInputItems) > 0 {
+			nativeTokens = 0
+			historyTokens = openaiclient.EstimateResponsesInputTokens(message.ResponsesInputItems)
+		} else {
+			historyTokens += openaiclient.EstimateResponsesInputTokens([]any{map[string]any{"type": "message", "role": message.Role, "content": message.Content}})
+		}
+	}
+	return historyTokens, nativeTokens
 }
 
 // HistoryInputItems is the canonical replay representation for chat and task
@@ -65,7 +85,7 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 	var users []models.Execution
 	for _, raw := range HistoryInputItems(history) {
 		item, ok := raw.(map[string]any)
-		if !ok || item["type"] != "message" || item["role"] != "user" {
+		if !ok || (item["type"] != nil && item["type"] != "message") || item["role"] != "user" {
 			continue
 		}
 		var text string
@@ -85,10 +105,40 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 			}
 			text = strings.Join(parts, "\n")
 		}
-		if strings.TrimSpace(text) != "" {
+		if strings.TrimSpace(text) != "" && !llmprompt.IsApplicationContext(text) && !llmprompt.IsCompactionContext(text) {
 			// No execution ID or replay: these are retained user messages, not
 			// database executions whose full history should be hydrated again.
-			users = append(users, models.Execution{PromptSent: text, Status: models.ExecCompleted})
+			// Preserve text annotations and provider message IDs. Drop media from
+			// retained user context, as it is not part of the 20k text budget.
+			retained := make(map[string]any, len(item))
+			for key, value := range item {
+				retained[key] = value
+			}
+			if parts, ok := item["content"].([]any); ok {
+				for _, value := range parts {
+					part, ok := value.(map[string]any)
+					if !ok || part["type"] != "input_text" {
+						retained["content"] = []any{map[string]any{"type": "input_text", "text": text}}
+						// The replacement has one text part, even when no text
+						// truncation is needed. Keep its classifications aligned.
+						for _, key := range []string{"internal_chat_message_metadata", "internal_chat_message_metadata_passthrough"} {
+							if metadata, ok := item[key].(map[string]any); ok {
+								if _, exists := metadata["content_item_kinds"]; exists {
+									updated := make(map[string]any, len(metadata))
+									for field, value := range metadata {
+										updated[field] = value
+									}
+									updated["content_item_kinds"] = []string{"user.text"}
+									retained[key] = updated
+								}
+							}
+						}
+						break
+					}
+				}
+			}
+			raw, _ := json.Marshal(retained)
+			users = append(users, models.Execution{PromptSent: text, Status: models.ExecCompleted, ContextKind: "user", RetainedUserMessage: raw})
 		}
 	}
 	return users
