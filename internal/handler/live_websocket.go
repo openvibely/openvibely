@@ -50,7 +50,8 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	if !native && (err != nil || origin == nil || origin.Host != r.Host || origin.Scheme != c.Scheme() || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "") {
 		return echo.NewHTTPError(http.StatusForbidden, "invalid WebSocket origin")
 	}
-	if h.liveSocketCount.Add(1) > events.MaxSubscribers {
+	limits := h.liveLimits.WithDefaults()
+	if h.liveSocketCount.Add(1) > int64(limits.Connections) {
 		h.liveSocketCount.Add(-1)
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "live connection limit reached")
 	}
@@ -159,7 +160,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 			if _, exists := subscriptions[cmd.ID]; exists {
 				continue
 			}
-			if len(subscriptions) >= 64 {
+			if len(subscriptions) >= limits.SubscriptionsPerConnection {
 				writeFrame(liveFrame{ID: cmd.ID, Event: "error", Data: "subscription limit reached"})
 				continue
 			}
@@ -260,6 +261,14 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 }
 
 func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liveFrame) bool) {
+	// One live subscription can attach to several broadcasters; count it once,
+	// across all projects and connections, and release it on every exit path.
+	if h.liveSubscriptionCount.Add(1) > int64(h.liveLimits.WithDefaults().LiveSubscriptions) {
+		h.liveSubscriptionCount.Add(-1)
+		send(liveFrame{Event: "retry", Data: "live subscription limit reached"})
+		return
+	}
+	defer h.liveSubscriptionCount.Add(-1)
 	var tasks events.Subscriber
 	var chats events.ChatSubscriber
 	var files events.FileChangeSubscriber
