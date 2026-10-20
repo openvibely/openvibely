@@ -20,14 +20,25 @@ import (
 // Loading older history leaves the latest execution offscreen. A fast warm
 // response must not preserve its serialized placeholders before hydration finishes.
 func TestTaskPagedCachedNavigationInChrome(t *testing.T) {
-	testTaskPagedCachedNavigation(t, false)
+	testTaskPagedCachedNavigation(t, "cache")
 }
 
 func TestTaskBoundedCachedHistoryInChrome(t *testing.T) {
-	testTaskPagedCachedNavigation(t, true)
+	testTaskPagedCachedNavigation(t, "bounded")
 }
 
-func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
+func TestTaskPagedScrollStabilityInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, "scroll")
+}
+
+func TestTaskHiddenPagedScrollStabilityInChrome(t *testing.T) {
+	testTaskPagedCachedNavigation(t, "hidden")
+}
+
+func testTaskPagedCachedNavigation(t *testing.T, mode string) {
+	bounded := mode == "bounded"
+	hiddenPaging := mode == "hidden"
+	scrollStability := mode == "scroll" || hiddenPaging
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -45,10 +56,20 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
 		Output string
 	}
 	var samples []sample
-	for i := 0; i < 10; i++ {
+	count := 10
+	if scrollStability {
+		count = 25
+	}
+	for i := 0; i < count; i++ {
 		samples = append(samples, sample{fmt.Sprintf("Prompt %d", i), strings.Repeat("A paragraph of **formatted text**.\n\n", 20)})
 	}
 	samples[len(samples)-1].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\n"+strings.Repeat("tool output line\n", 100)+"[/Tool]\n", 120) + "Final answer.\n"
+
+	if scrollStability {
+		for i := range samples {
+			samples[i].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\nresult\n[/Tool]\n", 40)
+		}
+	}
 
 	for i, s := range samples {
 		if s.Output == "" {
@@ -65,7 +86,7 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
 	path := "/tasks/" + task.ID
 	runner := fmt.Sprintf(`<script>
  window.addEventListener('DOMContentLoaded',()=>{
- const bounded=%t;
+ const bounded=%t, scrollStability=%t, hiddenPaging=%t;
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
  const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
@@ -75,6 +96,35 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
  function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
  (async()=>{
   await until(visible,'initial messages'); await wait(150);
+  if(scrollStability){
+   const m=messages(), paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   for(let page=0;page<4;page++){
+    m.dispatchEvent(new WheelEvent('wheel',{deltaY:-200,bubbles:true}));
+    m.scrollTop=50;await window.renderVisibleChatRows(m);await paint();
+    m.scrollTop=8;
+    const anchor=m.querySelector(':scope > [data-execution-pair]'), before=anchor.getBoundingClientRect().top;
+    const count=m.querySelectorAll(':scope > [data-execution-pair]').length;
+    let recording=true,maxShift=0;const trace=[];
+    const sample=()=>{if(!recording)return;if(!m.clientHeight){requestAnimationFrame(sample);return;}const top=anchor.getBoundingClientRect().top;maxShift=Math.max(maxShift,Math.abs(top-before));trace.push({top,scroll:m.scrollTop,restoring:m.dataset.earlierAnchorRestoring,guard:!!m._earlierAnchor});requestAnimationFrame(sample)};
+    requestAnimationFrame(sample);
+    m.dispatchEvent(new WheelEvent('wheel',{deltaY:-200,bubbles:true}));
+    if(hiddenPaging){
+     await until(()=>m.dataset.earlierRequestLoading==='true','request started');
+     window.taskWorkspace.openChanges();
+    }
+    await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>count,'page appended');
+    if(hiddenPaging){
+     await wait(200);
+     if(!m._earlierAnchor)throw Error('Paging anchor discarded while Chat hidden');
+     window.taskWorkspace.openThread();
+    }
+    await until(()=>m.dataset.earlierAnchorRestoring!=='true','page hydration');await paint();await wait(100);recording=false;
+    if(maxShift>3)throw Error('Page '+page+' moved visible content by '+maxShift+'px from '+before+' '+JSON.stringify(trace)+' '+debug());
+    if(!visible())throw Error('Page '+page+' left empty viewport');
+   }
+   if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   await fetch('/browser-result?status=pass');return;
+  }
   const m=messages();m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));m.scrollTop=0;m.dispatchEvent(new Event('scroll'));
   await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>5,'older page');
   await until(()=>m.dataset.earlierAnchorRestoring!=='true','older page settled');await wait(150);
@@ -109,7 +159,7 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
   }
   await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
- });</script>`, bounded, "/tasks/"+other.ID, other.ID, path, task.ID)
+ });</script>`, bounded, scrollStability, hiddenPaging, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -126,6 +176,9 @@ func testTaskPagedCachedNavigation(t *testing.T, bounded bool) {
 		if strings.HasPrefix(r.URL.Path, "/events") {
 			w.WriteHeader(204)
 			return
+		}
+		if hiddenPaging && r.URL.Query().Get("before") != "" {
+			time.Sleep(150 * time.Millisecond)
 		}
 		if bounded && r.URL.Path == path && r.Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
 			time.Sleep(200 * time.Millisecond)
