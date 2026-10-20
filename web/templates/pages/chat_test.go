@@ -288,7 +288,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	if !strings.Contains(bubbleSection, "function utf8ByteLength(value)") ||
 		!strings.Contains(bubbleSection, "var streamOffset = utf8ByteLength(textBuffer);") ||
-		!strings.Contains(bubbleSection, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
+		!strings.Contains(bubbleSection, "window.openVibelyLive.execution(execId, streamOffset)") {
 		t.Fatal("live-created assistant stream must reconnect with the current UTF-8 byte offset")
 	}
 	if !strings.Contains(bubbleSection, "progressDiv.id = 'mixture-progress-' + execId;") || !strings.Contains(bubbleSection, "innerDiv.appendChild(progressDiv);") {
@@ -355,7 +355,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("expected error event listener in createStreamingBubble")
 	}
-	errEndOffset := strings.Index(bubbleSection[errIdx:], "eventSource.onerror = function() {")
+	errEndOffset := strings.Index(bubbleSection[errIdx:], "connectChatExecutionStream();")
 	if errEndOffset == -1 {
 		t.Fatal("expected createStreamingBubble error handler boundary")
 	}
@@ -370,25 +370,10 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 		t.Error("error handler in createStreamingBubble must re-evaluate plan prompt")
 	}
 
-	// Also check onerror handler
-	oeIdx := strings.Index(bubbleSection, "eventSource.onerror = function() {")
-	if oeIdx == -1 {
-		t.Fatal("expected onerror handler in createStreamingBubble")
-	}
-	oeEnd := oeIdx + 1200
-	if oeEnd > len(bubbleSection) {
-		oeEnd = len(bubbleSection)
-	}
-	oeBody := bubbleSection[oeIdx:oeEnd]
-	if !strings.Contains(oeBody, "setTimeout(connectChatExecutionStream, 150 * streamRetryCount)") {
-		t.Error("onerror handler in createStreamingBubble must retry empty early stream failures")
-	}
-	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
-		t.Error("onerror handler in createStreamingBubble must clear _chatStreamInProgress")
-	}
-	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
-		t.Error("onerror handler in createStreamingBubble must re-evaluate plan prompt")
-	}
+    if strings.Contains(bubbleSection, "eventSource.onerror") {
+        t.Error("network failures must be recovered by the shared transport, not terminate the execution")
+    }
+
 }
 
 func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {

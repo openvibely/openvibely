@@ -2648,20 +2648,6 @@ paths:
       summary: Cancel a system update
       tags:
       - system
-  /api/system/update/events:
-    get:
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "204":
-          description: No Content
-      summary: Stream system update events
-      tags:
-      - system
   /api/tasks/{id}/lifecycle-executions:
     get:
       description: Returns one bounded page of lifecycle hook invocations (routing,
