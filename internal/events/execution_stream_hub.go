@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/livelimits"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -74,10 +75,20 @@ type ExecutionStreamHub struct {
 	mu              sync.RWMutex
 	subs            map[string]*executionStreamGroup
 	subscriberCount int
+	maxSubscribers  int
 }
 
 func NewExecutionStreamHub() *ExecutionStreamHub {
-	return &ExecutionStreamHub{subs: make(map[string]*executionStreamGroup)}
+	return NewExecutionStreamHubWithLimit(0)
+}
+
+// NewExecutionStreamHubWithLimit sets the total output subscriber budget across
+// all executions. Nonpositive values use the default.
+func NewExecutionStreamHubWithLimit(limit int) *ExecutionStreamHub {
+	if limit <= 0 {
+		limit = livelimits.DefaultExecutionSubscriptions
+	}
+	return &ExecutionStreamHub{subs: make(map[string]*executionStreamGroup), maxSubscribers: limit}
 }
 
 func (h *ExecutionStreamHub) Subscribe(execID string) (ExecutionStreamSubscriber, func(), error) {
@@ -86,7 +97,7 @@ func (h *ExecutionStreamHub) Subscribe(execID string) (ExecutionStreamSubscriber
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.subscriberCount >= MaxSubscribers {
+	if h.subscriberCount >= h.maxSubscribers {
 		return nil, nil, ErrMaxSubscribers
 	}
 	sub := make(ExecutionStreamSubscriber, 128)

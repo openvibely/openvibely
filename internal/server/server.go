@@ -485,10 +485,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	handler.SetUploadsDir(uploadsPath)
 
 	// Event broadcasters for real-time UI updates
-	broadcaster := events.NewBroadcaster()
-	chatBroadcaster := events.NewChatBroadcaster()
-	fileChangeBroadcaster := events.NewFileChangeBroadcaster()
-	executionStreamHub := events.NewExecutionStreamHub()
+	broadcaster := events.NewBroadcasterWithLimit(cfg.LiveLimits.LiveSubscriptions)
+	chatBroadcaster := events.NewChatBroadcasterWithLimit(cfg.LiveLimits.LiveSubscriptions)
+	fileChangeBroadcaster := events.NewFileChangeBroadcasterWithLimit(cfg.LiveLimits.LiveSubscriptions)
+	executionStreamHub := events.NewExecutionStreamHubWithLimit(cfg.LiveLimits.ExecutionSubscriptions)
 
 	// Database
 	backend, err := openPersistence(cfg, broadcaster)
@@ -1132,6 +1132,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			h.SetProjectFolderPicker(option.ProjectFolderPicker)
 		}
 	}
+	h.SetLiveLimits(cfg.LiveLimits)
 	h.SetChatBroadcaster(chatBroadcaster)
 	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
