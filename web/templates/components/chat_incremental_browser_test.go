@@ -956,3 +956,42 @@ func TestBrowserFunctional_VirtualScrollLargeThinkingGroupYields(t *testing.T) {
  return {asyncCalls};
  `)
 }
+
+func TestBrowserFunctional_HiddenVirtualAnchorResizesAndExpires(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='80px';messages.style.width='640px';messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const models=Array.from({length:10},(_,index)=>({kind:'using',segments:[{resultOutput:index===0?'x'.repeat(65536):''}]}));
+ let finish;
+ await installChatVirtualRows(stream,{models},(node,model,index)=>{
+   if(index===0)return new Promise(resolve=>{finish=()=>{
+     preserveChatVirtualScroll(node,()=>{node.style.height='1800px';node.textContent='Large result'});resolve();
+   }});
+   node.style.height='180px';node.textContent='Message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ messages.scrollTop=300;messages.dispatchEvent(new Event('scroll'));await paint();
+ assert(finish,'large row not preparing');
+ const reading=stream._chatVirtualRows[2];
+ const before=reading.node.getBoundingClientRect().top-messages.getBoundingClientRect().top;
+ const restore=captureChatVirtualScroll(messages);
+ messages.style.display='none';finish();await pause(0);
+ messages.style.width='320px';messages.style.marginTop='64px';
+ assert(restore()===false,'restored against hidden geometry');
+ messages.style.display='';
+ assert(restore()===true,'failed to restore visible anchor');
+ await paint();
+ const el=reading.node.isConnected?reading.node:reading.placeholder;
+ assert(Math.abs(el.getBoundingClientRect().top-messages.getBoundingClientRect().top-before)<3,'viewport movement changed relative reading position');
+ // Bottom-following should still follow the newest content after a hidden resize.
+ messages.scrollTop=messages.scrollHeight;await renderVisibleChatRows(messages);await paint();
+ const pinned=captureChatVirtualScroll(messages);
+ messages.style.display='none';const tail=document.createElement('div');tail.style.height='200px';messages.appendChild(tail);
+ messages.style.display='';pinned();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<3,'lost bottom-following');
+ // A saved closure must not touch detached transcripts after navigation.
+ messages.remove();
+ assert(restore()===false && pinned()===false,'restored a detached transcript');
+ return {};
+ `)
+}
