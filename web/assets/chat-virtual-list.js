@@ -104,6 +104,8 @@
         list.resize?.disconnect();
         list.messages.removeEventListener('scroll', list.schedule);
         list.rows.clear();
+        list.viewportReady?.(false);
+        list.viewportReady = null;
         lists.delete(list.messages);
     }
     function ensureList(messages) {
@@ -111,6 +113,11 @@
         if (!list) {
             list = {messages, rows:new Map(), frame:null};
             list.schedule = function () {
+                if (list.viewportReady && hasVisibleArea(messages)) {
+                    list.viewportReady(true);
+                    list.viewportReady = null;
+                    list.viewportPromise = null;
+                }
                 if (list.frame === null) list.frame = requestAnimationFrame(() => refresh(list));
             };
             list.observer = new MutationObserver(list.schedule);
@@ -209,6 +216,15 @@
         lists.forEach(list => { if (!list.messages.isConnected) destroy(list); });
         const messages = root?.matches?.(messagesSelector) ? root : root?.closest?.(messagesSelector);
         if (messages) ensureList(messages).schedule();
+    };
+    // A hidden workspace has no viewport to render or restore scroll against.
+    // Keep its initial hydration pending until resize makes that viewport real.
+    window.waitForChatTranscriptViewport = function (messages) {
+        if (!messages.isConnected) return Promise.resolve(false);
+        if (hasVisibleArea(messages)) return Promise.resolve(true);
+        const list = ensureList(messages);
+        if (!list.viewportPromise) list.viewportPromise = new Promise(resolve => { list.viewportReady = resolve; });
+        return list.viewportPromise;
     };
     window.renderVisibleChatRows = async function (messages) {
         const list = ensureList(messages);
