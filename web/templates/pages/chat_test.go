@@ -58,7 +58,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
 	}
 
-	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 space-y-6" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 space-y-6" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	if !strings.Contains(content, `data-messages-id="chat-messages"`) || !strings.Contains(content, `data-tracker-key="scrollTracker_chat-messages"`) || !strings.Contains(content, `aria-label="Scroll to latest message"`) {
@@ -114,8 +114,8 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
 		`class="relative flex-1 min-h-0 min-w-0"`,
-		`id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 space-y-6"`,
-		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-4"`,
+		`id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 space-y-6"`,
+		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
