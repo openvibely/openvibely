@@ -490,8 +490,13 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 		budget.FixedTokens += estimateDefaultProviderToolTokens(req.Agent.Provider)
 	}
 	budget.PendingTokens = estimatedUTF8Tokens(req.Message)
-	budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
-	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory) + estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
+	if req.Agent.Provider == models.ProviderOpenAI {
+		budget.HistoryTokens, budget.NativeStateTokens = llmopenai.EstimateContinuationTokens(req.ChatHistory, req.NativeCompactionStateJSON)
+	} else {
+		budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+		budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+	}
+	budget.HistoryTokens += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimateRequestAttachmentTokens(req, att)
 	}
@@ -720,7 +725,13 @@ func openAIContextWindow(model string) int {
 }
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
-	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+	total := estimatedUTF8Tokens(req.Message)
+	if req.Agent.Provider == models.ProviderOpenAI {
+		history, native := llmopenai.EstimateContinuationTokens(req.ChatHistory, req.NativeCompactionStateJSON)
+		total += history + native
+	} else {
+		total += estimatedUTF8Tokens(req.NativeCompactionStateJSON) + estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+	}
 	total += estimatedUTF8Tokens(attachmentcontext.Text(req.Ctx))
 	total += estimatedUTF8Tokens(managedcontext.Text(req.Ctx))
 	total += estimateProviderSystemPromptTokens(req)
@@ -732,7 +743,6 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	for _, att := range req.Attachments {
 		total += estimateRequestAttachmentTokens(req, att)
 	}
-	total += estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	total += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	return total - savedApplicationContextTokens(req)
 }

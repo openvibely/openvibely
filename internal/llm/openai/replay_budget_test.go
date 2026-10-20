@@ -75,3 +75,22 @@ func TestReplayBudgetDoesNotCountImageBase64AsText(t *testing.T) {
 	require.Equal(t, small, large)
 	require.InDelta(t, 1844, large, 100)
 }
+
+func TestContinuationBudgetReplacesNativeOnlyForStructuredReplay(t *testing.T) {
+	native := `[{"type":"message","role":"user","content":"saved native context"}]`
+	plain := []models.Execution{{PromptSent: "new question", Output: "new answer"}}
+	historyTokens, nativeTokens := EstimateContinuationTokens(plain, native)
+	require.Equal(t, EstimateHistoryTokens(plain), historyTokens)
+	require.Positive(t, nativeTokens)
+	for _, replay := range []string{
+		`{"responses_input":[{"type":"message","role":"user","content":"full replacement"}]}`,
+		`[{"role":"user","content":"converted message"}]`,
+	} {
+		history := append(append([]models.Execution(nil), plain...), models.Execution{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: replay}}}, models.Execution{PromptSent: "after replacement"})
+		h, n := EstimateContinuationTokens(history, native)
+		require.Zero(t, n, "match the client's replacement behavior for structured history")
+		require.Equal(t, EstimateHistoryTokens(history), h)
+	}
+	_, invalid := EstimateContinuationTokens(plain, `invalid JSON`)
+	require.Zero(t, invalid, "the adapter ignores invalid native JSON")
+}
