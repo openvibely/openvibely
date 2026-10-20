@@ -788,7 +788,7 @@ func TestBrowserFunctional_VirtualScrollFillsVisibleRowsBeforePaint(t *testing.T
  messages.setAttribute('data-transcript-hydrating','true');
  document.getElementById('pair').dataset.execStatus='completed';
  let source='';
- for(let i=0;i<40;i++) source+='[Thinking]\nreason '+i+'\n[/Thinking]\n'+(i%10===0?'Large **paragraph**.\n\n'.repeat(4000):'Message '+i)+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ for(let i=0;i<40;i++) source+='[Thinking]\nreason '+i+'\n[/Thinking]\n'+(i%10===0?'Formatted **paragraph**.\n\n'.repeat(800):'Message '+i)+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
  await renderStreamingContent(stream,source,false);
  await restoreChatTranscriptScroll({messages,defaultPinned:true});
  await paint();
@@ -802,6 +802,8 @@ func TestBrowserFunctional_VirtualScrollFillsVisibleRowsBeforePaint(t *testing.T
    }
    frames++;
  };
+ // Ordinary rows stay below the asynchronous renderer's 64 KiB threshold.
+ // Oversized messages are tested separately: they must not block a frame.
  // These are already loaded execution rows, not a network/history page fetch.
  for(let step=0;step<100;step++) {
    const started=performance.now();
@@ -872,5 +874,85 @@ func TestBrowserFunctional_VirtualScrollSettlesEstimatedHeightsBeforePaint(t *te
  });
  assert(empty.length===0,'height changes exposed unrendered rows for a frame: '+empty.length);
  return {};
+ `)
+}
+
+func TestBrowserPerformance_VirtualScrollLargeRowYields(t *testing.T) {
+	report := runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const paragraph='A large **message** with *formatting*, a [reference](https://example.com), and a little more prose.\n\n';
+ const huge=paragraph.repeat(Math.ceil(1048576/paragraph.length));
+ const text=huge+('[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n'.repeat(30))+'Latest message.';
+ await renderStreamingContent(stream,text,false);await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ assert(!stream._chatVirtualRows[0].ready,'large row was already rendered');
+ let synchronousLargeCalls=0,largeCalls=0;
+ const original=window.renderStreamingContent;
+ window.renderStreamingContent=function(node,source,yielding,options){
+   const size=options?.preparedSegments?.reduce((sum,s)=>sum+(s.content||'').length,0)||0;
+   if(options?.virtualRow && size>=65536){largeCalls++;if(yielding===false)synchronousLargeCalls++}
+   return original.apply(this,arguments);
+ };
+ messages.scrollTop=0;const start=performance.now();messages.dispatchEvent(new Event('scroll'));
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ const firstFrameMS=performance.now()-start;
+ assert(synchronousLargeCalls===0,'large viewport row bypassed asynchronous rendering');
+ assert(firstFrameMS<250,'large viewport row blocked the first frame: '+firstFrameMS+'ms');
+ const deadline=performance.now()+10000;
+ while(!stream._chatVirtualRows[0].ready && performance.now()<deadline) await pause(20);
+ const row=stream._chatVirtualRows[0];
+ assert(row.ready && row.node.querySelector('strong')?.textContent==='message','large row failed to finish with formatted content');
+ assert(largeCalls===1 && synchronousLargeCalls===0,'scroll settling restarted the large row');
+ return {firstFrameMS,largeCalls,synchronousLargeCalls};
+ `)
+	t.Logf("large-row first frame: %s", report)
+}
+
+func TestBrowserFunctional_VirtualScrollKeepsLargePreparationPending(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='80px';messages.style.overflowAnchor='none';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const models=Array.from({length:10},(_,index)=>({kind:'using',segments:[{resultOutput:index===0?'x'.repeat(65536):''}]}));
+ let calls=0,finish;
+ await installChatVirtualRows(stream,{models},(node,model,index,synchronous)=>{
+   if(index===0){
+     calls++;assert(!synchronous,'large tool result forced synchronous');
+     return new Promise(resolve=>{finish=()=>{node.style.height='180px';node.textContent='Finished tool result';resolve()}});
+   }
+   node.style.height='180px';node.textContent='Message '+index;
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ messages.scrollTop=300;messages.dispatchEvent(new Event('scroll'));await paint();
+ assert(calls===1 && finish,'lookahead did not begin preparation');
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await paint();
+ for(let i=0;i<4;i++){messages.dispatchEvent(new Event('scroll'));await paint()}
+ assert(calls===1 && !stream._chatVirtualRows[0].ready,'visible-window settling restarted pending work');
+ finish();await paint();
+ const row=stream._chatVirtualRows[0];
+ assert(row.ready && row.loading===null && row.node.textContent==='Finished tool result','pending row failed to finish');
+ return {calls};
+ `)
+}
+
+func TestBrowserFunctional_VirtualScrollLargeThinkingGroupYields(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ let source='';
+ for(let i=0;i<80;i++)source+='[Thinking]\nThought '+i+' '+('**reasoning** text. '.repeat(100))+'\n[/Thinking]\n';
+ source+=('[Using tool: shell | echo tail]\n[Tool shell done]\ntail result\n[/Tool]\n'.repeat(30))+'Latest message.';
+ await renderStreamingContent(stream,source,false);await restoreChatTranscriptScroll({messages,defaultPinned:true});await paint();
+ const row=stream._chatVirtualRows[0];
+ assert(row.model.kind==='thinking' && row.model.segments.length===80,'fixture did not group thinking');
+ assert(row.model.segments.every(s=>s.content.length<65536),'fixture has an individually large segment');
+ let asyncCalls=0;const original=window.renderChatMarkdownAsync;
+ window.renderChatMarkdownAsync=function(text,...args){if(text.length>=65536)asyncCalls++;return original.call(this,text,...args)};
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await new Promise(resolve=>requestAnimationFrame(resolve));
+ assert(!row.ready && row.loading,'large thinking group completed synchronously');
+ const deadline=performance.now()+10000;while(!row.ready && performance.now()<deadline)await pause(20);
+ assert(asyncCalls===1,'large thinking group bypassed the Markdown worker: '+asyncCalls);
+ assert(row.ready && row.node.querySelectorAll('details.stream-thinking').length===1,'thinking group failed to render');
+ assert(row.node.textContent.includes('Thought 0') && row.node.textContent.includes('Thought 79'),'thinking content was lost');
+ return {asyncCalls};
  `)
 }
