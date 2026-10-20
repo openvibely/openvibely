@@ -1810,7 +1810,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						? swapTarget
 						: (swapTarget && swapTarget.querySelector ? swapTarget.querySelector('#chat-messages') : null);
 					if (swappedChatMessages) {
-						window._chatInputRevision = (window._chatInputRevision || 0) + 1;
+						// Showing a local preview is not a new authoritative input
+						// snapshot. Counting it would reject its own pending refresh.
+						if (!event.detail._ovCachedPreview) window._chatInputRevision = (window._chatInputRevision || 0) + 1;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(swappedChatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(swappedChatMessages);
 						swappedChatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {

@@ -6,6 +6,8 @@ The server response remains authoritative. Cached task navigation requests an em
 
 Visible message HTML and tool-control event handlers are rebuilt from cached data. Matching source reuses cached row descriptions; changed source is projected again. Only a rendered revision held on a live DOM node can skip hydration; serialized revision attributes alone cannot.
 
+Cached Chat previews do not advance the authoritative input revision, so their pending refresh can still commit the destination URL. Sidebar same-page checks use the displayed route while that refresh is pending; cancelled duplicate clicks do not abort the active navigation.
+
 While a preview is visible, an inert template retains the outgoing history element until HTMX commits navigation. This prevents saving the destination under the previous URL, including when a warm navigation is aborted by another navigation. Browser back/forward remains owned by HTMX.
 
 `web/assets/chat-virtual-list.js` renders terminal executions and sealed streaming sections from lightweight row descriptions. The existing control-marker parser links tool calls/results and groups message text, thinking and compaction activity without creating their HTML. Only rows in the viewport plus 250 pixels above and below it receive Markdown parsing and tool DOM. Unvisited rows use estimated heights; visited rows retain their nodes and measurements. User bubbles and other already-rendered rows still use measured spacers once the list reaches 40 rows. Execution wrappers and raw source stay intact; the mutable streaming tail remains mounted.

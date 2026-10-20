@@ -42,6 +42,15 @@ func TestThreadNavigationToListPagesInChrome(t *testing.T) {
 	})
 	output := "[Using tool: shell | echo example]\n[Tool shell done]\n" + strings.Repeat("line of tool output\n", 200) + "[/Tool]\n"
 	require.NoError(t, h.execRepo.Complete(t.Context(), ex.ID, models.ExecCompleted, output, "", 0, 0))
+	chatTask := createTask(t, h, project.ID, "Project chat history", func(task *models.Task) {
+		task.Status = models.StatusCompleted
+		task.Category = models.CategoryChat
+	})
+	chatExec := createExec(t, h, chatTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "Read project chat output"
+	})
+	require.NoError(t, h.execRepo.Complete(t.Context(), chatExec.ID, models.ExecCompleted, output, "", 0, 0))
 	path := "/tasks/" + task.ID
 	runner := fmt.Sprintf(`<script>
 const requests=[]; document.addEventListener('htmx:afterRequest',e=>requests.push([e.detail.requestConfig?.path,e.detail.xhr?.status]));
@@ -54,14 +63,14 @@ window.addEventListener('DOMContentLoaded',function(){
  (async function(){
    await until(()=>document.querySelector('#task-thread-view'),'initial thread');
    for(let round=0;round<2;round++){
-     for(const [path,selector] of [['/tasks','#tasks-page'],['/automations','#automations-container']]){
+     for(const [path,selector] of [['/chat','#chat-page-root'],['/tasks','#tasks-page'],['/automations','#automations-container'],['/tasks','#tasks-page']]){
        const link=document.querySelector('[data-nav-base="'+path+'"]');
        assert(link,'missing sidebar '+path); link.click();
        await until(()=>document.querySelector('#main-content '+selector),path+' navigation');
        await wait(200);
        const rect=document.querySelector(selector).getBoundingClientRect();
        assert(rect.width>100 && rect.height>100,path+' has collapsed layout '+JSON.stringify(rect));
-       assert(location.pathname===path,path+' URL did not update');
+       await until(()=>location.pathname===path,path+' URL update');
      }
      await openVibelyNavigate(%q);
      await until(()=>document.querySelector('#task-thread-view'),'return to thread');
@@ -69,6 +78,24 @@ window.addEventListener('DOMContentLoaded',function(){
      await wait(100); // Include HTMX's delayed attribute settling.
      assert(getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','returned transcript remains hidden');
    }
+   // Return to Tasks while cached Chat is visible but its URL has not committed.
+   document.querySelector('[data-nav-base="/tasks"]').click();
+   await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','Tasks before interrupted Chat');
+   document.querySelector('[data-nav-base="/chat"]').click();
+   await until(()=>document.querySelector('#chat-page-root'),'cached Chat preview');
+   assert(location.pathname==='/tasks','fixture did not leave a pending Chat refresh');
+   // Clicking the displayed page again must not abort its pending refresh.
+   document.querySelector('[data-nav-base="/chat"]').click();
+   await until(()=>location.pathname==='/chat','Chat after repeated sidebar click');
+   document.querySelector('[data-nav-base="/tasks"]').click();
+   await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','Tasks before interrupted refresh');
+   document.querySelector('[data-nav-base="/chat"]').click();
+   await until(()=>document.querySelector('#chat-page-root'),'second cached Chat preview');
+   assert(location.pathname==='/tasks','second preview did not leave a pending Chat refresh');
+   document.querySelector('[data-nav-base="/tasks"]').click();
+   await until(()=>document.querySelector('#tasks-page') && !document.querySelector('#chat-page-root'),'Tasks during Chat refresh');
+   await wait(500);
+   assert(location.pathname==='/tasks' && document.querySelector('#tasks-page'),'late Chat response replaced Tasks');
    assert(!errors.length,'browser errors: '+JSON.stringify(errors));
    await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
@@ -92,6 +119,9 @@ window.addEventListener('DOMContentLoaded',function(){
 		if strings.HasPrefix(r.URL.Path, "/events") {
 			w.WriteHeader(http.StatusNoContent)
 			return
+		}
+		if r.URL.Path == "/chat" && r.Header.Get("HX-Request") == "true" {
+			time.Sleep(350 * time.Millisecond)
 		}
 		if r.URL.Path == path+"/thread" {
 			threadRequests.Add(1)
