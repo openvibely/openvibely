@@ -34,7 +34,8 @@ func TestChatAttachmentContextPreservesTurnOwnership(t *testing.T) {
 		ex.PromptSent = strings.Repeat("Original long request ", 20000)
 		ex.Status = models.ExecCompleted
 	})
-	otherTask := createTask(t, h, project.ID, "Other chat", func(task *models.Task) { task.Category = models.CategoryChat })
+	otherProject := createProject(t, h, "Other project")
+	otherTask := createTask(t, h, otherProject.ID, "Other chat", func(task *models.Task) { task.Category = models.CategoryChat })
 	other := createExec(t, h, otherTask.ID, agent.ID)
 	for _, file := range []models.ChatAttachment{
 		{ExecutionID: old.ID, FileName: "old.docx", FilePath: "/missing/old.docx", MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
@@ -44,7 +45,7 @@ func TestChatAttachmentContextPreservesTurnOwnership(t *testing.T) {
 		require.NoError(t, stores.ChatAttachments.Create(ctx, &file))
 	}
 	history := []models.Execution{*old}
-	params := streamingResponseParams{TaskID: task.ID, Message: "Replace Paver with Fin", ChatHistory: history, SystemContext: "Personality",
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, Message: "Replace Paver with Fin", ChatHistory: history, SystemContext: "Personality",
 		ImageAttachments: []models.Attachment{{FileName: "current.pdf", FilePath: "/missing/current.pdf", MediaType: "application/pdf"}}}
 	files, err := h.prepareChatAttachmentContext(ctx, &params)
 	require.NoError(t, err)
@@ -104,7 +105,7 @@ func TestAttachmentReferencesInUserMessagesAcrossProviders(t *testing.T) {
 					}
 				})
 				require.NoError(t, stores.ChatAttachments.Create(ctx, &models.ChatAttachment{ExecutionID: old.ID, FileName: "reference.docx", FilePath: "/missing/reference.docx", MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}))
-				p := streamingResponseParams{TaskID: task.ID, Message: "Replace Paver with Fin", ChatHistory: []models.Execution{*old}, SystemContext: "Be helpful"}
+				p := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, Message: "Replace Paver with Fin", ChatHistory: []models.Execution{*old}, SystemContext: "Be helpful"}
 				_, err := h.prepareChatAttachmentContext(ctx, &p)
 				require.NoError(t, err)
 				ctx = attachmentcontext.With(ctx, p.historicalAttachmentContext)
@@ -221,10 +222,11 @@ func TestChatAttachmentContextIncludesFilesOutsideHistory(t *testing.T) {
 	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: old.ID, FileName: "report.pdf", FilePath: "/missing/report.pdf", MediaType: "application/pdf"}))
 	var history []models.Execution
 	for i := 0; i < 21; i++ {
-		history = append(history, *createExec(t, h, task.ID, agent.ID))
+		turn := createTask(t, h, project.ID, fmt.Sprintf("Chat turn %d", i), func(task *models.Task) { task.Category = models.CategoryChat })
+		history = append(history, *createExec(t, h, turn.ID, agent.ID))
 	}
 	for _, recent := range [][]models.Execution{history[1:], nil} {
-		params := streamingResponseParams{TaskID: task.ID, Message: "Read the report", ChatHistory: recent}
+		params := streamingResponseParams{ProjectID: project.ID, TaskID: history[len(history)-1].TaskID, Message: "Read the report", ChatHistory: recent}
 		files, err := h.prepareChatAttachmentContext(ctx, &params)
 		require.NoError(t, err)
 		require.Len(t, files, 1)

@@ -35,8 +35,8 @@ func (r *ChatAttachmentRepo) CreateInTx(ctx context.Context, tx persistence.Tx, 
 
 func createChatAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att *models.ChatAttachment) error {
 	query := `
-			INSERT INTO chat_attachments (execution_id, file_name, file_path, media_type, file_size)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO chat_attachments (execution_id, file_name, file_path, media_type, file_size, project_id)
+			VALUES (?, ?, ?, ?, ?, (SELECT t.project_id FROM executions e JOIN tasks t ON t.id = e.task_id WHERE e.id = ?))
 			RETURNING id, created_at
 		`
 	err := exec.QueryRowContext(ctx, query, att.ExecutionID,
@@ -44,6 +44,7 @@ func createChatAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att
 		att.FilePath,
 		att.MediaType,
 		att.FileSize,
+		att.ExecutionID,
 	).Scan(&att.ID, &att.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("creating chat attachment: %w", err)
@@ -134,6 +135,41 @@ func (r *ChatAttachmentRepo) ListByTask(ctx context.Context, taskID string) ([]m
 		ORDER BY created_at ASC
 	`
 	rows, err := r.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat attachments: %w", err)
+	}
+	defer rows.Close()
+
+	var attachments []models.ChatAttachment
+	for rows.Next() {
+		var att models.ChatAttachment
+		if err := rows.Scan(
+			&att.ID,
+			&att.ExecutionID,
+			&att.FileName,
+			&att.FilePath,
+			&att.MediaType,
+			&att.FileSize,
+			&att.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning chat attachment: %w", err)
+		}
+		attachments = append(attachments, att)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating chat attachments: %w", err)
+	}
+	return attachments, nil
+}
+
+func (r *ChatAttachmentRepo) ListByProject(ctx context.Context, projectID string) ([]models.ChatAttachment, error) {
+	query := `
+		SELECT id, execution_id, file_name, file_path, media_type, file_size, created_at
+		FROM chat_attachments
+		WHERE project_id = ?
+		ORDER BY created_at ASC, id ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing chat attachments: %w", err)
 	}
