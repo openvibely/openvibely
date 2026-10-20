@@ -879,7 +879,19 @@ func SummaryHistory(history []models.Execution) []anthropicclient.Message {
 func EstimateHistoryTokens(history []models.Execution) int {
 	total := 0
 	for _, message := range buildRecoveryHistory(history) {
-		total += tokenestimate.FromText(message.Content) + tokenestimate.FromByteCount(len(message.ContentBlocks))
+		if len(message.ContentBlocks) == 0 {
+			total += tokenestimate.FromText(message.Content)
+			continue
+		}
+		// ContentBlocks replaces Content on the wire. Count image blocks using
+		// the same fixed cost as the client, rather than counting base64 as text.
+		encoded := append([]byte(`{"messages":[{"content":`), message.ContentBlocks...)
+		encoded = append(encoded, []byte(`}]}`)...)
+		tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+		if err != nil {
+			tokens = tokenestimate.FromByteCount(len(message.ContentBlocks))
+		}
+		total += tokens
 	}
 	return total
 }

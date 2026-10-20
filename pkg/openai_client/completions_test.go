@@ -16,6 +16,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestCompletionsContinuationPreflightUsesByteEstimate(t *testing.T) {
@@ -72,7 +73,7 @@ func TestSendCompletionsRetriesStreamTimeoutBeforeOutput(t *testing.T) {
 	})}
 
 	var streamed strings.Builder
-	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+	resp, err := client.SendCompletions(retrytest.Context(), "test", &CompletionsOptions{
 		DisableTools: true,
 		OnText: func(text string) {
 			streamed.WriteString(text)
@@ -110,7 +111,7 @@ func TestSendCompletionsRetriesStreamAfterOutputFromTurnState(t *testing.T) {
 	})}
 
 	var streamed strings.Builder
-	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+	resp, err := client.SendCompletions(retrytest.Context(), "test", &CompletionsOptions{
 		DisableTools: true,
 		OnText: func(text string) {
 			streamed.WriteString(text)
@@ -770,5 +771,87 @@ func TestCompletionsCancellationRetainsCompletedTools(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("lost completed skill result on cancellation")
+	}
+}
+
+func TestCompletionsToolBoundarySteering(t *testing.T) {
+	for _, mode := range []string{"text", "empty", "error"} {
+		t.Run(mode, func(t *testing.T) {
+			requests, executed, callbacks := 0, 0, 0
+			callbackErr := errors.New("steering unavailable")
+			client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
+			client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests++
+				var body struct {
+					Messages []completionsMessage `json:"messages"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				delta := map[string]any{"content": "finished"}
+				stop := "stop"
+				if requests == 1 {
+					delta = map[string]any{"tool_calls": []any{
+						map[string]any{"index": 0, "id": "a", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"file_path":"fixture.txt"}`}},
+						map[string]any{"index": 1, "id": "b", "type": "function", "function": map[string]any{"name": "read_file", "arguments": `{"file_path":"fixture.txt"}`}},
+					}}
+					stop = "tool_calls"
+				} else {
+					if requests != 2 {
+						t.Fatalf("unexpected request %d", requests)
+					}
+					tail := body.Messages[len(body.Messages)-3:]
+					if mode == "text" {
+						if tail[0].Role != "tool" || tail[0].ToolCallID != "a" || tail[1].Role != "tool" || tail[1].ToolCallID != "b" || tail[2].Role != "user" || tail[2].Content != "Change direction" {
+							t.Fatalf("steering must follow both tool results: %+v", tail)
+						}
+					} else if tail[2].Role != "tool" {
+						t.Fatalf("empty steering added a message: %+v", tail)
+					}
+				}
+				raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": delta, "finish_reason": stop}}})
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + string(raw) + "\n\ndata: [DONE]\n\n"))}, nil
+			})}
+			_, err := client.SendCompletions(context.Background(), "Inspect", &CompletionsOptions{
+				Model: "fixture", WorkDir: t.TempDir(), MaxTurns: 4,
+				ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+					executed++
+					return "result", false, nil
+				},
+				OnToolBoundarySteering: func(context.Context) (string, error) {
+					callbacks++
+					if executed != 2 {
+						t.Fatalf("steering ran before tools finished: %d", executed)
+					}
+					switch mode {
+					case "error":
+						return "", callbackErr
+					case "empty":
+						return "  ", nil
+					default:
+						return "Change direction", nil
+					}
+				},
+			})
+			if mode == "error" {
+				if !errors.Is(err, callbackErr) || requests != 1 {
+					t.Fatalf("err=%v requests=%d", err, requests)
+				}
+			} else if err != nil || requests != 2 {
+				t.Fatalf("err=%v requests=%d", err, requests)
+			}
+			if callbacks != 1 {
+				t.Fatalf("callbacks=%d", callbacks)
+			}
+			found := false
+			for _, message := range client.lastCompletionsTranscript {
+				if message.Role == "user" && message.Content == "Change direction" {
+					found = true
+				}
+			}
+			if found != (mode == "text") {
+				t.Fatalf("saved steering=%v mode=%s", found, mode)
+			}
+		})
 	}
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestParseStreamingResponseRejectsMissingTerminalEvent(t *testing.T) {
@@ -60,7 +61,7 @@ func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
 	})}
-	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "test"})
+	resp, err := client.Send(retrytest.Context(), "Hello", &SendOptions{Model: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestRefreshToken(t *testing.T) {
 	OpenAIOAuthTokenURL = srv.URL
 	defer func() { OpenAIOAuthTokenURL = oldURL }()
 
-	auth, err := RefreshToken("old-refresh")
+	auth, err := RefreshTokenContext(retrytest.Context(), "old-refresh")
 	if err != nil {
 		t.Fatalf("RefreshToken: %v", err)
 	}
@@ -833,7 +834,7 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	for i := 0; i < 2; i++ {
-		resp, err := client.Send(context.Background(), "Hello", &SendOptions{
+		resp, err := client.Send(retrytest.Context(), "Hello", &SendOptions{
 			Model:       "gpt-5.6-terra",
 			Attachments: []*FileAttachment{{FileName: "test.png", MediaType: "image/png", Data: []byte("png")}},
 		})
@@ -1034,7 +1035,7 @@ func TestSend_ResponsesLiteReconnectsStaleReusedWebSocket(t *testing.T) {
 
 	client := NewWithAPIKey("sk-test")
 	for i := 1; i <= 2; i++ {
-		resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
+		resp, err := client.Send(retrytest.Context(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
 		if err != nil {
 			t.Fatalf("Send %d: %v", i, err)
 		}
@@ -1100,7 +1101,7 @@ func TestSend_ResponsesLitePartialOutputFallsBackFromTurnState(t *testing.T) {
 
 	client := NewWithAPIKey("sk-test")
 	var output strings.Builder
-	resp, err := client.Send(context.Background(), "first", &SendOptions{
+	resp, err := client.Send(retrytest.Context(), "first", &SendOptions{
 		Model:   "gpt-5.6-sol",
 		OnDelta: func(text string) { output.WriteString(text) },
 	})
