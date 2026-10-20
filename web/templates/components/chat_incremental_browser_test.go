@@ -749,3 +749,34 @@ func TestBrowserFunctional_LazyTranscriptFindSkipsHiddenWorkspace(t *testing.T) 
  return {renders};
  `)
 }
+
+func TestBrowserFunctional_HiddenTranscriptHydrationWaitsForViewport(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
+ workspace.style.display='none';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const source=('Progress\n[Using tool: shell | echo example]\n[Tool shell done]\nresult\n[/Tool]\n').repeat(80)+'Final visible answer';
+ await renderStreamingContent(stream,source,false);
+ let settled=false;
+ const hydration=restoreChatTranscriptScroll({messages,defaultPinned:true}).then(result=>{settled=true;return result});
+ await paint();
+ assert(!settled,'hidden hydration completed without a viewport');
+ assert(messages.dataset.transcriptHydrating==='true','hidden transcript lost its reveal guard');
+ assert(!stream.querySelector('.stream-tool'),'hidden hydration rendered offscreen rows');
+ workspace.style.display='';
+ await hydration;
+ assert(getComputedStyle(messages).visibility==='visible','revealed viewport remained hidden');
+ assert(stream.textContent.includes('Final visible answer'),'reveal omitted the visible window');
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'reveal did not restore the bottom');
+ // Leaving while another hidden restore is pending must release that waiter.
+ workspace.style.display='none';messages.dataset.transcriptHydrating='true';
+ const abandoned=restoreChatTranscriptScroll({messages,defaultPinned:true});
+ await paint();
+ messages.remove();document.dispatchEvent(new CustomEvent('htmx:afterSwap',{detail:{}}));
+ const result=await Promise.race([abandoned,pause(500).then(()=> 'timeout')]);
+ assert(result===false,'detached hidden transcript kept its restore pending');
+ return {};
+ `)
+}
