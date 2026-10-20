@@ -50,6 +50,16 @@ type Doer interface {
 
 type retryContextKey struct{}
 
+type retryTimerContextKey struct{}
+
+// WithRetryTimer overrides retry waiting for calls made with ctx, including
+// nested provider retries. It lets integration tests advance retries without
+// real backoff delays. Retry counts, classification and reported delays remain
+// unchanged. Without an override, each policy uses its normal timer.
+func WithRetryTimer(ctx context.Context, after func(time.Duration) <-chan time.Time) context.Context {
+	return context.WithValue(ctx, retryTimerContextKey{}, after)
+}
+
 // RetryEvent describes a retry that will be attempted. Attempt is the
 // one-based retry number (the initial request is not counted as a retry).
 type RetryEvent struct {
@@ -532,6 +542,12 @@ func notify(policy Policy, attempt int, delay time.Duration, statusCode int, err
 }
 
 func wait(ctx context.Context, after func(time.Duration) <-chan time.Time, delay time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if override, ok := ctx.Value(retryTimerContextKey{}).(func(time.Duration) <-chan time.Time); ok && override != nil {
+		after = override
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

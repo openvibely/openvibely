@@ -209,7 +209,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 					if provider == models.ProviderAnthropic {
 						model = "claude-opus-5-5"
 					}
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+					ctx, cancel := context.WithTimeout(compactionTestContext(), 2*time.Minute)
 					defer cancel()
 					req := llmcontracts.AgentRequest{ExecID: exec.ID, Ctx: ctx, Operation: llmcontracts.OperationStreaming, Followup: true, Message: "CURRENT_REQUEST_739", WorkDir: dir, DisableNativeCompaction: true, ChatHistory: []models.Execution{{PromptSent: "OLDER_REQUEST", Output: "OLDER_ANSWER", Status: models.ExecCompleted}}, Agent: models.LLMConfig{ID: "saved-model-" + string(provider), Provider: provider, Model: model, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1", PresetSlug: "vllm", ContextWindow: 200000, MaxTokens: 1000, DisableNativeCompaction: true}}
 					if strings.Contains(phase, "native") {
