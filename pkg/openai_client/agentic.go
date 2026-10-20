@@ -522,6 +522,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		var turnResult *agenticTurnResult
 		localSteering := LocalSteeringInput{}
 		overflowRecovered := false
+		// Keep text actually delivered to the caller if this sampling attempt
+		// fails before it can publish a completed assistant message.
+		var partialText strings.Builder
+		streamOpts := *opts
+		streamOpts.OnText = func(text string) {
+			partialText.WriteString(text)
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+
 		turnResult, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 			RetryableError: func(err error) bool {
 				return isRetryableResponsesTransportError(err)
@@ -547,9 +558,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*agenticTurnResult, error) {
-			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
+			return c.sendAgenticTurn(attemptCtx, inputItems, tools, &streamOpts, isChatGPTOAuth)
 		})
 		if err != nil {
+			if text := partialText.String(); text != "" {
+				inputItems = append(inputItems, agenticInputItem{"type": "message", "role": "assistant", "content": text})
+				if saveErr := persistHistory(context.WithoutCancel(ctx), inputItems); saveErr != nil {
+					err = errors.Join(err, saveErr)
+				}
+			}
 			providerErr := CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 			for _, record := range pendingAsyncDeliveries {
 				if opts.OnAsyncToolRejected != nil {

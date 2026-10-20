@@ -36,7 +36,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 				continue
 			}
 			for _, media := range []string{"text", "image", "tool_image"} {
-				for _, outcome := range []string{"success", "summary_overflow_once", "summary_overflow_exhausted", "authentication", "empty_summary", "continuation_overflow", "transient_once", "transient_exhausted"} {
+				for _, outcome := range []string{"success", "summary_overflow_once", "summary_overflow_exhausted", "authentication", "empty_summary", "continuation_overflow", "continuation_partial_failure", "transient_once", "transient_exhausted"} {
 					// Retry exhaustion is independent of native fallback; exercise it in both summary entry points.
 					if outcome == "transient_exhausted" && strings.Contains(phase, "native") {
 						continue
@@ -101,6 +101,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								return
 							}
 							if restarted {
+								if outcome == "continuation_partial_failure" && !strings.Contains(text, "POST_SUMMARY_PARTIAL") {
+									t.Error("reload lost post-compaction partial answer")
+								}
 								restartCalls++
 								if strings.Contains(text, "PRE_SUMMARY_ASSISTANT_TEXT") {
 									t.Error("reload restored assistant text already covered by summary")
@@ -114,7 +117,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								if strings.Contains(text, "OLDER_ANSWER") {
 									t.Error("reload brought back history already covered by summary")
 								}
-								if outcome != "continuation_overflow" && !strings.Contains(text, "FINAL_739") {
+								if outcome != "continuation_overflow" && outcome != "continuation_partial_failure" && !strings.Contains(text, "FINAL_739") {
 									t.Error("reload lost the post-compaction answer")
 								}
 								if retainsAttachment && !strings.Contains(text, "image/png") {
@@ -220,6 +223,10 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							}
 							if strings.Count(text, "CURRENT_REQUEST_739") != 1 {
 								t.Errorf("prompt missing or duplicated: count=%d", strings.Count(text, "CURRENT_REQUEST_739"))
+							}
+							if outcome == "continuation_partial_failure" {
+								compactionServerPartialFailure(w, provider)
+								return
 							}
 							if outcome == "continuation_overflow" {
 								compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
@@ -348,8 +355,15 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							expected = append(expected, "summary")
 						}
 						success := outcome == "success" || outcome == "summary_overflow_once" || outcome == "transient_once"
-						if success || outcome == "continuation_overflow" {
+						if success || outcome == "continuation_overflow" || outcome == "continuation_partial_failure" {
 							expected = append(expected, "continuation")
+							if outcome == "continuation_partial_failure" {
+								// The transport may retry an interrupted stream; each attempt emits text.
+								require.LessOrEqual(t, len(events)-len(expected)+1, 7)
+								for i := len(expected); i < len(events); i++ {
+									expected = append(expected, "continuation")
+								}
+							}
 						}
 						require.Equal(t, expected, events)
 						if success {
@@ -369,18 +383,21 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 						default:
 							require.Equal(t, 1, summaries)
 						}
-						if success || outcome == "continuation_overflow" {
+						if success || outcome == "continuation_overflow" || outcome == "continuation_partial_failure" {
 							status := models.ExecCompleted
 							savedOutput := result.Output
 							if !success {
 								status = models.ExecFailed
-								if provider == models.ProviderOpenAICompatible && !strings.HasPrefix(phase, "preturn") {
+								if provider == models.ProviderOpenAICompatible && !strings.HasPrefix(phase, "preturn") && outcome != "continuation_partial_failure" {
 									savedOutput = "PRECOMPACTION_UI_OUTPUT"
 								}
 							}
 							require.NoError(t, stores.Executions.Complete(ctx, exec.ID, status, savedOutput, "", 0, 0))
 							beforeReload, readErr := stores.Executions.GetByID(ctx, exec.ID)
 							require.NoError(t, readErr)
+							if outcome == "continuation_partial_failure" {
+								require.Contains(t, beforeReload.Output, "POST_SUMMARY_PARTIAL")
+							}
 							if !strings.HasPrefix(phase, "preturn") && savedOutput != "PRECOMPACTION_UI_OUTPUT" {
 								require.Contains(t, beforeReload.Output, "PRE_SUMMARY_ASSISTANT_TEXT")
 							}
@@ -501,4 +518,28 @@ func compactionServerToolReply(w http.ResponseWriter, provider models.LLMProvide
 	compactionServerReply(rec, provider, prefix, file)
 	w.Header().Set("Content-Type", "text/event-stream")
 	fmt.Fprint(w, strings.ReplaceAll(rec.Body.String(), `"name":"read_file"`, `"name":"`+tool+`"`))
+}
+
+// Deliver answer text, then fail before a completed assistant message exists.
+func compactionServerPartialFailure(w http.ResponseWriter, provider models.LLMProvider) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	var events []any
+	switch provider {
+	case models.ProviderOpenAI:
+		events = []any{map[string]any{"type": "response.output_text.delta", "delta": "POST_SUMMARY_PARTIAL"}, map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": "invalid_request_error", "message": "nonretryable failure"}}}
+	case models.ProviderAnthropic:
+		events = []any{
+			map[string]any{"type": "message_start", "message": map[string]any{"id": "partial"}},
+			map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}},
+			map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": "POST_SUMMARY_PARTIAL"}},
+			map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "message": "nonretryable failure"}},
+		}
+	default:
+		// EOF without a finish_reason/[DONE] models a dropped connection.
+		events = []any{map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "POST_SUMMARY_PARTIAL"}}}}}
+	}
+	for _, event := range events {
+		raw, _ := json.Marshal(event)
+		fmt.Fprintf(w, "data: %s\n\n", raw)
+	}
 }
