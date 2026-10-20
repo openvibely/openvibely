@@ -1640,7 +1640,10 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 	if tokenBudget <= 0 {
 		return nil
 	}
-	history = llmopenai.UserMessageHistory(history)
+	// Decode Anthropic's saved messages through the same portable conversion
+	// used for provider switches. The shared extractor can then retain user
+	// text (including steering alongside tool results) with the same budget.
+	history = llmopenai.UserMessageHistory(normalizeProviderReplay(models.ProviderOpenAI, history, false))
 	retained := make([]models.Execution, 0, len(history))
 	remaining := tokenBudget
 	for i := len(history) - 1; i >= 0; i-- {

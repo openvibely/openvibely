@@ -101,6 +101,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								return
 							}
 							if restarted {
+								if !strings.Contains(text, "OLDER_STEER_739") {
+									t.Error("reload lost retained steering omitted by summary")
+								}
 								if outcome == "continuation_partial_failure" && !strings.Contains(text, "POST_SUMMARY_PARTIAL") {
 									t.Error("reload lost post-compaction partial answer")
 								}
@@ -135,6 +138,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							if strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
 								events = append(events, "summary")
 								summaries++
+								if summaries == 1 && !strings.Contains(text, "OLDER_STEER_739") {
+									t.Error("summary input lost older steering")
+								}
 								if summaries == 1 && (strings.HasPrefix(phase, "inturn") || strings.HasPrefix(phase, "steering")) && !strings.Contains(text, "PRE_SUMMARY_ASSISTANT_TEXT") {
 									t.Error("summary missing pre-compaction assistant text")
 								}
@@ -215,6 +221,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								return
 							}
 							events = append(events, "continuation")
+							if !strings.Contains(text, "OLDER_STEER_739") {
+								t.Error("continuation lost retained steering omitted by summary")
+							}
 							if strings.HasPrefix(phase, "steering") && !strings.Contains(text, "STEER_SUMMARY_739") {
 								t.Error("continuation lost steering")
 							}
@@ -330,6 +339,17 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							oldExecution.ReplayMessages = replay[oldExecution.ID]
 							req.ChatHistory = []models.Execution{oldExecution}
 						}
+
+						// The summary deliberately omits this saved steering message.
+						// Hydrate it from the database, as a real later turn does.
+						replayRaw := ""
+						if len(oldExecution.ReplayMessages) > 0 {
+							replayRaw = oldExecution.ReplayMessages[len(oldExecution.ReplayMessages)-1].TranscriptJSON
+						}
+						replayRaw = compactionMatrixSavedSteering(t, provider, replayRaw)
+						require.NoError(t, stores.Executions.ReplaceReasoningReplay(ctx, oldExecution.ID, "", []models.ExecutionReplayMessage{{TranscriptJSON: replayRaw}}))
+						oldExecution.ReplayMessages = nil
+						req.ChatHistory = []models.Execution{oldExecution}
 						if media == "image" {
 							req.Attachments = []models.Attachment{attachment}
 						}
@@ -542,4 +562,44 @@ func compactionServerPartialFailure(w http.ResponseWriter, provider models.LLMPr
 		raw, _ := json.Marshal(event)
 		fmt.Fprintf(w, "data: %s\n\n", raw)
 	}
+}
+
+func compactionMatrixSavedSteering(t *testing.T, provider models.LLMProvider, raw string) string {
+	t.Helper()
+	var envelope map[string]any
+	var messages []any
+	key := ""
+	if provider == models.ProviderOpenAI {
+		key = "responses_input"
+	} else if provider == models.ProviderAnthropic {
+		key = "messages"
+	}
+	if raw != "" {
+		if key != "" {
+			require.NoError(t, json.Unmarshal([]byte(raw), &envelope))
+			messages, _ = envelope[key].([]any)
+		} else {
+			require.NoError(t, json.Unmarshal([]byte(raw), &messages))
+		}
+	}
+	if len(messages) == 0 {
+		messages = []any{map[string]any{"role": "user", "content": "OLDER_REQUEST"}, map[string]any{"role": "assistant", "content": "OLDER_ANSWER"}}
+	}
+	steer := map[string]any{"role": "user", "content": "OLDER_STEER_739"}
+	if provider == models.ProviderAnthropic {
+		delete(steer, "content")
+		steer["content_blocks"] = []any{map[string]any{"type": "text", "text": "OLDER_STEER_739"}}
+	}
+	messages = append(messages, steer)
+	var value any = messages
+	if key != "" {
+		if envelope == nil {
+			envelope = map[string]any{}
+		}
+		envelope[key] = messages
+		value = envelope
+	}
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	return string(encoded)
 }
