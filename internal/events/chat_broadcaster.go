@@ -82,7 +82,16 @@ type ChatBroadcaster struct {
 
 // NewChatBroadcaster creates a new chat event broadcaster
 func NewChatBroadcaster() *ChatBroadcaster {
-	return &ChatBroadcaster{core: newBroadcaster[ChatEvent, ChatSubscriber](10)}
+	return NewChatBroadcasterWithLimit(0)
+}
+
+// NewChatBroadcasterWithLimit sets the subscriber budget. Nonpositive values use the default.
+func NewChatBroadcasterWithLimit(limit int) *ChatBroadcaster {
+	core := newBroadcaster[ChatEvent, ChatSubscriber](10)
+	if limit > 0 {
+		core.maxSubscribers = limit
+	}
+	return &ChatBroadcaster{core: core}
 }
 
 // Subscribe adds a new subscriber and returns a channel for receiving events.

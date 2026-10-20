@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/livelimits"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/stretchr/testify/require"
@@ -77,11 +78,16 @@ func (c *liveTestClient) next(t testing.TB, id, event string) liveFrame {
 	}
 }
 func liveTestServer(t *testing.T) (*TestContext, *httptest.Server) {
+	return liveTestServerWithLimits(t, livelimits.Limits{})
+}
+func liveTestServerWithLimits(t *testing.T, limits livelimits.Limits) (*TestContext, *httptest.Server) {
+	limits = limits.WithDefaults()
 	tc := NewStoreTestContext(t)
-	tc.handler.SetExecutionStreamHub(events.NewExecutionStreamHub())
-	tc.handler.broadcaster = events.NewBroadcaster()
-	tc.handler.chatBroadcaster = events.NewChatBroadcaster()
-	tc.handler.fileChangeBroadcaster = events.NewFileChangeBroadcaster()
+	tc.handler.SetLiveLimits(limits)
+	tc.handler.SetExecutionStreamHub(events.NewExecutionStreamHubWithLimit(limits.ExecutionSubscriptions))
+	tc.handler.broadcaster = events.NewBroadcasterWithLimit(limits.LiveSubscriptions)
+	tc.handler.chatBroadcaster = events.NewChatBroadcasterWithLimit(limits.LiveSubscriptions)
+	tc.handler.fileChangeBroadcaster = events.NewFileChangeBroadcasterWithLimit(limits.LiveSubscriptions)
 	e := echo.New()
 	e.Use(tc.handler.AuthMiddleware())
 	e.GET("/events/ws", tc.handler.LiveWebSocket)
@@ -317,7 +323,7 @@ func TestLiveWebSocketSystemUpdateProgressSharesExecutionConnection(t *testing.T
 	state.Store(update.ManagedUpdateState{Active: true, State: update.StateRestarting, DesiredVersion: "1.2.3"})
 	snapshot = client.next(t, "", "system_update").Data.(map[string]any)
 	require.Equal(t, string(update.StateRestarting), snapshot["state"])
-	require.Equal(t, int32(1), tc.handler.liveSocketCount.Load())
+	require.Equal(t, int64(1), tc.handler.liveSocketCount.Load())
 }
 
 func TestLiveWebSocketHubErrorReplaysDurableTailBeforeExactError(t *testing.T) {
