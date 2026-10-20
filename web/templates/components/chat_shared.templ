@@ -366,6 +366,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var streamingDots = document.currentScript.previousElementSibling;
 					var container = streamingDots.previousElementSibling;
 					var execId = container.getAttribute('data-exec-id');
+					// Capture the owning view's scope before navigation can change the selector.
+					var streamProjectRoot = container.closest('[data-project-id]');
+					var streamProjectID = streamProjectRoot ? streamProjectRoot.getAttribute('data-project-id') : '';
 					var thinkingIndicator = document.getElementById('streaming-thinking-' + execId);
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
@@ -593,7 +596,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
-							eventSource = window.openVibelyLive.execution(execId, streamOffset);
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
 							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
@@ -848,6 +851,9 @@ templ ChatStreamingResumeInitScript() {
 				container._sseConnected = true;
 
 					var execId = container.getAttribute('data-exec-id');
+					// Capture the owning view's scope before navigation can change the selector.
+					var streamProjectRoot = container.closest('[data-project-id]');
+					var streamProjectID = streamProjectRoot ? streamProjectRoot.getAttribute('data-project-id') : '';
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
@@ -1099,7 +1105,7 @@ templ ChatStreamingResumeInitScript() {
 
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
-							eventSource = window.openVibelyLive.execution(execId, streamOffset);
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
 							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
