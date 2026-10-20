@@ -9,6 +9,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +27,7 @@ func TestCompatibleModelDiscoveryRetriesWithHeaders(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"fixture-model"}]}`))
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(retrytest.Context(), 3*time.Second)
 	defer cancel()
 	found, err := fetchOpenAICompatibleModels(ctx, httpclient.New(3*time.Second), server.URL, "fixture-key", &models.LLMConfig{ExtraHeadersJSON: `{"X-Discovery":"fixture"}`})
 	require.NoError(t, err)

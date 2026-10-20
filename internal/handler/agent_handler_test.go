@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -713,7 +714,7 @@ func TestHandler_GenerateAgent_RetriesTransientTimeoutThenSucceeds(t *testing.T)
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -762,7 +763,7 @@ func TestHandler_GenerateAgent_TimeoutUsesClearFallbackError(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -1038,7 +1039,7 @@ func TestHandler_GenerateAgent_MalformedJSONFallsBackWithClearError(t *testing.T
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -1169,7 +1170,7 @@ func TestHandler_GenerateAgent_ProviderMalformedJSONFallsBackWithActionableError
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

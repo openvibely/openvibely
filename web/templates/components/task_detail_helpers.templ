@@ -356,7 +356,6 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				id="task-thread-messages"
 				class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"
 				if preservedExecIDs == nil {
-					style="visibility: hidden;"
 					data-transcript-hydrating="true"
 				}
 				data-window-limit={ fmt.Sprintf("%d", windowLimit) }
@@ -812,7 +811,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 							// Release detached task-thread runtime owners when navigating away.
 							// A later open is a fresh reading session and must settle at the true
 							// bottom instead of restoring an old upward position from this task.
-							if (target && target.id === 'main-content') {
+							if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {
 								var outgoingTaskId = _taskThreadTaskId();
 								window._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};
 								if (outgoingTaskId) window._taskThreadFreshOpenTasks[outgoingTaskId] = true;
@@ -899,7 +898,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 							}
 						}
-							else if (target && target.id === 'main-content') {
+							else if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {
 								_initializeFreshTaskThreadOpen();
 							}
 							// Restore textarea value after morph polling or full page refresh

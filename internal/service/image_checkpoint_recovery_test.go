@@ -13,15 +13,15 @@ import (
 	"testing"
 )
 
-func TestCompletionsTextCompactionDiscardsImages(t *testing.T) {
+func TestCompletionsSummaryRetainsImagesOnlyInInput(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAICompatible, models.ProviderOllama} {
 		req := trackSteeringRecovery(llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider}})
 		raw := `[{"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,UPLOADED"}}]},{"role":"tool","content":"EDIT_COMPLETED","tool_call_id":"edit"},{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,RENDERED"}}]}]`
 		recordProviderRecovery(req, &openaiclient.ConversationError{Err: errors.New("overflow"), MessagesJSON: raw})
 		recovered := restoreCurrentSteeringForRecovery(req)
-		summaryPrompt := buildLocalSummaryCompactionPrompt(recovered.ChatHistory)
+		summaryPrompt := summaryHistoryText(t, provider, recovered.ChatHistory)
 		require.Contains(t, summaryPrompt, "EDIT_COMPLETED")
-		require.NotContains(t, summaryPrompt, "base64,")
+		require.Contains(t, summaryPrompt, "base64,")
 		compacted := buildCompactedReplacementHistory(recovered.ChatHistory, "edit done")
 
 		stores := teststores.New(t).Stores
@@ -32,7 +32,7 @@ func TestCompletionsTextCompactionDiscardsImages(t *testing.T) {
 			require.Empty(t, execution.ReplayMessages)
 			require.NotContains(t, execution.Output, "base64,")
 		}
-		require.Contains(t, buildLocalSummaryCompactionPrompt(saved.History), "edit done")
+		require.Contains(t, summaryHistoryText(t, provider, saved.History), "edit done")
 	}
 }
 func TestFollowupAfterInflightSummaryRetainsRetryWork(t *testing.T) {
@@ -50,7 +50,7 @@ func TestFollowupAfterInflightSummaryRetainsRetryWork(t *testing.T) {
 	req.ChatHistory = []models.Execution{{ID: "old", Output: "old"}, {ID: "active", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"assistant","content":"A completed"},{"type":"function_call_output","call_id":"B","output":"B completed after summary"}]}`}}}}
 	restored := svc.restoreCompactionCheckpoint(req)
 	require.Len(t, restored.ChatHistory, 1)
-	require.Contains(t, buildLocalSummaryCompactionPrompt(restored.ChatHistory), "B completed after summary")
+	require.Contains(t, summaryHistoryText(t, req.Agent.Provider, restored.ChatHistory), "B completed after summary")
 }
 
 // Codex local text compaction rebuilds media-bearing messages as text only

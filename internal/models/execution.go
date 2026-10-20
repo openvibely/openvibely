@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type ExecutionStatus string
 
@@ -13,6 +16,11 @@ const (
 )
 
 type Execution struct {
+	// ContextKind marks synthetic checkpoint records, so replay hydration cannot
+	// replace retained user text with the original execution's tool history.
+	ContextKind         string          `json:"context_kind,omitempty"`
+	RetainedUserMessage json.RawMessage `json:"-"`
+
 	ID               string                   `json:"id"`
 	TaskID           string                   `json:"task_id"`
 	AgentConfigID    string                   `json:"agent_config_id"`

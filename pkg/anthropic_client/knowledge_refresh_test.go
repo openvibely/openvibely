@@ -30,7 +30,7 @@ func TestIndexAndPermissionsRefreshAfterToolResult(t *testing.T) {
 			require.Len(t, request.Tools, 1)
 			require.Equal(t, "memory_save", request.Tools[0].Name)
 		} else {
-			require.NotContains(t, string(body), "initial skills and memories")
+			require.Contains(t, string(body), "initial skills and memories")
 			require.Contains(t, string(body), "updated memory index")
 			require.Len(t, request.Tools, 1)
 			require.Equal(t, "memory_view", request.Tools[0].Name)
@@ -52,7 +52,8 @@ func TestIndexAndPermissionsRefreshAfterToolResult(t *testing.T) {
 	old := AnthropicAPIHost
 	AnthropicAPIHost = server.URL
 	defer func() { AnthropicAPIHost = old }()
-	_, err := NewWithAPIKey("test").SendAgentic(ctx, "save memory", &AgenticOptions{Model: "claude-sonnet-4-6", SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "memory_save", InputSchema: json.RawMessage(`{"type":"object"}`)}, {Name: "memory_view", InputSchema: json.RawMessage(`{"type":"object"}`)}}, ToolFilter: func(name string) bool {
+	client := NewWithAPIKey("test")
+	_, err := client.SendAgentic(ctx, "save memory", &AgenticOptions{Model: "claude-sonnet-4-6", SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "memory_save", InputSchema: json.RawMessage(`{"type":"object"}`)}, {Name: "memory_view", InputSchema: json.RawMessage(`{"type":"object"}`)}}, ToolFilter: func(name string) bool {
 		if name == "memory_view" {
 			return !allowed
 		}
@@ -64,4 +65,15 @@ func TestIndexAndPermissionsRefreshAfterToolResult(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.Equal(t, 2, requests)
+	// A followup must replay the saved update without injecting another copy.
+	_, err = client.SendAgentic(ctx, "followup", &AgenticOptions{Model: "claude-sonnet-4-6", SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "memory_view", InputSchema: json.RawMessage(`{"type":"object"}`)}}})
+	require.NoError(t, err)
+	require.Equal(t, 3, requests)
+	count := 0
+	for _, m := range client.History {
+		if m.Content == managedcontext.Text(ctx) {
+			count++
+		}
+	}
+	require.Equal(t, 1, count)
 }

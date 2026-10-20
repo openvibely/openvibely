@@ -607,3 +607,45 @@ func TestRecoveryIsBounded(t *testing.T) {
 		t.Fatalf("attempts=%d err=%v", attempts, err)
 	}
 }
+
+func TestRetryTimerContext(t *testing.T) {
+	const delay = 30 * time.Second
+	policyCalls, overrideCalls := 0, 0
+	ready := func() <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	policyTimer := func(got time.Duration) <-chan time.Time {
+		policyCalls++
+		if got != delay {
+			t.Errorf("delay = %v, want %v", got, delay)
+		}
+		return ready()
+	}
+	ctx := WithRetryTimer(context.Background(), func(got time.Duration) <-chan time.Time {
+		overrideCalls++
+		if got != delay {
+			t.Errorf("override delay = %v, want %v", got, delay)
+		}
+		return ready()
+	})
+	if err := wait(ctx, policyTimer, delay); err != nil {
+		t.Fatal(err)
+	}
+	if policyCalls != 0 || overrideCalls != 1 {
+		t.Fatalf("policy calls=%d override calls=%d", policyCalls, overrideCalls)
+	}
+	// An unrelated request must still use the policy's timer.
+	if err := wait(context.Background(), policyTimer, delay); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := wait(cancelled, policyTimer, delay); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled wait = %v", err)
+	}
+	if policyCalls != 1 || overrideCalls != 1 {
+		t.Fatalf("policy calls=%d override calls=%d", policyCalls, overrideCalls)
+	}
+}

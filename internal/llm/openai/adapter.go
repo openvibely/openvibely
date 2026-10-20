@@ -428,7 +428,7 @@ func New(llmConfigRepo persistence.LLMConfigStore, execRepo persistence.Executio
 // definition into it); lifecycleHookCall marks a request made on behalf of a
 // lifecycle hook, which keeps that agent prompt but drops the shared
 // coding-agent framing it has no use for.
-func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, disableTools bool, rawDirectPrompt bool, lifecycleHookCall bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, disableTools bool, rawDirectPrompt bool, lifecycleHookCall bool, summaryInput ...[]json.RawMessage) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v lifecycle_hook=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools, lifecycleHookCall)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, llmcontracts.TransportScopeFromContext(ctx))
@@ -436,6 +436,17 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), err
 	}
 	defer releaseTransport()
+	if len(summaryInput) > 0 && summaryInput[0] != nil {
+		var items []any
+		for _, raw := range summaryInput[0] {
+			var item any
+			if err := json.Unmarshal(raw, &item); err != nil {
+				return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
+			}
+			items = append(items, item)
+		}
+		client.History = []openaiclient.Message{{ResponsesInputItems: items}}
+	}
 
 	fullPrompt := prompt
 	if len(attachments) > 0 {
@@ -467,6 +478,10 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	}
 	if !rawDirectPrompt && lifecycleHookCall {
 		systemPrompt = applyOpenAIOAuthSystemPrompt(systemPrompt, agent)
+	}
+
+	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
+		systemPrompt = preserved
 	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -1152,6 +1167,14 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 	var messages []openaiclient.Message
 	for _, exec := range chatHistory {
+		if len(exec.RetainedUserMessage) > 0 {
+			var item any
+			if json.Unmarshal(exec.RetainedUserMessage, &item) == nil {
+				prefix := historyMessageItems(messages)
+				messages = []openaiclient.Message{{ResponsesInputItems: append(prefix, item)}}
+				continue
+			}
+		}
 		checkpoint := false
 		for _, replay := range exec.ReplayMessages {
 			var saved struct {

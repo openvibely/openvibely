@@ -48,9 +48,9 @@ func TestAnthropicSteeringRecoveryPreservesOversizedSuccessfulSummary(t *testing
 		return llmcontracts.AgentResult{Output: summary}, nil
 	}), req)
 	require.NoError(t, err)
-	require.Len(t, compacted.ChatHistory, 2)
-	require.Equal(t, "old", compacted.ChatHistory[0].PromptSent)
-	require.Equal(t, compactedHistorySummaryPrefix+"\n\n"+strings.TrimSpace(summary), compacted.ChatHistory[1].Output)
+	require.Len(t, compacted.ChatHistory, 3)
+	require.Equal(t, "old", compacted.ChatHistory[1].PromptSent)
+	require.Equal(t, compactedHistorySummaryPrefix+"\n\n"+strings.TrimSpace(summary), compacted.ChatHistory[2].PromptSent)
 	require.Error(t, ensureRequestFitsWithBudget(compacted, calculateRequestBudget(compacted), "compacted retry"))
 }
 
@@ -64,11 +64,11 @@ func TestAnthropicSteeringRecoveryStopsWithoutTruncatingToolResults(t *testing.T
 				map[string]any{"role": "user", "content": "original task"},
 				map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "write1", "name": "write_file", "input": map[string]any{}}}},
 				map[string]any{"role": "user", "content": []any{
-					map[string]any{"type": "tool_result", "tool_use_id": "write1", "content": "FILE_ALREADY_WRITTEN " + strings.Repeat("large result ", 50000)},
+					map[string]any{"type": "tool_result", "tool_use_id": "write1", "content": "FILE_ALREADY_WRITTEN " + strings.Repeat("large result ", 500)},
 					map[string]any{"type": "text", "text": "actually only review"}}},
 			})
 			require.NoError(t, err)
-			failure := errors.New("summarizer unavailable")
+			failure := errors.New("summary authentication failed")
 			overflow := llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "test", errors.New("too many tokens"))
 			calls := 0
 			adapter := providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -118,14 +118,14 @@ func TestAnthropicSteeringFallbackRetainsCurrentConversation(t *testing.T) {
 		case 2:
 			require.Equal(t, llmcontracts.OperationDirect, req.Operation)
 			require.False(t, llmcontracts.HistoryContinuationFromContext(req.Ctx))
-			require.Contains(t, req.Message, "file already written")
-			require.Contains(t, req.Message, "actually only review")
-			require.NotContains(t, req.Message, "stale history")
+			require.Contains(t, summaryInputText(req.SummaryInput), "file already written")
+			require.Contains(t, summaryInputText(req.SummaryInput), "actually only review")
+			require.NotContains(t, summaryInputText(req.SummaryInput), "stale history")
 			return llmcontracts.AgentResult{Output: "file already written; do not repeat"}, nil
 		case 3:
 			require.Empty(t, req.Message)
 			require.True(t, llmcontracts.HistoryContinuationFromContext(req.Ctx))
-			history := buildLocalSummaryCompactionPrompt(req.ChatHistory)
+			history := summaryHistoryText(t, req.Agent.Provider, req.ChatHistory)
 			require.Contains(t, history, "actually only review", "steer must survive even when summary omits it")
 			require.Contains(t, history, "file already written")
 		default:

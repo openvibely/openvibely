@@ -366,6 +366,18 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	var replayMessages []anthropicclient.Message
 	ctx = context.WithValue(ctx, conversationReplayKey{}, &replayMessages)
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
+	if req.SummaryInput != nil {
+		messages := make([]anthropicclient.Message, 0, len(req.SummaryInput)+1)
+		for _, raw := range req.SummaryInput {
+			var message anthropicclient.Message
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return result, fmt.Errorf("decode summary history: %w", err)
+			}
+			messages = append(messages, message)
+		}
+		messages = append(messages, anthropicclient.Message{Role: "user", Content: req.Message})
+		ctx = context.WithValue(ctx, recoveryMessagesKey{}, messages)
+	}
 	if llmcontracts.HistoryContinuationFromContext(ctx) {
 		messages := buildRecoveryHistory(req.ChatHistory)
 		// Service-side compaction stores its final summary as execution output.
@@ -483,6 +495,10 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		systemPrompt = llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir)
 		webSearchEnabled = anthropicModelSupportsWebSearch(agent.Model)
 	}
+	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
+		systemPrompt = preserved
+	}
+
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
 		Model:                     agent.Model,
@@ -804,7 +820,7 @@ func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.U
 
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	messages := buildRecoveryHistory(chatHistory)
-	if len(messages) > 0 && messages[len(messages)-1].Role == "user" && len(messages[len(messages)-1].ContentBlocks) == 0 {
+	if len(messages) > 0 && messages[len(messages)-1].Role == "user" && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content) {
 		messages = messages[:len(messages)-1]
 	}
 	return messages
@@ -823,13 +839,8 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		var structured []anthropicclient.Message
 		for _, replay := range exec.ReplayMessages {
 			var saved anthropicEnvironmentReplay
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil {
-				for _, m := range saved.Messages {
-					if len(m.ContentBlocks) > 0 {
-						structured = saved.Messages
-						break
-					}
-				}
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Messages) > 0 {
+				structured = saved.Messages
 			}
 			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
 				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
@@ -838,6 +849,14 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		}
 		if len(structured) > 0 {
 			messages = append(messages, structured...)
+			// A failed stream can persist its partial answer after the last
+			// replay checkpoint (often a tool result). Keep that answer too.
+			last := structured[len(structured)-1]
+			if (last.Role != "assistant" || (last.Content == "" && len(last.ContentBlocks) == 0)) && (exec.Status == models.ExecFailed || exec.Status == models.ExecRunning) {
+				if output := llmprompt.ReplayAssistantContent(exec); output != "" {
+					messages = appendMergedMessage(messages, "assistant", output)
+				}
+			}
 			continue
 		}
 		if exec.PromptSent != "" {
@@ -850,19 +869,36 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 	return messages
 }
 
+// SummaryHistory uses the same structured replay as a continuing conversation.
+func SummaryHistory(history []models.Execution) []anthropicclient.Message {
+	return buildRecoveryHistory(history)
+}
+
 // EstimateHistoryTokens counts the messages actually reconstructed for Anthropic,
 // including environment changes, without counting durable replay copies twice.
 func EstimateHistoryTokens(history []models.Execution) int {
 	total := 0
 	for _, message := range buildRecoveryHistory(history) {
-		total += tokenestimate.FromText(message.Content) + tokenestimate.FromByteCount(len(message.ContentBlocks))
+		if len(message.ContentBlocks) == 0 {
+			total += tokenestimate.FromText(message.Content)
+			continue
+		}
+		// ContentBlocks replaces Content on the wire. Count image blocks using
+		// the same fixed cost as the client, rather than counting base64 as text.
+		encoded := append([]byte(`{"messages":[{"content":`), message.ContentBlocks...)
+		encoded = append(encoded, []byte(`}]}`)...)
+		tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+		if err != nil {
+			tokens = tokenestimate.FromByteCount(len(message.ContentBlocks))
+		}
+		total += tokens
 	}
 	return total
 }
 
 // appendMergedMessage appends a message, merging with the previous if same role.
 func appendMergedMessage(messages []anthropicclient.Message, role, content string) []anthropicclient.Message {
-	if len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !strings.HasPrefix(messages[len(messages)-1].Content, executionenv.Marker+"\n") {
+	if len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsApplicationContext(messages[len(messages)-1].Content) && !llmprompt.IsApplicationContext(content) && !llmprompt.IsCompactionContext(content) && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content) {
 		messages[len(messages)-1].Content += "\n\n" + content
 		return messages
 	}

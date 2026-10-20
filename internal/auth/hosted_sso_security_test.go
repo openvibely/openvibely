@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -299,29 +300,33 @@ func TestHostedRedirectResponseBodyIsBoundedClosedAndNeverReplayed(t *testing.T)
 
 func TestHostedExchangeNetworkDeadlineAndCancellation(t *testing.T) {
 	t.Run("network failure", func(t *testing.T) {
-		client := NewHostedSSOClient("https://provider.example", "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
-		var attempts atomic.Int32
-		client.HTTPClient.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
-			attempts.Add(1)
-			return nil, errors.New("network unavailable")
+		synctest.Test(t, func(t *testing.T) {
+			client := NewHostedSSOClient("https://provider.example", "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
+			var attempts atomic.Int32
+			client.HTTPClient.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				attempts.Add(1)
+				return nil, errors.New("network unavailable")
+			})
+			if _, err := client.Exchange(context.Background(), canonicalAuthTestValue("c"), canonicalAuthTestValue("v")); err == nil || attempts.Load() < 2 {
+				t.Fatalf("err=%v attempts=%d", err, attempts.Load())
+			}
 		})
-		if _, err := client.Exchange(context.Background(), canonicalAuthTestValue("c"), canonicalAuthTestValue("v")); err == nil || attempts.Load() < 2 {
-			t.Fatalf("err=%v attempts=%d", err, attempts.Load())
-		}
 	})
 
 	t.Run("attempt has five second deadline", func(t *testing.T) {
-		client := NewHostedSSOClient("https://provider.example", "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
-		client.HTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			deadline, ok := r.Context().Deadline()
-			if !ok || time.Until(deadline) > 5*time.Second || time.Until(deadline) <= 0 {
-				t.Fatalf("attempt deadline=%v ok=%v", deadline, ok)
+		synctest.Test(t, func(t *testing.T) {
+			client := NewHostedSSOClient("https://provider.example", "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
+			client.HTTPClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				deadline, ok := r.Context().Deadline()
+				if !ok || time.Until(deadline) > 5*time.Second || time.Until(deadline) <= 0 {
+					t.Fatalf("attempt deadline=%v ok=%v", deadline, ok)
+				}
+				return nil, context.DeadlineExceeded
+			})
+			if _, err := client.Exchange(context.Background(), canonicalAuthTestValue("c"), canonicalAuthTestValue("v")); err == nil {
+				t.Fatal("attempt timeout accepted")
 			}
-			return nil, context.DeadlineExceeded
 		})
-		if _, err := client.Exchange(context.Background(), canonicalAuthTestValue("c"), canonicalAuthTestValue("v")); err == nil {
-			t.Fatal("attempt timeout accepted")
-		}
 	})
 
 	t.Run("in-flight cancellation", func(t *testing.T) {

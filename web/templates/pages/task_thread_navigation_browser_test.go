@@ -32,12 +32,13 @@ func TestBrowserFunctional_TaskThreadNavigationScrollStateInChrome(t *testing.T)
 		t.Fatalf("render base navigation script: %v", err)
 	}
 	baseHTML := base.String()
-	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	navStart := strings.Index(baseHTML, "// One owner for full-page fragment navigation")
 	navEnd := strings.Index(baseHTML[navStart:], "// Scroll position restoration for drop zones")
 	if navStart < 0 || navEnd < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
 	}
 	navigationScript := baseHTML[navStart : navStart+navEnd]
+	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	task := &models.Task{
 		ID:        "task-browser",
@@ -162,16 +163,12 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitForTaskDOM('initial delayed image');
     await waitFor(function() { return !historyImage().complete; }, 'delayed historical image request');
     await new Promise(function(resolve) { setTimeout(resolve, 80); });
-    if (messages().style.visibility !== 'hidden') {
-      fail('initial transcript became visible before delayed historical image loaded');
+    if (messages().style.visibility === 'hidden') {
+      fail('available transcript stayed hidden while historical images loaded');
     }
     await waitForTask('initial');
-    if (!historyImage().complete || historyImage().naturalHeight < 1) {
-      fail('initial transcript became visible before historical image decode completed');
-    }
-    if (stalledHistoryImage().style.display !== 'none' || stalledHistoryImage().hasAttribute('src')) {
-      fail('stalled historical image was not removed from layout before reveal');
-    }
+    await waitFor(function() { return historyImage().complete && historyImage().naturalHeight > 0; }, 'image decode');
+    await waitFor(function() { return stalledHistoryImage().style.display === 'none' && !stalledHistoryImage().hasAttribute('src'); }, 'stalled image timeout');
     await assertPinned('direct load');
 
     await window.openVibelyNavigate('/other');
@@ -277,7 +274,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			document := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
+			document := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
 			_, _ = w.Write([]byte(document))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

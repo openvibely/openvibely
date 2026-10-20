@@ -1515,3 +1515,9 @@ func (r *ThreadInputRepo) ReleaseExpiredEditHolds(ctx context.Context) ([]models
 	}
 	return inputs, nil
 }
+
+// ListAppliedSteeringByExecution returns accepted user steering for transcript recovery.
+// Its ordering describes steering delivery, not positions within assistant output.
+func (r *ThreadInputRepo) ListAppliedSteeringByExecution(ctx context.Context, executionID string) ([]models.ThreadInput, error) {
+	return r.list(ctx, `WHERE run_execution_id = ? AND input_mode = 'steering' AND input_status = 'applied' ORDER BY applied_at ASC, created_at ASC, rowid ASC`, executionID)
+}

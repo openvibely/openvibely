@@ -504,7 +504,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return nil, err
 			}
 		}
-		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
+		// Summary compaction sends first and trims only after provider overflow.
+		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil && !summarizing {
 			if turn == 0 || !opts.AutoCompaction {
 				return nil, err
 			}

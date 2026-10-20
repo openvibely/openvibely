@@ -77,7 +77,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(source, -1), "")
 	// Match the page's parser scripts: large Markdown workers import the math
 	// parser through its data attribute, even when the response contains no math.
-	fixture := `<!doctype html><html><head>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
+	fixture := `<!doctype html><html><head><script src="` + static.URL("chat-virtual-list.js") + `"></script>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
  <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
  <script>` + probe + baseJS + `</script>` + sharedJS + `<script>
  ` + coalescer + `
@@ -411,4 +411,341 @@ func TestIncrementalChatMetricsAcceptance(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBrowserFunctional_VirtualizedCompletedTranscript(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ document.getElementById('messages').id = 'chat-messages';
+ const messages = document.getElementById('chat-messages');
+ document.getElementById('pair').setAttribute('data-exec-status', 'completed');
+ let text = '';
+ for (let i=0; i<160; i++) text += '[Using tool: bash | echo row-'+i+']\n[Tool bash done]\nresult-'+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream, text, true);
+ await paint(); await paint();
+ assert(messages.querySelectorAll('[data-virtual-chat-row]').length > 100, 'completed tool rows were not virtualized');
+ assert(messages.querySelectorAll('.stream-tool').length < 40, 'too many tool cards mounted');
+ messages.scrollTop = messages.scrollHeight;
+ await paint(); await paint();
+ assert(messages.textContent.includes('row-159'), 'last tool did not mount');
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<4, 'measurement corrections lost the bottom pin');
+ // A full authoritative rerender must include rows currently represented by spacers.
+ await renderStreamingContent(stream, text+'\nNew final response.', true);
+ await paint(); await paint();
+ messages.scrollTop=0;
+ await paint(); await paint();
+ assert(messages.textContent.includes('row-0'), 'first tool was lost after rerender');
+ window.materializeVirtualChatRows(messages);
+ assert(messages.querySelectorAll('.stream-tool').length===160, 'virtual rows lost tool content');
+ const clone=messages.cloneNode(true);
+ window.cloneVirtualChatRows(messages,clone);
+ assert(clone.textContent.includes('row-159'), 'serialization omitted old rows');
+ document.getElementById('pair').setAttribute('data-exec-status', 'running');
+ await renderLiveChatContent(stream, text+text+'\nWorking...', true);
+ await paint(); await paint();
+ assert(messages.querySelectorAll('[data-virtual-chat-row]').length>100, 'sealed live output was not virtualized');
+ const tail=stream._incrementalChat.tail;
+ assert(tail.isConnected, 'mutable live tail detached');
+ await renderLiveChatContent(stream, text+text+'\nWorking... still streaming.', true);
+ await paint(); await paint();
+ assert(stream._incrementalChat.tail.textContent.includes('still streaming'), 'stream failed after windowing');
+ return {passed:true};
+ `)
+}
+
+func TestBrowserFunctional_CachedToolButtons(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const pair = document.getElementById('pair'); pair.dataset.execStatus='completed';
+ const content = document.createElement('div'); content.className='chat-stream-content'; stream.appendChild(content);
+ const raw='[Using tool: shell | echo example]\n[Tool shell done]\n'+('line of tool output\n'.repeat(200))+'[/Tool]\n';
+ content.setAttribute('data-raw-content',raw); content.setAttribute('data-raw-revision','fixture-v1');
+ await cleanAssistantMessages(pair);
+ let button=pair.querySelector('.stream-tool-output-toggle');
+ assert(button, 'fixture lacks output button');
+ button.click(); assert(button.getAttribute('aria-expanded')==='true','original button broken');
+ button.click();
+ const cached=pair.cloneNode(true).outerHTML;
+ pair.outerHTML=cached;
+ const restored=document.getElementById('pair');
+ await cleanAssistantMessages(restored);
+ button=restored.querySelector('.stream-tool-output-toggle'); button.click();
+ assert(button.getAttribute('aria-expanded')==='true','cached output button has no handler after normal hydration');
+ const hydratedButton=button;
+ await cleanAssistantMessages(restored);
+ assert(restored.querySelector('.stream-tool-output-toggle')===hydratedButton,'unchanged live output was unnecessarily rebuilt');
+ hydratedButton.click(); assert(hydratedButton.getAttribute('aria-expanded')==='false','rehydrated toggle did not collapse');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_VirtualRowsAfterPanelResize(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='chat-messages';
+ messages.style.cssText='height:300px;overflow:auto;width:800px;font:16px monospace;line-height:20px';
+ const pair=document.getElementById('pair'); pair.dataset.execStatus='completed';
+ pair.innerHTML=Array.from({length:200},()=>'<div class="chat-markdown" style="margin:0;padding:0">'+('word '.repeat(100))+'</div>').join('');
+ refreshVirtualChatRows(messages); await paint(); await pause(100);
+ assert(messages.querySelectorAll('[data-virtual-chat-row]').length>100,'fixture not virtualized');
+ messages.style.width='400px'; await pause(150); await paint();
+ const virtualHeight=messages.scrollHeight;
+ materializeVirtualChatRows(messages);
+ const actualHeight=messages.scrollHeight;
+ assert(Math.abs(actualHeight-virtualHeight)<3,'panel resize left stale spacer heights: virtual='+virtualHeight+' actual='+actualHeight);
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_TranscriptHydrationRevealsTogether(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');
+ messages.setAttribute('data-transcript-hydrating','true');
+ const pair=document.getElementById('pair'); pair.dataset.execStatus='completed';
+ pair.replaceChildren();
+ for(let i=0;i<3;i++){
+   const bubble=document.createElement('div'); bubble.className='chat-stream-content';
+   bubble.dataset.rawContent='Completed message '+i; bubble.dataset.rawRevision='revision-'+i;
+   pair.appendChild(bubble);
+ }
+ const image=document.createElement('img'); image.dataset.chatAttachmentImage='true';
+ Object.defineProperty(image,'complete',{value:false}); image.decode=()=>Promise.resolve();
+ messages.appendChild(image);
+ const render=window.renderStreamingContent, gates=[];
+ window.renderStreamingContent=async function(...args){
+   await new Promise(resolve=>gates.push(resolve));
+   return render(...args);
+ };
+ async function gate(index){
+   for(let i=0;i<200 && !gates[index];i++) await pause(10);
+   assert(gates[index],'render queue did not reach message '+index);
+ }
+ const hydration=cleanAssistantMessages(messages);
+ let settled=false;
+ const restoring=restoreChatTranscriptScroll({messages,renderPromise:hydration,waitForImages:true}).then(()=>{settled=true});
+ for(let i=0;i<3;i++){
+   await gate(i);
+   assert(getComputedStyle(messages).visibility==='hidden','history appeared one bubble at a time');
+   gates[i]();
+ }
+ await hydration; await paint();
+ assert(getComputedStyle(messages).visibility==='visible','rendered history was not revealed');
+ assert(messages.querySelectorAll('.chat-markdown').length===3,'reveal omitted completed bubbles');
+ assert(!settled,'fixture did not delay attachment loading');
+ image.dispatchEvent(new Event('load'));
+ await restoring;
+ // Cached markup must remain visible while controls are rehydrated, without
+ // clearing or revealing each bubble separately again.
+ const cached=messages.cloneNode(true); messages.replaceWith(cached);
+ const cachedHydration=cleanAssistantMessages(cached);
+ const cachedRestore=restoreChatTranscriptScroll({messages:cached,renderPromise:cachedHydration});
+ for(let i=3;i<6;i++){
+   await gate(i);
+   assert(getComputedStyle(cached).visibility==='visible','cached history disappeared during hydration');
+   assert(cached.querySelectorAll('.chat-markdown').length===3,'cached bubbles disappeared during hydration');
+   gates[i]();
+ }
+ await cachedRestore;
+ window.renderStreamingContent=render;
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptFirstPaint(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.style.width='640px'; messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ let markdownCalls=0, parseCalls=0;
+ const markdown=window.renderChatMarkdown, link=window.linkStreamingToolResults;
+ window.renderChatMarkdown=function(...args){markdownCalls++;return markdown.apply(this,args)};
+ window.linkStreamingToolResults=function(...args){parseCalls++;return link.apply(this,args)};
+ let text='';
+ for(let i=0;i<180;i++) text+='Message '+i+' **formatted**.\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ text+='Final visible message';
+ await window.renderStreamingContent(stream,text,false);
+ assert(markdownCalls===0,'cold projection parsed offscreen Markdown');
+ assert(!stream.querySelector('.stream-tool'),'cold projection built tool DOM');
+ assert(stream._chatVirtualData.models.length===361,'incorrect row projection');
+ await window.restoreChatTranscriptScroll({messages,defaultPinned:true,renderPromise:Promise.resolve()});
+ assert(getComputedStyle(messages).visibility==='visible','transcript did not reveal');
+ assert(stream.textContent.includes('Final visible message'),'initial bottom window missing');
+ assert(markdownCalls>0 && markdownCalls<25,'initial paint rendered the whole history: '+markdownCalls);
+ assert(stream.querySelectorAll('.stream-tool').length<15,'initial paint created offscreen tools');
+ const bottomCalls=markdownCalls;
+ messages.scrollTop=0; await window.renderVisibleChatRows(messages); await paint();
+ assert(stream.querySelector('[data-tool-name="shell"]').textContent.includes('echo 0'),'scroll did not render the first tool');
+ assert(markdownCalls<bottomCalls+25,'scroll rendered unrelated history');
+ const firstRow=stream.querySelector('[data-chat-lazy-row="0"]');
+ const topBefore=firstRow.getBoundingClientRect().top;
+ messages.style.width='320px'; await paint(); await window.renderVisibleChatRows(messages);
+ assert(Math.abs(firstRow.getBoundingClientRect().top-topBefore)<3,'width change moved the reading anchor');
+ assert(markdownCalls<60,'resize rendered all offscreen rows');
+ // Snapshots retain source/estimates without making every row render first.
+ const data=window.captureChatVirtualData(messages)[0], savedCalls=markdownCalls;
+ const snapshot=messages.cloneNode(true); window.cloneVirtualChatRows(messages,snapshot);
+ assert(markdownCalls===savedCalls,'snapshot rendered hidden content');
+ assert(snapshot.querySelectorAll('.stream-tool').length<15,'snapshot expanded hidden tools');
+ // Rehydrate serialized markup using cached row data; tool handlers are rebuilt.
+ const restored=stream.cloneNode(true); stream.replaceWith(restored);
+ window.findCachedChatVirtualData=(key,source)=>data;
+ await window.renderStreamingContent(restored,text,false);
+ assert(parseCalls===1,'cached hydration reparsed the transcript');
+ assert(restored.querySelector('[data-tool-name="shell"]'),'cached visible tools missing');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await window.materializeVirtualChatRows(messages);
+ assert(restored.querySelectorAll('.stream-tool').length===180,'find omitted unrendered tool rows');
+ assert(restored.textContent.includes('Message 90'),'find omitted unrendered Markdown');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+ await paint();
+ assert(restored.querySelectorAll('.stream-tool').length<15,'find did not resume windowing');
+ // A changed revision must not reuse the old model even if a cache offers it.
+ await window.renderStreamingContent(restored,text+'\nAuthoritative fresh text',false);
+ assert(parseCalls===2,'changed source reused stale cached row data');
+ messages.scrollTop=messages.scrollHeight; await window.renderVisibleChatRows(messages);
+ assert(restored.textContent.includes('Authoritative fresh text'),'fresh output missing');
+ return {markdownCalls,parseCalls};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptDefersLargeMarkdown(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ let largeMarkdownCalls=0;
+ const renderAsync=window.renderChatMarkdownAsync;
+ window.renderChatMarkdownAsync=function(text,...args){if(text.length>=65536)largeMarkdownCalls++;return renderAsync.call(this,text,...args)};
+ const large='Long offscreen paragraph with **Markdown**.\n\n'.repeat(1700);
+ const source=large+('[Using tool: shell | echo final]\n[Tool shell done]\nfinal result\n[/Tool]\n'.repeat(8))+'Visible final answer.';
+ await renderStreamingContent(stream,source,true);
+ assert(largeMarkdownCalls===0,'projection parsed large offscreen Markdown');
+ await restoreChatTranscriptScroll({messages,defaultPinned:true});
+ assert(stream.textContent.includes('Visible final answer.'),'bottom answer missing');
+ assert(largeMarkdownCalls===0,'first paint parsed large offscreen Markdown');
+ messages.scrollTop=0;
+ await renderVisibleChatRows(messages);
+ assert(largeMarkdownCalls===1,'scroll did not render large Markdown on demand');
+ assert(stream.querySelector('strong')?.textContent==='Markdown','large Markdown formatting missing');
+ assert(!('renderedContent' in stream._chatVirtualData.models[0].segments[0]),'cached model retained rendered DOM');
+ return {largeMarkdownCalls};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptMatchesEagerRenderer(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const source='Intro **bold**.\n\n[Thinking]\nfirst thought\n[/Thinking]\nsmall interlude\n[Thinking]\nsecond thought\n[/Thinking]\n'+
+ '[Using tool: shell | echo first]\n[Using tool: shell | echo second]\n[Tool shell done]\none\n[/Tool]\n[Tool shell error]\ntwo\n[/Tool]\n'+
+ '[Compaction started]\n[Compaction done | 1000]\n'+fence+'text\n[Using tool: shell | literal]\n'+fence+'\nFinal answer.';
+ const eager=document.createElement('div'); document.body.appendChild(eager);
+ await renderStreamingContent(eager,source,false);
+ await renderStreamingContent(stream,source,false);
+ await materializeVirtualChatRows(messages);
+ const shape=root=>Array.from(root.querySelectorAll('.stream-tool, details.stream-thinking, .chat-markdown')).filter(node=>!node.parentElement.closest('.stream-tool, details.stream-thinking, .chat-markdown')).map(node=>[node.className,node.textContent]);
+ assert(JSON.stringify(shape(stream))===JSON.stringify(shape(eager)),'projected rows changed transcript grouping or tool result association');
+ // A native find/print request must synchronously expose never-rendered rows.
+ assert(stream.querySelectorAll('.stream-tool').length===3,'materialization omitted tool/compaction rows');
+ const thought=stream.querySelector('details');thought.open=true;thought.dispatchEvent(new Event('toggle'));
+ await renderStreamingContent(stream,source+'\nFresh ending.',false);
+ await materializeVirtualChatRows(messages);
+ assert(stream.querySelector('details').open,'thinking disclosure state lost on revision change');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptUpdatesDuringFind(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ document.getElementById('pair').dataset.execStatus='completed';
+ const main=document.createElement('main'); main.id='main-content';
+ messages.before(main); main.append(messages);
+ let source='';
+ for(let i=0;i<80;i++) source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await materializeVirtualChatRows(messages);
+ assert(stream.querySelectorAll('.stream-tool').length===80,'Find omitted history');
+ // A refresh must update existing rows and render new rows while Find is active.
+ await renderStreamingContent(stream,source.replace('Message 0','Updated message 0')+'Fresh answer',false);
+ await paint();
+ assert(stream.textContent.includes('Updated message 0'),'Find left an existing row stale');
+ assert(stream.textContent.includes('Fresh answer'),'Find left new content blank');
+ // Navigation must resume windowing without requiring Escape from the old page.
+ document.dispatchEvent(new CustomEvent('htmx:beforeSwap',{detail:{target:main,shouldSwap:true}}));
+ const next=document.createElement('div'); stream.replaceWith(next);
+ await renderStreamingContent(next,source,false); await paint();
+ assert(next.querySelectorAll('.stream-tool').length>0,'new transcript is blank after Find');
+ assert(next.querySelectorAll('.stream-tool').length<25,'Find suspension leaked across navigation');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await materializeVirtualChatRows(messages);
+ document.dispatchEvent(new CustomEvent('htmx:historyRestore'));
+ await paint();
+ assert(next.querySelectorAll('.stream-tool').length<25,'history restoration did not resume windowing');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptHiddenWorkspace(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
+ let source='';
+ for(let i=0;i<180;i++) source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ source+='Final visible answer';
+ let renders=0; const markdown=window.renderChatMarkdown;
+ window.renderChatMarkdown=function(...args){renders++; return markdown.apply(this,args)};
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,defaultPinned:true}); await paint();
+ assert(stream.textContent.includes('Final visible answer'),'initial visible window missing');
+ const before=renders;
+ workspace.style.display='none'; await paint(); await renderVisibleChatRows(messages); await paint();
+ assert(renders===before,'hiding workspace rendered offscreen history');
+ // An authoritative update can also arrive while Changes is open.
+ await renderStreamingContent(stream,source+' Updated while hidden',false); await paint();
+ assert(renders===before,'hidden refresh rendered history');
+ workspace.style.display='';
+ // No explicit refresh: revealing the workspace must wake the ResizeObserver.
+ for(let i=0;i<100 && !stream.textContent.includes('Updated while hidden');i++) await pause(10);
+ assert(stream.textContent.includes('Updated while hidden'),'revealing workspace left new content blank');
+ assert(stream.querySelectorAll('.stream-tool').length<25,'revealing workspace rendered the whole history');
+ return {renders};
+ `)
+}
+
+func TestBrowserFunctional_LazyTranscriptFindSkipsHiddenWorkspace(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ document.getElementById('pair').dataset.execStatus='completed';
+ const workspace=document.createElement('section'); messages.before(workspace); workspace.append(messages);
+ let source='';
+ for(let i=0;i<180;i++) source+='Message '+i+'\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ let renders=0; const markdown=window.renderChatMarkdown;
+ window.renderChatMarkdown=function(...args){renders++; return markdown.apply(this,args)};
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,defaultPinned:true}); await paint();
+ const before=renders, mounted=stream.querySelectorAll('.stream-tool').length;
+ assert(mounted>0 && mounted<25,'fixture did not virtualize');
+ workspace.style.display='none'; await paint();
+ for(const modifiers of [{ctrlKey:true},{metaKey:true}]) {
+  for(const key of ['f','a']) {
+   document.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,...modifiers}));
+   await paint();
+   assert(renders===before,'Find/Select All rendered hidden Markdown');
+   assert(stream.querySelectorAll('.stream-tool').length===mounted,'Find/Select All mounted hidden tools');
+  }
+ }
+ // No Escape: Find in Changes must not leave chat windowing suspended.
+ workspace.style.display=''; await paint(); await renderVisibleChatRows(messages); await paint();
+ assert(stream.querySelectorAll('.stream-tool').length>0,'returning to chat left it blank');
+ assert(stream.querySelectorAll('.stream-tool').length<25,'hidden Find disabled windowing on return');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,bubbles:true}));
+ await paint();
+ assert(stream.querySelectorAll('.stream-tool').length===180,'Find omitted visible transcript history');
+ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); await paint();
+ assert(stream.querySelectorAll('.stream-tool').length<25,'Escape did not resume windowing');
+ return {renders};
+ `)
 }
