@@ -115,6 +115,9 @@ func (h *Handler) recognizeSession(request *http.Request, now time.Time) session
 func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			if err := h.consumeNativeLiveTicket(c); err != nil {
+				return err
+			}
 			if !h.authEnabled() {
 				return next(c)
 			}
