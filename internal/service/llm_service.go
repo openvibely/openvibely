@@ -1507,7 +1507,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
+			// Delivery publishes files and atomically records the applied inputs with
+			// their history. Subsequent checkpoints only persist history. Applied
+			// inputs are durable and are not claimed again after a restart.
+			var commitSteering llmcontracts.InitialSteeringCommit
+			commitSteering = func(commitCtx context.Context, history []any) error {
 				finishAttachments, err := s.publishTaskSteeringAttachments(commitCtx, task.ID, exec.ID, inputs)
 				if err != nil {
 					return err
@@ -1528,7 +1532,13 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 					}
 				}
 				preparedSteering = remaining
+				commitSteering = func(historyCtx context.Context, history []any) error {
+					return s.threadInputRepo.CommitLocalSteering(historyCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, ResponsesHistory: history})
+				}
 				return nil
+			}
+			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
+				return commitSteering(commitCtx, history)
 			}}, nil
 		})
 		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
