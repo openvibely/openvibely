@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/livelimits"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -65,7 +66,9 @@ type Handler struct {
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	nativeLiveTickets          nativeLiveTickets
-	liveSocketCount            atomic.Int32
+	liveSocketCount            atomic.Int64
+	liveSubscriptionCount      atomic.Int64
+	liveLimits                 livelimits.Limits
 	telegramService            *service.TelegramService
 	xService                   *service.XService
 	xServiceMu                 sync.RWMutex
@@ -1143,4 +1146,10 @@ func (h *Handler) AppIconPNG(c echo.Context) error {
 func (h *Handler) AppIconICO(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 	return c.Blob(http.StatusOK, "image/x-icon", desktopicons.BrowserICO)
+}
+
+// SetLiveLimits configures admission budgets before serving requests. Broadcaster
+// and execution hub budgets are configured at construction by the server.
+func (h *Handler) SetLiveLimits(limits livelimits.Limits) {
+	h.liveLimits = limits.WithDefaults()
 }

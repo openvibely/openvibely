@@ -43,11 +43,12 @@ func TestFileChangeBroadcaster_PublishAndReceive(t *testing.T) {
 }
 
 func TestFileChangeBroadcaster_MaxSubscribers(t *testing.T) {
-	b := NewFileChangeBroadcaster()
+	const limit = 3
+	b := NewFileChangeBroadcasterWithLimit(limit)
 
 	// Subscribe up to the limit
-	subs := make([]FileChangeSubscriber, MaxSubscribers)
-	for i := 0; i < MaxSubscribers; i++ {
+	subs := make([]FileChangeSubscriber, limit)
+	for i := 0; i < limit; i++ {
 		sub, err := b.Subscribe()
 		if err != nil {
 			t.Fatalf("Subscribe %d failed: %v", i, err)
