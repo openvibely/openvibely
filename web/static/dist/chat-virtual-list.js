@@ -47,7 +47,13 @@
             const el = element(row);
             if (!el.isConnected || (readingPair && !readingPair.contains(el))) return;
             const rect = el.getBoundingClientRect();
-            if (rect.bottom > bounds.top && rect.top < bounds.bottom && (!anchor || rect.top < anchor.top)) anchor = {row, top:rect.top};
+            const estimated = row.lazy && !row.ready;
+            // Follow actual content already being read, not a newly encountered
+            // estimate whose height can change drastically when it finishes.
+            if (rect.bottom > bounds.top && rect.top < bounds.bottom &&
+                (!anchor || (anchor.estimated && !estimated) || (Boolean(anchor.estimated) === Boolean(estimated) && rect.top < anchor.top))) {
+                anchor = {row, top:rect.top, estimated};
+            }
         });
         return function () {
             let restored = pinned;
@@ -83,7 +89,9 @@
                 row.node.style.minHeight = row.placeholder.style.height;
             }
             if (row.placeholder.isConnected) row.placeholder.replaceWith(row.node);
+            const generation = row.generation = (row.generation || 0) + 1;
             const finish = () => {
+                if (row.generation !== generation) return;
                 row.ready = true;
                 row.loading = null;
                 if (row.node.isConnected) row.node.style.minHeight = '';
@@ -92,6 +100,7 @@
             try {
                 const rendered = row.render(row.node, row.model, row.index, synchronous);
                 if (rendered?.then) row.loading = Promise.resolve(rendered).then(finish, error => {
+                    if (row.generation !== generation) return;
                     // Keep raw source accessible if a Markdown worker fails.
                     row.node.textContent = row.model.segments.map(seg => seg.content || seg.resultOutput || seg.secondary || '').join('\n');
                     row.node.style.whiteSpace = 'pre-wrap';
@@ -192,6 +201,11 @@
         }
         const bounds = list.messages.getBoundingClientRect();
         const buffer = 250;
+        // Start expensive rows ahead of the reader, while keeping the retained
+        // DOM window small. A 250px window alone can enter and leave the screen
+        // before asynchronous Markdown preparation has finished.
+        const movement = hydrating || list.scrollTop === undefined ? 0 : list.messages.scrollTop - list.scrollTop;
+        const lookahead = Math.min(2400, Math.max(list.messages.clientHeight * 2, Math.abs(movement) * 10));
         const selection = window.getSelection();
         const changes = [], restored = [], pending = [];
         const restore = saveAnchor(list);
@@ -206,7 +220,14 @@
             // or updated content instead of freezing it as empty placeholders.
             const visible = suspended || list.selecting || (!row.lazy && list.rows.size < 40) || protectedRow ||
                 (rect.bottom >= bounds.top - buffer && rect.top <= bounds.bottom + buffer);
-            if (visible && (!mounted || (row.lazy && !row.ready))) changes.push(() => mount(row, restored));
+            const approaching = row.lazy && !row.ready && !row.loading &&
+                ((movement < 0 && rect.bottom >= bounds.top - lookahead && rect.top <= bounds.bottom) ||
+                 (movement > 0 && rect.top <= bounds.bottom + lookahead && rect.bottom >= bounds.top));
+            // Initial hydration can await asynchronous work while hidden. During
+            // scrolling, an actual viewport row must commit before the next paint,
+            // including when the reader overtakes its background preparation.
+            const immediate = !hydrating && rect.bottom > bounds.top && rect.top < bounds.bottom;
+            if ((visible || approaching) && (!mounted || (row.lazy && !row.ready))) changes.push(() => mount(row, restored, immediate));
             if (mounted && row.lazy && row.ready && rect.height > 0) {
                 row.model.height = rect.height;
                 row.model.width = width;
@@ -225,6 +246,26 @@
         changes.forEach(change => change());
         restoreScroll(restored);
         restore();
+        if (!hydrating) {
+            // A measured row can shrink enough to pull further placeholders into
+            // view. Finish that newly exposed window in this frame, not a chain
+            // of frames showing successively different estimates. Each pass
+            // consumes previously unmounted/unready rows, bounded by the list.
+            for (let pass = 0; pass < list.rows.size; pass++) {
+                const exposed = [];
+                list.rows.forEach(row => {
+                    if (row.node?.isConnected && (!row.lazy || row.ready)) return;
+                    const rect = element(row).getBoundingClientRect();
+                    if (rect.bottom > bounds.top && rect.top < bounds.bottom) exposed.push(row);
+                });
+                if (!exposed.length) break;
+                const keepPosition = saveAnchor(list), newlyMounted = [];
+                exposed.forEach(row => mount(row, newlyMounted, true));
+                restoreScroll(newlyMounted);
+                keepPosition();
+            }
+        }
+        list.scrollTop = list.messages.scrollTop;
         list.rows.forEach(row => { if (row.loading) pending.push(row.loading); });
         list.observer.observe(list.messages, {childList:true, subtree:true});
         if (changes.length) list.schedule();
