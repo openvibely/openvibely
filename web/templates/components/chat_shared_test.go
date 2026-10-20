@@ -4779,7 +4779,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 space-y-6 min-h-0"`) {
+	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0"`) {
 		t.Fatal("task thread messages shell should anchor the latest control without stacking an outer bottom margin above the composer")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
@@ -5376,7 +5376,7 @@ func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 space-y-6 min-h-0" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
@@ -5621,7 +5621,7 @@ func TestTaskThreadView_WindowedTranscriptUsesContainerLoaderAndPruning(t *testi
 	if strings.Count(content, `data-execution-pair="true"`) < 2 {
 		t.Fatal("expected task thread executions to render as whole-turn pairs")
 	}
-	if strings.Count(content, `chat-execution-pair space-y-6`) < 2 {
+	if strings.Count(content, `chat-execution-pair space-y-4`) < 2 {
 		t.Fatal("expected task thread execution pairs to preserve equal vertical spacing between user and assistant bubbles")
 	}
 	if strings.Contains(content, `chat-execution-pair space-y-3`) {
