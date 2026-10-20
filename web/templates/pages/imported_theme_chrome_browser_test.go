@@ -147,7 +147,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default dark retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-stats", "#22272e"}, {"#fixture-input", "#22272e"}, {"#fixture-bubble", "#22272e"}, {"#fixture-composer", "#22272e"}, {"#fixture-menu", "#22272e"}} {
+		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-stats", "#22272e"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
 			browser.waitFor("default dark "+step.selector+" ladder step", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
 		}
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer", "#fixture-menu"} {
@@ -383,7 +383,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-light');'ok'`)
 		browser.waitFor("native light task column matches title bar", `String(window.computed('#fixture-column', 'backgroundColor') === window.computed('#desktop-project-titlebar', 'backgroundColor'))`, "true")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
-		browser.waitFor("native theme menu uses raised elevation step", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(34, 39, 46)")
+		browser.waitFor("native theme menu uses chat elevation step", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(38, 43, 51)")
 		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")
 		for _, property := range []string{"backgroundColor", "borderTopColor"} {
 			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
