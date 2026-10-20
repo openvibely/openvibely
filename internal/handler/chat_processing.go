@@ -738,11 +738,19 @@ modelLoop:
 			err = ctx.Err()
 			break
 		}
+		// Publish and refresh before any provider builds its attachment context.
+		if pendingSteering.count() > 0 {
+			if deliveryErr := h.prepareSteeringAttachmentDelivery(ctx, params, &pendingSteering); deliveryErr != nil {
+				h.requeueUncommittedSteering(ctx, params.ExecID, pendingSteering)
+				err = deliveryErr
+				break modelLoop
+			}
+		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
 		requestCtx = params.withAttachmentContext(requestCtx)
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
-			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...)}
+			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...), attachmentFinishes: pendingSteering.attachmentFinishes}
 			commit := h.preparedSteeringCommit(params, batch)
 			requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, func(commitCtx context.Context, history []any) error {
 				if err := commit(commitCtx, history); err != nil {
@@ -757,13 +765,6 @@ modelLoop:
 		requestCtx = llmcontracts.WithMidTurnSteeringWakeup(requestCtx, steeringWakeup)
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
-		}
-		if params.Agent.Provider != models.ProviderOpenAI && pendingSteering.count() > 0 {
-			if deliveryErr := h.prepareSteeringAttachmentDelivery(ctx, params, &pendingSteering); deliveryErr != nil {
-				h.requeueUncommittedSteering(ctx, params.ExecID, pendingSteering)
-				err = deliveryErr
-				break modelLoop
-			}
 		}
 		// Codex-style steering is owned by the active agentic turn. Active model
 		// sampling and its completed tools finish before pending input is drained.
