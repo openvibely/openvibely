@@ -36,7 +36,7 @@ type Theme struct {
 }
 
 func Catalog() []Theme {
-	catalog := make([]Theme, 0, ExpectedThemeCount+4+len(paletteSpecs()))
+	catalog := make([]Theme, 0, ExpectedThemeCount+3+len(paletteSpecs()))
 	catalog = append(catalog, OpenVibelyThemes()...)
 	catalog = append(catalog, PaletteThemes()...)
 	catalog = append(catalog, VSCodeCatalog()...)
@@ -194,7 +194,6 @@ func OpenVibelyThemes() []Theme {
 	return []Theme{
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
-		openVibelyClassicTheme(),
 		openVibelyFlatTheme(),
 	}
 }
@@ -206,16 +205,6 @@ func openVibelyFlatTheme() Theme {
 	theme.Name = "OpenVibely Dark Flat"
 	theme.Source = "OpenVibely experimental"
 	theme.SearchText = theme.Name + " dark experimental flat outlined"
-	return theme
-}
-
-// The classic variant retains the original native dark styling without the
-// lightness ladder applied to OpenVibely Dark.
-func openVibelyClassicTheme() Theme {
-	theme := openVibelyDarkTheme()
-	theme.ID = "openvibely-dark-classic"
-	theme.Name = "OpenVibely Dark Classic"
-	theme.SearchText = theme.Name + " dark classic original"
 	return theme
 }
 

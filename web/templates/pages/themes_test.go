@@ -36,7 +36,6 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 		`data-theme-id="` + themes.OpenVibelyDarkThemeID + `"`,
 		`data-theme-id="` + themes.OpenVibelyLightThemeID + `"`,
 		`data-theme-id="openvibely-dark-flat"`,
-		`data-theme-id="openvibely-dark-classic"`,
 		`OpenVibely Dark`,
 		`OpenVibely Light`,
 		`OpenVibely built-in`,
