@@ -261,6 +261,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("saved file row aligns with panel rows", `String((function(){var row=document.querySelector('#attachment-list .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#attachment-list').getBoundingClientRect(), list=document.querySelector('#attachment-list').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#attachment-list img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
 		b.click("#attachment-list [data-image-gallery-item]")
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
+		b.evaluate(`window.oldAttachmentList=document.getElementById('attachment-list');htmx.ajax('GET','/tasks/created/attachments',{target:'#attachment-list',swap:'outerHTML'});'refresh'`)
+		b.waitFor("panel refreshed without dismissing preview", `String(document.getElementById('attachment-list')!==window.oldAttachmentList && !document.querySelector('.htmx-settling') && document.getElementById('image-gallery').open)`, "true")
 		b.click("[data-gallery-close]")
 		// Composer and panel entry points share the task gallery, without duplicate saved files.
 		b.evaluate(`var composer=document.createElement('form');composer.id='task-thread-form';composer.innerHTML='<div data-image-gallery-group><a data-image-gallery-item data-image-name="pending.svg" href="/chat/attachments/pending/session/pending.svg">Pending upload</a></div>';document.getElementById('task-detail-content').append(composer);'ready'`)
