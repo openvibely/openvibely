@@ -18,9 +18,9 @@
   const old=image;image=document.createElement(item.kind==='video'?'video':'img');
   if(item.kind==='video'){image.controls=true;image.playsInline=true;image.preload='metadata';image.style.cssText='max-width:100%;max-height:100%;object-fit:contain'}
   image.dataset.galleryImage='';image.draggable=false;image.alt=item.name;old.replaceWith(image);
-  const current=image;q('status').textContent='Loading…';
-  image.onload=image.onloadedmetadata=()=>{if(image!==current)return;q('status').textContent='';transform()};
-  image.onerror=()=>{if(image!==current)return;q('status').textContent='Image unavailable';image.style.visibility='hidden'};
+  const current=image,status=q('status');status.setAttribute('aria-label','Loading preview');const spinner=document.createElement('span');spinner.className='loading loading-spinner loading-sm text-primary';spinner.setAttribute('aria-hidden','true');status.replaceChildren(spinner);
+  image.onload=image.onloadedmetadata=()=>{if(image!==current)return;q('status').replaceChildren();q('status').removeAttribute('aria-label');transform()};
+  image.onerror=()=>{if(image!==current)return;q('status').removeAttribute('aria-label');q('status').textContent='Image unavailable';image.style.visibility='hidden'};
   image.src=item.url;transform();
  }
  function refresh(item){
