@@ -14,7 +14,7 @@ Use invariant Excel number-format syntax; do not swap comma/decimal characters t
 
 Use the source fiscal calendar, reporting date and year; do not invent a missing year. Share chronological period headers across related schedules. For monthly timestamp aggregation, use inclusive month start and exclusive next-month start. Sum flows, take ending stocks, and calculate rates from matching period components.
 
-For week-based work with no supplied convention, make a Monday-start assumption explicit; use only supplied holiday calendars. Keep actuals fixed across cases. For a nonnegative annual flow forecast, do not create a negative remaining-period forecast to force a full-year target below actuals; expose the inconsistency.
+For week-based work with no supplied convention, make a Monday-start assumption explicit; use only supplied holiday calendars. For a nonnegative annual flow forecast, do not create a negative remaining-period forecast to force a full-year target below actuals; expose the inconsistency.
 
 ## Operational workbooks
 
@@ -26,7 +26,7 @@ Use a cover only if useful, placed first; an explanatory readme belongs last. Av
 
 ## Sources and review annotations
 
-Keep source references beside their inputs. When a cell annotation is appropriate, use the supported `workbook-edit` `note` operation; ordinary source notes do not need threaded conversations. Avoid repeating the same citation in cells, notes and threads. Do not decorate calculated output areas with repeated citations. Create review threads only when requested; use the user’s supplied name or `User` as author.
+Keep source references beside their inputs. When a cell annotation is appropriate, use the supported `workbook-edit` `note` operation; ordinary source notes do not need threaded conversations. Avoid repeating the same citation in cells, notes and threads. Preserve existing annotations; update an existing note/comment/thread rather than adding another annotation type to the same cell. Do not add citations, notes or comments to cover/presentation tabs or output regions unless requested. On mixed-use sheets, place sources beside inputs, outside the output region. Create comments or review threads only when requested; use the user’s supplied name or `User` as author.
 
 ## Charts
 
