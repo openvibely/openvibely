@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/util"
@@ -553,7 +554,11 @@ func firstMarkdownParagraph(content string) string {
 		}
 		para = strings.Join(strings.Fields(para), " ")
 		if len(para) > 160 {
-			para = strings.TrimSpace(para[:160])
+			cut := 160
+			for cut > 0 && !utf8.RuneStart(para[cut]) {
+				cut--
+			}
+			para = strings.TrimSpace(para[:cut])
 		}
 		return para
 	}
