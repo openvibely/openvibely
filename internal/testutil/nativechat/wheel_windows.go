@@ -9,7 +9,6 @@ import (
 
 var user32 = syscall.NewLazyDLL("user32.dll")
 var clientToScreen = user32.NewProc("ClientToScreen")
-var windowFromPoint = user32.NewProc("WindowFromPoint")
 var sendMessage = user32.NewProc("SendMessageW")
 
 type point struct{ X, Y int32 }
@@ -21,8 +20,9 @@ func nativeWheel(window unsafe.Pointer, e wheel) {
 	}
 	p := point{int32(e.X * scale), int32(e.Y * scale)}
 	clientToScreen.Call(uintptr(window), uintptr(unsafe.Pointer(&p)))
-	packed := uintptr(uint32(p.X)) | uintptr(uint32(p.Y))<<32
-	target, _, _ := windowFromPoint.Call(packed)
+	// Composition-hosted WebView2 receives input through the Wails HWND.
+	// Do not depend on whichever window happens to be under a screen point.
+	target := uintptr(window)
 	coords := uintptr(uint16(p.X)) | uintptr(uint16(p.Y))<<16
 	// WebView2 receives real Windows wheel messages. Its configured line/pixel
 	// conversion is measured from the resulting trusted DOM event by the fixture.

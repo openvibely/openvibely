@@ -38,3 +38,11 @@ window or server gains an input-injection endpoint.
 
 This replaces the standalone Swift window. Native event delivery does not
 reproduce every physical trackpad gesture or hardware-specific momentum profile.
+
+The fixture installs the native-input bridge in its HTML before page scripts run;
+this does not rely on Wails' platform-dependent `WebviewWindowOptions.JS` handling
+for URL-backed windows. Gesture setup waits for virtual layout to settle and
+calibrates pixel wheel units from a trusted event. Assertions follow visible text
+across late height corrections rather than assuming absolute scroll offsets are
+constant. Event coalescing is allowed, but actual input, paging, and text tracking
+must all be observed for the test to pass.

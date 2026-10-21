@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,7 +36,19 @@ func main() {
 	app := application.New(application.Options{Name: "Native chat regression", Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true}})
 	endpoint := "http://" + listener.Addr().String() + "/wheel"
 	bridge := fmt.Sprintf(`window.nativeTestInput={postMessage(data){fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(r=>{if(!r.ok)throw Error('Native input failed: '+r.status);if(data.count)window._nativeBurstDone=true}).catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e))))}};`, endpoint)
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "native-chat-test", Title: "Native chat regression", URL: target.String(), Width: 1728, Height: 1084, JS: bridge, Windows: application.WindowsWindow{WebView2CompositionHosting: true}})
+	// URL-backed Wails windows do not consistently apply Options.JS (WebView2
+	// only uses it for HTML-backed windows). Register it with the fixture before
+	// navigating, so every engine receives the identical script in its document.
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Post(target.Scheme+"://"+target.Host+"/native-test-bridge", "text/javascript", strings.NewReader(bridge))
+	if err != nil {
+		log.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		log.Fatalf("register native bridge: %s", response.Status)
+	}
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "native-chat-test", Title: "Native chat regression", URL: target.String(), Width: 1280, Height: 800, Windows: application.WindowsWindow{WebView2CompositionHosting: true}})
 	var input sync.Mutex
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") != target.Scheme+"://"+target.Host {
