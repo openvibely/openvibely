@@ -35,15 +35,16 @@
         row.placeholder.style.cssText = 'height:' + height + 'px;min-height:' + height +
             'px;box-sizing:border-box;flex-shrink:0;margin-top:' + (margins?.marginTop || '0px') + ';margin-bottom:' + (margins?.marginBottom || '0px') + ';';
     }
-    function saveAnchor(list) {
+    function saveAnchor(list, followMovement) {
         const messages = list.messages;
         // Hidden history may still be parsed, but zero-sized geometry must not
         // replace the reading anchor saved before the workspace was hidden.
         if (!hasVisibleArea(messages)) return function () {};
         // Settle pending non-virtual changes (such as an earlier image loading)
         // before taking ownership of the next row-height adjustment.
-        window.compensateChatEarlierLayout?.(messages);
+        if (!followMovement) window.compensateChatEarlierLayout?.(messages);
         const bounds = messages.getBoundingClientRect();
+        const scrollTop = messages.scrollTop;
         const pinned = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= 2;
         let anchor = null;
         // While older history settles, newly inserted estimates can overlap the
@@ -52,7 +53,7 @@
         const earlierPair = messages._earlierAnchor?.pair;
         const earlierBounds = earlierPair?.isConnected ? earlierPair.getBoundingClientRect() : null;
         const readingPair = earlierBounds && earlierBounds.bottom > bounds.top && earlierBounds.top < bounds.bottom ? earlierPair : null;
-        if (readingPair && earlierBounds.top >= bounds.top) anchor = {row:{node:readingPair}, top:earlierBounds.top};
+        if (readingPair && earlierBounds.top >= bounds.top) anchor = {row:{node:readingPair}, top:earlierBounds.top, bottom:earlierBounds.bottom};
         // Map insertion order can differ from DOM order after prepending history.
         list.rows.forEach(row => {
             const el = element(row);
@@ -63,11 +64,19 @@
             // estimate whose height can change drastically when it finishes.
             if (rect.bottom > bounds.top && rect.top < bounds.bottom &&
                 (!anchor || (anchor.estimated && !estimated) || (Boolean(anchor.estimated) === Boolean(estimated) && rect.top < anchor.top))) {
-                anchor = {row, top:rect.top, estimated};
+                anchor = {row, top:rect.top, bottom:rect.bottom, estimated};
             }
         });
         return function () {
             if (!hasVisibleArea(messages)) return false;
+            // Shrinking content can clamp scrollTop even without user input.
+            const maximum = Math.max(0, messages.scrollHeight - messages.clientHeight);
+            const movement = followMovement ? messages.scrollTop - Math.min(scrollTop, maximum) : 0;
+            // A deferred resize must retain input since the last measured frame.
+            // A jump to a different window or away from the bottom owns its own
+            // position; do not pull the reader back to the previous anchor.
+            if (followMovement && ((pinned && movement !== 0) || (!pinned &&
+                (!anchor || anchor.estimated || anchor.bottom - movement <= bounds.top || anchor.top - movement >= bounds.bottom)))) return false;
             let restored = pinned;
             if (pinned) {
                 // Do not restart the browser's ongoing boundary/overscroll
@@ -78,12 +87,13 @@
                 const row = anchor.row.lazy ? (anchor.row.owner._chatVirtualRows?.[anchor.row.index] || anchor.row) : anchor.row;
                 if (messages.contains(element(row))) {
                     const viewportShift = messages.getBoundingClientRect().top - bounds.top;
-                    const delta = element(row).getBoundingClientRect().top - anchor.top - viewportShift;
+                    const delta = element(row).getBoundingClientRect().top - anchor.top - viewportShift + movement;
                     if (delta !== 0) messages.scrollTop += delta;
                     restored = true;
                 }
             }
             if (restored) window.acknowledgeChatEarlierLayout?.(messages);
+            if (!followMovement) list.lateAnchor = saveAnchor(list, true);
             return restored;
         };
     }
@@ -170,6 +180,8 @@
         cancelAnimationFrame(list.frame);
         list.observer.disconnect();
         list.resize?.disconnect();
+        list.rowResize?.disconnect();
+        list.messages.style.overflowAnchor = list.overflowAnchor;
         list.messages.removeEventListener('scroll', list.schedule);
         list.rows.clear();
         list.viewportReady?.(false);
@@ -179,7 +191,9 @@
     function ensureList(messages) {
         let list = lists.get(messages);
         if (!list) {
-            list = {messages, rows:new Map(), frame:null};
+            list = {messages, rows:new Map(), frame:null, overflowAnchor:messages.style.overflowAnchor, observedRows:new Set()};
+            // One owner compensates for height changes in both Chrome and WebKit.
+            messages.style.overflowAnchor = 'none';
             list.schedule = function () {
                 if (list.viewportReady && hasVisibleArea(messages)) {
                     list.viewportReady(true);
@@ -191,6 +205,12 @@
             list.observer = new MutationObserver(list.schedule);
             list.resize = typeof ResizeObserver === 'function' ? new ResizeObserver(list.schedule) : null;
             list.resize?.observe(messages);
+            list.rowResize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+                // ResizeObserver runs before paint. Correct delayed image/diagram
+                // layout now, not in a later animation frame after it has flashed.
+                compensateLateLayout(list);
+                list.schedule();
+            }) : null;
             messages.addEventListener('scroll', list.schedule, {passive:true});
             lists.set(messages, list);
         }
@@ -217,6 +237,21 @@
             list.rows.set(node, {node, placeholder});
         });
     }
+    function compensateLateLayout(list) {
+        if (!hasVisibleArea(list.messages)) { list.lateAnchor = null; return; }
+        const restore = list.lateAnchor;
+        list.lateAnchor = null;
+        restore?.();
+        list.lateAnchor = saveAnchor(list, true);
+    }
+    function observeRowLayout(list) {
+        const mounted = new Set();
+        list.rows.forEach(row => { if (row.node?.isConnected) mounted.add(row.node); });
+        list.observedRows.forEach(node => { if (!mounted.has(node)) list.rowResize?.unobserve(node); });
+        mounted.forEach(node => { if (!list.observedRows.has(node)) list.rowResize?.observe(node); });
+        list.observedRows = mounted;
+        list.lateAnchor = saveAnchor(list, true);
+    }
     function refresh(list, hydrating) {
         cancelAnimationFrame(list.frame);
         list.frame = null;
@@ -226,6 +261,7 @@
         // those as intersections would render the entire transcript. ResizeObserver
         // schedules another pass when the chat area becomes visible again.
         if (!hasVisibleArea(list.messages)) return [];
+        compensateLateLayout(list);
         list.observer.disconnect();
         collect(list);
         const width = list.messages.clientWidth;
@@ -310,6 +346,7 @@
                 keepPosition();
             }
         }
+        observeRowLayout(list);
         list.scrollTop = list.messages.scrollTop;
         list.rows.forEach(row => { if (row.loading) pending.push(row.loading); });
         list.observer.observe(list.messages, {childList:true, subtree:true});
