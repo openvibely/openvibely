@@ -20,11 +20,12 @@ import (
 //go:embed builtin/agents/*/skills/*/SKILL.md
 //go:embed builtin/skills/SKILLS.md
 //go:embed builtin/skills/*/SKILL.md
+//go:embed builtin/skills/*/references/*.md
 var FS embed.FS
 
 // SyncTo writes the embedded built-in files under root.
 //
-// SKILL.md bodies are always overwritten: those are the app's source of
+// SKILL.md bodies and bundled support files are always overwritten: those are the app's source of
 // truth and travel with the binary. AGENTS.md and user-managed per-agent
 // SKILLS.md files are only written when missing. Protected built-in system
 // agent root declarations are also overwritten because they carry system policy
