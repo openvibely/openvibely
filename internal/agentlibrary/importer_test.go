@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/agentskills"
 )
@@ -506,6 +507,72 @@ func TestNormalizeStandaloneSkillPackage_RawMarkdownGeneratesRequiredFrontmatter
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered SKILL.md missing %q:\n%s", want, rendered)
 		}
+	}
+}
+
+func TestFirstMarkdownParagraph_TruncatesAtUTF8Boundary(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "three-byte rune at 160-byte limit",
+			content: strings.Repeat("界", 54),
+			want:    strings.Repeat("界", 53),
+		},
+		{
+			name:    "four-byte rune crosses 160-byte limit",
+			content: strings.Repeat("a", 158) + "🙂tail",
+			want:    strings.Repeat("a", 158),
+		},
+		{
+			name:    "long ASCII paragraph",
+			content: strings.Repeat("a", 165),
+			want:    strings.Repeat("a", 160),
+		},
+		{
+			name:    "short multi-byte paragraph",
+			content: "你好世界",
+			want:    "你好世界",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := firstMarkdownParagraph(tt.content)
+			if got != tt.want {
+				t.Fatalf("firstMarkdownParagraph() = %q (len=%d), want %q (len=%d)", got, len(got), tt.want, len(tt.want))
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("firstMarkdownParagraph() returned invalid UTF-8: %q", got)
+			}
+		})
+	}
+}
+
+func TestNormalizeStandaloneSkillPackage_RawMarkdownUnicodeTruncation(t *testing.T) {
+	content := "# Raw Chinese Skill\n\n" + strings.Repeat("界", 54) + "\n"
+	decl, body, err := NormalizeStandaloneSkillPackage(content, "raw_chinese_skill", "project")
+	if err != nil {
+		t.Fatalf("NormalizeStandaloneSkillPackage: %v", err)
+	}
+	if !utf8.ValidString(decl.Skill.Description) {
+		t.Fatalf("decl.Skill.Description contains invalid UTF-8: %q", decl.Skill.Description)
+	}
+	if decl.Skill.Description != strings.Repeat("界", 53) {
+		t.Fatalf("decl.Skill.Description = %q, want 53 copies of 界", decl.Skill.Description)
+	}
+
+	rendered, err := RenderSkillMarkdown(decl, body)
+	if err != nil {
+		t.Fatalf("RenderSkillMarkdown: %v", err)
+	}
+	if !utf8.ValidString(rendered) {
+		t.Fatalf("rendered SKILL.md contains invalid UTF-8: %q", rendered)
+	}
+	if strings.Contains(rendered, "!!binary") {
+		t.Fatalf("rendered YAML contains binary tag for invalid UTF-8 string: %s", rendered)
 	}
 }
 
