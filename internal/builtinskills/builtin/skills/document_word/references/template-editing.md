@@ -13,3 +13,19 @@ Run `"$PAPERWORKS" verify-preservation before.docx --against after.docx --requir
 Render and compare all pages against the source, checking wrapping, overflow, pagination, table widths and header/footer placement. Verify updated fields using the field-refresh policy in `references/review-and-fields.md`. Neither unchanged package hashes nor successful rendering alone proves that the filled content is correct.
 
 For strict unchanged-part preservation, avoid an Office re-save because it can rewrite unrelated markup. Use `materialize` for supported SEQ/REF fields; resolve conflicts between pagination refresh and preservation before proceeding.
+
+## Clone a template component
+
+This operation is implemented in newer local Paperworks builds, but not the skill's pinned `v0.0.1-rc2`. Check `"$PAPERWORKS" schema word-edit` for `clone-component` before using it. If absent, report that this runtime lacks the operation; do not silently rebuild the template. Use a newer executable only when supplied for the task.
+
+Save the operation in a JSON spec and run `"$PAPERWORKS" word-edit input.docx --spec clone.json --output edited.docx`:
+
+```json
+{"operation":"clone-component","path":"template.docx","start":1,"end":2,"before":0}
+```
+
+`start` and `end` select an inclusive, zero-based range of direct body blocks: paragraphs, tables and content controls, excluding final section properties. Inspect the source body XML to locate these blocks; paragraph-only indices are different. Optional `path` resolves relative to the spec; omit it to copy from the input. `before` is the destination body-block index; omit it to append.
+
+Cloning imports related images, links, charts, styles and numbering, renaming conflicting style IDs and bookmark names. The destination retains its theme, defaults, page setup, headers and footers. Components containing section breaks, incomplete bookmarks, fields, comments, notes, tracked revisions, bound controls or `altChunk` dependencies are rejected. Choose a self-contained source component; do not remove those features merely to make cloning succeed.
+
+After saving, inspect copied text and relationships, numbering, style conflicts and internal links. Render the final document using the skill's verification workflow and confirm that the inserted component and surrounding layout match the requested design.

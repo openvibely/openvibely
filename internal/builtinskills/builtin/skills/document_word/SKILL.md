@@ -86,13 +86,13 @@ Read the references relevant to the current operation before running its command
 | Create a new DOCX or configure styles, themes and tables | [references/creation.md](references/creation.md) |
 | Change existing text, formatting, images, tables or sections | [references/editing.md](references/editing.md) |
 | Tracked changes, comments, controls, captions, fields, metadata, merges or equations | [references/review-and-fields.md](references/review-and-fields.md) |
-| Create from a supplied design template or require strict package preservation | [references/template-editing.md](references/template-editing.md) |
+| Create from a supplied design template, clone its components, or require strict package preservation | [references/template-editing.md](references/template-editing.md) |
 
 References inherit the working-file and verification rules in this skill. Examples that start from `example.*` use the fixture in `references/creation.md`; for real edits, use the actual input and inspected identifiers. Do not create the example fixture during an ordinary user edit.
 
 ## Current Paperworks limits
 
-General template-component cloning and legacy DOC conversion are not exposed by the current CLI. General image edits target standalone pictures; floating-position editing and vertical table restructuring are not supported. Preserve templates with narrow supported edits; do not recreate them from extracted text. Formatting/table revision acceptance is unsupported; exact Word pagination and native comment UI require target-application verification. For editable equations, only the MathML constructs listed in `references/review-and-fields.md` are supported.
+Template-component cloning requires a newer local build than the pinned `v0.0.1-rc2`; see `references/template-editing.md` for availability and dependency restrictions. Legacy DOC conversion is not exposed by the CLI. General image edits target standalone pictures; floating-position editing and vertical table restructuring are not supported. Preserve templates with narrow supported edits; do not recreate them from extracted text. Formatting/table revision acceptance is unsupported; exact Word pagination and native comment UI require target-application verification. For editable equations, only the MathML constructs listed in `references/review-and-fields.md` are supported.
 
 ## Working files
 
