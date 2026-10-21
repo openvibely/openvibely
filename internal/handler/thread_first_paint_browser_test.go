@@ -109,6 +109,10 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
 })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))))});</script>`, task.ID, path+"?tab=chat", "/tasks/"+other.ID, initiallyHidden)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Exercise rendering before the deferred virtual-list asset arrives.
+		if initiallyHidden && strings.HasSuffix(r.URL.Path, "/chat-virtual-list.js") {
+			time.Sleep(500 * time.Millisecond)
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
