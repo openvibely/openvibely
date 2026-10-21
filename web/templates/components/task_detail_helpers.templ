@@ -909,6 +909,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var threadView = document.getElementById('task-thread-view');
 					var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
 					if (!taskId) return;
+					var disposed = false;
 						var queuedSteerInFlight = {};
 						var queuedSteerClearTimers = {};
 						var directSteerInFlight = false;
@@ -965,6 +966,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						delete window._taskThreadQueuedSteerRequestHandlers[taskId];
 					}
 						function currentTaskThreadView() {
+							if (disposed) return null;
 							var view = document.getElementById('task-thread-view');
 							return view && view.getAttribute('data-task-id') === taskId ? view : null;
 						}
@@ -1223,7 +1225,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								swap: 'beforeend'
 							}).then(function() {
 								delete pendingFragmentExecs[data.exec_id];
-								var view = document.getElementById('task-thread-view');
+								if (!currentTaskThreadView() || !messages.isConnected) return;
+								var view = currentTaskThreadView();
 								if (view) view.setAttribute('data-task-active', 'true');
 								if (window._initThreadStreaming) window._initThreadStreaming();
 								refreshThreadComposerAction();
@@ -1315,6 +1318,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var cleanupTaskThreadLiveHandlers = function(event) {
 						var target = event.detail && event.detail.target;
 						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {
+							disposed = true;
 							window.removeEventListener('sse-task-event', handler);
 							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
