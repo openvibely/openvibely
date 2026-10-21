@@ -233,6 +233,34 @@
         }
     };
 
+    document.addEventListener('htmx:beforeSend', function (event) {
+        const detail = event.detail;
+        const verb = detail.requestConfig?.verb;
+        const target = detail.target;
+        const owner = target?.closest('#task-detail-content, #chat-page-root');
+        if (verb === 'get' && owner) {
+            // A late fragment/poll can outlive its view. Even a swap into a
+            // detached target processes hx-preserve against the live document,
+            // stealing matching executions from a subsequently reopened thread.
+            // Fence by DOM ownership, not task ID: reopening the same task is a
+            // different view. Listen on the source so detached sources work too.
+            const source = detail.elt;
+            const xhr = detail.xhr;
+            const discardDetachedResponse = response => {
+                if (response.detail.xhr === xhr &&
+                    (!owner.isConnected || !target.isConnected || !owner.contains(target))) {
+                    response.preventDefault();
+                }
+            };
+            const cleanup = response => {
+                if (response.detail.xhr !== xhr) return;
+                source.removeEventListener('htmx:beforeOnLoad', discardDetachedResponse);
+                source.removeEventListener('htmx:afterRequest', cleanup);
+            };
+            source.addEventListener('htmx:beforeOnLoad', discardDetachedResponse);
+            source.addEventListener('htmx:afterRequest', cleanup);
+        }
+    }, true);
     document.addEventListener('htmx:beforeRequest', function (event) {
         const verb = event.detail.requestConfig?.verb;
         if (verb && verb !== 'get') {
