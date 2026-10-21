@@ -33,7 +33,8 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
    #attachment-form .htmx-indicator { display:none; }
    #attachment-form.htmx-request .htmx-indicator { display:inline; }
   </style>
-  <div class="flex justify-end mb-3">
+  <div class="flex items-center justify-between mb-3" style="height:20px">
+   <h3 class="text-sm font-semibold">Attachments</h3>
    <button type="button" id="add-attachment-btn" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.querySelector('#attachment-form input[type=file]').click()">+</button>
   </div>
   <form method="post" id="attachment-form" hx-post={ TaskAttachmentUploadURL(taskID, projectID) } hx-target="#attachment-list" hx-swap="outerHTML" hx-encoding="multipart/form-data" hx-on::after-request="if(event.detail.successful)this.reset()">
