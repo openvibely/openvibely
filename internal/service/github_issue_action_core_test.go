@@ -151,6 +151,17 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 	if err != nil || out != `{"issue_number":8,"ok":true,"state":"closed"}` || provider.closeNumber != 8 {
 		t.Fatalf("close output=%q request=%d err=%v", out, provider.closeNumber, err)
 	}
+	var closePayload struct {
+		OK          bool   `json:"ok"`
+		IssueNumber int    `json:"issue_number"`
+		State       string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &closePayload); err != nil {
+		t.Fatalf("decode close output %q: %v", out, err)
+	}
+	if !closePayload.OK || closePayload.IssueNumber != 8 || closePayload.State != "closed" {
+		t.Fatalf("decoded close payload=%+v, want ok issue_number=8 state=closed", closePayload)
+	}
 
 	wantResolved := []string{"get", "my-assigned", "assigned", "created", "assigned-with-prs", "comment", "labels", "close"}
 	if !reflect.DeepEqual(resolved, wantResolved) {
