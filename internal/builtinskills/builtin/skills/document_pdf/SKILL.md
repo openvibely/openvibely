@@ -9,33 +9,33 @@ skill:
     description: Read, create, edit, and validate PDFs, including page layout and interactive forms.
 dependencies:
   - name: paperworks
-    version: 0.0.1-rc1
+    version: 0.0.1-rc2
     environment_variable: PAPERWORKS
     health_check: [version]
     packages:
       darwin/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-darwin-amd64.zip
-        sha256: 4cd6accfa9ef3cf27c2d5959ad11596a57472993caca6261133e27c5cf69bdab
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-darwin-amd64.zip
+        sha256: 75e6371febd8323019c5a070782b23b74a4f33caeec4c0cfa4c007a99f961da9
         format: zip
         executable: paperworks
       darwin/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-darwin-arm64.zip
-        sha256: b6ddaa7fac8ac5b577f4a7ab5dc0b07d91d12ae0465ebaeae29e7815aa62b091
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-darwin-arm64.zip
+        sha256: 3764c75d75db6882e3cd147f391dea09970b914eddc691553d95cb2405a67a39
         format: zip
         executable: paperworks
       linux/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-linux-amd64.zip
-        sha256: 76d4081f30dc765a84e10854a09b855928b8cc24986eea30a120fa984aaf4e51
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-linux-amd64.zip
+        sha256: a6559fc1ffb8a9f73a0e7b12b9a1d4150453403fe2d87603ef26298df0e80b94
         format: zip
         executable: paperworks
       linux/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-linux-arm64.zip
-        sha256: fe992a22c5fd3998015743af287f99f7a92997fec205df8c98ae2c84ab39c11e
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-linux-arm64.zip
+        sha256: 16062f4ab7cc8b13b775aa76921688d3090495e271afcd2b3a623069da8e7ef7
         format: zip
         executable: paperworks
       windows/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-windows-amd64.zip
-        sha256: 09b9d0b96e664fd0391773d6a7773cd469a7ac73c370bc58c1d3c4b8f3d9c90f
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-windows-amd64.zip
+        sha256: 58a9acea5964d032d71a72d56dea3681979cfcda4e639d19bcfaf4bd5c88b70a
         format: zip
         executable: paperworks.exe
   - name: libreoffice
@@ -54,28 +54,30 @@ dependencies:
 
 ## Local helpers
 
-`skill_view` returns dependency status and an `environment` map. Export `PAPERWORKS` and, when available, `DOCUMENT_SOFFICE` to those exact absolute executable paths; quote them when invoking commands. Use the execution environment that can access both these paths and the input files.
+`skill_view` supplies executable paths in its `environment` map. Export `PAPERWORKS` and, when supplied, `DOCUMENT_SOFFICE` to those paths. Run commands where the executables and input files are accessible; quote paths.
 
-The dependency loader already runs the executable health check. Use `"$PAPERWORKS" capabilities` when available operations are uncertain and `"$PAPERWORKS" help COMMAND` when command syntax is unclear; repeat discovery only after a runtime change or relevant failure. Report a missing command or dependency specifically. PDF page and equation rendering is built in and does not require LibreOffice.
+The loader runs the executable health check. Use `"$PAPERWORKS" capabilities` to discover commands and `"$PAPERWORKS" help COMMAND` for arguments when needed. Reuse this information until the runtime changes or a command fails. PDF and equation rendering do not require LibreOffice.
 
 ## Choose the operation
 
-For a follow-up edit, use the latest saved document, not a reconstruction from chat text or an older input. Check that the path still exists; if only a published URL remains, resolve/download that file through the available file tools first. Keep the original and write each successive edit to a new output; feed that output into the next edit.
+For follow-ups, edit the latest saved output. If only a published URL remains, download it through the file tools. Preserve the original, write each edit to a new output, and use that output for subsequent edits.
 
 | Request | Use |
 |---|---|
 | Read or summarize | `inspect` for page/form structure, `pdf-text` for text, `render` for visual content. |
-| New PDF | `create-pdf` using `flow.blocks` or fixed `pages`. |
+| New PDF | `create-pdf` using `flow.blocks`, fixed `pages`, or `canvas` for embedded fonts and vector artwork. |
 | Reorder/extract/merge/rotate pages | `pdf-select`, `pdf-merge`, `pdf-rotate`, `pdf-split`. |
+| Extract positioned text or a bounded table | `pdf-layout` with selected pages/regions and explicit row/column boundaries. |
+| Remove selected page objects / overlay artwork | Inspect with `pdf-objects`, then use `pdf-object-edit` and verify the saved page. |
 | Stamp text | `pdf-watermark`; this does not replace or securely redact existing text. |
 | Fill existing fields | `fill` with the actual field names and export states from `inspect`. |
-| Rewrite existing paragraph text or OCR scanned pages | No general command is exposed. Explain that limitation instead of inventing an edit operation. |
+| Rewrite existing paragraph text or OCR scanned pages | Not supported. |
 
-Use the JSON field names below exactly. CLI help describes command-line flags but does not list every JSON field. Do not guess fields: unknown keys can be ignored by a command without applying the intended edit. Reopen the result and check the requested change.
+Use `"$PAPERWORKS" schema COMMAND` for supported JSON schemas. The recipes below specify required fields, indices and units. Unknown fields may be ignored.
 
 ## Current Paperworks limits
 
-The current Paperworks runtime does not provide general OCR, layout-aware table extraction, or arbitrary existing-page paragraph editing. Authoring accepts printable ASCII with built-in fonts; embedded Unicode fonts and rich inline text are unsupported. Use only the documented form-creation fields below. Use supported PDF text/page/form operations, inspect rendered results, and report unmet requirements rather than replacing them silently.
+No OCR, automatic table detection or existing-paragraph reflow. Flow/form creation accepts printable ASCII. Canvas creation supports embedded Unicode fonts and vector drawing, but not complex-script shaping or rich flowing-text layout.
 
 ## Working files
 
@@ -89,11 +91,17 @@ After the final edit, run `"$PAPERWORKS" inspect FINAL_FILE` and the format-spec
 {"file_path":"/absolute/task-directory/preview/page-1.png"}
 ```
 
-Use the actual returned path. `view_image` is a tool call, not a shell command. Text extraction and publishing do not show pixels to the model.
+Call `view_image` with the actual returned path; it is a model tool, not a shell command.
 
-For a new PDF, inspect every page. For a narrow edit, inspect changed pages and any affected content, including pages whose layout shifted; compare against the source for unintended changes. Fix defects within the requested scope, then repeat the affected checks. Disclose any sampling or unavailable visual checks; do not claim an unperformed check passed.
+For a new PDF, inspect every page. For a narrow edit, inspect changed pages and any affected content, including pages whose layout shifted; compare against the source for unintended changes. Fix defects within the requested scope, then repeat the affected checks. Report any pages/ranges that could not be checked.
 
-Publish only the requested final files with `publish_file`, for example `{"file_path":"/absolute/task-directory/final-file.ext"}`, then include the returned URL as a Markdown link. Keep preview PNGs and intermediate files private. Add an extra PDF copy only when requested.
+Publish only the requested final files with `publish_file`, for example `{"file_path":"/absolute/task-directory/final-file.ext"}`, then include the returned URL as a Markdown link. Keep previews and intermediate files private.
+
+## Focused inspection and preview export
+
+Use `"$PAPERWORKS" inspect-select input.pdf --search Revenue --max-items 50 --max-chars 20000` to find matching report values and their JSON paths. Use `--path` with a JSON pointer from the actual report to select a subtree. Check `truncated`; increase bounds or inspect smaller sections before treating results as complete.
+
+`"$PAPERWORKS" preview-export input.pdf --output new-previews --format webp --columns 3` exports page images and an optional PNG contact sheet. Formats are `png`, `jpeg` or lossless `webp`; omit `--columns` to skip the contact sheet. `--max-pixels` controls rendering size. Use the contact sheet for an overview and individual images for the visual review above.
 
 ## Read and review
 
@@ -103,7 +111,7 @@ Render the selected copy with `"$PAPERWORKS" render selected.pdf --output previe
 
 ## Create and edit
 
-Use `"$PAPERWORKS" create-pdf --spec document.json --output new.pdf` for new PDFs. Use `flow.blocks` for flowing reports or `pages` for fixed positioning. Use `pdf-merge`, `pdf-rotate`, `pdf-select` or `pdf-split` for page operations, consulting command help for arguments. There is no arbitrary existing-page text replacement command. A watermark only stamps text; it does not remove the original. Rebuilding a page is a separate, potentially lossy approach and must match the requested scope.
+Use `"$PAPERWORKS" create-pdf --spec document.json --output new.pdf`. Choose one top-level mode: `flow.blocks` for flowing reports, `pages` for fixed ASCII/form layouts, or `canvas` for embedded fonts and vector artwork.
 
 Check final page count, content, page breaks, clipping, image proportions and table widths using the review scope in Verification and delivery.
 
@@ -133,7 +141,53 @@ After the small authoring example creates `example.pdf`, this stamps its first p
 "$PAPERWORKS" render draft.pdf --output draft-preview
 ```
 
-Check that the source text and page count remain, then open the returned PNG paths with `view_image`. The stamp is an example of a supported page edit, not a general text editor or secure redaction. Publish `draft.pdf` only if that is the requested result.
+Check that the source text and page count remain and the DRAFT stamp appears in the preview.
+
+## Positioned extraction and page-object edits
+
+`"$PAPERWORKS" pdf-layout input.pdf --spec selection.json` returns characters with bounding boxes and optional table cells. For example, `{"pages":[1],"bounds":[36,72,576,720],"columns":[36,300,576],"rows":[72,120,168],"max_chars":20000}` selects one-based pages and explicitly bounded cells. Coordinates are PDF points from the **bottom-left**. Both row and column boundaries must be strictly ascending with at least two values each; returned table rows are top-to-bottom. Use boundaries from the actual page, not these sample coordinates. Select smaller regions if the character limit is reached. Scanned artwork still needs image inspection or an external OCR tool.
+
+`"$PAPERWORKS" pdf-objects input.pdf` lists top-level objects with page, index, type and bounds. Types are 1 text, 2 path, 3 image, 4 shading, 5 form. Render and inspect before selecting indices; a visual object may consist of several PDF objects. Nested artwork within a form is handled as one form, not as separate semantic objects.
+
+Run `"$PAPERWORKS" pdf-object-edit input.pdf --spec edits.json --output edited.pdf` with, for example:
+
+```json
+{"edits":[{"page":1,"remove":[3,4],"overlay_pdf":"replacement.pdf","overlay_page":1,"matrix":[1,0,0,1,0,0]}]}
+```
+
+Page numbers are one-based; object indices come from inspection and refer to the page before each edit. Omit `remove` for a pure overlay. The PDF transform is `[a,b,c,d,e,f]` and defaults to identity; overlay paths resolve relative to the spec. This preserves vector artwork but provides neither semantic “replace the robot” detection nor secure redaction. Compare the edited region and surrounding titles/captions with the source.
+
+## Embedded fonts and vector creation
+
+Use `canvas.pages` with explicit page `width/height` and `elements`. Coordinates are points from the **top-left**, unlike `pdf-layout` extraction and the legacy fixed-page schema. Elements support `text`, `rect`, `ellipse`, `line`, `polygon`, `bezier`, `image`. Text uses `x/y/text/font/font_size`; boxes/images use `x/y/w/h`, with a local `path` for images. Vector styles use six-digit hex `fill/stroke` and point-valued `line_width`; polygons use `points`, cubic Bézier curves use four points.
+
+The default embedded Go font covers Latin, Greek and Cyrillic. Map font aliases to local TTF files in `canvas.fonts`, then select `font` on text elements for other glyphs. Check glyph coverage in the rendered page.
+
+### General editing example
+
+Starting from the small authoring example's `example.pdf`, create an embedded-font annotation and overlay it without deleting original objects:
+
+```sh
+cat > annotation.json <<'JSON'
+{"canvas":{"pages":[{"width":595.28,"height":841.89,"elements":[
+ {"type":"text","x":36,"y":780,"text":"Café — Δοκιμή","font_size":14}
+]}]}}
+JSON
+"$PAPERWORKS" create-pdf --spec annotation.json --output annotation.pdf
+cat > overlay.json <<'JSON'
+{"edits":[{"page":1,"overlay_pdf":"annotation.pdf","overlay_page":1}]}
+JSON
+"$PAPERWORKS" pdf-objects example.pdf > original-objects.json
+"$PAPERWORKS" pdf-object-edit example.pdf --spec overlay.json --output annotated.pdf
+cat > layout.json <<'JSON'
+{"pages":[1],"max_chars":20000}
+JSON
+"$PAPERWORKS" pdf-layout annotated.pdf --spec layout.json > annotated-layout.json
+"$PAPERWORKS" pdf-text annotated.pdf --output annotated-text.txt
+"$PAPERWORKS" preview-export annotated.pdf --output annotated-preview --format webp --columns 1
+```
+
+Check that the original revenue text and added Unicode text survive extraction, then inspect placement and glyphs in the preview.
 
 ## Form repair and verification
 
@@ -147,7 +201,7 @@ For flattening, the helper refreshes all values, including unchanged fields, pai
 
 ## Layout and reading quality
 
-When plain extraction loses columns, use rendered images and an available layout-aware extraction tool; Paperworks does not currently expose general table extraction. Verify extracted rows against page images. Keep OCR text distinguished from reliably extracted text. For creation, select page size, margins, heading hierarchy and fonts before laying out content. Repeat table headers across pages and keep captions with their figure. Verify fonts contain all needed glyphs and links point to their intended destinations. Reopen and inspect the final saved file, not a prior draft.
+When plain extraction loses columns, use `pdf-layout` with explicit regions/table boundaries and compare extracted rows with rendered pages. It does not detect arbitrary tables automatically. Keep OCR text distinguished from reliably extracted text. For creation, select page size, margins, heading hierarchy and fonts before laying out content. Repeat table headers across pages and keep captions with their figure. Verify fonts contain all needed glyphs and links point to their intended destinations.
 
 ## Creation options
 
@@ -179,7 +233,7 @@ For this fixture, verify `reviewer` is `Alex Smith` and `approved` is `/Yes`, an
 
 ## Small authoring example
 
-Adapt the content and layout to the request or supplied template. This creates an editable/source artifact; run the rendering and verification steps above before delivery.
+Adapt this example to the requested content and layout.
 
 ```sh
 cat > example.json <<'JSON'

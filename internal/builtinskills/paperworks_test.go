@@ -29,7 +29,7 @@ func TestPaperworksSkillPackages(t *testing.T) {
 			t.Fatalf("%s: %v %v", name, dependencies, err)
 		}
 		paperworks := dependencies[0]
-		if paperworks.Version != "0.0.1-rc1" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
+		if paperworks.Version != "0.0.1-rc2" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
 			t.Fatalf("%s: invalid Paperworks release configuration: %+v", name, paperworks)
 		}
 		platforms := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64"}
@@ -62,9 +62,6 @@ func TestPaperworksSkillPackages(t *testing.T) {
 			if !strings.Contains(string(data), heading) {
 				t.Fatalf("%s missing %s", name, heading)
 			}
-		}
-		if name != "document_pdf" && !strings.Contains(string(data), "## Native Google output") {
-			t.Fatalf("lost native import guidance: %s", name)
 		}
 		spec := regexp.MustCompile("(?s)cat > example.json <<'JSON'\n(.*?)\nJSON").FindSubmatch(data)
 		if len(spec) != 2 || !json.Valid(spec[1]) {
@@ -154,6 +151,7 @@ func TestPaperworksLocalExecutionIntegration(t *testing.T) {
 		}
 		exerciseDocumentEditExample(t, executable, office, work, kind.skill, kind.format, data)
 		exerciseDocumentCreationOptions(t, executable, office, work, kind.skill, data)
+		exerciseGeneralDocumentEditExample(t, executable, office, work, kind.skill, data)
 	}
 
 }

@@ -9,33 +9,33 @@ skill:
     description: Read and analyze XLS/XLSX and CSV/TSV spreadsheets; create and edit XLSX spreadsheets with formulas and charts.
 dependencies:
   - name: paperworks
-    version: 0.0.1-rc1
+    version: 0.0.1-rc2
     environment_variable: PAPERWORKS
     health_check: [version]
     packages:
       darwin/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-darwin-amd64.zip
-        sha256: 4cd6accfa9ef3cf27c2d5959ad11596a57472993caca6261133e27c5cf69bdab
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-darwin-amd64.zip
+        sha256: 75e6371febd8323019c5a070782b23b74a4f33caeec4c0cfa4c007a99f961da9
         format: zip
         executable: paperworks
       darwin/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-darwin-arm64.zip
-        sha256: b6ddaa7fac8ac5b577f4a7ab5dc0b07d91d12ae0465ebaeae29e7815aa62b091
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-darwin-arm64.zip
+        sha256: 3764c75d75db6882e3cd147f391dea09970b914eddc691553d95cb2405a67a39
         format: zip
         executable: paperworks
       linux/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-linux-amd64.zip
-        sha256: 76d4081f30dc765a84e10854a09b855928b8cc24986eea30a120fa984aaf4e51
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-linux-amd64.zip
+        sha256: a6559fc1ffb8a9f73a0e7b12b9a1d4150453403fe2d87603ef26298df0e80b94
         format: zip
         executable: paperworks
       linux/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-linux-arm64.zip
-        sha256: fe992a22c5fd3998015743af287f99f7a92997fec205df8c98ae2c84ab39c11e
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-linux-arm64.zip
+        sha256: 16062f4ab7cc8b13b775aa76921688d3090495e271afcd2b3a623069da8e7ef7
         format: zip
         executable: paperworks
       windows/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc1/paperworks-windows-amd64.zip
-        sha256: 09b9d0b96e664fd0391773d6a7773cd469a7ac73c370bc58c1d3c4b8f3d9c90f
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1-rc2/paperworks-windows-amd64.zip
+        sha256: 58a9acea5964d032d71a72d56dea3681979cfcda4e639d19bcfaf4bd5c88b70a
         format: zip
         executable: paperworks.exe
   - name: libreoffice
@@ -54,34 +54,30 @@ dependencies:
 
 ## Local helpers
 
-`skill_view` returns dependency status and an `environment` map. Export `PAPERWORKS` and, when available, `DOCUMENT_SOFFICE` to those exact absolute executable paths; quote them when invoking commands. Use the execution environment that can access both these paths and the input files.
+`skill_view` supplies executable paths in its `environment` map. Export `PAPERWORKS` and, when supplied, `DOCUMENT_SOFFICE` to those paths. Run commands where the executables and input files are accessible; quote paths.
 
-The dependency loader already runs the executable health check. Use `"$PAPERWORKS" capabilities` when available operations are uncertain and `"$PAPERWORKS" help COMMAND` when command syntax is unclear; repeat discovery only after a runtime change or relevant failure. Report a missing command or dependency specifically. XLSX rendering, PDF conversion and recalculation require LibreOffice. Its output is not proof of identical Microsoft Excel rendering or formula behavior.
-
-Whole-sheet and whole-workbook model previews ignore saved paper print areas so content outside them is included. Selecting a sheet or range excludes other sheets from the preview, including sheets with their own print areas. Hidden sheets stay hidden unless explicitly selected. Each selected sheet renders as one content-sized image; use explicit ranges for readable large-sheet review. Paper pagination applies to `convert`, not whole-sheet previews. These changes affect only a disposable copy, preserving the original print settings and data.
-
-The render helper preserves implicit category colors and category legends in pie/doughnut charts and keeps marker-only scatter plots unconnected. These adjustments apply only to a temporary preview copy; explicit single-color and connected-scatter choices remain unchanged. The original workbook and its chart data stay editable. Inspect the rendered images after recalculation.
+The loader runs the executable health check. Use `"$PAPERWORKS" capabilities` to discover commands and `"$PAPERWORKS" help COMMAND` for arguments when needed. Reuse this information until the runtime changes or a command fails. XLSX rendering, PDF conversion and recalculation require LibreOffice. Rendering and formula behavior can differ from Excel.
 
 ## Choose the operation
 
-For a follow-up edit, use the latest saved document, not a reconstruction from chat text or an older input. Check that the path still exists; if only a published URL remains, resolve/download that file through the available file tools first. Keep the original and write each successive edit to a new output; feed that output into the next edit.
+For follow-ups, edit the latest saved output. If only a published URL remains, download it through the file tools. Preserve the original, write each edit to a new output, and use that output for subsequent edits.
 
 | Request | Use |
 |---|---|
 | Read XLS/XLSX | `inspect` for saved values/formulas (XLS reads saved values only); `trace` for XLSX dependencies. No source mutation. |
-| Read or edit CSV/TSV | Use an available delimited-text reader/editor; apply the CSV/TSV data checks below. |
+| Import CSV/TSV into XLSX | `import-csv`, with `--delimiter tab` for TSV. Values remain literal strings. For CSV/TSV output, use a delimited-text writer and the data checks below. |
 | New workbook | `create-xlsx`; this writes formulas but does not calculate them. |
 | Change literal inputs in an existing workbook | `workbook-inputs`, then `recalculate` and inspect saved results. |
-| Change existing formulas, layout or chart formatting | The input editor does not expose these edits. Do not replace the workbook with a new one without the user's intended scope. |
+| Change existing formulas, layout, charts or sheet structure | `workbook-edit` for ordered edits, then recalculate and verify affected content. |
 | Sparkline or comment edits | `sparklines` or `comments`; see their specifications below. |
 | Model preview | `render` with optional `--sheet` and `--range`; one content-sized image per selected sheet. |
 | Print/PDF output | `convert`; print areas and pagination apply here. |
 
-Use the JSON field names below exactly. CLI help describes command-line flags but does not list every JSON field. Do not guess fields: unknown keys can be ignored by a command without applying the intended edit. Reopen the result and check the requested change.
+Use `"$PAPERWORKS" schema COMMAND` for supported JSON schemas. The recipes below specify required fields, indices and units. Unknown fields may be ignored.
 
 ## Current Paperworks limits
 
-Legacy XLS inspection reads saved values; it does not author XLS or calculate its formulas. General CSV/TSV import/export and lossless XLSM/XLSB/ODS editing are not exposed by this CLI. Use an available capable application for those operations. Validate iteration, dynamic-array and shared-formula behavior in the intended engine when required; LibreOffice recalculation alone does not establish Excel compatibility. Tracing is partial when unresolved or truncated and is never calculation.
+Legacy XLS inspection reads saved values; it does not author XLS or calculate its formulas. CSV/TSV import to XLSX is supported; general CSV/TSV export and lossless XLSM/XLSB/ODS editing are not exposed by this CLI. Use an available capable application for those operations. Validate iteration, dynamic-array and shared-formula behavior in the intended engine when required; LibreOffice recalculation alone does not establish Excel compatibility. Tracing is partial when unresolved or truncated and is never calculation.
 
 ## Working files
 
@@ -95,17 +91,23 @@ For XLSX output after the final edit and recalculation, run `"$PAPERWORKS" inspe
 {"file_path":"/absolute/task-directory/preview/page-1.png"}
 ```
 
-Use the actual returned path. `view_image` is a tool call, not a shell command. Text extraction and publishing do not show pixels to the model.
+Call `view_image` with the actual returned path; it is a model tool, not a shell command.
 
-For a new workbook, review every sheet at a readable scale, using ranges for large sheets. For a narrow edit, inspect changed ranges and affected formulas, charts and other views; compare all tabs with the source for unintended changes. Do not repeatedly render unaffected views. Fix defects within the requested scope, then repeat the affected checks. Disclose any sampling or unavailable visual checks; do not claim an unperformed check passed.
+For a new workbook, review every sheet at a readable scale, using ranges for large sheets. For a narrow edit, inspect changed ranges and affected formulas, charts and other views; compare all tabs with the source for unintended changes. Check headers, units, totals, charts and error indicators. Fix defects within the requested scope, then repeat the affected checks. Report any pages/ranges that could not be checked.
 
 For CSV/TSV output, reopen the saved file with a delimited-text reader using the intended encoding and delimiter. Compare headers, row/column counts, cell values and ordering against the requested changes; verify quoting, embedded delimiters/newlines, empty fields and leading-zero identifiers. Do not run Paperworks `inspect`, `render` or `recalculate` on CSV/TSV. These files contain no workbook formatting or calculated formula caches, so use data checks rather than page-image review.
 
-Publish only the requested final files with `publish_file`, for example `{"file_path":"/absolute/task-directory/final-file.ext"}`, then include the returned URL as a Markdown link. Keep preview PNGs and intermediate files private. Add an extra PDF copy only when requested. For native Google output, follow the dedicated delivery section instead of publishing the intermediate Office file.
+Publish only the requested final files with `publish_file`, for example `{"file_path":"/absolute/task-directory/final-file.ext"}`, then include the returned URL as a Markdown link. Keep previews and intermediate files private.
+
+## Focused inspection and preview export
+
+Use `"$PAPERWORKS" inspect-select input.xlsx --search Revenue --max-items 50 --max-chars 20000` to find matching report values and their JSON paths. Use `--path` with a JSON pointer from the actual report to select a subtree. Check `truncated`; increase bounds or inspect smaller sections before treating results as complete. For XLSX cells, use `--sheet "Revenue" --range A1:F20` together; the range is limited to 10,000 cells and saved results may be stale.
+
+`"$PAPERWORKS" preview-export input.xlsx --output new-previews --format webp --columns 3` exports page/sheet images and an optional PNG contact sheet. Formats are `png`, `jpeg` or lossless `webp`; omit `--columns` to skip the contact sheet. `--max-pixels` controls rendering size; XLSX also accepts `--sheet` and `--range`. Use the contact sheet for an overview and individual images for the visual review above.
 
 ## Read and analyze
 
-Use `"$PAPERWORKS" inspect input.xlsx` for XLSX and `inspect input.xls` for legacy saved values. Keep dates, booleans, errors and empty cells distinct. Legacy XLS inspection does not calculate formulas or author XLS. CSV/TSV import/export is not exposed by Paperworks: use an available text/spreadsheet tool with an explicit delimiter. For legacy edits, convert a copy with a capable office application to XLSX and compare values, dates, formulas and requested features; do not promise lossless legacy round-trips. Inventory sheet names, occupied ranges, merged cells and formulas before changing a workbook. Read only relevant ranges for large sheets. Retain source sheet/cell references in reported calculations. Do not interpret identifiers with leading zeros as numbers, or silently guess date formats and units. Store dates as typed values with number formats, not display strings.
+Use `"$PAPERWORKS" inspect input.xlsx` for XLSX and `inspect input.xls` for legacy saved values. Keep dates, booleans, errors and empty cells distinct. Legacy XLS inspection does not calculate formulas or author XLS. Use `"$PAPERWORKS" import-csv input.csv --sheet Data --output imported.xlsx` or add `--delimiter tab` for TSV. Imported fields stay strings, including leading zeros and formula-looking text. Convert intended numeric/date columns explicitly before calculating; formatting alone does not convert types. Use a delimited-text writer for CSV/TSV export. For legacy edits, convert a copy with a capable office application to XLSX and compare values, dates, formulas and requested features; do not promise lossless legacy round-trips. Inventory sheet names, occupied ranges, merged cells and formulas before changing a workbook. Read only relevant ranges for large sheets. Retain source sheet/cell references in reported calculations. Do not interpret identifiers with leading zeros as numbers, or silently guess date formats and units. Store dates as typed values with number formats, not display strings.
 
 Inspect both formula expressions and saved results. Cached values may be missing or stale. `create-xlsx` and `workbook-inputs` do not calculate formulas. A formula string saved successfully is not a verified numeric result.
 
@@ -113,15 +115,15 @@ Inspect both formula expressions and saved results. Cached values may be missing
 
 Separate inputs, calculations and outputs clearly. Use formulas for derived values where appropriate; set number/date formats and readable column widths. Preserve existing formulas outside the requested changes. Treat imported strings beginning with formula markers as literal data unless formulas are intended. CSV has no formatting, formulas with computed caches, or multiple sheets; choose XLSX when those are needed.
 
-For XLSM, preserve VBA only when necessary, retaining the matching extension; never execute macros to inspect a file. The XLSX editing/calculation path does not promise VBA preservation. Unsupported objects can be lost on conversion, so use a copy and inspect warnings. XLSB and ODS require an appropriate application; this CLI does not expose lossless editing for them.
+The XLSX editing/calculation path does not preserve VBA. Use a capable application for XLSM, XLSB or ODS edits and retain the source.
 
 ## Preview commands
 
-`"$PAPERWORKS" render INPUT.xlsx --sheet "Report" --range B2:H20 --output NEW_DIRECTORY` renders a focused range. Omit `--range` for a content-sized sheet image; omit `--sheet` too for all visible sheets. Select a hidden sheet explicitly to inspect it. Cross-sheet formulas retain access to the full workbook, while other sheets, print headers and repeated print titles stay outside the selected image. Explicit ranges are limited to 10,000 cells and 20,000 pixels per side; review larger sheets in sections. Use `convert` for printable PDF output with print areas and pagination.
+`"$PAPERWORKS" render INPUT.xlsx --sheet "Report" --range B2:H20 --output NEW_DIRECTORY` renders a focused range. Omit `--range` for a content-sized sheet image; omit `--sheet` too for all visible sheets. Select a hidden sheet explicitly to inspect it. Model previews ignore saved print areas; cross-sheet formulas retain access to the full workbook. Other sheets, print headers and repeated print titles stay outside the selected image. Original print settings remain unchanged. Explicit ranges are limited to 10,000 cells and 20,000 pixels per side; review larger sheets in sections. Use `convert` for printable PDF output with print areas and pagination.
 
 ## Calculation and analytical correctness
 
-Use a real calculation engine for computed deliverables. After saving XLSX, run the helper's `recalculate` command into a new directory, then inspect that returned workbook. Check every formula error and missing formula cache; stale input caches are not acceptable evidence. The helper rejects recalculation that renames/reorders sheets or removes formula cells, even when converted values look correct. This preservation check is not a proof that every formula has identical Excel semantics; independently verify the requested calculations. Empty-string formula results are valid caches, not missing calculations. Recalculate after the final edit, not only on a draft. Unsupported formulas, circular references, external data and engine-specific functions need a supported engine or an explicit unresolved limitation. Do not replace formulas with hard-coded outputs to hide calculation failure.
+After the final XLSX edit, run `recalculate` into a new directory and inspect the returned workbook. Check formula errors and missing caches; an empty-string result is a valid cache. Recalculation rejects sheet renaming/reordering or removed formula cells. Verify key calculations independently, especially external data, circular references and engine-specific functions. Retain formulas rather than hard-coding their results.
 
 Independently verify key totals and ratios with arithmetic. Test empty inputs, zero denominators, negative values and period boundaries relevant to the task. For what-if models, change a driver on a disposable copy, recalculate and confirm dependent outputs move correctly; restore the original scenario in the delivered workbook. Review chart source ranges, validation rules and conditional formatting after these changes. Keep units, dates, currencies and percentage bases explicit; distinguish a ratio of totals from an average of ratios.
 
@@ -151,21 +153,67 @@ For finance, separate recognition from cash timing, prorate hiring/pay by suppli
 
 For healthcare work, preserve raw records, record corrections separately, retain supplied unit/code definitions, and derive thresholds only from the provided protocol or cited source. For marketing, distinguish the data's as-of date from analysis time, keep raw and cleaned data separate, and use consistent attribution windows/denominators. Preserve timestamp types; add ISO text only when an export needs it. For research, use a flat observation table with units and explicit data flags; color alone must not encode exclusions. Preserve raw observations and document transformations, uncertainty and any simulated-data method.
 
-## Visual and compatibility review
-
-Use Preview commands for image selection and printable PDF output. Inspect headers, units, totals, charts and error indicators at a readable scale using the scope in Verification and delivery. Follow Scope and source fidelity for preservation checks. Save original XLSM separately: the XLSX recalculation helper does not preserve VBA. Do not promise XLS/XLSB/ODS or Excel-specific feature fidelity from an XLSX conversion.
-
 ## Editable charts
 
-Use native `create-xlsx` charts bound to worksheet cells: column charts for category comparisons, line charts for chronological trends, scatter charts for numeric relationships, and pie/doughnut charts for a small number of shares. Check supported chart specifications before choosing a type. Keep derived chart inputs as formulas, exclude headers from value ranges, and preserve blanks rather than inventing zeros. When a requested chart type is unsupported, disclose that and use an appropriate supported alternative only within the user's scope.
+Use native charts bound to worksheet cells, through `create-xlsx` for new workbooks or `workbook-edit` for existing ones: column charts for category comparisons, line charts for chronological trends, scatter charts for numeric relationships, and pie/doughnut charts for a small number of shares. Check supported chart specifications before choosing a type. Keep derived chart inputs as formulas, exclude headers from value ranges, and preserve blanks rather than inventing zeros.
+
+Creation also supports radar, bubble, stock-hlc and stock-ohlc charts, with full Excelize chart settings in `options`; conditional-format creation accepts `options` for color scales, data bars and icon sets. Use `schema create-xlsx` for the nested fields.
 
 Set axis units and number formats explicitly; cell formatting does not guarantee matching chart ticks. Start bar/area axes at zero, keep scales consistent across comparable charts, and avoid 3-D effects that distort values. Apply series colors and line properties to the exported chart, not only a preview. Reopen the saved workbook and verify series bindings, categories, chart count and styles. Render with readable legends/labels and inspect for clipping or stale values. For a narrow chart edit preserve unrelated sheet layout and existing charts.
 
-## Native Google output
+## General workbook edits
 
-For a new Google Sheets request, first create and verify a local .xlsx file. If a connected native importer is exposed in the current tool list, inspect its schema and use that tool to request import into native `application/vnd.google-apps.spreadsheet`. If the importer uses an upload-mode enum, choose its native Sheets option rather than ordinary file storage. Confirm the importer can access the file through its supported upload/attachment mechanism; an executor-local path is not necessarily accessible to a remote connector.
+Run `"$PAPERWORKS" workbook-edit input.xlsx --spec edits.json --output edited.xlsx` with `{"edits":[...]}`. Operations run in order; indices and sheet names refer to the workbook after preceding edits. This editor may normalize workbook XML. Prefer `workbook-inputs` for literal-only edits requiring its narrower preservation guarantees. A failed batch does not publish a partial output. Recalculate the saved workbook before using formula results.
 
-Wait for the actual import result. Never treat a queued approval or upload of an Office file as a native Google document. Inspect the imported document with the connected service's read/preview tools: verify sheet names, formulas, key values and charts and any conversion losses. Return the confirmed Google URL; keep the local build file private unless requested. For edits to an existing Google document, use the service's native editing tools rather than exporting/reimporting and changing its identity. If an importer or authorization is missing, explain the specific required connection; do not silently substitute a download or browser automation. This integration does not come from the email/calendar read-only connection, and connecting an account does not approve an unrelated publication or sharing change.
+| Operation | Fields beyond `operation` and `sheet` |
+|---|---|
+| `value` / `formula` | `cell` plus literal `value` or `formula`; formula has no leading `=`. Optional `formula_style:r1c1` for R1C1 formulas. |
+| `fill-formula` | `range`, top-left `formula`, optional `formula_style`. Translates relative references; keep dynamic-array formulas at their anchor rather than filling spill cells. |
+| `copy` / `copy-values` / `copy-formulas` / `copy-formats` | Source `range`, destination top-left `target`, optional destination sheet in `name`. Overlap uses a snapshot. Formula copies translate relative references; absolute references remain fixed. `copy-formulas` also copies literals without styles. `copy-values` uses saved results, so recalculate the source first. |
+| `clear-values` / `clear-formats` / `clear-all` | `range`; values includes formulas. All clears cell content/styles, not comments or drawings. |
+| `style` | `range`, Excelize `style`, e.g. `{"NumFmt":10,"Font":{"Bold":true}}`. Nested option keys use their exported capitalization; consult `schema workbook-edit`. |
+| `column-width` / `autofit-columns` / `row-height` | Column `range` (e.g. `A:C`), with `size` for width; row height uses one-based `index` and point-valued `size`. Avoid sheet-wide autofit for narrow changes. |
+| `panes` / `view` | Excelize `panes` or `view`; clear panes with `{"Freeze":false,"Split":false}`. |
+| `add-sheet` / `rename-sheet` / `delete-sheet` / `move-sheet` | `name` for add/rename; move uses an existing destination sheet in `target`. Add does not need `sheet`. |
+| `merge` / `unmerge` | `range`. Keep data tables unmerged. |
+| `insert-rows` / `delete-row` | One-based `index`; insertion needs `count`. |
+| `insert-columns` / `delete-column` | Column name in `cell`; insertion needs `count`. |
+| `set-name` / `delete-name` | Excelize `defined_name`; no `sheet` required. |
+| `add-table` / `set-table` / `delete-table` | Excelize `table` for add; set also needs old `name` and the complete replacement `table`; delete uses `name`. |
+| `validation` / `delete-validation` | Excelize `validation` for add; `range` for delete. |
+| `conditional-format` / `delete-conditional-format` | `range`; add needs Excelize `conditional` rules and optional differential `style`. |
+| `add-chart` / `replace-chart` / `delete-chart` | Anchor `cell`; add/replace need complete Excelize `chart`, optional `combo`. Inspect the existing chart first; omitted settings are not inferred. |
+| `add-picture` / `replace-picture` / `delete-picture` | Anchor `cell`; add/replace need `picture:{"path":"asset.png","options":{...}}`. |
+| `note` / `delete-note` | Excelize `note:{"Cell":"C2","Author":"Reviewer","Text":"Check input"}` for add; `cell` for delete. Notes are separate from threaded comments. |
+
+When ranges grow, check dependent formulas, charts, formatting and validation. Use Scope and source fidelity for the full preservation inventory.
+
+### General editing example
+
+Starting from `example.xlsx`, add a formula-driven share column and copy the existing revenue results as values. Recalculate before copying saved results and again after editing:
+
+```sh
+"$PAPERWORKS" recalculate example.xlsx --output copy-source
+cat > workbook-edit.json <<'JSON'
+{"edits":[
+ {"operation":"value","sheet":"Revenue","cell":"E1","value":"Share"},
+ {"operation":"fill-formula","sheet":"Revenue","range":"E2:E3","formula":"D2/$D$4"},
+ {"operation":"style","sheet":"Revenue","range":"E2:E3","style":{"NumFmt":10}},
+ {"operation":"copy-values","sheet":"Revenue","range":"D2:D3","target":"F2"}
+]}
+JSON
+"$PAPERWORKS" workbook-edit copy-source/example.xlsx --spec workbook-edit.json --output formula-edit.xlsx
+"$PAPERWORKS" recalculate formula-edit.xlsx --output formula-results
+"$PAPERWORKS" inspect-select formula-results/formula-edit.xlsx --sheet Revenue --range A1:F4
+"$PAPERWORKS" render formula-results/formula-edit.xlsx --sheet Revenue --range A1:F4 --output formula-preview
+cat > import.csv <<'CSV'
+ID,Label
+00123,Example
+CSV
+"$PAPERWORKS" import-csv import.csv --sheet Data --output imported.xlsx
+```
+
+Verify E2/E3 remain formulas with results 0.6/0.4, F2/F3 are numeric constants 120/80, and the imported ID remains the string `00123`. View the preview before publishing the recalculated workbook.
 
 ## Editing example
 
@@ -188,7 +236,7 @@ JSON
 
 A new `create-xlsx` sheet can use `rows` for a grid and `cells` for overrides. Cell objects choose one of `value`, `formula` (without a leading `=`), or `date` (RFC3339, for example `{"date":"2026-01-01T00:00:00Z"}`). Apply a named date style to display a date instead of a serial. Keep identifiers such as `0012` as strings. `style` selects an entry from top-level `styles`.
 
-Additional sheet fields include `merges:["A1:C1"]`, `row_heights:{"1":24}`, `pictures:[{"cell":"F2","path":"chart.png"}]`, `hidden`, `show_grid_lines`, and the formatting/chart fields in the example. Use local image paths relative to the spec; use merges only for presentation areas, not the data grid. Top-level `names` uses entries such as `{"Name":"UnitPrice","RefersTo":"Revenue!$C$2"}`. These are creation options, not a schema for modifying an existing workbook.
+Additional sheet fields include `merges:["A1:C1"]`, `row_heights:{"1":24}`, `pictures:[{"cell":"F2","path":"chart.png"}]`, `hidden`, `show_grid_lines`, and the formatting/chart fields in the example. Use local image paths relative to the spec; use merges only for presentation areas, not the data grid. Top-level `names` uses entries such as `{"Name":"UnitPrice","RefersTo":"Revenue!$C$2"}`. For existing workbooks, use the separate `workbook-edit` operation schema above.
 
 ### Dropdowns and workbook themes example
 
@@ -283,7 +331,7 @@ A `tables` entry creates a real named Excel table with filter/header metadata. I
 
 ## Small authoring example
 
-Adapt the content and layout to the request or supplied template. This creates an editable/source artifact; run the rendering and verification steps above before delivery.
+Adapt this example to the requested content and layout.
 
 ```sh
 cat > example.json <<'JSON'
@@ -421,17 +469,11 @@ JSON
 "$PAPERWORKS" create-xlsx --spec example.json --output example.xlsx
 ```
 
-## Sources
-
-- https://github.com/openvibely/openvibely-paperworks
-
 ## Scope and source fidelity
 
 Answer read-only questions without saving, recalculating or normalizing the source. Record its hash when preservation matters. Cite the actual sheet and cells used. For an edit, inventory names, tables, filters, validation, conditional formatting, charts, pivots, hidden/grouped rows, annotations, protection, external links and iteration settings. Extend dependent ranges when adding records or periods. Reopen and compare those structures; formula-cell counts alone cannot establish preservation. Use `verify-preservation` with exact allowed part paths for targeted package edits. A full office conversion may intentionally rewrite XML, so compare native features and values as well rather than approving every changed part automatically.
 
 For a supplied screenshot, identify labels, typed source values, derived formulas and obscured cells separately. Recreate derived results with formulas only where the relationships are supported by the evidence. Preserve dates and IDs as their actual types; do not infer bold styling from compression artifacts or invent missing numbers. Compare the rendered workbook with the image.
-
-Recalculation preserves the original package and formulas while updating calculated results, spill ranges and chart caches. A missing runtime or failed calculation stops the operation. Verify dynamic-array results in the intended engine; preserving their structure does not prove calculation compatibility.
 
 To create a native sensitivity table, use `data_tables` in the `create-xlsx` sheet specification. Its `range` covers result cells only; the upper-left result cell is the native formula master. For two inputs, place the model-output reference above-left, trial row values above results and trial column values to their left; set `input1` to the row-input cell and `input2` to the column-input cell. For one input omit `input2`; `row_oriented:true` means results run across a row, otherwise down a column. Keep the underlying model formulas and literal input cells in the workbook. Run `recalculate`, verify independently chosen scenario results, change a driver and recalculate again. Reopen the saved workbook to verify the master cell still has a native Data Table definition, not a static replacement grid.
 
@@ -492,3 +534,7 @@ Trace an output back through its static formula references before explaining a s
 The read-only JSON report contains cells, formulas, saved values, edges from each formula to its precedents, cycles, unresolved references, and `truncated`/`complete` flags. It supports cell ranges, absolute/relative cell references, quoted cross-sheet references, and local/global defined names. Summarize the relevant path and source values; redirect a large report to a task file rather than dumping it into chat.
 
 This is static dependency analysis, not formula evaluation: all referenced branches are included and cached values may be stale. Literal/input-driven `INDIRECT` addresses (A1 or R1C1, including relative R1C1 and concatenated address inputs), `OFFSET` with literal/input offsets, table columns/column ranges/sections, whole-row/column ranges and 3D sheet spans are traced. Whole-row/column ranges use the saved populated extent of the referenced rows/columns and the same node budget. Address inputs that are themselves formulas remain unresolved: stale cached results are not trusted. Arbitrary address expressions, external workbooks, combined table-section selectors, relative defined names and spill syntax remain explicit limitations. Recalculate/inspect those with a capable application before making a conclusion. A trace with `complete:false` is partial; never describe it as the full dependency tree. Cycles are reported rather than followed indefinitely. Bounds limit report size; they do not silently turn omitted cells into zeroes.
+
+## Sources
+
+- https://github.com/openvibely/openvibely-paperworks
