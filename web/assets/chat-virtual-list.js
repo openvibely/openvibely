@@ -246,6 +246,12 @@
             list.rows.set(node, {node, placeholder});
         });
     }
+    // Paging owns its prepend correction. Its resulting geometry must replace
+    // the previous resize snapshot, or the next frame applies that change twice.
+    window.rebaseChatVirtualScroll = function (messages) {
+        const list = lists.get(messages);
+        if (list) list.lateAnchor = saveAnchor(list, true);
+    };
     function compensateLateLayout(list) {
         if (!hasVisibleArea(list.messages)) { list.lateAnchor = null; return; }
         const restore = list.lateAnchor;
