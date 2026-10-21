@@ -40,6 +40,12 @@ func serveBrowserLiveFixture(w http.ResponseWriter, r *http.Request, events <-ch
 	}
 	id := ""
 	for {
+		// Scripted events stay queued until the page subscribes; otherwise an
+		// event emitted before the subscribe handshake is silently lost.
+		pending := events
+		if id == "" {
+			pending = nil
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -53,7 +59,7 @@ func serveBrowserLiveFixture(w http.ResponseWriter, r *http.Request, events <-ch
 			if cmd["op"] == "unsubscribe" && cmd["id"] == id {
 				id = ""
 			}
-		case text := <-events:
+		case text := <-pending:
 			if len(intercept) > 0 && intercept[0](text) {
 				return
 			}
@@ -75,10 +81,8 @@ func serveBrowserLiveFixture(w http.ResponseWriter, r *http.Request, events <-ch
 					data = strings.TrimPrefix(line, "data: ")
 				}
 			}
-			if id != "" {
-				if wsjson.Write(ctx, conn, map[string]any{"id": id, "event": name, "data": json.RawMessage(data)}) != nil {
-					return
-				}
+			if wsjson.Write(ctx, conn, map[string]any{"id": id, "event": name, "data": json.RawMessage(data)}) != nil {
+				return
 			}
 		}
 	}
