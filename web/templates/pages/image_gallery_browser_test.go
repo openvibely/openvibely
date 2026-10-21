@@ -64,6 +64,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			return
 		}
 		child := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if r.URL.Query().Get("delayed_titlebar") == "1" {
+				io.WriteString(w, `<script>window.delayedTitlebar=document.getElementById('desktop-project-titlebar');window.delayedTitlebar.remove();</script>`)
+			}
 			if err := components.AttachmentList([]models.Attachment{{ID: "one", FileName: "one.svg", MediaType: "image/svg+xml"}, {ID: "two", FileName: "two.svg", MediaType: "image/svg+xml"}, {ID: "document", FileName: "notes.txt", MediaType: "text/plain"}}, project.ID, "task").Render(ctx, w); err != nil {
 				return err
 			}
@@ -72,6 +75,13 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		_ = layout.Base("Gallery", []models.Project{project}, project.ID).Render(templ.WithChildren(layout.WithDesktopMode(r.Context(), true), child), w)
 	}))
 	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/gallery?delayed_titlebar=1", "delayed-native-bridge", func(b *composerFocusCDP) {
+		b.waitFor("native runtime ready before titlebar", `String(!!window.wails && !document.getElementById('desktop-project-titlebar'))`, "true")
+		b.evaluate(`document.body.prepend(window.delayedTitlebar);document.getElementById('image-gallery').showModal();'opened'`)
+		b.waitFor("delayed titlebar still hides controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "true")
+		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("delayed titlebar restores controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "image-gallery", func(b *composerFocusCDP) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
