@@ -1045,6 +1045,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				     injects after our <style> block and would otherwise override width. */
 				#chat-messages,
 				#task-thread-messages {
+					/* WKWebView rubber-banding moves beyond the transcript's bounds,
+					   conflicting with virtual row measurement and bottom restoration.
+					   Keep native scrolling, but stop boundary bounce and scroll chaining. */
+					overscroll-behavior-y: none;
 					margin-left: -16px;
 					width: calc(100% + 28px);
 					max-width: none;
