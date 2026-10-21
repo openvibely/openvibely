@@ -213,7 +213,14 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	results := make(chan string, 1)
 	var bridgeMu sync.Mutex
 	var nativeBridge string
+	nativeInputFinished := make(chan struct{})
+	var finishNativeInput sync.Once
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mode == "native-wheel-delayed" && r.URL.Path == "/native-input-finished" && r.Method == "POST" {
+			finishNativeInput.Do(func() { close(nativeInputFinished) })
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if nativeWheel && r.URL.Path == "/native-test-bridge" && r.Method == "POST" {
 			script, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
 			if err != nil {
@@ -241,10 +248,15 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			w.WriteHeader(204)
 			return
 		}
-		// Let the native wheel burst finish before history arrives. The reading
-		// position must remain monitored through the response and rendering.
+		// Release history only after the browser has observed input completion.
+		// Native dispatch and timer cadence vary across runners; elapsed time
+		// cannot establish this ordering. Cancellation also releases the wait.
 		if mode == "native-wheel-delayed" && r.URL.Query().Get("before") != "" {
-			time.Sleep(6 * time.Second)
+			select {
+			case <-nativeInputFinished:
+			case <-r.Context().Done():
+				return
+			}
 		}
 		if hiddenPaging && r.URL.Query().Get("before") != "" {
 			time.Sleep(150 * time.Millisecond)
@@ -265,6 +277,8 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 		e.ServeHTTP(w, r)
 	}))
 	defer server.Close()
+	// Unblock a pending history request if the browser fails before signalling.
+	defer finishNativeInput.Do(func() { close(nativeInputFinished) })
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path)

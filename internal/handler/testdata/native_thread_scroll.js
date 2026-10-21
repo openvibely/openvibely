@@ -57,9 +57,17 @@
     }, {passive: true});
     const bounds = m.getBoundingClientRect();
     nativeInput.postMessage({dy: -2, count: 600, x: bounds.left + 6, y: bounds.top + 75});
-    let settledFrames = 0, previousLayout = '';
+    let settledFrames = 0, previousLayout = '', signalledInputFinished = false;
     for (let frame = 0; ; frame++) {
         if (frame > 1000) throw Error('Native paging did not settle: '+debug());
+        if (expectDelayedHistory && window._nativeBurstDone && !signalledInputFinished) {
+            signalledInputFinished = true;
+            // Do not await the request here: text must stay monitored while
+            // releasing the response and throughout its insertion/rendering.
+            fetch('/native-input-finished', {method: 'POST'}).then(response => {
+                if (!response.ok) throw Error('Could not release delayed history: '+response.status);
+            }).catch(error => errors.push(String(error)));
+        }
         const b = m.getBoundingClientRect(), ranges = [], before = m.scrollTop, startInput = input;
         // Whole-bubble bounds miss jumps within a bubble. Follow actual text at
         // several viewport positions, including partially clipped paragraphs.
