@@ -12,7 +12,9 @@
         messages.clientHeight > 0 && messages.getClientRects().length > 0;
 
     function estimate(model, width) {
-        if (model.width === width && model.height > 0) return model.height;
+        // Hidden panels have no measurable width. Retain the last measurement
+        // until reveal instead of expanding measured rows back into estimates.
+        if ((model.width === width || width === 0) && model.height > 0) return model.height;
         if (model.kind === 'thinking') return 36;
         if (model.kind === 'using') return 180;
         if (model.kind === 'compaction') return 36;
@@ -245,6 +247,7 @@
         // before asynchronous Markdown preparation has finished.
         const movement = hydrating || list.scrollTop === undefined ? 0 : list.messages.scrollTop - list.scrollTop;
         const lookahead = Math.min(2400, Math.max(list.messages.clientHeight * 2, Math.abs(movement) * 10));
+        const prepareInitialLookahead = hydrating && list.messages.scrollHeight - list.messages.scrollTop - list.messages.clientHeight <= 2;
         const selection = window.getSelection();
         const changes = [], restored = [], pending = [];
         const restore = saveAnchor(list);
@@ -259,8 +262,13 @@
             // or updated content instead of freezing it as empty placeholders.
             const visible = suspended || list.selecting || (!row.lazy && list.rows.size < 40) || protectedRow ||
                 (rect.bottom >= bounds.top - buffer && rect.top <= bounds.bottom + buffer);
+            // Measure the first upward lookahead before revealing a bottom-opened
+            // thread. Otherwise the first tiny gesture changes offscreen heights
+            // and requires scroll corrections while WebKit is scrolling natively.
+            // Keep oversized rows asynchronous/on demand and leave the rest lazy.
+            const initialLookahead = prepareInitialLookahead && canRenderImmediately(row) && rect.bottom >= bounds.top - lookahead - buffer && rect.top < bounds.top;
             const approaching = row.lazy && !row.ready && !row.loading &&
-                ((movement < 0 && rect.bottom >= bounds.top - lookahead && rect.top <= bounds.bottom) ||
+                (initialLookahead || (movement < 0 && rect.bottom >= bounds.top - lookahead && rect.top <= bounds.bottom) ||
                  (movement > 0 && rect.top <= bounds.bottom + lookahead && rect.bottom >= bounds.top));
             // Finish small viewport rows before paint. Large rows keep their
             // asynchronous preparation even if scrolling overtakes the lookahead.
