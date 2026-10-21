@@ -2340,8 +2340,11 @@ func TestTaskAttachmentListCarriesProjectContext(t *testing.T) {
 		t.Fatalf("render AttachmentList: %v", err)
 	}
 	content := buf.String()
-	if strings.Contains(content, "data-files-panel") || strings.Contains(content, ">Attachments</h3>") {
-		t.Fatal("Files tab must not repeat its heading or open a second file list")
+	if strings.Contains(content, "data-files-panel") {
+		t.Fatal("Files tab must not open a second file list")
+	}
+	if count := strings.Count(content, ">Attachments</h3>"); count != 1 {
+		t.Fatalf("Files tab must show exactly one Attachments heading, got %d", count)
 	}
 	if !strings.Contains(content, `id="add-attachment-btn"`) {
 		t.Fatal("Files tab must retain its upload control")
@@ -5118,9 +5121,9 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		t.Error("error handler must expose its terminal render and transcript sync as an awaitable transition")
 	}
 
-    if strings.Contains(content,"eventSource.onerror") {
-        t.Error("network failures must not terminalize an execution subscription")
-    }
+	if strings.Contains(content, "eventSource.onerror") {
+		t.Error("network failures must not terminalize an execution subscription")
+	}
 
 }
 
