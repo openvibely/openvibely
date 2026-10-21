@@ -9,8 +9,9 @@ inserted, visible text positions, nested vertical/horizontal tool scrolling, and
 leaving/reopening the cached task. It observes trusted native wheel events,
 rather than substituting `scrollTop` assignments for the paging gesture.
 The test runs sequential `during-wheel` and `after-wheel` subtests, using immediate
-and delayed history responses. Each asserts when history arrives and monitors
-reading position through rendering completion.
+and delayed history responses. The delayed response waits for an explicit
+input-finished signal from the browser, not a fixed timer. Each scenario asserts
+when history arrives and monitors reading position through rendering completion.
 
 Run on a graphical desktop (macOS, Windows, or Linux):
 
