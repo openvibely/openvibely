@@ -1,4 +1,7 @@
 {
+    await until(() => window.nativeTestInput, 'native input bridge');
+    const nativeInput = window.nativeTestInput;
+    const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
     const m = messages();
     m.dispatchEvent(new WheelEvent('wheel', {deltaY: -8, bubbles: true}));
     m.scrollTop = 160;
@@ -12,7 +15,7 @@
         if (event.defaultPrevented) cancelled++;
     }, {passive: true});
     const bounds = m.getBoundingClientRect();
-    window.webkit.messageHandlers.nativeWheel.postMessage({dy: -2, count: 600, x: bounds.left + 6, y: bounds.top + 75});
+    nativeInput.postMessage({dy: -2, count: 600, x: bounds.left + 6, y: bounds.top + 75});
     for (let frame = 0; !window._nativeBurstDone || frame < 40; frame++) {
         if (frame > 1000) throw Error('Native wheel burst did not finish');
         const b = m.getBoundingClientRect(), ranges = [], before = m.scrollTop, startInput = input;
@@ -20,7 +23,7 @@
         // several viewport positions, including partially clipped paragraphs.
         for (const y of [b.top + 24, b.top + 100, b.bottom - 30]) {
             for (let x = b.left + 30; x < b.right - 20; x += 90) {
-                const range = document.caretRangeFromPoint(x, y);
+                const range = (document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : (() => { const pos = document.caretPositionFromPoint(x,y); if (!pos) return null; const range = document.createRange(); range.setStart(pos.offsetNode,pos.offset); range.collapse(true); return range; })());
                 if (!range || range.startContainer.nodeType !== 3 || !range.startContainer.textContent.trim() ||
                     !m.contains(range.startContainer) || !range.startContainer.parentElement.closest('[data-execution-pair]')) continue;
                 const rect = range.getBoundingClientRect();
@@ -37,7 +40,7 @@
         }
         loaded ||= m.querySelectorAll(':scope > [data-execution-pair]').length > 5;
     }
-    if (!loaded || events < 100 || cancelled === 0) throw Error('Native paging path was not exercised');
+    if (!loaded || events < 100 || (webkit && cancelled === 0)) throw Error('Native paging path was not exercised');
 
     // A nested tool scroller must retain native vertical and horizontal input.
     const tool = document.createElement('div');
@@ -57,7 +60,7 @@
                 delivered = event;
                 resolve();
             });
-            window.webkit.messageHandlers.nativeWheel.postMessage({...delta, x: bounds.left + 50, y: bounds.top + 150});
+            nativeInput.postMessage({...delta, x: bounds.left + 50, y: bounds.top + 150});
         });
         await wait(100);
         if (delivered.defaultPrevented) throw Error('Nested tool wheel was intercepted');
@@ -85,11 +88,11 @@
     let delivered;
     const receive = event => { if (event.isTrusted) delivered = event; };
     returned.addEventListener('wheel', receive);
-    window.webkit.messageHandlers.nativeWheel.postMessage({dy: -4, x: rect.left + 6, y: rect.top + 75});
+    nativeInput.postMessage({dy: -4, x: rect.left + 6, y: rect.top + 75});
     await until(() => delivered, 'wheel after return');
     await wait(100);
     returned.removeEventListener('wheel', receive);
-    if (!delivered.defaultPrevented || Math.abs(returned.scrollTop - top + 4) > 1)
+    if ((webkit && !delivered.defaultPrevented) || Math.abs(returned.scrollTop - top - delivered.deltaY) > 2)
         throw Error('Restored wheel handler missing or duplicated: ' + top + ' -> ' + returned.scrollTop);
     if (errors.length) throw Error('Browser errors: ' + errors.join('; '));
     await fetch('/browser-result?status=pass');

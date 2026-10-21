@@ -280,6 +280,15 @@ jobs:
         shell: bash
         run: echo "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1" >> "$GITHUB_ENV"
 
+      - name: Start window manager for native chat tests
+        if: runner.os == 'Linux'
+        run: openbox >/tmp/openvibely-native-chat-wm.log 2>&1 &
+
+      - name: Test native Wails chat scrolling
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        run: go test ./internal/handler -run '^TestTaskNativeWheelPagingInWails$' -count=1 -timeout 300s
+
       - name: Test native shell selection and execution
         run: |
           go test ./pkg/executionenv -count=1 -timeout 60s
