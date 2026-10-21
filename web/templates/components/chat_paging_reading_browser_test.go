@@ -70,3 +70,44 @@ func TestBrowserFunctional_PagingRebasesPendingVirtualLayout(t *testing.T) {
  return {};
  `)
 }
+
+// An older page must not expose a short, empty assistant bubble which expands
+// underneath a reader crossing the boundary on the following frame.
+func TestBrowserFunctional_PagingDoesNotRevealUnpreparedExecutions(t *testing.T) {
+	for _, id := range []string{"chat-messages", "task-thread-messages"} {
+		t.Run(id, func(t *testing.T) {
+			runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='`+id+`';
+ const current=document.getElementById('pair');current.dataset.execStatus='completed';
+ await renderStreamingContent(stream,('Existing conversation.\n\n').repeat(40),false);
+ const loader=document.createElement('div');loader.dataset.containerId=messages.id;loader.style.height='60px';messages.prepend(loader);
+ messages.scrollTop=8;await renderVisibleChatRows(messages);await paint();
+ prepareChatEarlierSwap(loader);
+ const previous=document.createElement('div');previous.dataset.executionPair='true';previous.dataset.execStatus='completed';
+ previous.innerHTML='<div>Assistant</div><div class="chat-markdown"></div>';loader.after(previous);
+ let finish;window.applyChatBubbleTransforms=()=>new Promise(resolve=>{finish=resolve});
+ afterChatEarlierSwap(loader);const restored=restoreChatEarlierScroll(messages);
+ for(let step=0;step<3;step++){
+  await paint();
+  assert(getComputedStyle(previous).visibility==='hidden','unfinished older bubble was painted');
+  assert(getComputedStyle(current).visibility==='visible','existing conversation was hidden');
+  messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-8,bubbles:true}));messages.scrollTop-=8;messages.dispatchEvent(new Event('scroll'));
+  preserveChatVirtualScroll(previous,()=>{previous.lastElementChild.style.height=(step+1)*300+'px'});
+ }
+ // An HTML history snapshot has no live transaction or completion promise.
+ // Its normal initialization must clear the saved temporary visibility state.
+ const snapshot=messages.cloneNode(true);snapshot.dataset.earlierLoaderBound='true';
+ const restoredPair=snapshot.querySelector('[data-earlier-pending-visibility]');
+ assert(restoredPair&&restoredPair.style.visibility==='hidden','snapshot did not capture pending bubble');
+ initChatEarlierLoader(snapshot);
+ assert(restoredPair.style.visibility===''&&!restoredPair.hasAttribute('data-earlier-pending-visibility'),'history snapshot retained a hidden bubble');
+ assert(getComputedStyle(previous).visibility==='hidden','snapshot cleanup affected the active transaction');
+ previous.lastElementChild.textContent='Prepared earlier response';finish();await restored;await paint();
+ assert(getComputedStyle(previous).visibility==='visible','prepared older response stayed hidden');
+ assert(!previous.style.visibility,'temporary visibility override survived paging');
+ assert(!messages._earlierAnchor,'paging did not finish');
+ return {};
+ `)
+		})
+	}
+}

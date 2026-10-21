@@ -3949,11 +3949,18 @@ templ ChatAutoScrollScript() {
 				});
 			};
 
-			window.initChatEarlierLoader = function(containerOrID) {
-			var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
-			if (!container) return;
-			if (container.dataset.earlierLoaderBound === 'true') return;
-			container.dataset.earlierLoaderBound = 'true';
+				function revealPreparedEarlierPairs(container) {
+					container.querySelectorAll('[data-earlier-pending-visibility]').forEach(function(pair) {
+						pair.style.visibility = pair.dataset.earlierPendingVisibility;
+						delete pair.dataset.earlierPendingVisibility;
+					});
+				}
+				window.initChatEarlierLoader = function(containerOrID) {			var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
+				if (!container) return;
+				// History snapshots can be saved mid-hydration. Their DOM has no
+				// live paging transaction to release these temporary overrides.
+				if (!container._earlierAnchor) revealPreparedEarlierPairs(container);
+				if (container.dataset.earlierLoaderBound === 'true') return;			container.dataset.earlierLoaderBound = 'true';
 
 			function setEarlierLoaderBusy(loader, busy) {
 				if (!loader) return;
@@ -4078,6 +4085,7 @@ templ ChatAutoScrollScript() {
 					pair: anchor && anchor.pair,
 					position: anchor ? anchor.offset + container.scrollTop : container.scrollHeight,
 					intentRevision: tracker ? tracker.intentRevision : 0,
+					existingPairs: new Set(container.querySelectorAll(':scope > [data-execution-pair="true"]')),
 					overflowAnchor: container.style.overflowAnchor
 				};
 				// Own compensation for this transaction; native anchoring must not
@@ -4180,7 +4188,18 @@ templ ChatAutoScrollScript() {
 				var container = getEarlierContainerForElement(swapped);
 				if (!container) return;
 				if (container._earlierAnchor && container._earlierAnchor.started) return;
-				if (container._earlierAnchor) container._earlierAnchor.started = true;
+				if (container._earlierAnchor) {
+					container._earlierAnchor.started = true;
+					// New executions arrive as empty shells. Keep only those shells
+					// hidden until row models and the visible window are ready; the
+					// conversation already being read must remain visible throughout.
+					Array.from(container.querySelectorAll(':scope > [data-execution-pair="true"]')).filter(function(pair) {
+						return !container._earlierAnchor.existingPairs.has(pair);
+					}).forEach(function(pair) {
+						pair.dataset.earlierPendingVisibility = pair.style.visibility;
+						pair.style.visibility = 'hidden';
+					});
+				}
 				container.dataset.earlierAnchorRestoring = 'true';
 				compensateChatEarlierLayout(container);
 				var anchor = container._earlierAnchor;
@@ -4241,6 +4260,7 @@ templ ChatAutoScrollScript() {
 			function clearChatEarlierRestoreState(container) {
 				var anchor = container._earlierAnchor;
 				if (anchor) {
+					revealPreparedEarlierPairs(container);
 					if (anchor.observer) anchor.observer.disconnect();
 					if (anchor.onScroll) container.removeEventListener('scroll', anchor.onScroll);
 					container.style.overflowAnchor = anchor.overflowAnchor;
