@@ -67,10 +67,17 @@
                 anchor = {row, top:rect.top, bottom:rect.bottom, estimated};
             }
         });
+        // An unrendered row has no readable interior to anchor. Keep the nearest
+        // edge of its estimate: scrolling in from below must retain its end,
+        // not jump toward its beginning when the real response is much taller.
+        // Geometry also handles small direction reversals and Home correctly.
+        const edge = anchor?.estimated && anchor.top < bounds.top &&
+            anchor.bottom - bounds.bottom < bounds.top - anchor.top ? 'bottom' : 'top';
         return function () {
             if (!hasVisibleArea(messages)) return false;
             // Shrinking content can clamp scrollTop even without user input.
             const maximum = Math.max(0, messages.scrollHeight - messages.clientHeight);
+            const beforeScroll = messages.scrollTop;
             const movement = followMovement ? messages.scrollTop - Math.min(scrollTop, maximum) : 0;
             // A deferred resize must retain input since the last measured frame.
             // A jump to a different window or away from the bottom owns its own
@@ -87,11 +94,13 @@
                 const row = anchor.row.lazy ? (anchor.row.owner._chatVirtualRows?.[anchor.row.index] || anchor.row) : anchor.row;
                 if (messages.contains(element(row))) {
                     const viewportShift = messages.getBoundingClientRect().top - bounds.top;
-                    const delta = element(row).getBoundingClientRect().top - anchor.top - viewportShift + movement;
+                    const delta = element(row).getBoundingClientRect()[edge] - anchor[edge] - viewportShift + movement;
                     if (delta !== 0) messages.scrollTop += delta;
                     restored = true;
                 }
             }
+            // Height compensation is not a reversal of the reader's gesture.
+            if (list.scrollTop !== undefined) list.scrollTop = Math.min(list.scrollTop, maximum) + messages.scrollTop - beforeScroll;
             if (restored) window.acknowledgeChatEarlierLayout?.(messages);
             if (!followMovement) list.lateAnchor = saveAnchor(list, true);
             return restored;
