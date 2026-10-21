@@ -3794,7 +3794,10 @@ templ ChatAutoScrollScript() {
 						if (!messages.isConnected) return;
 						var tracker = currentTracker();
 						if (!tracker || !tracker.shouldAutoScroll()) return;
-						messages.scrollTop = messages.scrollHeight;
+						// Mutations can leave the scroll geometry unchanged. Avoid cancelling
+						// an ongoing boundary gesture with a redundant programmatic scroll.
+						var bottom = messages.scrollHeight - messages.clientHeight;
+						if (bottom - messages.scrollTop > 1) messages.scrollTop = bottom;
 						if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
 					});
 				}

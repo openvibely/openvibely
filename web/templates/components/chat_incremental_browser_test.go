@@ -995,3 +995,52 @@ func TestBrowserFunctional_HiddenVirtualAnchorResizesAndExpires(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_VirtualScrollDoesNotRepinSettledBottom(t *testing.T) {
+	report := runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
+ let source='';
+ for(let i=0;i<80;i++)source+='Message '+i+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,tracker,defaultPinned:true});await paint();
+ const scroll=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');
+ let redundantWrites=0,measuring=false;
+ Object.defineProperty(messages,'scrollTop',{configurable:true,get(){return scroll.get.call(this)},set(value){
+   if(measuring && Math.abs(scroll.get.call(this)-(this.scrollHeight-this.clientHeight))<2 && value>=this.scrollHeight-this.clientHeight)redundantWrites++;
+   scroll.set.call(this,value);
+ }});
+ // Reverse direction in one continuous gesture, then keep scrolling at the end.
+ messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-480,bubbles:true}));scroll.set.call(messages,messages.scrollTop-480);messages.dispatchEvent(new Event('scroll'));
+ await paint();
+ for(let i=0;i<12;i++){
+   messages.dispatchEvent(new WheelEvent('wheel',{deltaY:80,bubbles:true}));scroll.set.call(messages,messages.scrollTop+80);messages.dispatchEvent(new Event('scroll'));await paint();
+ }
+ await pause(100);await paint();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'did not reach bottom');
+ measuring=true;
+ for(let i=0;i<30;i++){
+   messages.dispatchEvent(new WheelEvent('wheel',{deltaY:80,bubbles:true}));messages.dispatchEvent(new Event('scroll'));await paint();
+   assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'moved away from bottom during downward gesture');
+ }
+ measuring=false;
+ assert(redundantWrites===0,'virtualization repeatedly resets the native bottom gesture: '+redundantWrites);
+ window.observeChatTranscriptLayout({messages,tracker});await paint();
+ // A mutation with no height change must not restart the boundary gesture either.
+ const tail=document.createElement('div');messages.appendChild(tail);await paint();
+ measuring=true;
+ for(let i=0;i<5;i++){tail.replaceChildren(document.createElement('span'));await paint();}
+ measuring=false;
+ assert(redundantWrites===0,'layout observer resets a settled bottom: '+redundantWrites);
+ // Genuine growth should still follow the bottom, until the reader scrolls up.
+ tail.innerHTML='<div style="height:240px"></div>';await paint();await paint();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'layout growth no longer follows bottom');
+ messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-180,bubbles:true}));scroll.set.call(messages,messages.scrollTop-180);messages.dispatchEvent(new Event('scroll'));await paint();
+ const parked=messages.scrollTop;tail.innerHTML='<div style="height:480px"></div>';await paint();await paint();
+ assert(tracker.userScrolledUp,'upward gesture did not leave bottom-following');
+ assert(Math.abs(messages.scrollTop-parked)<2,'layout growth overrode the reader scrolling up');
+ return {redundantWrites};
+ `)
+	t.Logf("settled bottom: %s", report)
+}
