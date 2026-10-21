@@ -147,7 +147,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default dark retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#22272e"}, {"#fixture-stats", "#22272e"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
+		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#1d232a"}, {"#fixture-stats", "#1d232a"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
 			browser.waitFor("default dark "+step.selector+" ladder step", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
 		}
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer", "#fixture-menu"} {
@@ -388,6 +388,6 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		for _, property := range []string{"backgroundColor", "borderTopColor"} {
 			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
 		}
-		browser.waitFor("native dark search uses card step", `window.near('.kanban-search', 'backgroundColor', '#22272e')`, "ok")
+		browser.waitFor("native dark search uses card color", `window.near('.kanban-search', 'backgroundColor', '#1d232a')`, "ok")
 	})
 }
