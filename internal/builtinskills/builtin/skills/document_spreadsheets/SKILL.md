@@ -137,7 +137,7 @@ Preserve raw source values and identify assumptions. Link derived results using 
 
 ## Scenarios and formulas
 
-For formula design, period aggregation, operational trackers or chart construction, load `references/workbook-checks.md` with `skill_view` using this skill’s handle and `file_path`.
+For formula design, period aggregation, operational trackers, chart construction or source/review annotations, load `references/workbook-checks.md` with `skill_view` using this skill’s handle and `file_path`.
 
 For a forecast with cases, keep one editable case selector and one calculation model. Group each driver’s case inputs with its active selected value above them, and link calculations to those active values. Preserve historical actuals when changing forecast cases. Show the active case wherever a reader could otherwise mistake the results. A requested simultaneous comparison needs independently recalculated case results; choose the refresh method before replacing live comparisons with snapshots, and label captured results and their refresh date. Do not introduce cases for an ordinary single-scenario report.
 
@@ -145,7 +145,7 @@ Anchor copied formulas deliberately: `$A2` fixes the category column, `B$1` fixe
 
 For requested Excel financial-model sensitivities, prefer native What-If Data Tables when the selected engine supports them; the user need not name this feature explicitly. Ordinary simple sensitivity calculations may use formulas. Verify native input/output behavior in the intended engine. The `create-xlsx` JSON `data_tables` entry records the table definition; it does not calculate it. Do not substitute a static matrix while claiming a native live table. If the requested native design cannot be verified, explain that limitation and agree on a formula-based or change-input/recalculate/restore alternative. Label captured outputs and their refresh method; do not silently substitute them for a live table. Intentional circular formulas require explicitly chosen iteration settings and a convergence test after input changes and save/reopen; never enable iteration merely to conceal a cycle.
 
-In addition to the formula checks above, test the next record/period when extension is part of the requested workflow. A missing inactive case must not block a valid active case; selecting the incomplete case must expose the missing value. Keep actuals unchanged. Rates use matching totals, stocks use ending balances and flows use the correct period sum. Use fixed source reporting dates when appropriate; TODAY is only for intentionally changing dates.
+In addition to the formula checks above, test the next record/period when extension is part of the requested workflow. A missing inactive case must not block a valid active case; selecting the incomplete case must expose the missing value. Use fixed source reporting dates when appropriate; TODAY is only for intentionally changing dates.
 
 ## Purpose and presentation
 
