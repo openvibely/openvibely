@@ -3633,16 +3633,15 @@ templ ChatAutoScrollScript() {
 					this._handlers.scroll = function() {
 						if (!self.element || !self.element.isConnected) return;
 						if (self.element.closest('[data-workspace-hidden="true"]')) return;
-						var isNear = window.chatAutoScroll.isNearBottom(self.element);
 						var el = self.element;
 						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
 						if (self._userInteracting) {
 							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 							if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(self.element);
-							// Scrolling up in any amount parks the reader; the near-bottom threshold
-							// only decides when scrolling back down re-pins. Otherwise small trackpad
-							// steps stay "near bottom" and the next streamed chunk undoes them.
-							self.userScrolledUp = self._interactionUp === true ? !atBottom : !isNear;
+							// Follow again only when the reader reaches the actual end. The wider
+							// near-bottom threshold is for UI affordances, not scroll ownership:
+							// re-pinning inside it makes layout updates finish the gesture for them.
+							self.userScrolledUp = !atBottom;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
 						}
