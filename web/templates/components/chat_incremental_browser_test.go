@@ -1079,3 +1079,46 @@ func TestBrowserFunctional_VirtualScrollDoesNotSnapNearBottom(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_FollowingSmoothStreamAfterDownwardInput(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');
+ stream.innerHTML='<div style="height:3000px">history</div>';
+ messages.scrollTop=messages.scrollHeight;await paint();
+ const tracker=new window.ChatScrollTracker(messages);
+ messages.dispatchEvent(new WheelEvent('wheel',{deltaY:30,bubbles:true}));
+ messages.dispatchEvent(new Event('scroll'));
+ assert(tracker.shouldAutoScroll(),'not initially following');
+ // A real stream update uses a smooth scroll while the gesture is still active.
+ const tail=document.createElement('div');tail.style.height='500px';stream.append(tail);
+ tracker.autoScroll();
+ await pause(800);await paint();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'smooth scroll failed to reach bottom');
+ assert(tracker.shouldAutoScroll(),'smooth stream scroll left reader parked at the bottom');
+ tail.style.height='550px';tracker.autoScroll();await pause(500);
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'next stream chunk stopped following');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_SmoothReturnWithLayoutObserver(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');
+ stream.innerHTML='<div style="height:3000px">history</div>';
+ messages.scrollTop=messages.scrollHeight;await paint();
+ const tracker=new window.ChatScrollTracker(messages);
+ window.observeChatTranscriptLayout({messages,tracker});await paint();
+ messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-500,bubbles:true}));
+ messages.scrollTop-=500;messages.dispatchEvent(new Event('scroll'));await paint();
+ assert(tracker.userScrolledUp,'not parked');
+ // Model a browser animated downward key scroll; the animation outlives the key event.
+ window.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}));
+ messages.scrollTo({top:messages.scrollHeight,behavior:'smooth'});
+ await pause(800);await paint();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'did not reach bottom');
+ assert(tracker.shouldAutoScroll(),'following did not resume at bottom');
+ const tail=document.createElement('div');tail.style.height='80px';stream.append(tail);await paint();await paint();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'new content no longer follows after smooth return');
+ return {};
+ `)
+}
