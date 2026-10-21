@@ -1122,3 +1122,29 @@ func TestBrowserFunctional_SmoothReturnWithLayoutObserver(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_TranscriptDisablesBoundaryBounce(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');
+ for(const id of ['chat-messages','task-thread-messages']){
+  messages.id=id;
+  assert(getComputedStyle(messages).overscrollBehaviorY==='none',id+' allows native boundary bounce');
+  stream.innerHTML='<div style="height:3000px">history</div>';
+  messages.scrollTop=messages.scrollHeight;await paint();
+  const tracker=new window.ChatScrollTracker(messages);
+  window.observeChatTranscriptLayout({messages,tracker});await paint();
+  messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-150,bubbles:true}));
+  messages.scrollTop-=150;messages.dispatchEvent(new Event('scroll'));await paint();
+  assert(tracker.userScrolledUp,'ordinary upward scrolling stopped working');
+  for(const distance of [90,30,0]){
+   messages.dispatchEvent(new WheelEvent('wheel',{deltaY:60,bubbles:true}));
+   messages.scrollTop=messages.scrollHeight-messages.clientHeight-distance;
+   messages.dispatchEvent(new Event('scroll'));await paint();
+   assert(Math.abs(messages.scrollHeight-messages.clientHeight-messages.scrollTop-distance)<=2,'ordinary downward scrolling snapped');
+  }
+  assert(tracker.shouldAutoScroll(),'bottom following failed');
+  tracker.destroy();
+ }
+ return {};
+ `)
+}
