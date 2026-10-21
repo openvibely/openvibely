@@ -262,6 +262,18 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click("#attachment-list [data-image-gallery-item]")
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
 		b.click("[data-gallery-close]")
+		// Composer and panel entry points share the task gallery, without duplicate saved files.
+		b.evaluate(`var composer=document.createElement('form');composer.id='task-thread-form';composer.innerHTML='<div data-image-gallery-group><a data-image-gallery-item data-image-name="pending.svg" href="/chat/attachments/pending/session/pending.svg">Pending upload</a></div>';document.getElementById('task-detail-content').append(composer);'ready'`)
+		b.click("#task-thread-form [data-image-gallery-item]")
+		b.waitFor("composer includes saved task files", `String(document.querySelector('[data-gallery-count]').textContent.endsWith(' / 2'))`, "true")
+		b.evaluate(`window.composerGalleryCount=document.querySelector('[data-gallery-count]').textContent;'saved'`)
+		b.evaluate(`document.querySelector(document.querySelector('[data-gallery-next]').disabled?'[data-gallery-prev]':'[data-gallery-next]').click();'navigate'`)
+		b.waitFor("navigate from pending upload to saved file", `String(document.querySelector('[data-gallery-count]').textContent!==window.composerGalleryCount)`, "true")
+		b.click("[data-gallery-close]")
+		b.click("#attachment-list [data-image-gallery-item]")
+		b.waitFor("panel shares composer gallery", `String(document.querySelector('[data-gallery-count]').textContent.endsWith(' / 2'))`, "true")
+		b.click("[data-gallery-close]")
+		b.evaluate(`document.getElementById('task-thread-form').remove();'cleared'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 700, "deviceScaleFactor": 1, "mobile": true}, nil)
 		// The workspace ResizeObserver re-lays out the details panel as an overlay after the viewport change.
 		b.waitFor("saved page settled into mobile overlay before preview", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request') && document.getElementById('task-details-panel').dataset.overlay==='true')`, "true")
