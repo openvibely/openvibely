@@ -3541,6 +3541,8 @@ templ ChatAutoScrollScript() {
 						self._bubbleJump = null;
 						self._userInteracting = true;
 						self._interactionUp = up === undefined ? null : up;
+						self._interactionScrollTop = self.element.scrollTop;
+						self._interactionScrollHeight = self.element.scrollHeight;
 						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
 						self._userInteractTimeout = setTimeout(function() {
 							if (!self._pointerInteracting) self._userInteracting = false;
@@ -3636,6 +3638,18 @@ templ ChatAutoScrollScript() {
 						var el = self.element;
 						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
 						if (self._userInteracting) {
+							// Smooth keyboard/wheel scrolling can outlast the original input
+							// event. Extend its lifetime while it is still moving downward,
+							// but not for height corrections or a stationary boundary event.
+							if (self._interactionUp === false && el.scrollTop > self._interactionScrollTop &&
+								el.scrollHeight === self._interactionScrollHeight) {
+								if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+								self._userInteractTimeout = setTimeout(function() {
+									if (!self._pointerInteracting) self._userInteracting = false;
+								}, 250);
+							}
+							self._interactionScrollTop = el.scrollTop;
+							self._interactionScrollHeight = el.scrollHeight;
 							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 							if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(self.element);
 							// Follow again only when the reader reaches the actual end. The wider
