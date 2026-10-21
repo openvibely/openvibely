@@ -12,7 +12,7 @@ Save `{"edits":[...operations...]}` and run `"$PAPERWORKS" slide-edit input.pptx
 | Table cell | `{"operation":"table-cell","slide":1,"shape_id":"4","row":1,"column":1,"text":"$180"}` |
 | Existing notes body | `{"operation":"notes","slide":1,"text":"Updated speaker notes"}` |
 
-Prefer `replace-text` or `run-text` for narrow changes. `replace-text` can span adjacent ordinary runs, but not fields or line-break boundaries. `text` retains paragraph/first-run styling but replaces its contents, flattening mixed formatting and fields. Those three operations do not accept newlines. `table-cell` and `notes` replace the whole body, using its first paragraph as the formatting prototype; they can contain newlines. `notes` creates a missing notes part when needed; an existing notes part must have one body placeholder. Reopen the output and verify notes text and relationships.
+Prefer `replace-text` or `run-text` for narrow changes. `replace-text` can span adjacent ordinary runs, but not fields or line-break boundaries. `text` retains paragraph/first-run styling but replaces its contents, flattening mixed formatting and fields. Those three operations do not accept newlines. `table-cell` and plain-text `notes` replace the whole body, using its first paragraph as the formatting prototype; they can contain newlines. `notes` creates a missing notes part when needed; an existing notes part must have one body placeholder. Reopen the output and verify notes text and relationships.
 
 ## Object and deck editing
 
@@ -109,3 +109,57 @@ Confirm the title, table-cell and notes changes, with unchanged chart data in `a
 
 If inspection finds a missing notes-master reference, run `"$PAPERWORKS" repair-notes draft.pptx --output final.pptx`. Ambiguous references are rejected. Check slide order/count, notes and expected text afterward.
 
+
+## Extended editing operations
+
+These operations are implemented in newer local Paperworks builds, but not the skill's pinned `v0.0.1-rc2`. Before using them, check `"$PAPERWORKS" schema slide-edit`: table merges need `end_row`/`end_column`, formatted notes need `paragraphs`, nested layouts need `Layout.root`, and drawing styles need `pattern`/`image`. Resolve schema references to check the relevant object, not an unrelated field with the same name. If absent, report that this runtime lacks the operation; do not send fields that it may silently ignore. Use a newer executable only when supplied for the task.
+
+Use the same `slide-edit` command and `{"edits":[...]}` wrapper as above. Replace sample IDs with inspected IDs.
+
+### Table merge and unmerge
+
+```json
+{"edits":[{"operation":"table-merge","slide":1,"shape_id":"4","row":0,"column":0,"end_row":1,"end_column":1}]}
+```
+
+The rectangle is inclusive and zero-based. All selected text is retained in the top-left cell in row order, with paragraph/run formatting. Existing merged regions cannot overlap the selection. To split it, use `table-unmerge` with the same origin `row`/`column`, omitting end coordinates. Combined text remains at the origin; unmerge does not restore its original distribution. Edit merged-cell text through the origin. Row/column insertion and deletion still require an unmerged table. Reopen and inspect the merge and all retained text, then view the rendered table.
+
+### Pattern and image fills
+
+```json
+{"edits":[
+ {"operation":"drawing-style","slide":1,"shape_id":"2","drawing_style":{"pattern":{"preset":"diagCross","foreground":"16324F","background":"FFFFFF"}}},
+ {"operation":"drawing-style","slide":1,"shape_id":"3","drawing_style":{"image":{"path":"texture.png","fit":"cover"}}}
+]}
+```
+
+Patterns use DrawingML preset names, such as `diagCross`, `pct50`, `cross`, `smCheck`, `horzBrick`, `weave` or `zigZag`, and six-digit RGB colors. Image fills embed PNG/JPEG files relative to the spec. `fit` is `stretch` (default), `cover` or `tile`; `cover` accepts the image `anchor`/`crop` fields from `references/creation.md`. Solid, gradient, pattern and image fills are mutually exclusive; outline and shadow may accompany a fill. Apply geometry/layout changes before cover fills so cropping uses final dimensions. Check the rendered crop, pattern and proportions.
+
+### Formatted speaker notes
+
+```json
+{"edits":[{"operation":"notes","slide":1,"paragraphs":[
+ {"runs":[{"text":"Opening: ","bold":true},{"text":"Explain the result.","italic":true}]},
+ {"text":"Mention the caveat","bullet":true,"level":1,"format":{"after":6}}
+]}]}
+```
+
+Use `paragraphs` instead of `text`. It replaces the notes body while preserving other placeholders. Runs accept bold, italic, underline, font size and color; paragraphs accept bullets, levels, alignment, spacing and indentation. An empty array clears the body. To append, preserve the existing paragraphs in the new specification. Inspect saved notes text and XML formatting; slide previews do not verify notes appearance.
+
+### Nested layouts
+
+```json
+{"edits":[{"operation":"layout","slide":1,"layout":{
+ "x":0.5,"y":0.5,"width":12,"height":6,
+ "root":{"mode":"row","gap":0.3,"children":[
+  {"shape_id":"2","width":3},
+  {"mode":"column","gap":0.2,"children":[
+   {"shape_id":"3","weight":1},{"shape_id":"4","weight":2}
+  ]}
+ ]}
+}}]}
+```
+
+Use `root` instead of the flat layout's `shape_ids`, `mode`, `gap` and `columns`. Containers accept `row`, `column`, or `grid` with `columns`, plus `gap` and `padding`. Leaves name distinct top-level shapes. Dimensions and spacing are inches; positive `width`/`height` fix a node's size. Other row/column children divide remaining space by `weight` (default 1); grid cells have equal sizes. Fixed cross-axis sizes align top/left.
+
+Layout moves and resizes shapes; it does not measure text, wrap children, or react to later edits. Group children are rejected. Render afterward and adjust dimensions for any clipped or overflowing content.

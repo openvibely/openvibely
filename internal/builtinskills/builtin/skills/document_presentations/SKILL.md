@@ -94,7 +94,7 @@ References inherit the working-file and verification rules in this skill. Exampl
 
 ## Current Paperworks limits
 
-General template-component cloning, grouped-shape creation, table merges, composed layout trees, patterned/image fills and rich speaker-note formatting are unsupported. Native comment display, animations and video playback require target-application checks.
+Table merge/unmerge, nested layouts, pattern/image fills and formatted notes require a newer local build than the pinned `v0.0.1-rc2`; see `references/editing.md` for availability and commands. General template-component cloning and grouped-shape creation remain unsupported. Nested layouts position top-level shapes; they do not measure text or automatically reflow after later edits. Native comment display, animations and video playback require target-application checks.
 
 ## Working files
 
