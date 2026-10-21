@@ -2571,15 +2571,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* OpenVibely Dark climbs an even lightness ladder instead of using shadows. */
 html[data-color-theme="openvibely-dark"] {
-	--ov-elevation-card: #22272E;
 	--ov-elevation-chat: #262B33;
 	--ov-menu-surface: var(--ov-elevation-chat);
 	--ov-menu-hover: #2D333C;
 }
-html[data-color-theme="openvibely-dark"] :is(.card, .stats) { background-color: var(--ov-elevation-card); }
 html[data-color-theme="openvibely-dark"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg, .chat-input-container) { --chat-user-bg: var(--ov-elevation-chat); background-color: var(--ov-elevation-chat); }
 html[data-color-theme="openvibely-dark"] :is(.input, .select, .textarea) { background-color: var(--ov-elevation-chat); }
-html[data-color-theme="openvibely-dark"] .kanban-search[data-open="true"] { background-color: var(--ov-elevation-card); }
 html[data-color-theme="openvibely-dark"] :is(.dropdown-content, .ov-menu, .modal-box) { background-color: var(--ov-elevation-chat); box-shadow: none; }
 					/* Experimental native dark variant: flat bordered chat surfaces. */
 html[data-color-theme^="openvibely-dark-flat"] .chat-bubble-user-msg,
