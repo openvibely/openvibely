@@ -1974,6 +1974,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var wrapper = script ? script.previousElementSibling : null;
 			var form = wrapper ? wrapper.querySelector('form.chat-input-container') : null;
 			if (!form || form.tagName !== 'FORM') return;
+			// Fragment scripts can run again while the existing composer survives.
+			// Bind once per DOM form so one drop cannot start multiple upload queues.
+			// Use a property, not an attribute: restored/cloned forms need fresh handlers.
+			if (form._chatInputInitialized) return;
+			form._chatInputInitialized = true;
 			var formId = form.id;
 			var inputId = form.querySelector('textarea[name="message"]').id;
 			var messageInput = document.getElementById(inputId);
