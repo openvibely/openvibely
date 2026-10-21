@@ -410,10 +410,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const syncNativeTheme = () => runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});
 						new MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
 						syncNativeTheme();
-						const preview = document.getElementById('image-gallery');
 						let visibilitySequence = 0;
-						const syncNativeVisibility = () => runtime.Events.Emit('desktop:controls-visibility', {hidden: !!preview?.open, page: performance.timeOrigin, sequence: ++visibilitySequence});
-						if (preview) new MutationObserver(syncNativeVisibility).observe(preview, {attributes: true, attributeFilter: ['open']});
+						let previewHidden;
+						const syncNativeVisibility = () => {
+							// Resolve the live dialog: navigation can replace the original node.
+							const hidden = !!document.querySelector('#image-gallery[open]');
+							if (hidden === previewHidden) return;
+							previewHidden = hidden;
+							runtime.Events.Emit('desktop:controls-visibility', {hidden, page: performance.timeOrigin, sequence: ++visibilitySequence});
+						};
+						new MutationObserver(syncNativeVisibility).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['open']});
 						syncNativeVisibility();
 					}
 					window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();

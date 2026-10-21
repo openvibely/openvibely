@@ -78,6 +78,16 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			b.waitFor("native controls initially visible", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 		}
 		b.waitFor("chat image link fits thumbnail", `String((()=>{const img=document.querySelector('[data-chat-attachment-image]'),link=img.closest('a');return Math.abs(link.getBoundingClientRect().width-img.getBoundingClientRect().width)<1})())`, "true")
+		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+			b.evaluate(`window.savedGallery=document.getElementById('image-gallery');window.savedGallery.remove();'removed'`)
+			b.waitFor("removing preview restores native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+			b.evaluate(`const replacement=document.createElement('dialog');replacement.id='image-gallery';document.body.append(replacement);replacement.showModal();'replaced'`)
+			b.waitFor("replacement preview hides native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
+			b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
+			b.waitFor("replacement close restores native controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+			b.evaluate(`document.getElementById('image-gallery').replaceWith(window.savedGallery);delete window.savedGallery;'restored'`)
+		}
+
 		for _, selector := range []string{"#attachment-list [data-image-gallery-item]", "#attachment-list [data-file-preview]", "a:has([data-chat-attachment-image])"} {
 			b.click(selector)
 			b.waitFor("preview open", `String(document.getElementById('image-gallery').open)`, "true")
