@@ -1044,3 +1044,38 @@ func TestBrowserFunctional_VirtualScrollDoesNotRepinSettledBottom(t *testing.T) 
  `)
 	t.Logf("settled bottom: %s", report)
 }
+
+func TestBrowserFunctional_VirtualScrollDoesNotSnapNearBottom(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
+ let source='';for(let i=0;i<80;i++)source+='Message '+i+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,tracker,defaultPinned:true});await paint();
+ window.observeChatTranscriptLayout({messages,tracker});
+ const tail=document.createElement('div');messages.append(tail);await paint();
+ function moveToDistance(distance,delta){
+  messages.dispatchEvent(new WheelEvent('wheel',{deltaY:delta,bubbles:true}));
+  messages.scrollTop=messages.scrollHeight-messages.clientHeight-distance;
+  messages.dispatchEvent(new Event('scroll'));
+ }
+ moveToDistance(300,-300);await paint();
+ for(const distance of [90,60,30,10]){
+  moveToDistance(distance,30);const reading=messages.scrollTop;
+  // Virtual row mounting and streaming both trigger layout reconciliation.
+  tail.replaceChildren(document.createElement('span'));await paint();await paint();
+  assert(Math.abs(messages.scrollTop-reading)<2,'downward gesture snapped to bottom '+distance+'px early');
+  assert(!tracker.shouldAutoScroll(),'bottom-following resumed before reaching the bottom');
+ }
+ // Remaining just above the end must survive new output and gesture expiry.
+ await pause(300);const parked=messages.scrollTop;
+ tail.innerHTML='<div style="height:80px"></div>';await paint();await paint();
+ assert(Math.abs(messages.scrollTop-parked)<2,'new output pulled a reader who had not reached the bottom');
+ moveToDistance(0,100);await paint();
+ assert(tracker.shouldAutoScroll(),'reaching bottom did not resume following');
+ tail.innerHTML='<div style="height:160px"></div>';await paint();await paint();
+ assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight<=2,'new output stopped following at bottom');
+ return {};
+ `)
+}
