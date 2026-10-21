@@ -195,7 +195,17 @@ func OpenVibelyThemes() []Theme {
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
 		openVibelyFlatTheme(),
+		openVibelyFlatNavStepTheme(),
 	}
+}
+
+// Temporary audit variant: Dark Flat with the sidebar halfway between page and raised surfaces.
+func openVibelyFlatNavStepTheme() Theme {
+	theme := openVibelyFlatTheme()
+	theme.ID = "openvibely-dark-flat-navstep"
+	theme.Name = "OpenVibely Dark Flat (Nav Step)"
+	theme.SearchText = theme.Name + " dark experimental flat outlined nav step"
+	return theme
 }
 
 // The flat variant retains native dark styling with flat, bordered chat surfaces.
