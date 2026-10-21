@@ -3,6 +3,7 @@ package builtinskills
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +48,7 @@ func TestPaperworksSkillPackages(t *testing.T) {
 				t.Fatalf("%s: invalid %s release package: %+v", name, platform, pkg)
 			}
 		}
+		data = documentSkillText(t, root, name)
 		for _, old := range []string{"document_check.py", "uv run", "pip install", "equation.cjs", "document_native.py", "word_edit.py", "```python", "npm install", "DOCUMENT_JAVA"} {
 			if strings.Contains(string(data), old) {
 				t.Fatalf("%s retains %s", name, old)
@@ -114,10 +116,7 @@ func TestPaperworksLocalExecutionIntegration(t *testing.T) {
 	run("capabilities")
 	checked := map[string]bool{}
 	for _, name := range []string{"pdf", "word", "spreadsheets", "presentations"} {
-		data, err := os.ReadFile(filepath.Join(root, "skills", "document_"+name, "SKILL.md"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		data := documentSkillText(t, root, "document_"+name)
 		for _, command := range regexp.MustCompile(`"\$PAPERWORKS" ([a-z-]+)`).FindAllSubmatch(data, -1) {
 			name := string(command[1])
 			if name == "help" || checked[name] {
@@ -128,10 +127,7 @@ func TestPaperworksLocalExecutionIntegration(t *testing.T) {
 		}
 	}
 	for _, kind := range []struct{ skill, format string }{{"pdf", "pdf"}, {"word", "docx"}, {"spreadsheets", "xlsx"}, {"presentations", "pptx"}} {
-		data, err := os.ReadFile(filepath.Join(root, "skills", "document_"+kind.skill, "SKILL.md"))
-		if err != nil {
-			t.Fatal(err)
-		}
+		data := documentSkillText(t, root, "document_"+kind.skill)
 		match := regexp.MustCompile("(?s)cat > example.json <<'JSON'\n(.*?)\nJSON").FindSubmatch(data)
 		if len(match) != 2 {
 			t.Fatal("missing inline spec")
@@ -166,11 +162,14 @@ func TestDocumentReferencesAvailableThroughSkillView(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := agentskills.SkillRuntimeTools(catalog, root, "", nil)
-	for _, item := range []struct{ handle, file string }{
-		{"document_word", "references/template-editing.md"},
-		{"document_spreadsheets", "references/workbook-checks.md"},
-		{"document_spreadsheets", "references/modeling-and-domains.md"},
-	} {
+	files, err := fs.Glob(FS, "builtin/skills/document_*/references/*.md")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("bundled references: %v %v", files, err)
+	}
+	for _, file := range files {
+		parts := strings.Split(file, "/")
+		item := struct{ handle, file string }{parts[2], strings.Join(parts[3:], "/")}
+
 		t.Run(item.handle+"/"+item.file, func(t *testing.T) {
 			call := func(file string) string {
 				t.Helper()
@@ -225,4 +224,65 @@ func TestDocumentReferencesAvailableThroughSkillView(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Collect the test recipes by following the same reference paths a model receives.
+// Runtime loading remains selective; only the integration tests load every recipe.
+func documentSkillText(t *testing.T, root, handle string) []byte {
+	t.Helper()
+	catalog, err := agentskills.BuildCatalog("document-recipes", root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := agentskills.SkillRuntimeTools(catalog, root, "", nil)
+	data, err := os.ReadFile(filepath.Join(root, "skills", handle, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := string(data)
+	pending := []string{""}
+	seen := map[string]bool{}
+	var advertised []string
+	references := regexp.MustCompile(`references/[a-z0-9-]+\.md`)
+	for len(pending) > 0 {
+		file := pending[0]
+		pending = pending[1:]
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		args, err := json.Marshal(map[string]string{"handle": handle, "file_path": file})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, handled, failed, err := runtime.Executor(context.Background(), "skill_view", args)
+		if err != nil || !handled || failed {
+			t.Fatalf("%s/%s: %s %v", handle, file, out, err)
+		}
+		var view struct {
+			Body        string              `json:"body"`
+			Content     string              `json:"content"`
+			LinkedFiles map[string][]string `json:"linked_files"`
+		}
+		if err := json.Unmarshal([]byte(out), &view); err != nil {
+			t.Fatal(err)
+		}
+		content := view.Content
+		if file == "" {
+			content = view.Body
+			advertised = view.LinkedFiles["references"]
+		} else {
+			all += "\n" + content
+		}
+		if strings.TrimSpace(content) == "" {
+			t.Fatalf("empty instructions: %s/%s", handle, file)
+		}
+		pending = append(pending, references.FindAllString(content, -1)...)
+	}
+	for _, file := range advertised {
+		if !seen["references/"+file] {
+			t.Fatalf("reference has no instruction route: %s/%s", handle, file)
+		}
+	}
+	return []byte(all)
 }
