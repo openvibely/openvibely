@@ -67,12 +67,17 @@
         return function () {
             if (!hasVisibleArea(messages)) return false;
             let restored = pinned;
-            if (pinned) messages.scrollTop = messages.scrollHeight;
-            else if (anchor) {
+            if (pinned) {
+                // Do not restart the browser's ongoing boundary/overscroll
+                // gesture when layout has left us at the bottom already.
+                const bottom = messages.scrollHeight - messages.clientHeight;
+                if (bottom - messages.scrollTop > 1) messages.scrollTop = bottom;
+            } else if (anchor) {
                 const row = anchor.row.lazy ? (anchor.row.owner._chatVirtualRows?.[anchor.row.index] || anchor.row) : anchor.row;
                 if (messages.contains(element(row))) {
                     const viewportShift = messages.getBoundingClientRect().top - bounds.top;
-                    messages.scrollTop += element(row).getBoundingClientRect().top - anchor.top - viewportShift;
+                    const delta = element(row).getBoundingClientRect().top - anchor.top - viewportShift;
+                    if (delta !== 0) messages.scrollTop += delta;
                     restored = true;
                 }
             }
