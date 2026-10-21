@@ -66,3 +66,5 @@
 
 /* Image-only preview links should not extend across the surrounding message. */
 a[data-image-gallery-item]:has(> img:only-child):not(.attachment-gallery-open){display:block;width:fit-content;max-width:100%}
+
+#image-gallery .file-preview-loading{display:flex;flex:1;min-height:160px;align-items:center;justify-content:center}

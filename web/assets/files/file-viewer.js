@@ -50,7 +50,9 @@
   dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
   prev.disabled=index===0;next.disabled=index===items.length-1;
   if(item.kind){stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(item);return}
-  content.hidden=false;content.textContent='Loading preview…';
+  content.hidden=false;
+  const loading=document.createElement('div');loading.className='file-preview-loading';loading.setAttribute('role','status');loading.setAttribute('aria-label','Loading preview');
+  const spinner=document.createElement('span');spinner.className='loading loading-spinner loading-sm text-primary';spinner.setAttribute('aria-hidden','true');loading.append(spinner);content.replaceChildren(loading);
   try{
    const response=await fetch(mode(item.raw,'view'),{signal:controller.signal});
    if(!response.ok){let message='Preview unavailable';try{message=(await response.json()).message||message}catch{}throw Error(message)}
