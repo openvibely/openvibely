@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -208,7 +210,21 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e)+'\n'+(e.stack||''))));
  });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, nativeScript, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
+	var bridgeMu sync.Mutex
+	var nativeBridge string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mode == "native-wheel" && r.URL.Path == "/native-test-bridge" && r.Method == "POST" {
+			script, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
+			if err != nil {
+				http.Error(w, "invalid bridge", 400)
+				return
+			}
+			bridgeMu.Lock()
+			nativeBridge = "<script>" + string(script) + "</script>"
+			bridgeMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -234,7 +250,10 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, r)
 			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1)))
+			bridgeMu.Lock()
+			bridge := nativeBridge
+			bridgeMu.Unlock()
+			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", bridge+runner+"</body>", 1)))
 			return
 		}
 		e.ServeHTTP(w, r)
