@@ -199,7 +199,7 @@ func OpenVibelyThemes() []Theme {
 	}
 }
 
-// Temporary audit variant: Dark Flat with chat bubbles and composer one step above the sidebar.
+// Temporary audit variant: Dark Flat with sidebar, cards, chat bubbles and composer one step brighter.
 func openVibelyFlatNavStepTheme() Theme {
 	theme := openVibelyFlatTheme()
 	theme.ID = "openvibely-dark-flat-navstep"
