@@ -185,6 +185,29 @@
         }
         scrollRestores.forEach(restore => restore());
     }
+    // WebKit's scrolling thread can apply an old absolute offset after a prepend
+    // has already corrected scrollTop on the main thread. Handle vertical wheel
+    // input in the same thread as virtual layout, including trackpad momentum.
+    const webkitWheel = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
+    function scrollWebKitTranscript(list, event) {
+        if (!event.isTrusted || !event.cancelable || event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey ||
+            !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+        const messages = list.messages;
+        for (let node = event.target instanceof Element ? event.target : event.target?.parentElement; node && node !== messages; node = node.parentElement) {
+            if (node.scrollHeight <= node.clientHeight + 1) continue;
+            const style = getComputedStyle(node);
+            if (!/^(auto|scroll|overlay)$/.test(style.overflowY)) continue;
+            if (style.overscrollBehaviorY === 'contain' || style.overscrollBehaviorY === 'none' ||
+                (event.deltaY < 0 ? node.scrollTop > 0 : node.scrollTop < node.scrollHeight - node.clientHeight - 1)) return;
+        }
+        event.preventDefault();
+        const unit = event.deltaMode === 1 ? (parseFloat(getComputedStyle(messages).lineHeight) || 16) :
+            event.deltaMode === 2 ? messages.clientHeight : 1;
+        const maximum = Math.max(0, messages.scrollHeight - messages.clientHeight);
+        const target = Math.max(0, Math.min(maximum, messages.scrollTop + event.deltaY * unit + (list.wheelRemainder || 0)));
+        messages.scrollTop = target;
+        list.wheelRemainder = target === 0 || target === maximum ? 0 : target - messages.scrollTop;
+    }
     function destroy(list) {
         cancelAnimationFrame(list.frame);
         list.observer.disconnect();
@@ -192,6 +215,7 @@
         list.rowResize?.disconnect();
         list.messages.style.overflowAnchor = list.overflowAnchor;
         list.messages.removeEventListener('scroll', list.schedule);
+        if (list.wheel) list.messages.removeEventListener('wheel', list.wheel);
         list.rows.clear();
         list.viewportReady?.(false);
         list.viewportReady = null;
@@ -221,6 +245,10 @@
                 list.schedule();
             }) : null;
             messages.addEventListener('scroll', list.schedule, {passive:true});
+            if (webkitWheel) {
+                list.wheel = event => scrollWebKitTranscript(list, event);
+                messages.addEventListener('wheel', list.wheel, {passive:false});
+            }
             lists.set(messages, list);
         }
         return list;

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,12 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	bounded := mode == "bounded"
 	hiddenPaging := mode == "hidden"
 	scrollStability := mode == "scroll" || hiddenPaging
+	nativeScript := ""
+	if mode == "native-wheel" {
+		data, err := os.ReadFile("testdata/native_thread_scroll.js")
+		require.NoError(t, err)
+		nativeScript = string(data)
+	}
 	if testing.Short() {
 		t.Skip("browser test")
 	}
@@ -69,6 +76,12 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 		samples = append(samples, sample{fmt.Sprintf("Prompt %d", i), strings.Repeat("A paragraph of **formatted text**.\n\n", 20)})
 	}
 	samples[len(samples)-1].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\n"+strings.Repeat("tool output line\n", 100)+"[/Tool]\n", 120) + "Final answer.\n"
+
+	if mode == "native-wheel" {
+		for i := range samples {
+			samples[i].Output = strings.Repeat("Assistant progress.\n[Using tool: shell | echo example]\n[Tool shell done]\nresult\n[/Tool]\n", 40)
+		}
+	}
 
 	if hiddenRow {
 		samples[len(samples)-1].Output = strings.Repeat("Large **paragraph**.\n\n", 4000) + strings.Repeat("[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n", 30) + "Latest message."
@@ -105,6 +118,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
  function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
  (async()=>{
   await until(visible,'initial messages'); await wait(150);
+ %s
   if(hiddenRow){
    const m=messages(),paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
    const owner=Array.from(m.querySelectorAll('[data-chat-virtual-owner]')).find(o=>o._chatVirtualRows?.[0]?.model.segments.some(s=>(s.content||'').length>=65536));
@@ -191,8 +205,8 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
    }
   }
   await fetch('/browser-result?status=pass');
- })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
- });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, "/tasks/"+other.ID, other.ID, path, task.ID)
+ })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e)+'\n'+(e.stack||''))));
+ });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, nativeScript, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
