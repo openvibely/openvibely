@@ -150,6 +150,20 @@
             saved.node.scrollLeft = saved.left;
         }));
     }
+    function batchRowChanges(list, commit) {
+        // The caller owns the viewport anchor for this frame. Synchronous row
+        // renderers must not each adjust scrollTop while the user is scrolling.
+        if (list.bulk) { commit(); return; }
+        const scrollRestores = [];
+        list.bulk = true;
+        list.scrollRestores = scrollRestores;
+        try { commit(); }
+        finally {
+            list.bulk = false;
+            list.scrollRestores = null;
+        }
+        scrollRestores.forEach(restore => restore());
+    }
     function destroy(list) {
         cancelAnimationFrame(list.frame);
         list.observer.disconnect();
@@ -267,7 +281,7 @@
                 changes.push(() => row.node.replaceWith(row.placeholder));
             }
         });
-        changes.forEach(change => change());
+        batchRowChanges(list, () => changes.forEach(change => change()));
         restoreScroll(restored);
         restore();
         if (!hydrating) {
@@ -283,7 +297,7 @@
                 });
                 if (!exposed.length) break;
                 const keepPosition = saveAnchor(list), newlyMounted = [];
-                exposed.forEach(row => mount(row, newlyMounted, canRenderImmediately(row)));
+                batchRowChanges(list, () => exposed.forEach(row => mount(row, newlyMounted, canRenderImmediately(row))));
                 restoreScroll(newlyMounted);
                 keepPosition();
             }
