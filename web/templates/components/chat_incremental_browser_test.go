@@ -1148,3 +1148,30 @@ func TestBrowserFunctional_TranscriptDisablesBoundaryBounce(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_VirtualSmallScrollBatchesAnchorCorrections(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.width='640px';
+ messages.setAttribute('data-transcript-hydrating','true');document.getElementById('pair').dataset.execStatus='completed';
+ const tracker=window.resolveScrollTracker('scrollTracker_task-thread-messages',messages);
+ let source='';
+ for(let i=0;i<80;i++)source+='Message '+i+'\n\n[Using tool: shell | echo '+i+']\n[Tool shell done]\nresult '+i+'\n[/Tool]\n';
+ await renderStreamingContent(stream,source,false);
+ await restoreChatTranscriptScroll({messages,tracker,defaultPinned:true});await paint();
+ const native=Object.getOwnPropertyDescriptor(Element.prototype,'scrollTop');let writes=0,maxWrites=0;
+ Object.defineProperty(messages,'scrollTop',{get(){return native.get.call(this)},set(value){writes++;native.set.call(this,value)}});
+ for(let step=0;step<80;step++){
+  messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-8,bubbles:true}));native.set.call(messages,messages.scrollTop-8);
+  const bounds=messages.getBoundingClientRect();
+  const reading=stream._chatVirtualRows.find(row=>row.ready && row.node?.isConnected && row.node.getBoundingClientRect().bottom>bounds.top && row.node.getBoundingClientRect().top<bounds.bottom);
+  const top=reading?.node.getBoundingClientRect().top;
+  writes=0;messages.dispatchEvent(new Event('scroll'));
+  await new Promise(resolve=>requestAnimationFrame(resolve));
+  maxWrites=Math.max(maxWrites,writes);
+  if(reading)assert(reading.node.isConnected && Math.abs(reading.node.getBoundingClientRect().top-top)<2,'visible message moved during small scroll');
+ }
+ assert(maxWrites<=1,'multiple anchor corrections in one scroll frame: '+maxWrites);
+ assert(stream.querySelector('.stream-tool-body-scroll'),'tool output disappeared during batched mounting');
+ return {maxWrites};
+ `)
+}
