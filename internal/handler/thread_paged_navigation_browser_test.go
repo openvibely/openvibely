@@ -43,15 +43,16 @@ func TestTaskHiddenLargeRowScrollStabilityInChrome(t *testing.T) {
 }
 
 func testTaskPagedCachedNavigation(t *testing.T, mode string) {
+	nativeWheel := mode == "native-wheel" || mode == "native-wheel-delayed"
 	hiddenRow := mode == "hidden-row"
 	bounded := mode == "bounded"
 	hiddenPaging := mode == "hidden"
 	scrollStability := mode == "scroll" || hiddenPaging
 	nativeScript := ""
-	if mode == "native-wheel" {
+	if nativeWheel {
 		data, err := os.ReadFile("testdata/native_thread_scroll.js")
 		require.NoError(t, err)
-		nativeScript = string(data)
+		nativeScript = fmt.Sprintf("const expectDelayedHistory = %t;\n", mode == "native-wheel-delayed") + string(data)
 	}
 	if testing.Short() {
 		t.Skip("browser test")
@@ -79,7 +80,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	}
 	samples[len(samples)-1].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\n"+strings.Repeat("tool output line\n", 100)+"[/Tool]\n", 120) + "Final answer.\n"
 
-	if mode == "native-wheel" {
+	if nativeWheel {
 		for i := range samples {
 			samples[i].Output = strings.Repeat("Assistant progress.\n[Using tool: shell | echo example]\n[Tool shell done]\nresult\n[/Tool]\n", 40)
 		}
@@ -213,7 +214,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	var bridgeMu sync.Mutex
 	var nativeBridge string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if mode == "native-wheel" && r.URL.Path == "/native-test-bridge" && r.Method == "POST" {
+		if nativeWheel && r.URL.Path == "/native-test-bridge" && r.Method == "POST" {
 			script, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8192))
 			if err != nil {
 				http.Error(w, "invalid bridge", 400)
@@ -242,7 +243,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 		}
 		// Let the native wheel burst finish before history arrives. The reading
 		// position must remain monitored through the response and rendering.
-		if mode == "native-wheel" && r.URL.Query().Get("before") != "" {
+		if mode == "native-wheel-delayed" && r.URL.Query().Get("before") != "" {
 			time.Sleep(6 * time.Second)
 		}
 		if hiddenPaging && r.URL.Query().Get("before") != "" {
