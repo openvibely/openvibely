@@ -240,6 +240,11 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			w.WriteHeader(204)
 			return
 		}
+		// Let the native wheel burst finish before history arrives. The reading
+		// position must remain monitored through the response and rendering.
+		if mode == "native-wheel" && r.URL.Query().Get("before") != "" {
+			time.Sleep(6 * time.Second)
+		}
 		if hiddenPaging && r.URL.Query().Get("before") != "" {
 			time.Sleep(150 * time.Millisecond)
 		}

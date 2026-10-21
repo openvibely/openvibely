@@ -57,8 +57,9 @@
     }, {passive: true});
     const bounds = m.getBoundingClientRect();
     nativeInput.postMessage({dy: -2, count: 600, x: bounds.left + 6, y: bounds.top + 75});
-    for (let frame = 0; !window._nativeBurstDone || frame < 40; frame++) {
-        if (frame > 1000) throw Error('Native wheel burst did not finish');
+    let settledFrames = 0, previousLayout = '';
+    for (let frame = 0; ; frame++) {
+        if (frame > 1000) throw Error('Native paging did not settle: '+debug());
         const b = m.getBoundingClientRect(), ranges = [], before = m.scrollTop, startInput = input;
         // Whole-bubble bounds miss jumps within a bubble. Follow actual text at
         // several viewport positions, including partially clipped paragraphs.
@@ -81,14 +82,21 @@
             if (Math.abs(shift) > 10) throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame);
         }
         loaded ||= m.querySelectorAll(':scope > [data-execution-pair]').length > 5;
+        // Keep measuring after input stops: the response and its asynchronous
+        // rendering can arrive later. Readiness must not create an unobserved
+        // interval in which a paging correction can move the reader's text.
+        const layout = [m.scrollTop,m.scrollHeight,m.clientHeight].join(',');
+        const busy = m.dataset.transcriptHydrating === 'true' || m.dataset.earlierAnchorRestoring === 'true' ||
+            window._chatContentRenderActive || window._chatContentRenderQueue?.length;
+        settledFrames = window._nativeBurstDone && loaded && !busy && layout === previousLayout && input === startInput
+            ? settledFrames + 1 : 0;
+        previousLayout = layout;
+        if (frame >= 40 && settledFrames >= 6) break;
     }
     // Native events may be coalesced under CI load; require actual movement,
     // page insertion and measured text, not a particular event-delivery rate.
-    await until(() => m.querySelectorAll(':scope > [data-execution-pair]').length > 5, 'native older page');
-    loaded = true;
     if (!loaded || events < 2 || input < 148 || measured === 0 || (webkit && cancelled === 0))
         throw Error('Native paging coverage: '+JSON.stringify({events,input,cancelled,measured,top:m.scrollTop,height:m.scrollHeight,wheelScale,ua:navigator.userAgent}));
-    await stableLayout(m);
 
     // A nested tool scroller must retain native vertical and horizontal input.
     const tool = document.createElement('div');
