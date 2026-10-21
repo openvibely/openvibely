@@ -59,6 +59,7 @@
 #image-gallery [data-file-viewer="markdown"]{flex:none;min-height:auto}
 #image-gallery:focus{outline:none}
 #image-gallery .file-viewer-shell>header{padding-right:76px}
+#image-gallery [data-pdf-controls]{padding:12px;flex:none;flex-wrap:wrap}
 #image-gallery header [data-gallery-count]{flex:none}
 #image-gallery [data-result-content] img{flex-shrink:initial;user-select:auto}
 @media(max-width:640px){#image-gallery .image-gallery-viewer>[data-result-content]{margin-inline:16px}}
