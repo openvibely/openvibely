@@ -31,5 +31,13 @@ func TestTaskNativeWheelPagingInWails(t *testing.T) {
 		t.Fatalf("build Wails test host: %v\n%s", err, output)
 	}
 	t.Setenv("CHROME_BIN", runner)
-	testTaskPagedCachedNavigation(t, "native-wheel")
+	// Run sequentially: each scenario owns a native window and input stream.
+	for _, scenario := range []struct{ name, mode string }{
+		{"during-wheel", "native-wheel"},
+		{"after-wheel", "native-wheel-delayed"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testTaskPagedCachedNavigation(t, scenario.mode)
+		})
+	}
 }

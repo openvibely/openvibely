@@ -81,7 +81,11 @@
             // Allow event/frame coalescing, but not a page-sized offset overwrite.
             if (Math.abs(shift) > 10) throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame);
         }
-        loaded ||= m.querySelectorAll(':scope > [data-execution-pair]').length > 5;
+        if (!loaded && m.querySelectorAll(':scope > [data-execution-pair]').length > 5) {
+            loaded = true;
+            if (!!window._nativeBurstDone !== expectDelayedHistory)
+                throw Error('History arrived in wrong phase: expected '+(expectDelayedHistory ? 'after' : 'during')+' native wheel input');
+        }
         // Keep measuring after input stops: the response and its asynchronous
         // rendering can arrive later. Readiness must not create an unobserved
         // interval in which a paging correction can move the reader's text.
