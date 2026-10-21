@@ -155,3 +155,74 @@ func TestPaperworksLocalExecutionIntegration(t *testing.T) {
 	}
 
 }
+
+func TestDocumentReferencesAvailableThroughSkillView(t *testing.T) {
+	root := t.TempDir()
+	if err := SyncTo(root); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := agentskills.BuildCatalog("document-references", root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := agentskills.SkillRuntimeTools(catalog, root, "", nil)
+	for _, item := range []struct{ handle, file string }{
+		{"document_word", "references/template-editing.md"},
+		{"document_spreadsheets", "references/workbook-checks.md"},
+		{"document_spreadsheets", "references/modeling-and-domains.md"},
+	} {
+		t.Run(item.handle+"/"+item.file, func(t *testing.T) {
+			call := func(file string) string {
+				t.Helper()
+				args, err := json.Marshal(map[string]string{"handle": item.handle, "file_path": file})
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, handled, failed, err := runtime.Executor(context.Background(), "skill_view", args)
+				if err != nil || !handled || failed {
+					t.Fatalf("skill_view: %s %v", out, err)
+				}
+				return out
+			}
+			var skill struct {
+				LinkedFiles map[string][]string `json:"linked_files"`
+			}
+			if err := json.Unmarshal([]byte(call("")), &skill); err != nil {
+				t.Fatal(err)
+			}
+			listed := false
+			for _, name := range skill.LinkedFiles["references"] {
+				listed = listed || name == strings.TrimPrefix(item.file, "references/")
+			}
+			if !listed {
+				t.Fatalf("reference not discoverable: %v", skill.LinkedFiles)
+			}
+			var support struct {
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal([]byte(call(item.file)), &support); err != nil {
+				t.Fatal(err)
+			}
+			bundled, err := FS.ReadFile("builtin/skills/" + item.handle + "/" + item.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(bundled) == 0 || support.Content != string(bundled) {
+				t.Fatal("reference body was not delivered")
+			}
+			// Existing installs must receive updated bundled references too.
+			if err := os.WriteFile(filepath.Join(root, "skills", item.handle, item.file), []byte("stale instructions"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := SyncTo(root); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(call(item.file)), &support); err != nil {
+				t.Fatal(err)
+			}
+			if support.Content != string(bundled) {
+				t.Fatal("reference not refreshed on sync")
+			}
+		})
+	}
+}
