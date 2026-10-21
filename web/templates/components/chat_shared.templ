@@ -5226,6 +5226,17 @@ templ ChatAutoScrollScript() {
 			};
 
 			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options) {
+				// Inline thread initialization can run before the deferred virtual-list
+				// script. Wait for it before choosing the rendering path, especially
+				// for hidden workspaces whose first paint needs viewport coordination.
+				if (!window.installChatVirtualRows && document.readyState !== 'complete') {
+					return new Promise(function(resolve) {
+						document.addEventListener('DOMContentLoaded', resolve, {once:true});
+					}).then(function() {
+						if (!container.isConnected) return false;
+						return window.renderStreamingContent(container, textBuffer, yieldBetweenBatches, options);
+					});
+				}
 				// Live callers also pass a terminal boolean when this is their fallback.
 				if (!options || typeof options !== 'object') options = null;
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
