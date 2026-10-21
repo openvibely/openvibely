@@ -98,7 +98,7 @@ func (c *GitHubIssueActionCore) ExecuteGetIssue(ctx context.Context, input json.
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "issue": issue})
+	return githubIssueJSON(map[string]any{"ok": true, "issue": issue})
 }
 
 func (c *GitHubIssueActionCore) ExecuteGetProjectInbox(ctx context.Context, _ json.RawMessage) (string, error) {
@@ -119,7 +119,7 @@ func (c *GitHubIssueActionCore) ExecuteGetProjectInbox(ctx context.Context, _ js
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
+	return githubIssueJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
 }
 
 func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, input json.RawMessage) (string, error) {
@@ -138,7 +138,7 @@ func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, in
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "github_login": persistence.NormalizeGitHubLogin(login), "authorized": authorized})
+	return githubIssueJSON(map[string]any{"ok": true, "github_login": persistence.NormalizeGitHubLogin(login), "authorized": authorized})
 }
 
 func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage) (string, error) {
@@ -159,7 +159,7 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 		return "", err
 	}
 	summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
-	return githubIssueActionJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+	return githubIssueJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 }
 
 func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.Context, input json.RawMessage) (string, error) {
@@ -180,7 +180,7 @@ func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.
 		return "", err
 	}
 	summaries, nextOffset := compactExistingGitHubIssues(issues, limit, offset)
-	return githubIssueActionJSON(map[string]any{
+	return githubIssueJSON(map[string]any{
 		"ok": true, "account": user, "repository": repo.FullName,
 		"issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0,
 	})
@@ -215,7 +215,7 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 		return "", err
 	}
 	summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
-	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": persistence.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+	return githubIssueJSON(map[string]any{"ok": true, "assignee": persistence.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 }
 
 func assignedIssueListPage(req GitHubIssueActionRequest) (int, int, error) {
@@ -342,7 +342,7 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Con
 		return "", err
 	}
 	page, nextOffset := pageAssignedGitHubIssuesWithPRs(items, limit, offset)
-	return githubIssueActionJSON(map[string]any{
+	return githubIssueJSON(map[string]any{
 		"ok": true, "items": page, "returned": len(page), "total": len(items), "offset": offset,
 		"next_offset": nextOffset, "truncated": nextOffset > 0,
 		"skipped_without_pr": "Assigned issues without an associated pull request are skipped.",
@@ -371,7 +371,7 @@ func (c *GitHubIssueActionCore) ExecuteCommentOnIssue(ctx context.Context, input
 	if err := c.provider.CommentOnIssue(ctx, repo, req.IssueNumber, req.Body); err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber})
+	return githubIssueJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber})
 }
 
 func (c *GitHubIssueActionCore) ExecuteAddIssueLabels(ctx context.Context, input json.RawMessage) (string, error) {
@@ -382,7 +382,7 @@ func (c *GitHubIssueActionCore) ExecuteAddIssueLabels(ctx context.Context, input
 	if err := c.provider.AddLabelsToIssue(ctx, repo, req.IssueNumber, req.Labels); err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
+	return githubIssueJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
 }
 
 func (c *GitHubIssueActionCore) ExecuteCloseIssue(ctx context.Context, input json.RawMessage) (string, error) {
@@ -393,10 +393,10 @@ func (c *GitHubIssueActionCore) ExecuteCloseIssue(ctx context.Context, input jso
 	if err := c.provider.CloseIssue(ctx, repo, req.IssueNumber); err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "state": "closed"})
+	return githubIssueJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "state": "closed"})
 }
 
-func githubIssueActionJSON(payload map[string]any) (string, error) {
+func githubIssueJSON(payload map[string]any) (string, error) {
 	b, err := json.Marshal(payload)
 	return string(b), err
 }
