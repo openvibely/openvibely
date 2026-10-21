@@ -188,7 +188,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<script src={ static.URL("live-transport.js") }></script>
 			<script defer src={ static.URL("kanban.js") }></script>
 			<script defer src={ static.URL("thread-navigation.js") }></script>
-			<script defer src={ static.URL("chat-virtual-list.js") }></script>
+			<script defer src={ static.URL("chat-virtual-list.js") } data-chat-virtual-list></script>
+			<script>
+				// Inline thread scripts must wait for this deferred dependency, including
+				// when parsing has finished but the asset is still downloading.
+				window.chatVirtualRowsReady = new Promise(function(resolve) {
+					var script = document.querySelector('script[data-chat-virtual-list]');
+					function ready() {
+						window.chatVirtualRowsReady = null;
+						resolve();
+					}
+					script.addEventListener('load', ready, {once:true});
+					script.addEventListener('error', ready, {once:true});
+				});
+			</script>
 			<script>
 			window.appendPendingThreadInputEditButton = function(actions) {
 				var button = document.createElement('button');

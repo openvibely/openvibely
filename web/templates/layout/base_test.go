@@ -2036,3 +2036,45 @@ function page(version = '1', native = false, runtime = 'web') {
 		t.Fatalf("update reload regression: %v\n%s", err, output)
 	}
 }
+
+func TestChatVirtualRowsReadinessSettlesOnLoadOrError(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	var buf bytes.Buffer
+	if err := Base("Chat", nil, "default").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	marker := strings.Index(html, "window.chatVirtualRowsReady =")
+	if marker < 0 {
+		t.Fatal("missing virtual-row readiness initialization")
+	}
+	start := strings.LastIndex(html[:marker], "<script>") + len("<script>")
+	end := marker + strings.Index(html[marker:], "</script>")
+	initialization := html[start:end]
+	for _, event := range []string{"load", "error"} {
+		t.Run(event, func(t *testing.T) {
+			script := `const assert = require('node:assert/strict');
+const handlers = {};
+global.window = {};
+global.document = {querySelector: () => ({addEventListener: (event, fn) => {handlers[event] = fn;}})};
+` + initialization + `
+(async () => {
+ const pending = window.chatVirtualRowsReady;
+ let settled = false;
+ pending.then(() => {settled = true;});
+ await Promise.resolve();
+ assert.equal(settled, false, 'rendering must wait while the asset is pending');
+ handlers[` + strconv.Quote(event) + `]();
+ await pending;
+ assert.equal(settled, true);
+ assert.equal(window.chatVirtualRowsReady, null, 'later renders must not wait again, including after an asset failure');
+})().catch(err => {console.error(err); process.exit(1);});`
+			if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+				t.Fatalf("virtual-row readiness: %v\n%s", err, output)
+			}
+		})
+	}
+}
