@@ -2573,9 +2573,34 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	first, err := handlers["github_create_issue"](ctx, input)
 	require.NoError(t, err)
 	require.Contains(t, first, `"Number":42`)
+	var createdPayload struct {
+		OK    bool `json:"ok"`
+		Issue struct {
+			Number int    `json:"Number"`
+			Title  string `json:"Title"`
+			State  string `json:"State"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(first), &createdPayload))
+	require.True(t, createdPayload.OK)
+	require.Equal(t, 42, createdPayload.Issue.Number)
+	require.Equal(t, "Exact issue", createdPayload.Issue.Title)
+	require.Equal(t, "open", createdPayload.Issue.State)
+
 	second, err := handlers["github_create_issue"](ctx, input)
 	require.NoError(t, err)
 	require.Contains(t, second, `"reused":true`)
+	var reusedPayload struct {
+		OK     bool `json:"ok"`
+		Reused bool `json:"reused"`
+		Issue  struct {
+			Number int `json:"Number"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(second), &reusedPayload))
+	require.True(t, reusedPayload.OK)
+	require.True(t, reusedPayload.Reused)
+	require.Equal(t, 42, reusedPayload.Issue.Number)
 	require.Equal(t, int32(1), createCalls.Load(), "successful issue creation retry must resolve persisted provenance")
 
 	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body", Labels: []string{"bug"}}
