@@ -20,12 +20,19 @@
     }
     const m = messages();
     if(document.fonts) await document.fonts.ready;
-    m.dispatchEvent(new WheelEvent('wheel', {deltaY: -8, bubbles: true}));
+    function positionForGesture(top) {
+        // Setup is a synthetic scrollbar move, not the native gesture under
+        // test. Record intent and position together before asynchronous layout
+        // work can expire the tracker's input window and re-pin the bottom.
+        m.dispatchEvent(new WheelEvent('wheel', {deltaY: -8, bubbles: true}));
+        m.scrollTop = top;
+        m.dispatchEvent(new Event('scroll'));
+    }
     // Rendering a newly visited window can rebase its estimated heights. Place
     // the gesture after that work, otherwise CI can start thousands of pixels
     // from the page boundary despite the initial assignment of 160.
     for(let attempt=0;attempt<6;attempt++) {
-        m.scrollTop = 160;
+        positionForGesture(160);
         await renderVisibleChatRows(m);
         await stableLayout(m);
         if(Math.abs(m.scrollTop-160)<1) break;
@@ -45,7 +52,7 @@
     wheelScale=40/Math.abs(probe.deltaY);
     if(wheelScale<0.01 || wheelScale>256) throw Error('Invalid native wheel scale: '+wheelScale);
     await stableLayout(m);
-    m.scrollTop=160;
+    positionForGesture(160);
     await stableLayout(m);
     if(Math.abs(m.scrollTop-160)>=1) throw Error('Native calibration changed starting window: '+debug());
     let input = 0, events = 0, cancelled = 0, loaded = false, measured = 0;
@@ -87,7 +94,12 @@
             if (!range.startContainer.isConnected) throw Error('Reading text detached during native scroll');
             const shift = range.getBoundingClientRect().top - top - expected;
             // Allow event/frame coalescing, but not a page-sized offset overwrite.
-            if (Math.abs(shift) > 10) throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame);
+            if (Math.abs(shift) > 10) throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame + ' '+JSON.stringify({
+                expected,actual:range.getBoundingClientRect().top-top,before,after:m.scrollTop,
+                startInput,input,events,loaded,burstDone:!!window._nativeBurstDone,
+                restoring:m.dataset.earlierAnchorRestoring,hydrating:m.dataset.transcriptHydrating,
+                height:m.scrollHeight,viewport:m.clientHeight,webkit,wheelScale
+            }));
         }
         if (!loaded && m.querySelectorAll(':scope > [data-execution-pair]').length > 5) {
             loaded = true;
