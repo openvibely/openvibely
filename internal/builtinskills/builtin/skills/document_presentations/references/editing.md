@@ -162,4 +162,21 @@ Use `paragraphs` instead of `text`. It replaces the notes body while preserving 
 
 Use `root` instead of the flat layout's `shape_ids`, `mode`, `gap` and `columns`. Containers accept `row`, `column`, or `grid` with `columns`, plus `gap` and `padding`. Leaves name distinct top-level shapes. Dimensions and spacing are inches; positive `width`/`height` fix a node's size. Other row/column children divide remaining space by `weight` (default 1); grid cells have equal sizes. Fixed cross-axis sizes align top/left.
 
-Layout moves and resizes shapes; it does not measure text, wrap children, or react to later edits. Group children are rejected. Render afterward and adjust dimensions for any clipped or overflowing content.
+Layout moves and resizes shapes; it does not react to later edits. Use `fit_text` below for measured text height. Group children are rejected. Render afterward and adjust dimensions for any clipped or overflowing content.
+
+### Fit text height and span grid cells
+
+These additions also require a newer build than the pinned release. Check `schema slide-edit` for `LayoutNode.fit_text`, `column_span` and `row_span`.
+
+```json
+{"edits":[{"operation":"layout","slide":1,"layout":{
+ "x":0.5,"y":0.5,"width":4,"height":6,
+ "root":{"mode":"column","gap":0.2,"children":[
+  {"shape_id":"2","fit_text":true},{"shape_id":"3","fit_text":true}
+ ]}
+}}]}
+```
+
+`fit_text:true` sizes a text leaf's height at its allocated width; omit its fixed `height`. Column siblings follow the measured height and gap. Runs must have resolved, available fonts (`Go` faces are bundled for measurement). Measurement uses glyph advances, wrapping, mixed run sizes, text insets and paragraph spacing. Unavailable fonts/glyphs, unresolved fields, rotated/vertical text, fixed-point line spacing and overflow fail explicitly. Use explicit sizes for those cases; verify rendered text for font substitution and complex-script shaping. Rerun layout after text/width edits.
+
+Grid children may use positive `column_span` and `row_span`, defaulting to 1. For a heading across two columns above two items, use `{"mode":"grid","columns":2,"children":[{"shape_id":"2","column_span":2},{"shape_id":"3"},{"shape_id":"4"}]}`. Items occupy free cells in row-major order; rows divide the frame equally and spans include internal gaps. Check both placement and text fit in the resulting preview.

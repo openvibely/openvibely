@@ -15,7 +15,7 @@ Use `word-edit` with the operations below. `paragraph`, `run`, `table`, `row`, `
 | `image-replace` / `image-resize` / `image-delete` | `image`; replace needs local PNG/JPEG `path`, resize needs `width_in` and/or `height_in`. Replacement uses a private media part. Image indices count standalone pictures in the selected part, excluding charts and grouped artwork. |
 | `section-format` | `section`; page `width`, `height`, margins `top`, `bottom`, `left`, `right`, `header`, `footer`, `gutter`, all in twips (1440 per inch). |
 | `section-insert` | Source `section`, terminating `paragraph`, `type:nextPage/continuous/evenPage/oddPage`. |
-| `header-footer` | `section`, `kind:header/footer`, `type:default/first/even`, `text`. Check inherited headers/footers on affected sections. |
+| `header-footer` | `section`, `kind:header/footer`, `type:default/first/even`, `text` or the table specification below on newer builds. Check inherited headers/footers on affected sections. |
 | `batch` | `edits` array of these general operations. Indices reflect earlier edits. No nested batches or specialized review operations inside a batch. |
 
 ### General editing example
@@ -36,3 +36,14 @@ JSON
 
 Verify the paragraph changed, the table and unrelated text remain, and no tracked replacement was introduced. Use `redline` for tracked changes.
 
+
+## Header and footer tables
+
+On newer builds, `header-footer` accepts `rows` instead of `text`. Check `schema word-edit` for `rows` and `widths_twips`; the pinned `v0.0.1-rc2` lacks this addition. If absent, report the runtime limitation rather than sending ignored fields.
+
+```json
+{"operation":"header-footer","section":0,"kind":"footer","type":"default",
+ "rows":[["Left","Middle","Right"]],"widths_twips":[2000,2000,2000]}
+```
+
+Run with `word-edit` as above. The zero-based section receives a private header/footer part containing a native table; this replaces its selected header/footer, not the body or other sections. Use `kind:header` for a header and `type:first/even` when requested. Rows must be rectangular strings; provide one positive column width in twips (1440 per inch), within the section's usable width. Text and rows are mutually exclusive. Inspect the saved part/section relationship and apply existing table formatting operations with its `part` path if needed. Render all pages to check header/footer placement and page variants.
