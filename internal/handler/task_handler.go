@@ -3479,7 +3479,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	return render(c, http.StatusOK, templ.Join(
-		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments, task.ProjectID),
+		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments, task.ProjectID, *exec),
 		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true, exec.ID),
 	))
 }

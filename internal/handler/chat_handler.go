@@ -385,7 +385,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
 	}
 	return render(c, http.StatusOK, templ.Join(
-		components.ChatFollowupResponse(message, exec.ID, "chat-messages", "", false, chatAttachments, projectID),
+		components.ChatFollowupResponse(message, exec.ID, "chat-messages", "", false, chatAttachments, projectID, *exec),
 		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true, exec.ID),
 	))
 }

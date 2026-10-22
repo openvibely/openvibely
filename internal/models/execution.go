@@ -16,6 +16,9 @@ const (
 )
 
 type Execution struct {
+	// HistoryOrder is the server tie-breaker for equal start times in transcript windows.
+	HistoryOrder int64 `json:"-"`
+
 	// ContextKind marks synthetic checkpoint records, so replay hydration cannot
 	// replace retained user text with the original execution's tool history.
 	ContextKind         string          `json:"context_kind,omitempty"`
@@ -60,9 +63,10 @@ type ExecutionReplayMessage struct {
 
 // LiveExecution identifies an active thread without loading transcript blobs.
 type LiveExecution struct {
-	ID        string       `json:"id"`
-	TaskID    string       `json:"task_id"`
-	ProjectID string       `json:"project_id"`
-	Category  TaskCategory `json:"category"`
-	StartedAt time.Time    `json:"started_at"`
+	HistoryOrder int64        `json:"history_order,string"`
+	ID           string       `json:"id"`
+	TaskID       string       `json:"task_id"`
+	ProjectID    string       `json:"project_id"`
+	Category     TaskCategory `json:"category"`
+	StartedAt    time.Time    `json:"started_at"`
 }

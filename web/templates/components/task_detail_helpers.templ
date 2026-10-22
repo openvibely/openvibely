@@ -1337,8 +1337,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
 // Delegates to the shared ChatFollowupResponse component with thread settings.
-templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string) {
-	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID)
+templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string, execution ...models.Execution) {
+	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID, execution...)
 }
 
 templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) {

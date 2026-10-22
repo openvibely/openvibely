@@ -38,8 +38,14 @@
         const fraction = String(value).match(/\.(\d+)(?:Z|[+-]\d\d:\d\d)$/)?.[1] || '';
         return new Date(millis).toISOString().slice(0, 19) + '.' + fraction.padEnd(9, '0').slice(0, 9);
     }
+    function historyOrder(value) {
+        // SQLite's 64-bit insertion sequence must not be rounded to a JS Number.
+        const order = String(value ?? '');
+        return /^[1-9][0-9]{0,18}$/.test(order) ? order.padStart(19, '0') : '';
+    }
     function newestFirst(a, b) {
         if (a.startedAt !== b.startedAt) return a.startedAt > b.startedAt ? -1 : 1;
+        if (a.historyOrder !== b.historyOrder) return a.historyOrder > b.historyOrder ? -1 : 1;
         return a.id === b.id ? 0 : a.id > b.id ? -1 : 1;
     }
     function discard(run) {
@@ -140,15 +146,15 @@
         stream.addEventListener('done', event => finish('done', event));
         stream.addEventListener('error', event => finish('error', event));
     }
-    function ensure(id, project, task, seed, startedAt) {
-        const key = runKey(project, id), timestamp = executionTime(startedAt);
+    function ensure(id, project, task, seed, startedAt, insertionOrder) {
+        const key = runKey(project, id), timestamp = executionTime(startedAt), order = historyOrder(insertionOrder);
         let run = runs.get(key);
         if (!run) {
             const output = seed || '';
             run = {key, id, project, task: task || '', output, offset: encoder.encode(output).length,
                 version: 0, time: retainedTime(project, task || id),
                 // Optimistic rows lack server metadata until discovery catches up.
-                startedAt: timestamp || executionTime(new Date(Date.now()).toISOString()), live: false, stream: null, terminal: null, views: new Set()};
+                startedAt: timestamp || executionTime(new Date(Date.now()).toISOString()), historyOrder: order, live: false, stream: null, terminal: null, views: new Set()};
             runs.set(key, run);
         } else if (task) run.task = task;
         if (task) {
@@ -160,6 +166,7 @@
             });
         }
         if (timestamp) run.startedAt = timestamp;
+        if (order) run.historyOrder = order;
         start(run);
         return run;
     }
@@ -175,8 +182,8 @@
         // keep the HTTP seed visible until replay reaches its actual byte offset.
         suppressedThreads.delete(threadKey(project, task || id));
         suppressedExecutions.delete(runKey(project, id));
-        const startedAt = container?.closest('[data-execution-pair]')?.getAttribute('data-started-at');
-        const run = ensure(id, project, task, offset === seedBytes ? seed : '', startedAt);
+        const pair = container?.closest('[data-execution-pair]');
+        const run = ensure(id, project, task, offset === seedBytes ? seed : '', pair?.getAttribute('data-started-at'), pair?.getAttribute('data-history-order'));
         if (container) container.setAttribute('data-live-snapshot-key', run.key);
         run.time = Date.now();
         const view = {listeners: {}, offset, version: run.version,
@@ -273,6 +280,8 @@
                 // older discoveries, even if their DOM lacked a timestamp.
                 const run = runs.get(key), timestamp = executionTime(item.started_at);
                 if (run && timestamp) run.startedAt = timestamp;
+                const order = historyOrder(item.history_order);
+                if (run && order) run.historyOrder = order;
                 threads.add(threadKey(item.project_id, item.category === 'chat' ? 'chat' : item.task_id));
             });
             suppressedExecutions.forEach(key => { if (!keys.has(key)) suppressedExecutions.delete(key); });
@@ -282,7 +291,7 @@
                 if (!item.id || !item.project_id || !item.task_id) return;
                 const task = item.category === 'chat' ? 'chat' : item.task_id;
                 if (suppressedThreads.has(threadKey(item.project_id, task)) || suppressedExecutions.has(runKey(item.project_id, item.id))) return;
-                ensure(item.id, item.project_id, task, '', item.started_at);
+                ensure(item.id, item.project_id, task, '', item.started_at, item.history_order);
                 sweep();
             });
             // Absence is not completion: final bytes arrive on the execution stream.

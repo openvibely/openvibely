@@ -41,27 +41,27 @@ const executionOutputSelectAlias = `COALESCE(e.output, '') || COALESCE((
 	), '')`
 
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, reasoning_content, error_message,
-		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
+		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END`
 
 // executionSelectColumnsLight omits reasoning_content and diff_output (substituting
 // empty strings) so list/pagination queries don't load potentially very large blobs.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
 // resulting Execution will have ReasoningContent == "" and DiffOutput == "".
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, '' AS reasoning_content, error_message,
-		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
+		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END`
 
 const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, e.reasoning_content, e.error_message,
-			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END`
 
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, '' AS reasoning_content, e.error_message,
-			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END`
 
 const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
 
 // taskThreadExecutionSelectColumns contains only the fields needed to render a
 // runtime task-thread transcript. It deliberately omits execution metadata and
 // detail-only payloads that the formatter never reads.
-const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, ` + executionOutputSelect + `, error_message, is_followup, started_at`
+const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, ` + executionOutputSelect + `, error_message, is_followup, started_at, rowid`
 
 const taskExecutionChronologicalPageSQL = `SELECT ` + taskThreadExecutionSelectColumns + ` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?`
 
@@ -78,7 +78,7 @@ func scanExecutionRow(scanner interface {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
 		&e.Output, &e.ReasoningContent, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
-		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
+		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt, &e.HistoryOrder)
 	return e, err
 }
 
@@ -86,7 +86,7 @@ func scanTaskThreadExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (models.Execution, error) {
 	var e models.Execution
-	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt)
+	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt, &e.HistoryOrder)
 	return e, err
 }
 
@@ -301,8 +301,8 @@ func createExecutionWithExecutor(ctx context.Context, exec sqlExecutor, e *model
 	err := exec.QueryRowContext(ctx,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
 			 VALUES (COALESCE(NULLIF(?, ''), lower(hex(randomblob(16)))), ?, NULLIF(?, ''), ?, ?, ?, ?)
-			 RETURNING id, started_at`,
-		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt)
+			 RETURNING id, started_at, rowid`,
+		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt, &e.HistoryOrder)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
 	}
@@ -405,8 +405,8 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
 			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
 			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
-			RETURNING id, started_at`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
-			Scan(&e.ID, &e.StartedAt); err != nil {
+			RETURNING id, started_at, rowid`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
+			Scan(&e.ID, &e.StartedAt, &e.HistoryOrder); err != nil {
 			return fmt.Errorf("creating direct task follow-up execution: %w", err)
 		}
 		if e.IsFollowup {
@@ -1879,9 +1879,9 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 // ListLiveExecutions is an instance-scoped discovery projection. Output is sent
 // only by the authorized, offset-based execution WebSocket subscription.
 func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveExecution, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT e.id, e.task_id, t.project_id, t.category, e.started_at
+	rows, err := r.db.QueryContext(ctx, `SELECT e.id, e.task_id, t.project_id, t.category, e.started_at, CASE WHEN t.category = 'chat' THEN e.history_order ELSE e.rowid END
  FROM executions e JOIN tasks t ON t.id = e.task_id
- WHERE e.status IN ('queued', 'running') ORDER BY e.started_at, e.id`)
+ WHERE e.status IN ('queued', 'running') ORDER BY e.started_at, CASE WHEN t.category = 'chat' THEN e.history_order ELSE e.rowid END`)
 	if err != nil {
 		return nil, fmt.Errorf("listing live executions: %w", err)
 	}
@@ -1889,7 +1889,7 @@ func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveEx
 	result := make([]models.LiveExecution, 0)
 	for rows.Next() {
 		var item models.LiveExecution
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.ProjectID, &item.Category, &item.StartedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.ProjectID, &item.Category, &item.StartedAt, &item.HistoryOrder); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

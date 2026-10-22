@@ -1630,7 +1630,7 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 		t.Fatal("terminal execution pair must be preserved across polling morphs")
 	}
 
-	running := models.Execution{ID: "running-1", Status: models.ExecRunning}
+	running := models.Execution{ID: "running-1", Status: models.ExecRunning, HistoryOrder: 9007199254740995, StartedAt: time.Date(2026, 10, 22, 1, 0, 0, 0, time.UTC)}
 	var runningHTML bytes.Buffer
 	if err := ChatExecutionPair(running, nil, []models.Execution{running}, 0, false, nil, "messages", "thread", "project-a").Render(context.Background(), &runningHTML); err != nil {
 		t.Fatalf("render running execution pair: %v", err)
@@ -1640,11 +1640,16 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 	}
 
 	var followupHTML bytes.Buffer
-	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil, "project-a").Render(context.Background(), &followupHTML); err != nil {
+	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil, "project-a", running).Render(context.Background(), &followupHTML); err != nil {
 		t.Fatalf("render live follow-up pair: %v", err)
 	}
 	if !strings.Contains(followupHTML.String(), `id="chat-execution-running-1"`) {
 		t.Fatal("live follow-up pair must use the same stable execution ID as polling markup")
+	}
+	for _, html := range []string{runningHTML.String(), followupHTML.String()} {
+		if !strings.Contains(html, `data-history-order="9007199254740995"`) || !strings.Contains(html, `data-started-at="2026-10-22T01:00:00Z"`) {
+			t.Fatal("page and fresh follow-up must carry exact server ordering metadata")
+		}
 	}
 }
 
