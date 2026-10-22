@@ -125,6 +125,21 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   }
   assert(Array.from(cache.runs.values()).filter(run=>run.task==='same-task').length===5&&!record('turn0')&&record('turn6'),'settled execution window was not bounded');
   cache.clear();assert(cache.runs.size===0&&cache.pages.size===0&&remote.closed&&cs.closed,'cleanup leaked subscriptions/data');
+  // Six 12 MiB estimates exceed the budget, but the retained five total 60 MiB.
+  // Prune the sixth record before accounting for idle bytes.
+  let oldestOutput;
+  for(let i=0;i<6;i++){
+   const listener=cache.execution('large-turn'+i,'p','',container);await tick();
+   const output=String(i).repeat(6*1024*1024);
+   if(i===0)oldestOutput=output;
+   streams.at(-1).emit('message',output);streams.at(-1).emit('done','completed');listener.close();now++;
+  }
+  assert(cache.runs.size===5&&!record('large-turn0')&&record('large-turn5'),'pruned output still counted toward byte budget and evicted the retained five');
+  cache.sweep();assert(cache.runs.size===5,'subsequent sweep evicted the retained five');
+  // A page can still hold a pruned source. Those bytes remain resident and must
+  // continue to count, rather than being subtracted merely because its run left.
+  cache.pages.set('older-shell',{threadKey:cache.threadKey('p','same-task'),time:now,html:'',sources:[{text:oldestOutput}],virtual:[]});
+  cache.sweep();assert(cache.runs.size===0&&cache.pages.size===0,'page-held pruned output was excluded from byte budget');
   navigator.sendBeacon('/result?value=pass');
  }catch(error){navigator.sendBeacon('/result?value='+encodeURIComponent(error.stack||error));}
  })();</script></body></html>`
