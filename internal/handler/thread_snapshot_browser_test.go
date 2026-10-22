@@ -332,6 +332,8 @@ window.addEventListener('load',async()=>{
    await fetch('/test/result?value=pass');return;
   }
   if(%t){
+   // Cached restoration must not depend on the stream's quiet-period deadline.
+   window._chatRenderMaxLiveDeferralMS=60000;
    await fetch('/test/start',{method:'POST'});
    const visible=()=>{const m=document.getElementById('task-thread-messages');return m&&getComputedStyle(m).visibility==='visible'&&m.textContent.includes('initial')&&m.textContent.includes('Earlier answer')};
    let returned=false;

@@ -3896,6 +3896,7 @@ templ ChatAutoScrollScript() {
 					messages.style.visibility = '';
 					messages.removeAttribute('data-transcript-hydrating');
 					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
+					if (window.releaseInitialTranscriptRender) window.releaseInitialTranscriptRender(messages);
 				});
 
 				function waitForImages() {
@@ -4855,8 +4856,18 @@ templ ChatAutoScrollScript() {
 		// Thinking: collapsible <details> with italic label and markdown content.
 			if (!window._chatContentRenderQueue) window._chatContentRenderQueue = [];
 			if (typeof window._chatContentRenderActive !== 'number') window._chatContentRenderActive = 0;
+			window.initialTranscriptRender = function(messages) {
+				if (!messages) return null;
+				if (!messages._initialTranscriptRender && messages.getAttribute && messages.getAttribute('data-transcript-hydrating') === 'true') {
+					messages._initialTranscriptRender = { initial: new Map(), pending: new Map() };
+				}
+				return messages._initialTranscriptRender;
+			};
 			window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches) {
 				if (!container) return Promise.resolve(false);
+				var initialMessages = container.closest && container.closest('#chat-messages, #task-thread-messages');
+				var initialRender = window.initialTranscriptRender(initialMessages);
+				if (initialRender && initialRender.initial.has(container)) return initialRender.initial.get(container);
 				var activeRequest = window._activeChatContentRender;
 				if (activeRequest && !activeRequest.container.isConnected && activeRequest.finish) activeRequest.finish(false, false, true);
 				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null, enqueuedAt: Date.now() };
@@ -4865,10 +4876,12 @@ templ ChatAutoScrollScript() {
 				request.sourceRevision = container.getAttribute('data-raw-revision') || container.getAttribute('data-raw-content');
 				function isCurrentRequest(queued) {
 					return queued.container._scheduledChatRender === queued && queued.container.isConnected &&
-						queued.sourceRevision === (queued.container.getAttribute('data-raw-revision') || queued.container.getAttribute('data-raw-content'));
+						(queued.initialRender || queued.sourceRevision === (queued.container.getAttribute('data-raw-revision') || queued.container.getAttribute('data-raw-content')));
 				}
 				container._scheduledChatRender = request;
 				var promise = new Promise(function(resolve) { request.resolve = resolve; });
+				request.initialRender = !!initialRender;
+				if (initialRender) initialRender.initial.set(container, promise);
 					window._chatContentRenderQueue.push(request);
 					function drain() {
 						if (window._chatContentRenderActive >= 1) return;
@@ -4883,7 +4896,7 @@ templ ChatAutoScrollScript() {
 						if (window._chatContentRenderQueue.length === 0) return;
 						var now = Date.now();
 					var oldestRequest = window._chatContentRenderQueue[0];
-					var maxDeferralRemaining = oldestRequest ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
+					var maxDeferralRemaining = oldestRequest && !oldestRequest.initialRender ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
 					if ((window._liveChatRenderActive || 0) > 0) {
 						if (maxDeferralRemaining > 0) {
 							clearTimeout(window._chatRenderResumeTimer);
@@ -5150,7 +5163,28 @@ templ ChatAutoScrollScript() {
 				}
 				return rendered !== false && container._incrementalChat === state && state.generation === generation;
 			};
+			// Finish the initial transcript (cached or refreshed) before applying deltas.
+			// Subscriptions keep collecting output; retain only the latest render per bubble.
+			window.releaseInitialTranscriptRender = function(messages) {
+				var restore = messages._initialTranscriptRender;
+				if (!restore) return;
+				delete messages._initialTranscriptRender;
+				restore.pending.forEach(function(update, container) {
+					if (!container.isConnected) return;
+					window.renderLiveChatContent(container, update.text, update.yield, update.final).catch(function() {
+						container.textContent = update.text;
+					});
+				});
+				restore.pending.clear();
+				restore.initial.clear();
+			};
 			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches, final) {
+				var initialMessages = container.closest && container.closest('#chat-messages, #task-thread-messages');
+				var initialRender = window.initialTranscriptRender(initialMessages);
+				if (initialRender) {
+					initialRender.pending.set(container, {text:textBuffer || '', yield:yieldBetweenBatches, final:final});
+					return window.scheduleChatContentRender(container, textBuffer, yieldBetweenBatches);
+				}
 				var renderRevision = window.setChatRawContent ? window.setChatRawContent(container, textBuffer || '') : (textBuffer || '');
 				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
 				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
