@@ -29,8 +29,8 @@ func TestRunningExecutionsDiscovery(t *testing.T) {
 	var items []models.LiveExecution
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &items))
 	require.ElementsMatch(t, []models.LiveExecution{
-		{ID: running.ID, TaskID: one.ID, ProjectID: p1.ID, Category: one.Category},
-		{ID: queued.ID, TaskID: two.ID, ProjectID: p2.ID, Category: models.CategoryChat},
+		{ID: running.ID, TaskID: one.ID, ProjectID: p1.ID, Category: one.Category, StartedAt: running.StartedAt.UTC()},
+		{ID: queued.ID, TaskID: two.ID, ProjectID: p2.ID, Category: models.CategoryChat, StartedAt: queued.StartedAt.UTC()},
 	}, items)
 	require.NotContains(t, rec.Body.String(), "private")
 	require.NoError(t, h.execRepo.Complete(t.Context(), running.ID, models.ExecCompleted, "final", "", 0, 0))

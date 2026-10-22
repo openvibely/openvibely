@@ -9,7 +9,7 @@
     const suppressedThreads = new Set(), suppressedExecutions = new Set();
     const ttl = 30 * 60 * 1000, maxBytes = 64 * 1024 * 1024, maxThreads = 20;
     const encoder = new TextEncoder();
-    let discovery = null, stopped = false, sweepTimer = null, nextOrder = 0;
+    let discovery = null, stopped = false, sweepTimer = null;
     const runKey = (project, id) => JSON.stringify([project, id]);
     const threadKey = (project, task) => JSON.stringify([project, task]);
     function projectID(value) {
@@ -29,6 +29,18 @@
         runs.forEach(run => { if (group(run) === key) time = Math.max(time || 0, run.time); });
         pages.forEach(page => { if (page.threadKey === key) time = Math.max(time || 0, page.time); });
         return time ?? Date.now();
+    }
+    // Normalize RFC3339 timestamps to UTC while preserving the fractional
+    // precision used by the server (Date.parse alone truncates to milliseconds).
+    function executionTime(value) {
+        const millis = Date.parse(value);
+        if (!Number.isFinite(millis)) return null;
+        const fraction = String(value).match(/\.(\d+)(?:Z|[+-]\d\d:\d\d)$/)?.[1] || '';
+        return new Date(millis).toISOString().slice(0, 19) + '.' + fraction.padEnd(9, '0').slice(0, 9);
+    }
+    function newestFirst(a, b) {
+        if (a.startedAt !== b.startedAt) return a.startedAt > b.startedAt ? -1 : 1;
+        return a.id === b.id ? 0 : a.id > b.id ? -1 : 1;
     }
     function discard(run) {
         if (run.live) suppressedExecutions.add(run.key);
@@ -128,13 +140,15 @@
         stream.addEventListener('done', event => finish('done', event));
         stream.addEventListener('error', event => finish('error', event));
     }
-    function ensure(id, project, task, seed) {
-        const key = runKey(project, id);
+    function ensure(id, project, task, seed, startedAt) {
+        const key = runKey(project, id), timestamp = executionTime(startedAt);
         let run = runs.get(key);
         if (!run) {
             const output = seed || '';
             run = {key, id, project, task: task || '', output, offset: encoder.encode(output).length,
-                version: 0, time: retainedTime(project, task || id), order: ++nextOrder, live: false, stream: null, terminal: null, views: new Set()};
+                version: 0, time: retainedTime(project, task || id),
+                // Optimistic rows lack server metadata until discovery catches up.
+                startedAt: timestamp || executionTime(new Date(Date.now()).toISOString()), live: false, stream: null, terminal: null, views: new Set()};
             runs.set(key, run);
         } else if (task) run.task = task;
         if (task) {
@@ -145,6 +159,7 @@
                 if (page.threadKey === group(run) && !page.executionIDs?.includes(id)) pages.delete(key);
             });
         }
+        if (timestamp) run.startedAt = timestamp;
         start(run);
         return run;
     }
@@ -160,7 +175,8 @@
         // keep the HTTP seed visible until replay reaches its actual byte offset.
         suppressedThreads.delete(threadKey(project, task || id));
         suppressedExecutions.delete(runKey(project, id));
-        const run = ensure(id, project, task, offset === seedBytes ? seed : '');
+        const startedAt = container?.closest('[data-execution-pair]')?.getAttribute('data-started-at');
+        const run = ensure(id, project, task, offset === seedBytes ? seed : '', startedAt);
         if (container) container.setAttribute('data-live-snapshot-key', run.key);
         run.time = Date.now();
         const view = {listeners: {}, offset, version: run.version,
@@ -202,7 +218,7 @@
         });
         groups.forEach(g => {
             if (!g.pinned) {
-                const ordered = g.runs.map(key => runs.get(key)).sort((a,b) => b.order-a.order);
+                const ordered = g.runs.map(key => runs.get(key)).sort(newestFirst);
                 ordered.slice(5).forEach(discard);
             }
             g.runs = g.runs.filter(key => runs.has(key));
@@ -251,7 +267,12 @@
             const keys = new Set(), threads = new Set();
             active.forEach(item => {
                 if (!item.id || !item.project_id || !item.task_id) return;
-                keys.add(runKey(item.project_id, item.id));
+                const key = runKey(item.project_id, item.id);
+                keys.add(key);
+                // Update previously opened records before admitting/pruning any
+                // older discoveries, even if their DOM lacked a timestamp.
+                const run = runs.get(key), timestamp = executionTime(item.started_at);
+                if (run && timestamp) run.startedAt = timestamp;
                 threads.add(threadKey(item.project_id, item.category === 'chat' ? 'chat' : item.task_id));
             });
             suppressedExecutions.forEach(key => { if (!keys.has(key)) suppressedExecutions.delete(key); });
@@ -261,7 +282,7 @@
                 if (!item.id || !item.project_id || !item.task_id) return;
                 const task = item.category === 'chat' ? 'chat' : item.task_id;
                 if (suppressedThreads.has(threadKey(item.project_id, task)) || suppressedExecutions.has(runKey(item.project_id, item.id))) return;
-                ensure(item.id, item.project_id, task, '');
+                ensure(item.id, item.project_id, task, '', item.started_at);
                 sweep();
             });
             // Absence is not completion: final bytes arrive on the execution stream.
