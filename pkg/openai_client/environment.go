@@ -7,10 +7,10 @@ import (
 	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
-func ensureExecutionEnvironment(items []any, dir string) []any {
+func postCompactionContextWindow(items []any) (start, end int) {
 	// Keep pending configuration updates trailing so the caller can replace
 	// them before appending the next user request.
-	end := len(items)
+	end = len(items)
 	for end > 0 {
 		item, ok := items[end-1].(map[string]any)
 		if !ok || item["type"] != "configuration_update" {
@@ -18,13 +18,17 @@ func ensureExecutionEnvironment(items []any, dir string) []any {
 		}
 		end--
 	}
-	start := 0
 	for i := end - 1; i >= 0; i-- {
 		if item, ok := items[i].(map[string]any); ok && item["type"] == "compaction" {
 			start = i + 1
 			break
 		}
 	}
+	return start, end
+}
+
+func ensureExecutionEnvironment(items []any, dir string) []any {
+	start, end := postCompactionContextWindow(items)
 	withEnvironment := executionenv.Ensure(items[start:end], dir, func(item any) (string, string) {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -66,20 +70,7 @@ func ensureCompletionsHistoryEnvironment(items []CompletionsHistoryMessage, dir 
 // Restore references after the last opaque compaction item; older visible
 // messages may no longer be available to the model.
 func ensureAttachmentContext(ctx context.Context, items []any) []any {
-	start, end := 0, len(items)
-	for end > 0 {
-		m, ok := items[end-1].(map[string]any)
-		if !ok || m["type"] != "configuration_update" {
-			break
-		}
-		end--
-	}
-	for i := end - 1; i >= 0; i-- {
-		if m, ok := items[i].(map[string]any); ok && m["type"] == "compaction" {
-			start = i + 1
-			break
-		}
-	}
+	start, end := postCompactionContextWindow(items)
 	restored := managedcontext.Ensure(ctx, items[start:end], func(item any) (string, string) {
 		m, ok := item.(map[string]any)
 		if !ok {

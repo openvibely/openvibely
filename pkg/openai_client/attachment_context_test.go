@@ -2,9 +2,42 @@ package openaiclient
 
 import (
 	"context"
-	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"reflect"
 	"testing"
+
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
+
+func TestAttachmentAndManagedContextRestoreAfterLatestCompaction(t *testing.T) {
+	ctx := managedcontext.With(context.Background(), "document_word: Word documents")
+	ctx = attachmentcontext.With(ctx, "/uploads/report.docx")
+	items := []any{
+		map[string]any{"type": "message", "role": "user", "content": managedcontext.Text(ctx) + "\n" + attachmentcontext.Text(ctx)},
+		map[string]any{"type": "compaction", "encrypted_content": "older summary"},
+		map[string]any{"type": "message", "role": "user", "content": "stale context"},
+		map[string]any{"type": "compaction", "encrypted_content": "latest summary"},
+		map[string]any{"type": "message", "role": "user", "content": "current question"},
+		map[string]any{"type": "configuration_update"},
+	}
+
+	got := ensureAttachmentContext(ctx, items)
+	if len(got) != 8 || !reflect.DeepEqual(got[:4], items[:4]) {
+		t.Fatalf("history prefix or compaction marker changed: %#v", got)
+	}
+	if got[4].(map[string]any)["content"] != managedcontext.Text(ctx) {
+		t.Fatalf("managed context was not restored in the current window: %#v", got)
+	}
+	if got[5].(map[string]any)["content"] != attachmentcontext.Text(ctx) {
+		t.Fatalf("attachment context was not restored in the current window: %#v", got)
+	}
+	if !reflect.DeepEqual(got[6:], items[4:]) {
+		t.Fatalf("current user message or configuration update moved: %#v", got)
+	}
+	if repeated := ensureAttachmentContext(ctx, got); !reflect.DeepEqual(repeated, got) {
+		t.Fatalf("context duplicated on repeated restoration: %#v", repeated)
+	}
+}
 
 func TestAttachmentContextAfterNativeCompaction(t *testing.T) {
 	ctx := attachmentcontext.With(context.Background(), "/uploads/report.docx")
