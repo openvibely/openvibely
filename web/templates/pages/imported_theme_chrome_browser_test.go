@@ -122,7 +122,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 					browser.waitFor(theme.ID+" chat surfaces share card shadow", `(function(){var c=getComputedStyle(document.querySelector('#fixture-settings-card')).boxShadow;return String(c!=='none'&&['#fixture-bubble','#fixture-composer'].every(function(s){return getComputedStyle(document.querySelector(s)).boxShadow===c;}));})()`, "true")
 				}
 				browser.waitFor(theme.ID+" preserves default toggle geometry and fading", `window.toggleGeometry() === window.originalToggleGeometry ? 'true' : window.toggleGeometry() + ' expected ' + window.originalToggleGeometry`, "true")
-				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" && theme.ID != "openvibely-dark-flat" && theme.ID != "openvibely-dark-flat-navstep" {
+				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" {
 					browser.waitFor(theme.ID+" consumes dedicated toggle colors", `JSON.stringify(['.theme-toggle-pill','.theme-toggle-thumb','.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'moon' : 'sun'),'.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')].map(function(selector, i) { var probe = document.getElementById('probe'); probe.style.color = 'var(--ov-mode-'+['track','thumb','active','inactive'][i]+')'; return getComputedStyle(document.querySelector(selector))[i < 2 ? 'backgroundColor' : 'color'] === getComputedStyle(probe).color; }))`, "[true,true,true,true]")
 				}
 			}
@@ -135,23 +135,15 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			window.matches = function(selector, property, value) { var got = window.computed(selector, property); var want = window.themeColor(value, property); return got === want ? 'ok' : got + ' != ' + want; };
 			'ok'`)
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
-		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark-flat');'ok'`)
-		browser.waitFor("flat sidebar matches cards", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('#fixture-settings-card', 'backgroundColor'))`, "true")
-		browser.waitFor("flat sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
-		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
-			browser.waitFor("flat "+selector+" matches settings card", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.backgroundColor===b.backgroundColor&&a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
-		}
-		browser.waitFor("flat retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
-			browser.waitFor("flat "+selector+" has no shadow", `window.computed('`+selector+`', 'boxShadow')`, "none")
-		}
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default dark retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#1d232a"}, {"#fixture-stats", "#1d232a"}, {"#fixture-input", "#262b33"}, {"#fixture-bubble", "#262b33"}, {"#fixture-composer", "#262b33"}, {"#fixture-menu", "#262b33"}} {
-			browser.waitFor("default dark "+step.selector+" ladder step", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
+		browser.waitFor("default dark sidebar matches cards", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('#fixture-settings-card', 'backgroundColor'))`, "true")
+		browser.waitFor("default dark sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
+		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#1d232a"}, {"#fixture-stats", "#1d232a"}, {"#fixture-menu", "#1d232a"}, {"#fixture-bubble", "#22272e"}, {"#fixture-composer", "#22272e"}} {
+			browser.waitFor("default dark "+step.selector+" surface", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
 		}
-		for _, selector := range []string{"#fixture-bubble", "#fixture-composer", "#fixture-menu"} {
-			browser.waitFor("default dark "+selector+" has no shadow", `window.computed('`+selector+`', 'boxShadow')`, "none")
+		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
+			browser.waitFor("default dark "+selector+" uses card outline without shadow", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default sidebar restored", `window.near('#sidebar', 'backgroundColor', '#1d232a')`, "ok")
@@ -383,7 +375,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-light');'ok'`)
 		browser.waitFor("native light task column matches title bar", `String(window.computed('#fixture-column', 'backgroundColor') === window.computed('#desktop-project-titlebar', 'backgroundColor'))`, "true")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
-		browser.waitFor("native theme menu uses chat elevation step", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(38, 43, 51)")
+		browser.waitFor("native theme menu uses default surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(29, 35, 42)")
 		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")
 		for _, property := range []string{"backgroundColor", "borderTopColor"} {
 			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")

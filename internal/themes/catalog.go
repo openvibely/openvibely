@@ -194,28 +194,7 @@ func OpenVibelyThemes() []Theme {
 	return []Theme{
 		openVibelyDarkTheme(),
 		openVibelyLightTheme(),
-		openVibelyFlatTheme(),
-		openVibelyFlatNavStepTheme(),
 	}
-}
-
-// Temporary audit variant: Dark Flat with chat bubbles and composer one step above the sidebar.
-func openVibelyFlatNavStepTheme() Theme {
-	theme := openVibelyFlatTheme()
-	theme.ID = "openvibely-dark-flat-navstep"
-	theme.Name = "OpenVibely Dark Flat (Nav Step)"
-	theme.SearchText = theme.Name + " dark experimental flat outlined nav step"
-	return theme
-}
-
-// The flat variant retains native dark styling with flat, bordered chat surfaces.
-func openVibelyFlatTheme() Theme {
-	theme := openVibelyDarkTheme()
-	theme.ID = "openvibely-dark-flat"
-	theme.Name = "OpenVibely Dark Flat"
-	theme.Source = "OpenVibely experimental"
-	theme.SearchText = theme.Name + " dark experimental flat outlined"
-	return theme
 }
 
 func CatalogJSON() string {

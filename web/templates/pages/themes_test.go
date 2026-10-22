@@ -35,7 +35,6 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 	for _, fragment := range []string{
 		`data-theme-id="` + themes.OpenVibelyDarkThemeID + `"`,
 		`data-theme-id="` + themes.OpenVibelyLightThemeID + `"`,
-		`data-theme-id="openvibely-dark-flat"`,
 		`OpenVibely Dark`,
 		`OpenVibely Light`,
 		`OpenVibely built-in`,
@@ -43,6 +42,9 @@ func TestThemesContentRendersCatalogCardsAndSearchMetadata(t *testing.T) {
 		if !strings.Contains(html, fragment) {
 			t.Fatalf("rendered Themes page missing OpenVibely default fragment %q", fragment)
 		}
+	}
+	if strings.Contains(html, `data-theme-id="openvibely-dark-flat`) {
+		t.Fatal("Themes page must not list removed OpenVibely Dark Flat variants")
 	}
 	if !strings.Contains(html, `data-page-header`) || strings.Contains(html, "Choose an OpenVibely") {
 		t.Fatal("Themes must use the shared page header without a subtitle")
