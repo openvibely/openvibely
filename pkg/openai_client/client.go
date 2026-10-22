@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/llm/tooloutput"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -1281,7 +1282,7 @@ func openAIFormatToolResultMarker(name, status, output string) string {
 	if strings.TrimSpace(status) == "" {
 		status = "done"
 	}
-	return fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", openAICanonicalToolName(name), status, preview)
+	return fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", openAICanonicalToolName(name), status, tooloutput.Encode(preview))
 }
 
 func openAIIsMarkerChunk(text string) bool {
