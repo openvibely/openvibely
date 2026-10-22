@@ -13,6 +13,35 @@ import (
 	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
+func TestPostCompactionContextWindow(t *testing.T) {
+	message := func(content string) any {
+		return map[string]any{"type": "message", "role": "user", "content": content}
+	}
+	compaction := func() any { return map[string]any{"type": "compaction"} }
+	configurationUpdate := func() any { return map[string]any{"type": "configuration_update"} }
+
+	tests := []struct {
+		name      string
+		items     []any
+		wantStart int
+		wantEnd   int
+	}{
+		{name: "no compaction", items: []any{message("one"), message("two")}, wantStart: 0, wantEnd: 2},
+		{name: "trailing configuration updates", items: []any{message("one"), configurationUpdate(), configurationUpdate()}, wantStart: 0, wantEnd: 1},
+		{name: "latest compaction", items: []any{message("old"), compaction(), message("stale"), compaction(), message("current"), configurationUpdate()}, wantStart: 4, wantEnd: 5},
+		{name: "compaction followed only by configuration updates", items: []any{message("old"), compaction(), configurationUpdate()}, wantStart: 2, wantEnd: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end := postCompactionContextWindow(tt.items)
+			if start != tt.wantStart || end != tt.wantEnd {
+				t.Fatalf("window = [%d:%d], want [%d:%d]", start, end, tt.wantStart, tt.wantEnd)
+			}
+		})
+	}
+}
+
 func TestEnvironmentOnResponsesAndCompletionsWire(t *testing.T) {
 	dir := t.TempDir()
 	items := ensureExecutionEnvironment([]any{map[string]any{"type": "message", "role": "user", "content": "run tests"}}, dir)
@@ -120,6 +149,37 @@ func TestEnvironmentPersistsAcrossToolDisabledTurns(t *testing.T) {
 				t.Fatalf("raw request contains extra context: %#v", messages)
 			}
 		})
+	}
+}
+
+func TestEnvironmentRestoredAfterLatestCompaction(t *testing.T) {
+	dir := t.TempDir()
+	items := []any{
+		map[string]any{"role": "user", "content": executionenv.Context(dir)},
+		map[string]any{"role": "user", "content": "older question"},
+		map[string]any{"type": "compaction", "encrypted_content": "older summary"},
+		map[string]any{"role": "user", "content": executionenv.Context(dir)},
+		map[string]any{"role": "user", "content": "recent question"},
+		map[string]any{"type": "compaction", "encrypted_content": "latest summary"},
+		map[string]any{"type": "configuration_update", "reasoning": map[string]any{"effort": "high"}},
+		map[string]any{"type": "configuration_update", "reasoning": map[string]any{"effort": "low"}},
+	}
+
+	got := ensureExecutionEnvironment(items, dir)
+	if len(got) != 9 {
+		t.Fatalf("restored history length = %d, want 9: %#v", len(got), got)
+	}
+	if !reflect.DeepEqual(got[:6], items[:6]) {
+		t.Fatalf("history before restored environment changed: %#v", got[:6])
+	}
+	if got[6].(map[string]any)["content"] != executionenv.Context(dir) {
+		t.Fatalf("environment was not restored after the latest compaction: %#v", got)
+	}
+	if !reflect.DeepEqual(got[7:], items[6:]) {
+		t.Fatalf("configuration updates moved: %#v", got)
+	}
+	if repeated := ensureExecutionEnvironment(got, dir); len(repeated) != len(got) {
+		t.Fatalf("environment duplicated after latest compaction: %#v", repeated)
 	}
 }
 
