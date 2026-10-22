@@ -33,10 +33,17 @@ that document. Missing IDs in discovery are not completion: execution streams
 must deliver their final bytes and terminal event first. Transport capacity
 limits still apply; a refused subscription is retried by discovery.
 
-Running or viewed entries are pinned. Idle groups use the existing 30-minute,
-20-thread and 64 MiB estimated-size limits, with at most five settled execution
-records per thread. Active data is outside that idle budget, so many parallel
-runs or large outputs can use more memory. Cache storage is not persisted to disk.
+Background running and finished snapshots share the existing 20-thread and
+64 MiB estimated-size budget, with at most five execution records per thread.
+Only the displayed thread (or a mounted execution listener) is exempt while in
+use. Idle expiry is 30 minutes after viewing/leaving, or initial admission for
+never-viewed threads. Streaming, completion and discovery do not renew that age.
+Eviction closes background subscriptions and releases their data; backend tasks
+continue running. Discovery remembers only evicted active identifiers so it does
+not immediately reload them. Opening the thread explicitly admits it again using
+current HTTP output and a fresh subscription. Suppression identifiers are removed
+when discovery no longer lists that active work. Cache storage is not persisted
+to disk.
 A new execution missing from a saved page invalidates that shell; the normal HTTP
 load supplies its markup while output is already retained. HTTP remains necessary
 for page/composer metadata and authoritative history reconciliation.
