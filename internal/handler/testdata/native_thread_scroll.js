@@ -107,12 +107,30 @@
             if (!range.startContainer.isConnected) throw Error('Reading text detached during native scroll');
             const shift = range.getBoundingClientRect().top - top - expected;
             // Allow event/frame coalescing, but not a page-sized offset overwrite.
-            if (Math.abs(shift) > 10) throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame + ' '+JSON.stringify({
-                expected,actual:range.getBoundingClientRect().top-top,before,after:m.scrollTop,
-                startInput,input,startReachableInput,reachableInput,events,loaded,burstDone:!!window._nativeBurstDone,
-                restoring:m.dataset.earlierAnchorRestoring,hydrating:m.dataset.transcriptHydrating,
-                height:m.scrollHeight,viewport:m.clientHeight,webkit,wheelScale
-            }));
+            if (Math.abs(shift) > 10) {
+                const failure = {
+                    expected,actual:range.getBoundingClientRect().top-top,before,after:m.scrollTop,
+                    startInput,input,startReachableInput,reachableInput,events,loaded,burstDone:!!window._nativeBurstDone,
+                    restoring:m.dataset.earlierAnchorRestoring,hydrating:m.dataset.transcriptHydrating,
+                    height:m.scrollHeight,viewport:m.clientHeight,webkit,wheelScale
+                };
+                // Preserve the failure, but observe the SAME text in subsequent
+                // frames. WebView2 can deliver wheel events before the compositor
+                // applies their movement. This trace distinguishes catch-up from
+                // a persistent layout displacement without relaxing the assertion.
+                const followingFrames = [];
+                const failedAt = performance.now();
+                for (let sample=0;sample<12;sample++) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                    followingFrames.push({ms:performance.now()-failedAt,
+                        connected:range.startContainer.isConnected,
+                        actual:range.startContainer.isConnected ? range.getBoundingClientRect().top-top : null,
+                        input:input-startInput,reachableInput:reachableInput-startReachableInput,
+                        scrollTop:m.scrollTop,height:m.scrollHeight,events,
+                        restoring:m.dataset.earlierAnchorRestoring,burstDone:!!window._nativeBurstDone});
+                }
+                throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame + ' '+JSON.stringify({...failure,followingFrames}));
+            }
         }
         if (!loaded && m.querySelectorAll(':scope > [data-execution-pair]').length > 5) {
             loaded = true;
