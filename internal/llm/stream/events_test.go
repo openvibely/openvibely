@@ -2,7 +2,6 @@ package stream
 
 import (
 	"context"
-	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +81,7 @@ func TestWriteEvent_ToolResultProtectsNestedTranscript(t *testing.T) {
 		if strings.Count(got, "[/Tool]") != 1 || strings.Count(got, "[Tool ") != 1 {
 			t.Fatalf("nested output escaped the result: %q", got)
 		}
-		if !strings.Contains(got, "tool-output-base64:"+base64.StdEncoding.EncodeToString([]byte(output))) {
+		if !strings.Contains(got, "&#91;Tool skill_view done]\npending\n&#91;/Tool]\nErrorMessage: TokensUsed:0\n--- FAIL: test") {
 			t.Fatalf("missing encoded output: %q", got)
 		}
 	}

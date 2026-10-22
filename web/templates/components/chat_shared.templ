@@ -4961,7 +4961,7 @@ templ ChatAutoScrollScript() {
 
 			var thinkingPattern = /^[\t ]*\[Thinking\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)(?:\[\/Thinking\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?|(?![\s\S]))/gm;
 			var toolUsingPattern = /^[\t ]*\[Using tool:\s*([^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
-				var toolResultBlockPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error)\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+				var toolResultBlockPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error)\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)(?:\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?|(?![\s\S]))/gm;
 				var toolResultLegacyPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
 
 					var allMatches = [];
@@ -4984,7 +4984,10 @@ templ ChatAutoScrollScript() {
 							}
 							closer.lastIndex = opener.lastIndex;
 							end = closer.exec(text);
-							if (!end) break;
+							if (!end) {
+								ranges.push({start: block.index, end: text.length});
+								break;
+							}
 							ranges.push({start: block.index, end: closer.lastIndex});
 							opener.lastIndex = closer.lastIndex;
 						}
@@ -5018,10 +5021,6 @@ templ ChatAutoScrollScript() {
 					}
 					function stripPreparedStatus() {
 						if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer, rawCodeRanges);
-						return true;
-					}
-					function stripPreparedArtifacts() {
-						textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
 						return true;
 					}
 					function prepareToolBlockRanges() {
@@ -5276,7 +5275,6 @@ templ ChatAutoScrollScript() {
 						protectInitialToolBlocks,
 						stripPreparedStatus,
 						normalizePreparedText,
-						stripPreparedArtifacts,
 						prepareToolBlockRanges,
 						prepareCodeRanges,
 					collectThinkingMatches,
@@ -5547,14 +5545,9 @@ templ ChatAutoScrollScript() {
 
 				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
 				// Decode only after transcript parsing, never before marker matching.
-				if (outputText.indexOf('tool-output-base64:') === 0) {
-					try {
-						var toolPayload = atob(outputText.substring('tool-output-base64:'.length));
-						var toolBytes = new Uint8Array(toolPayload.length);
-						for (var ti = 0; ti < toolPayload.length; ti++) toolBytes[ti] = toolPayload.charCodeAt(ti);
-						outputText = new TextDecoder().decode(toolBytes).trim();
-					} catch (_) {}
-				}
+				outputText = outputText.replace(/&(?:amp|#91);/g, function(entity) {
+					return entity === '&amp;' ? '&' : '[';
+				});
 				var webSearchSources = [];
 				if (window.normalizeStreamingToolName(seg.name) === 'web_search' && outputText.indexOf('web-search-json:') === 0) {
 					try {
