@@ -2669,96 +2669,114 @@ func TestHandler_MergeTaskBranch_TaskCardFastForwardFailureRefreshesCardWithToas
 	}
 }
 
-func TestHandler_MergeTaskBranch_ChangesTabFastForwardAdvancesTargetAndRefreshesChanges(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
-	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
-	ctx := context.Background()
+func TestHandler_MergeTaskBranch_RefreshesOwningSurfaceOnce(t *testing.T) {
+	for _, mergeType := range []string{"ff", "merge", "squash"} {
+		for _, source := range []string{"changes_tab", "worktree"} {
+			t.Run(mergeType+"/"+source, func(t *testing.T) {
 
-	repoDir := createHandlerTestGitRepo(t)
-	targetBranch := service.GetCurrentBranch(repoDir)
+				h, e, _ := setupTestHandler(t)
+				h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+				ctx := context.Background()
 
-	project := &models.Project{
-		Name: "Fast Forward Project", RepoPath: repoDir, IsDefault: true,
-	}
-	if err := h.projectSvc.Create(ctx, project); err != nil {
-		t.Fatal(err)
-	}
+				repoDir := createHandlerTestGitRepo(t)
+				targetBranch := service.GetCurrentBranch(repoDir)
 
-	task := &models.Task{
-		ProjectID:         project.ID,
-		Title:             "Changes tab ff",
-		Prompt:            "test",
-		Category:          models.CategoryCompleted,
-		Status:            models.StatusCompleted,
-		MergeTargetBranch: targetBranch,
-		MergeStatus:       models.MergeStatusPending,
-	}
-	if err := h.taskRepo.Create(ctx, task); err != nil {
-		t.Fatal(err)
-	}
+				project := &models.Project{
+					Name: "Fast Forward Project", RepoPath: repoDir, IsDefault: true,
+				}
+				if err := h.projectSvc.Create(ctx, project); err != nil {
+					t.Fatal(err)
+				}
 
-	wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task.WorktreePath = wtPath
-	task.WorktreeBranch = branchName
-	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
-		t.Fatal(err)
-	}
+				task := &models.Task{
+					ProjectID:         project.ID,
+					Title:             "Changes tab ff",
+					Prompt:            "test",
+					Category:          models.CategoryCompleted,
+					Status:            models.StatusCompleted,
+					MergeTargetBranch: targetBranch,
+					MergeStatus:       models.MergeStatusPending,
+				}
+				if err := h.taskRepo.Create(ctx, task); err != nil {
+					t.Fatal(err)
+				}
 
-	if err := os.WriteFile(filepath.Join(wtPath, "ff_from_changes.txt"), []byte("merged by changes tab ff\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.CommitWorktreeChanges(wtPath, "ff change"); err != nil {
-		t.Fatal(err)
-	}
-	branchTip := runGit(t, repoDir, "rev-parse", branchName)
+				wtPath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				task.WorktreePath = wtPath
+				task.WorktreeBranch = branchName
+				if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, wtPath, branchName); err != nil {
+					t.Fatal(err)
+				}
 
-	form := url.Values{
-		"merge_type":   {"ff"},
-		"merge_source": {"changes_tab"},
-	}
-	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
-	req.Header.Set("HX-Request", "true")
-	rec := worktreeExecute(e, req)
+				if err := os.WriteFile(filepath.Join(wtPath, "ff_from_changes.txt"), []byte("merged by changes tab ff\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := service.CommitWorktreeChanges(wtPath, "ff change"); err != nil {
+					t.Fatal(err)
+				}
+				branchTip := runGit(t, repoDir, "rev-parse", branchName)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := runGit(t, repoDir, "rev-parse", targetBranch); got != branchTip {
-		t.Fatalf("expected %s to fast-forward to task branch tip %s, got %s", targetBranch, branchTip, got)
-	}
-	updated, err := h.taskRepo.GetByID(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.MergeStatus != models.MergeStatusMerged {
-		t.Fatalf("expected merge_status merged, got %s", updated.MergeStatus)
-	}
-	trigger := rec.Header().Get("HX-Trigger")
-	var triggerData map[string]any
-	if err := json.Unmarshal([]byte(trigger), &triggerData); err != nil {
-		t.Fatalf("expected valid HX-Trigger JSON, got %q: %v", trigger, err)
-	}
-	if triggerData["refreshChanges"] != true {
-		t.Fatalf("expected refreshChanges trigger, got %q", trigger)
-	}
-	if _, ok := triggerData["showToast"]; ok {
-		t.Fatalf("merge success must not emit legacy showToast trigger, got %q", trigger)
-	}
-	toast, ok := triggerData["openvibelyToast"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected canonical success toast trigger, got %q", trigger)
-	}
-	if toast["message"] != "Merged locally into "+targetBranch || toast["status"] != "completed" || toast["task_id"] != task.ID {
-		t.Fatalf("unexpected merge success toast payload: %#v", toast)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "Worktree Changes") {
-		t.Fatalf("expected changes-tab partial response, got %s", body)
-	}
-	if strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Fast-forward only") {
-		t.Fatalf("expected local merge actions hidden after successful ff merge, got %s", body)
+				form := url.Values{
+					"merge_type":   {mergeType},
+					"merge_source": {source},
+				}
+				req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+				req.Header.Set("HX-Request", "true")
+				rec := worktreeExecute(e, req)
+
+				if rec.Code != http.StatusOK {
+					t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+				}
+				if got := runGit(t, repoDir, "rev-parse", targetBranch); mergeType == "ff" && got != branchTip {
+					t.Fatalf("expected %s to fast-forward to task branch tip %s, got %s", targetBranch, branchTip, got)
+				}
+				updated, err := h.taskRepo.GetByID(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mergeType == "ff" && updated.MergeStatus != models.MergeStatusMerged {
+					t.Fatalf("expected merge_status merged, got %s", updated.MergeStatus)
+				}
+				if got := runGit(t, repoDir, "show", targetBranch+":ff_from_changes.txt"); got != "merged by changes tab ff" {
+					t.Fatalf("merge did not land task content on target: %q", got)
+				}
+				trigger := rec.Header().Get("HX-Trigger")
+				var triggerData map[string]any
+				if err := json.Unmarshal([]byte(trigger), &triggerData); err != nil {
+					t.Fatalf("expected valid HX-Trigger JSON, got %q: %v", trigger, err)
+				}
+				if source == "changes_tab" {
+					if _, exists := triggerData["refreshChanges"]; exists {
+						t.Fatalf("Changes response already contains the panel; extra refresh duplicates its swap: %q", trigger)
+					}
+				} else if triggerData["refreshChanges"] != true {
+					t.Fatalf("worktree-panel merge must still refresh Changes: %q", trigger)
+				}
+				if _, ok := triggerData["showToast"]; ok {
+					t.Fatalf("merge success must not emit legacy showToast trigger, got %q", trigger)
+				}
+				toast, ok := triggerData["openvibelyToast"].(map[string]any)
+				if !ok {
+					t.Fatalf("expected canonical success toast trigger, got %q", trigger)
+				}
+				if toast["message"] != "Merged locally into "+targetBranch || toast["status"] != "completed" || toast["task_id"] != task.ID {
+					t.Fatalf("unexpected merge success toast payload: %#v", toast)
+				}
+				body := rec.Body.String()
+				if source == "changes_tab" && !strings.Contains(body, "Worktree Changes") {
+					t.Fatalf("expected changes-tab partial response, got %s", body)
+				}
+				if mergeType == "ff" && source == "changes_tab" && (strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Fast-forward only")) {
+					t.Fatalf("expected local merge actions hidden after successful ff merge, got %s", body)
+				}
+
+				if source == "worktree" && !strings.Contains(body, `id="worktree-info-panel"`) {
+					t.Fatalf("expected worktree panel response, got %s", body)
+				}
+			})
+		}
 	}
 }
