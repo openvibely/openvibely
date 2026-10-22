@@ -25,6 +25,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 			var mu sync.Mutex
 			selected := "p00"
 			locations := "{}"
+			var projectOpenGate <-chan struct{}
 			pins := []string{}
 			projects := []models.Project{}
 			for i := 0; i < 24; i++ {
@@ -87,7 +88,15 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				saved := append([]string{}, pins...)
 				savedLocations := locations
+				gate := projectOpenGate
 				mu.Unlock()
+				if gate != nil && id == "p02" && r.Header.Get("HX-Request") == "true" {
+					select {
+					case <-gate:
+					case <-r.Context().Done():
+						return
+					}
+				}
 				w.Header().Set("Content-Type", "text/html")
 				if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
 					fmt.Fprintf(w, `<div id="fixture-project">%s</div><a id="filtered-page" href="/tasks?project_id=%s&amp;view=board#keep" hx-get="/tasks?project_id=%s&amp;view=board" hx-push-url="/tasks?project_id=%s&amp;view=board#keep" hx-target="#main-content">Filtered tasks</a>`, id, id, id, id)
@@ -444,6 +453,37 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.click("#project-selector-trigger")
 				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
 				browser.waitFor("reopen appended project", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+
+				// Exercise the reported flow with the real selector and no open dialog
+				// or confirmation mock: add an existing project, then close it once.
+				browser.waitFor("new project is the active last tab with no dialog", `String(Array.from(document.querySelectorAll('#desktop-project-tabs [data-project-tab]')).at(-1).dataset.projectTab === 'p02' && !!document.querySelector('[data-project-tab="p02"][aria-selected="true"]') && !document.querySelector('dialog[open]'))`, "true")
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("single click removes newly opened active project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p23' && new URLSearchParams(location.search).get('project_id') === 'p23')`, "true")
+				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (!html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("restore project for restart coverage", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+
+				// Also close immediately while the newly opened project's response
+				// is still pending, rather than waiting for its content to load.
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("prepare immediate close", `String(!document.querySelector('[data-project-tab="p02"]') && !window.openVibelyProtectedProjectID)`, "true")
+				gate := make(chan struct{})
+				defer close(gate)
+				mu.Lock()
+				projectOpenGate = gate
+				mu.Unlock()
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("new active tab is still loading", `String(!!document.querySelector('[data-project-tab="p02"][aria-selected="true"]') && window.openVibelyProtectedProjectID === 'p23' && !document.querySelector('dialog[open]'))`, "true")
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("single click closes loading tab and restores previous project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p23' && !window.openVibelyProtectedProjectID)`, "true")
+				mu.Lock()
+				projectOpenGate = nil
+				mu.Unlock()
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("restore project after immediate close", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
 
 			})
 			if desktop {
