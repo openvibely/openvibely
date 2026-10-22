@@ -131,6 +131,16 @@ window.addEventListener('DOMContentLoaded',function(){
    await fetch('/advance');
    let warmURL=%q;
    for(let round=0;round<2;round++){
+     // Hold the cached page's delayed initializer until the user has scrolled.
+     // This makes its stale saved-position race deterministic rather than CPU-dependent.
+     const nativeTimeout=window.setTimeout;
+     let delayedInit=null;
+     if(round===1 && %t) window.setTimeout=function(callback,delay,...args){
+       if(delay===100 && String(callback).includes('_restoreThreadScrollOrBottom')){
+         delayedInit=()=>callback(...args);return 0;
+       }
+       return nativeTimeout(callback,delay,...args);
+     };
      const beforeWarmParses=parsedSources;
      let done=false;
      const warm=openVibelyNavigate(warmURL).then(()=>{done=true});
@@ -159,7 +169,14 @@ window.addEventListener('DOMContentLoaded',function(){
      if(round===1 && messages.querySelectorAll('[data-virtual-chat-row]').length>100){
        messages.dispatchEvent(new WheelEvent('wheel',{deltaY:-600,bubbles:true}));
        messages.scrollTop=Math.max(0,messages.scrollTop-600);
+       // Deliver input before releasing the older initializer, but before
+       // asynchronous render completion saves a newer navigation snapshot.
+       messages.dispatchEvent(new Event('scroll'));
+       assert(delayedInit && window._taskThreadPageTracker.userScrolledUp,'test did not establish upward reading before initialization');
+       window.setTimeout=nativeTimeout;
+       delayedInit();
        await window.renderVisibleChatRows(messages); await wait(40);
+       assert(messages.scrollHeight-messages.scrollTop-messages.clientHeight>100,'delayed initializer pulled reader to bottom');
        readingHistory=true;
      }
      let lost=false;
@@ -193,7 +210,7 @@ window.addEventListener('DOMContentLoaded',function(){
    assert(document.querySelectorAll('.stream-tool').length<40,'history restoration rendered offscreen tools');
    await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));
-});</script>`, "/tasks/"+other.ID, other.ID, path, task.ID, "/tasks/"+other.ID, other.ID)
+});</script>`, "/tasks/"+other.ID, other.ID, path, large, task.ID, "/tasks/"+other.ID, other.ID)
 	var threadRequests atomic.Int32
 	var warmRequests atomic.Int32
 	results := make(chan string, 1)
