@@ -6,15 +6,18 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 // MockLLMCall records the arguments from a single CallModel invocation.
 type MockLLMCall struct {
-	Prompt      string
-	Attachments []models.Attachment
-	Agent       models.LLMConfig
-	ExecID      string
-	WorkDir     string
+	// Snapshot while request permissions are live; turn contexts may be canceled after completion.
+	ManagedKnowledge string
+	Prompt           string
+	Attachments      []models.Attachment
+	Agent            models.LLMConfig
+	ExecID           string
+	WorkDir          string
 }
 
 // MockLLMCaller implements service.LLMCaller for tests.
@@ -46,11 +49,12 @@ func (m *MockLLMCaller) RecordAgentRequest(req llmcontracts.AgentRequest) {
 // CallModel satisfies the service.LLMCaller interface.
 func (m *MockLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
 	call := MockLLMCall{
-		Prompt:      prompt,
-		Attachments: attachments,
-		Agent:       agent,
-		ExecID:      execID,
-		WorkDir:     workDir,
+		ManagedKnowledge: managedcontext.Text(ctx),
+		Prompt:           prompt,
+		Attachments:      attachments,
+		Agent:            agent,
+		ExecID:           execID,
+		WorkDir:          workDir,
 	}
 	m.mu.Lock()
 	m.Calls = append(m.Calls, call)

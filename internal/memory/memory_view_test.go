@@ -61,24 +61,3 @@ func TestIndexedMemoryHandlesExtractsOnlySafeIndexedMarkdownFiles(t *testing.T) 
 		}
 	}
 }
-
-func TestRenderSelectedMemoriesMarkdownUsesHandlesLikeSkills(t *testing.T) {
-	rendered := RenderSelectedMemoriesMarkdown([]SelectedMemory{
-		{File: "provider_architecture.md", Summary: "Provider routing decisions are mode-driven.", Snippet: "route snippet"},
-		{File: "provider_architecture.md", Summary: "duplicate"},
-		{File: "managed_memory.md", Topic: "Managed memory", Summary: "route summary should not render"},
-	})
-	for _, want := range []string{"## Selected Memories For This Task", "MUST call `memory_view(\"<memory>\")`", "summarize, explain, or tell them about a selected memory/topic", "`provider_architecture.md`", "`managed_memory.md`"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered selected memories missing %q:\n%s", want, rendered)
-		}
-	}
-	for _, unwanted := range []string{"Provider routing decisions are mode-driven.", "route snippet", "route summary should not render", "duplicate", "Managed memory"} {
-		if strings.Contains(rendered, unwanted) {
-			t.Fatalf("rendered selected memories leaked route-generated text %q:\n%s", unwanted, rendered)
-		}
-	}
-	if strings.Count(rendered, "provider_architecture.md") != 1 {
-		t.Fatalf("expected duplicate memory handle to be collapsed, got:\n%s", rendered)
-	}
-}

@@ -253,7 +253,7 @@ func visibleSearchUserText(text string) string {
 	for {
 		trimmed := strings.TrimSpace(text)
 		removed := false
-		for _, tag := range []string{"openvibely_execution_environment", "environment_context", "permissions instructions", "apps_instructions", "plugins_instructions"} {
+		for _, tag := range []string{"openvibely_attachment_context", "openvibely_execution_environment", "managed_knowledge_index", "permissions instructions", "apps_instructions", "plugins_instructions"} {
 			opening := "<" + tag + ">"
 			closing := "</" + tag + ">"
 			if !strings.HasPrefix(trimmed, opening) {

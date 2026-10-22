@@ -1018,7 +1018,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:               "edit_task",
-		Description:        "Edit an existing task by id. Can add or modify chain configuration for sequential execution.",
+		Description:        "Edit an existing task by id within the current project. Supports title, prompt, priority, category, tag, Agent/model assignment, chain configuration, auto-merge settings, merge target branch, and attachment file paths.",
 		Domain:             DomainTasks,
 		Access:             AccessWrite,
 		Sensitivity:        SensitivityNormal,
@@ -2420,7 +2420,7 @@ var registry = []ActionDef{
 	// --- Memory domain (read-only, scoped by selected-memory runtime tools) ---
 	{
 		Name:         "memory_view",
-		Description:  "Load an authorized managed memory selected for this turn. Use only handles listed in the selected memory index.",
+		Description:  "Read a permitted managed memory from the current project memory index.",
 		Domain:       DomainMemory,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -2431,7 +2431,7 @@ var registry = []ActionDef{
 			Properties: map[string]*toolschema.Schema{
 				"handle": {
 					Type:        "string",
-					Description: "Selected memory handle/file, e.g. provider_architecture.md",
+					Description: "Memory handle/file, e.g. provider_architecture.md",
 				},
 			},
 			Required:             []string{"handle"},

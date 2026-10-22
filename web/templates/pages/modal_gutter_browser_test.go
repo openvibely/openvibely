@@ -16,6 +16,10 @@ func TestBrowserFunctional_ModalPreservesShellWidth(t *testing.T) {
 		if static.ServeAsset(w, r) {
 			return
 		}
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		if err := layout.Base("Models", nil, "default").Render(context.Background(), w); err != nil {
 			t.Error(err)

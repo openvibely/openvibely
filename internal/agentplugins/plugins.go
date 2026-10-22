@@ -713,10 +713,11 @@ func loadPluginMCPServers(pluginDir string) []models.MCPServerConfig {
 	if err != nil {
 		return nil
 	}
+	interpolate := pluginEnvInterpolator(pluginDir)
 	servers, err := mcpconfig.ParseServers(data, mcpconfig.ParseOptions{
 		AllowDirectServers: true,
 		InferType:          true,
-		MapValueTransform:  interpolateEnvRef,
+		MapValueTransform:  interpolate,
 	})
 	if err != nil {
 		return nil
@@ -724,6 +725,10 @@ func loadPluginMCPServers(pluginDir string) []models.MCPServerConfig {
 
 	out := make([]models.MCPServerConfig, 0, len(servers))
 	for _, server := range servers {
+		for i, part := range server.Command {
+			server.Command[i] = interpolate(part)
+		}
+		server.URL = interpolate(server.URL)
 		if server.Name == "" {
 			continue
 		}
@@ -1586,12 +1591,24 @@ func asString(v interface{}) string {
 	return ""
 }
 
-func interpolateEnvRef(input string) string {
+func pluginEnvInterpolator(pluginDir string) func(string) string {
+	if absoluteDir, err := filepath.Abs(pluginDir); err == nil {
+		pluginDir = absoluteDir
+	}
+	return func(input string) string {
+		return interpolateEnvRefWithPluginRoot(input, pluginDir)
+	}
+}
+
+func interpolateEnvRefWithPluginRoot(input, pluginDir string) string {
 	return envRefRe.ReplaceAllStringFunc(input, func(match string) string {
 		groups := envRefRe.FindStringSubmatch(match)
 		name := groups[1]
 		if name == "" {
 			name = groups[2]
+		}
+		if name == "CLAUDE_PLUGIN_ROOT" && pluginDir != "" {
+			return pluginDir
 		}
 		return os.Getenv(name)
 	})

@@ -1212,6 +1212,39 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					zone.style.cursor = '';
 				}
 
+				function applyDropZoneFeedback(zone, valid) {
+					if (!zone) return;
+					if (valid) {
+						zone.style.backgroundColor = 'var(--ov-schedule-drop-valid-bg, rgba(99, 102, 241, 0.2))';
+						zone.style.outline = '2px solid var(--ov-schedule-drop-valid-outline, rgba(99, 102, 241, 0.5))';
+						zone.style.cursor = '';
+					} else {
+						zone.style.backgroundColor = 'var(--ov-schedule-drop-invalid-bg, rgba(239, 68, 68, 0.15))';
+						zone.style.outline = '2px dashed var(--ov-schedule-drop-invalid-outline, rgba(239, 68, 68, 0.6))';
+						zone.style.cursor = 'not-allowed';
+					}
+				}
+
+				function handleScheduleDragOver(event) {
+					var dropZone = event.currentTarget;
+					var hasScheduleType = event.dataTransfer.types &&
+						event.dataTransfer.types.indexOf('application/x-schedule-drag') !== -1;
+					var isValidDrop = hasScheduleType && draggedScheduleId && draggedHasSchedule;
+
+					if (isValidDrop) {
+						event.preventDefault();
+						event.dataTransfer.dropEffect = 'move';
+						applyDropZoneFeedback(dropZone, true);
+					} else if (hasScheduleType) {
+						event.preventDefault();
+						event.dataTransfer.dropEffect = 'none';
+						applyDropZoneFeedback(dropZone, false);
+					} else {
+						event.dataTransfer.dropEffect = 'none';
+						applyDropZoneFeedback(dropZone, false);
+					}
+				}
+
 				function resetSchedulePointerDrag() {
 					var state = _schedulePointerDrag;
 					var wasStarted = !!(state && state.started);
@@ -1280,15 +1313,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						state.dropZone = zone;
 					}
 					if (!zone) return null;
-					if (draggedScheduleId && draggedHasSchedule) {
-						zone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-						zone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
-						zone.style.cursor = '';
-					} else {
-						zone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
-						zone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
-						zone.style.cursor = 'not-allowed';
-					}
+					applyDropZoneFeedback(zone, !!(draggedScheduleId && draggedHasSchedule));
 					return zone;
 				}
 

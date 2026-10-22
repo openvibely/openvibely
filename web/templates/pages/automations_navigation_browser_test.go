@@ -750,6 +750,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-details`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
+		`style="caret-color: oklch(var(--bc));"`, `data-automation-yaml-key`, `data-automation-yaml-value`, `data-automation-yaml-scalar`, `data-automation-yaml-comment`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
 		`data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`,
 		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
@@ -887,6 +888,10 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 		`data-automation-copy-yaml-status`,
 		`Copy YAML`,
 		`aria-label="Copy saved Automation YAML"`,
+		`data-automation-yaml-key`,
+		`data-automation-yaml-value`,
+		`data-automation-yaml-scalar`,
+		`data-automation-yaml-comment`,
 		`readonly`,
 		`tabindex="-1"`,
 		`cursor-default`,
@@ -1171,11 +1176,13 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation Details view to contain %q", want)
 		}
 	}
-	if !(strings.Index(body, `data-automation-graph-panel`) < strings.Index(body, `data-automation-live-details-panel`) && strings.Index(body, `data-automation-live-details-panel`) < strings.Index(body, `data-automation-yaml-panel`)) {
+	panelBody := body[viewportStart:]
+	detailsPanel := strings.Index(panelBody, `data-automation-live-details-panel`)
+	yamlPanel := strings.Index(panelBody, `data-automation-yaml-panel hidden style="display: none"`)
+	if detailsPanel < 0 || yamlPanel < 0 || detailsPanel >= yamlPanel {
 		t.Error("expected Live Automation panels in Graph, Details, YAML order")
 	}
-	for _, forbidden := range []string{
-		`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
+	for _, forbidden := range []string{`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
 		`data-automation-live-legend-row`, `aria-label="Graph status legend"`, `Failed`, `Waiting human`, `Recently Completed`,
 	} {
 		if strings.Contains(cardHeader, forbidden) {
@@ -1502,7 +1509,7 @@ func TestAutomationBuilderUsesInteractiveGraphAndYAMLEditor(t *testing.T) {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`} {
+	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`, `[data-ov-theme-layer="custom"] .automation-canvas-shell`, `[data-ov-theme-layer="custom"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }`, `[data-ov-theme-layer="custom"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }`, `[data-ov-theme-layer="custom"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected interactive YAML builder to contain %q", want)
 		}
@@ -1545,11 +1552,14 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML indentation must use visual-only guides over source spaces: missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-indent-rail`) || !strings.Contains(body, `width:1px;z-index:20;background-color:`) || !strings.Contains(body, `function yamlRailColor(active)`) || !strings.Contains(body, `oklch(var(--bc) / 0.3)`) {
+		if !strings.Contains(body, `data-automation-yaml-indent-rail`) || !strings.Contains(body, `width:1px;z-index:20;background-color:`) || !strings.Contains(body, `function yamlRailColor(active)`) || !strings.Contains(body, `var(--ov-yaml-indent-active, var(--ov-focus`) || !strings.Contains(body, `var(--ov-yaml-indent-rail, var(--ov-border-strong`) {
 			t.Errorf("%s YAML indentation rails must use a visible continuous theme-colored layer", source)
 		}
 		if strings.Contains(body, `marker = column % 2 === 0 ? '│' : '·'`) {
 			t.Errorf("%s YAML indentation must not substitute guide characters into the source overlay flow", source)
+		}
+		if strings.Contains(body, `[data-automation-yaml-panel]:focus-within { --ov-yaml-indent-dot: var(--ov-focus); --ov-yaml-indent-rail: var(--ov-focus); }`) {
+			t.Errorf("%s YAML focus must not recolor every indentation guide; only the active innermost rail should highlight", source)
 		}
 	}
 }
@@ -2104,15 +2114,30 @@ window.addEventListener('DOMContentLoaded', function() {
     nestedRail = Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return Number(rail.dataset.yamlRailColumn) === 2 && Number(rail.dataset.yamlRailStart) === 34; });
     if (!nestedRail) fail('expected an indentation rail at column 2 for the edge item fields after restoring typed edit');
     document.documentElement.setAttribute('data-theme', 'dark');
-    editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowRight'}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     var darkActiveColor = window.getComputedStyle(nestedRail).backgroundColor;
     document.documentElement.setAttribute('data-theme', 'light');
-    editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowRight'}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     var lightActiveColor = window.getComputedStyle(nestedRail).backgroundColor;
-    if (darkActiveColor === lightActiveColor) fail('active YAML rail color must differ between dark and light themes: dark=' + darkActiveColor + ' light=' + lightActiveColor);
-    document.documentElement.setAttribute('data-theme', 'dark');
+    if (darkActiveColor === lightActiveColor) fail('theme switch must refresh active YAML rails without editor interaction');
+    document.documentElement.style.setProperty('--ov-focus', '#123456');
+    document.documentElement.style.setProperty('--ov-yaml-indent-rail', '#654321');
+    document.documentElement.setAttribute('data-ov-theme-layer', 'custom');
+    document.documentElement.setAttribute('data-color-theme', 'test-custom');
+    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+    if (window.getComputedStyle(nestedRail).backgroundColor !== 'rgb(18, 52, 86)') fail('native-to-custom switch did not refresh active rail');
+    var inactiveRail = Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return rail !== nestedRail; });
+    if (!inactiveRail || window.getComputedStyle(inactiveRail).backgroundColor !== 'rgb(101, 67, 33)') fail('native-to-custom switch did not refresh inactive rails');
+    for (var nativeMode of ['light', 'dark']) {
+      document.documentElement.setAttribute('data-theme', nativeMode);
+      document.documentElement.setAttribute('data-ov-theme-layer', 'native');
+      document.documentElement.setAttribute('data-color-theme', 'openvibely-' + nativeMode);
+      await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+      if (window.getComputedStyle(nestedRail).backgroundColor !== (nativeMode === 'dark' ? darkActiveColor : lightActiveColor)) fail('return to native did not restore active rail');
+      if (window.getComputedStyle(inactiveRail).backgroundColor !== inactiveColor) fail('return to native did not restore inactive rail');
+    }
+    document.documentElement.style.removeProperty('--ov-focus');
+    document.documentElement.style.removeProperty('--ov-yaml-indent-rail');
     var outsideCursor = editor.value.indexOf('schema_version');
     editor.setSelectionRange(outsideCursor, outsideCursor);
     editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowLeft'}));

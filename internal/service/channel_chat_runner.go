@@ -19,6 +19,7 @@ type ChannelChatRunRequest struct {
 	Agent               models.LLMConfig
 	ChatHistory         []models.Execution
 	SystemContext       string
+	AttachmentContext   string
 	WorkDir             string
 	ImageAttachments    []models.Attachment
 	Surface             chatcontrol.Surface

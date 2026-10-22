@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/httpclient"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -140,7 +141,7 @@ func NewTelegramService(
 		return nil, fmt.Errorf("telegram bot token is empty")
 	}
 
-	bot, err := tgbotapi.NewBotAPI(token)
+	bot, err := newSafeTelegramBot(token)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
 	}
@@ -161,7 +162,7 @@ func NewTelegramService(
 		chatAttachmentRepo:  chatAttachmentRepo,
 		llmSvc:              llmSvc,
 		workerSvc:           workerSvc,
-		newBotAPI:           tgbotapi.NewBotAPI,
+		newBotAPI:           newSafeTelegramBot,
 		userProjects:        make(map[int64]string),
 		userProjectVersions: make(map[int64]uint64),
 		ctx:                 ctx,
@@ -339,7 +340,7 @@ func (s *TelegramService) UpdateToken(token string) error {
 	}
 	newBotAPI := s.newBotAPI
 	if newBotAPI == nil {
-		newBotAPI = tgbotapi.NewBotAPI
+		newBotAPI = newSafeTelegramBot
 	}
 	bot, err := newBotAPI(token)
 	if err != nil {
@@ -907,7 +908,20 @@ func (s *TelegramService) downloadAndSaveTelegramAttachment(
 
 	// Download file
 	fileURL := tgFile.Link(s.bot.Token)
-	resp, err := http.Get(fileURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return "", nil, nil, safeTelegramHTTPError("downloadFile", s.bot.Token, err)
+	}
+	// Reuse the bot's shared client (or its injected test client) without
+	// stacking two retry wrappers.
+	downloadClient := s.bot.Client
+	if wrapped, ok := downloadClient.(telegramHTTPClient); ok {
+		downloadClient = wrapped.client
+	}
+	if downloadClient == nil {
+		downloadClient = httpclient.New(httpclient.MessagingTimeout)
+	}
+	resp, err := (telegramHTTPClient{client: downloadClient, token: s.bot.Token}).Do(req)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("failed to download file: %w", err)
 	}

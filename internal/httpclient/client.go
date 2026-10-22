@@ -24,6 +24,7 @@ const (
 	XTimeout               = OAuthTimeout
 	UsageTimeout           = 5 * time.Second
 	MessagingTimeout       = 20 * time.Second
+	MessagingPollTimeout   = 90 * time.Second
 	MCPTimeout             = time.Minute
 	HostedSSOTimeout       = 5 * time.Second
 	HealthTimeout          = 3 * time.Second

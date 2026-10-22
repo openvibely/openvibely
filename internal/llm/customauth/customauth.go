@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
+	"golang.org/x/sync/singleflight"
 )
 
 type Config struct {
@@ -684,7 +684,7 @@ func Refresh(ctx context.Context, client *http.Client, cfg Config, refreshToken 
 			req.Header.Set(name, value)
 		}
 	}
-	resp, err := client.Do(req)
+	resp, err := httpretry.DoRequest(client, req)
 	if err != nil {
 		return TokenSet{}, err
 	}

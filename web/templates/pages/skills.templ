@@ -204,7 +204,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 					The skill package and its indexed registration will be removed from the selected scope.
 				}
 
-			<dialog id="skill_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box">
+			<dialog id="skill_modal" class="modal" onclose="handleSkillModalClose()">			<div class="modal-box">
 				@ModalCloseButton("skill_modal", "Close skill dialog")
 				<h3 id="skill_modal_title" class="font-bold text-lg mb-4 pr-10">New Skill</h3>
 				<form id="skill_form" onsubmit="submitSkillForm(event)">
@@ -473,6 +473,16 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 						focusAfterSkillsSwap(root, saved);
 					});
 				})();
+
+				function handleSkillModalClose() {
+					function blurRestoredSkillCard() {
+						var active = document.activeElement;
+						if (active && active.matches && active.matches('[data-skill-handle]')) active.blur();
+					}
+					blurRestoredSkillCard();
+					setTimeout(blurRestoredSkillCard, 0);
+					if (typeof syncToastContainerHost === 'function') syncToastContainerHost();
+				}
 
 				function setSkillModalError(message) {
 					var el = document.getElementById('skill_error');

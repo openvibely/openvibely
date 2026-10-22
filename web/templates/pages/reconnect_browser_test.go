@@ -136,6 +136,7 @@ window.EventSource = function(url) {
 };
 window.EventSource.prototype.addEventListener = function(name, handler) { this.listeners[name] = handler; };
 window.EventSource.prototype.close = function() { this.closed = true; };
+window.openVibelyLive = {execution: function(id, offset) { return new window.EventSource("/events/chat/" + id + "?offset=" + offset); }};
 window.EventSource.prototype.emit = function(name, data) {
   var event = {data: data};
   if (name === 'message' && this.onmessage) this.onmessage(event);
@@ -161,16 +162,8 @@ window.__emitFor = function(execId, name, data) {
 </script><script>` + renderedTabVisibilityManager(t) + `</script><script>
 window.__visibilityHidden = false;
 Object.defineProperty(document, 'hidden', {configurable: true, get: function() { return window.__visibilityHidden; }});
-window.__managedOpenCount = 0;
-window._tabVisibility.registerSSE('reconnect-fixture', '/events/live', {
-  onopen: function() {
-    var reconnected = window.__managedOpenCount > 0;
-    window.__managedOpenCount++;
-    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail: {reconnected: reconnected}}));
-  }
-});
-var initialManagedSource = window.__eventSources[window.__eventSources.length - 1];
-if (initialManagedSource && initialManagedSource.onopen) initialManagedSource.onopen();
+window.__managedOpenCount = 1;
+window.addEventListener('sse-live-connected', function() { window.__managedOpenCount++; });
 window.__hideManagedTab = function() {
   var poll = document.getElementById('task-thread-view');
   window.__visibilityOriginalTrigger = poll ? (poll.getAttribute('hx-trigger') || '') : '';

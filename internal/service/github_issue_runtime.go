@@ -231,7 +231,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, cleanupBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
-					return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue, "reused": true})
+					return githubIssueJSON(map[string]any{"ok": true, "issue": issue, "reused": true})
 				}
 				if reservationNeedsReconciliation {
 					releaseCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
@@ -283,7 +283,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			} else if _, err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
 				return "", err
 			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
+			return githubIssueJSON(map[string]any{"ok": true, "issue": issue})
 		},
 		"github_get_issue":           core.ExecuteGetIssue,
 		"github_get_project_inbox":   core.ExecuteGetProjectInbox,
@@ -310,7 +310,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+			return githubIssueJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
 		"github_list_existing_automation_issues": core.ExecuteListExistingAutomationIssues,
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -342,7 +342,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", err
 			}
 			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": persistence.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+			return githubIssueJSON(map[string]any{"ok": true, "assignee": persistence.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
 		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
 			req, err := core.request(input)
@@ -390,7 +390,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				filtered = append(filtered, item)
 			}
 			page, nextOffset := pageAssignedGitHubIssuesWithPRs(filtered, limit, offset)
-			return githubIssueRuntimeJSON(map[string]any{
+			return githubIssueJSON(map[string]any{
 				"ok": true, "items": page, "returned": len(page), "total": len(filtered), "offset": offset,
 				"next_offset": nextOffset, "truncated": nextOffset > 0,
 				"skipped_without_pr": "Assigned issues without an associated pull request are skipped.",
@@ -480,7 +480,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.AfterPullRequestOpened != nil {
 				opts.AfterPullRequestOpened(task.ID, result)
 			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
+			return githubIssueJSON(map[string]any{"ok": true, "task_id": task.ID, "pull_request": result.PullRequest, "reused_existing_record": result.ReusedExistingRecord, "reused_remote": result.ReusedRemote, "created": result.Created})
 		},
 		"github_replace_pull_request_branch": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
@@ -518,7 +518,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			return githubIssueRuntimeJSON(map[string]any{
+			return githubIssueJSON(map[string]any{
 				"ok":                true,
 				"task_id":           task.ID,
 				"pull_request":      record,
@@ -552,7 +552,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					opts.AfterPRFeedbackForwarded(forwarded.TaskID)
 				}
 			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "result": result})
+			return githubIssueJSON(map[string]any{"ok": true, "result": result})
 		},
 	}
 }
@@ -1335,9 +1335,4 @@ func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeO
 		}
 	}
 	return nil
-}
-
-func githubIssueRuntimeJSON(payload map[string]any) (string, error) {
-	b, err := json.Marshal(payload)
-	return string(b), err
 }

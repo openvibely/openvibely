@@ -15,13 +15,15 @@ import (
 // BenchmarkGrepSearchFixture compares the old and streaming implementations
 // on the same generated 105 MiB fixture (darwin/arm64, Apple M5 Pro). The old
 // implementation was measured before the change; the streaming implementation
-// was measured three times afterward. The reported after values are medians.
+// was measured afterward (NoMatch seven times, PreCancelled three times, on a
+// loaded machine). The reported after values are medians.
 //
 // Results (ns/op, B/op, allocs/op):
-//   NoMatch:      before 55,762,917; 242,823,360; 21,684
-//                 after  36,954,375;   1,152,856; 12,074
-//   PreCancelled: before 52,774,333; 242,466,896; 21,606
-//                 after       5,500;           0;      0
+//
+//	NoMatch:      before 55,762,917; 242,823,360; 21,684
+//	              after  42,876,875;   1,104,976; 10,576
+//	PreCancelled: before 52,774,333; 242,466,896; 21,606
+//	              after         875;           0;      0
 //
 // Run with: go test ./pkg/agenttools -run '^$' -bench '^BenchmarkGrepSearchFixture$' -benchmem -benchtime=1x -count=3
 func BenchmarkGrepSearchFixture(b *testing.B) {

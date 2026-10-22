@@ -16,10 +16,7 @@ import (
 func RenderAvailableSkillsMarkdown(globalRoot, projectRoot string) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Standalone Skills\n\n")
-	sb.WriteString("Review the standalone skill index below and select skill handles relevant to the user prompt.\n")
-	sb.WriteString("Agents are assigned outside this routing step; do not choose or switch agents. When a\n")
-	sb.WriteString("listed standalone skill is relevant, return its skill handle, for example `debug_go_tests`.\n")
-	sb.WriteString("Use `skills_list` or `skill_view` only to inspect available skills. Use `agent_view` only to understand an assigned agent.\n\n")
+	sb.WriteString("Choose relevant skills using the request and conversation. Load needed instructions with skill_view using the listed handle; reuse instructions still in context.\n\n")
 	sb.WriteString("<available_skills>\n")
 
 	wrote := false
@@ -46,8 +43,8 @@ func RenderAvailableSkillsMarkdown(globalRoot, projectRoot string) string {
 func RenderAvailableAgentSkillsMarkdown(globalRoot, projectRoot, agentKey string) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Assigned-Agent Skills\n\n")
-	fmt.Fprintf(&sb, "Review the skills owned by assigned agent `%s` below and select skill handles relevant to the user prompt.\n", strings.TrimSpace(agentKey))
-	sb.WriteString("Do not choose or switch agents. When a listed assigned-agent skill is relevant, return only its skill key, for example `maintain_skill_library`, not `agent/skill`.\n")
+	fmt.Fprintf(&sb, "Choose relevant skills owned by assigned agent `%s` using the request and conversation.\n", strings.TrimSpace(agentKey))
+	sb.WriteString("Load needed instructions with skill_view using the listed skill key, for example `maintain_skill_library`. Reuse instructions still in context.\n")
 	sb.WriteString("Use `skill_view` only to inspect skills listed for this assigned agent.\n\n")
 	sb.WriteString("<available_skills>\n")
 
@@ -193,5 +190,44 @@ func readSkillsIndexSectionFiltered(indexPath, skillsDir, agentKey, scope string
 	fmt.Fprintf(&out, "### Scope: %s\n\n", scope)
 	out.WriteString(strings.TrimSpace(body))
 	out.WriteString("\n")
+	return out.String()
+}
+
+// RenderCatalogMarkdown lists the effective permitted entries once, including
+// project overrides, without loading skill instruction bodies.
+func RenderCatalogMarkdown(catalog *Catalog) string {
+	if catalog == nil {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString("## Available skills\n\n")
+	indexes := map[string]map[string]string{}
+	for _, entry := range catalog.Entries() {
+		indexPath := filepath.Join(filepath.Dir(filepath.Dir(entry.AbsolutePath)), SkillsIndexFile)
+		if entry.AgentKey != "" {
+			indexPath = filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(entry.AbsolutePath))), SkillsIndexFile)
+		}
+		sections, ok := indexes[indexPath]
+		if !ok {
+			sections = map[string]string{}
+			data, _ := os.ReadFile(indexPath)
+			content := string(data)
+			locs := h2HeaderRegexp.FindAllStringIndex(content, -1)
+			matches := h2HeaderRegexp.FindAllStringSubmatch(content, -1)
+			for i, loc := range locs {
+				end := len(content)
+				if i+1 < len(locs) {
+					end = locs[i+1][0]
+				}
+				sections[strings.TrimSpace(matches[i][1])] = strings.TrimSpace(content[loc[1]:end])
+			}
+			indexes[indexPath] = sections
+		}
+		key := entry.Handle
+		if entry.AgentKey != "" {
+			key = entry.AgentKey + "/" + entry.Handle
+		}
+		fmt.Fprintf(&out, "- `%s` (%s): %s\n", entry.Handle, entry.Source, sections[key])
+	}
 	return out.String()
 }

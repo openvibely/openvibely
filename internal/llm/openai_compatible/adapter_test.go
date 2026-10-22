@@ -674,28 +674,23 @@ func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
 		Status:           models.ExecCompleted,
 	}}
 
-	kimiHistory := buildClientHistory(executions, true)
+	kimiHistory := buildClientHistory(executions)
 	require.Len(t, kimiHistory, 2)
 	require.Equal(t, "assistant", kimiHistory[1].Role)
 	require.Equal(t, "answer", kimiHistory[1].Content)
 	require.Equal(t, "private thought", kimiHistory[1].ReasoningContent)
 
-	otherHistory := buildClientHistory(executions, false)
+	otherHistory := buildClientHistory(executions)
 	require.Len(t, otherHistory, 2)
-	require.Empty(t, otherHistory[1].ReasoningContent)
+	require.Equal(t, "private thought", otherHistory[1].ReasoningContent)
 }
 
-func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k3"}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.6 "}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"keep":"all"}}`}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"type":"disabled"}}`}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"type":"enabled","keep":null}}`}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code"}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code-highspeed"}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.5"}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "glm-5"}))
-	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "gpt-5.6"}))
+func TestReasoningReplayForAllCompatibleModels(t *testing.T) {
+	for _, model := range []string{"kimi-k3", "glm-5", "deepseek-reasoner", "custom-model"} {
+		history, err := New(nil, nil).prepareClientHistory(context.Background(), models.LLMConfig{Model: model}, []models.Execution{{Output: "answer", ReasoningContent: "original reasoning", Status: models.ExecCompleted}})
+		require.NoError(t, err)
+		require.Equal(t, "original reasoning", history[0].ReasoningContent)
+	}
 }
 
 func TestEnsureFreshOAuthKeepsOpaqueTokenWithUnknownExpiry(t *testing.T) {
@@ -800,7 +795,7 @@ func TestOAuthInferenceUsesOnlyConfiguredAccessTokenHeader(t *testing.T) {
 	require.Equal(t, "Token opaque-token", customToken)
 }
 
-func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
+func TestPrepareClientHistoryUsesSuppliedReasoning(t *testing.T) {
 	ctx := context.Background()
 	storeEnv := teststores.New(t)
 	taskRepo := storeEnv.Stores.Tasks
@@ -831,6 +826,7 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, lightHistory, 1)
 	require.Empty(t, lightHistory[0].ReasoningContent)
+	lightHistory[0].ReasoningContent = "private thought"
 
 	adapter := New(execRepo, nil)
 	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
@@ -841,7 +837,7 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	glmHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
 	require.NoError(t, err)
 	require.Len(t, glmHistory, 2)
-	require.Empty(t, glmHistory[1].ReasoningContent)
+	require.Equal(t, "private thought", glmHistory[1].ReasoningContent)
 }
 
 func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
@@ -884,6 +880,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 
 	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+	require.NoError(t, err)
+	lightHistory[0].ReplayMessages = replay[execution.ID]
 	adapter := New(execRepo, nil)
 
 	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
@@ -899,9 +898,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []openaiclient.CompletionsHistoryMessage{
 		{Role: "user", Content: "first question"},
-		{Role: "assistant", Content: "first answer"},
+		{Role: "assistant", Content: "first answer", ReasoningContent: "first thought"},
 		{Role: "user", Content: "steer"},
-		{Role: "assistant", Content: "second answer"},
+		{Role: "assistant", Content: "second answer", ReasoningContent: "second thought"},
 	}, glmHistory)
 }
 
@@ -951,6 +950,9 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 
 	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+	require.NoError(t, err)
+	lightHistory[0].ReplayMessages = replay[execution.ID]
 	adapter := New(execRepo, nil)
 	got, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
 	require.NoError(t, err)
@@ -1137,5 +1139,126 @@ func TestCompatibleOutputBudgetsSentToServer(t *testing.T) {
 			}
 
 		})
+	}
+}
+
+func TestNonKimiAdapterPersistsReplay(t *testing.T) {
+	ctx := context.Background()
+	storeEnv := teststores.New(t)
+	taskRepo := storeEnv.Stores.Tasks
+	agentRepo := storeEnv.Stores.LLMConfigs
+	execRepo := storeEnv.Stores.Executions
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Clear stale reasoning",
+		Category:  models.CategoryChat,
+		Status:    models.StatusPending,
+		Prompt:    "question",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	defaultAgent, err := agentRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	execution := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: defaultAgent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "question",
+	}
+	require.NoError(t, execRepo.Create(ctx, execution))
+	require.NoError(t, execRepo.ReplaceReasoningReplay(ctx, execution.ID, "stale thought", nil))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(execRepo, nil)
+	_, err = adapter.Call(ctx, llmcontracts.AgentRequest{
+		Ctx:       ctx,
+		Operation: llmcontracts.OperationDirect,
+		ExecID:    execution.ID,
+		Message:   "question",
+		Agent: models.LLMConfig{
+			Name:       "Kimi",
+			Provider:   models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey,
+			Model:      "generic-model",
+			APIKey:     "test-key",
+			BaseURL:    srv.URL + "/v1/",
+			PresetSlug: "vllm",
+			Transport:  "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	stored, err := execRepo.GetByID(ctx, execution.ID)
+	require.NoError(t, err)
+	require.Empty(t, stored.ReasoningContent)
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+	require.NoError(t, err)
+	require.Len(t, replay[execution.ID], 1)
+}
+
+func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
+	for _, model := range []string{"generic-model", "kimi-k3"} {
+		for _, cancelTurn := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/cancel=%t", model, cancelTurn), func(t *testing.T) {
+				ctx := context.Background()
+				stores := teststores.New(t).Stores
+				task := &models.Task{ProjectID: "default", Title: "Replay", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "load skill"}
+				require.NoError(t, stores.Tasks.Create(ctx, task))
+				config, err := stores.LLMConfigs.GetDefault(ctx)
+				require.NoError(t, err)
+				execution := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "load skill"}
+				require.NoError(t, stores.Executions.Create(ctx, execution))
+				calls := 0
+				var last map[string]any
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&last))
+					w.Header().Set("Content-Type", "text/event-stream")
+					if calls == 1 {
+						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"original thinking sentinel\",\"tool_calls\":[{\"index\":0,\"id\":\"skill-call\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+						return
+					}
+					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+				}))
+				defer srv.Close()
+				turn, cancel := context.WithCancel(ctx)
+				defer cancel()
+				turn = llmcontracts.WithRuntimeTools(turn, &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view", Access: llmcontracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)}}, Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+					if cancelTurn {
+						cancel()
+					}
+					return "loaded skill instructions", true, false, nil
+				}})
+				agent := models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: model, PresetSlug: "vllm", APIKey: "test", BaseURL: srv.URL + "/v1", Transport: "chat_completions"}
+				_, err = New(stores.Executions, nil).Call(turn, llmcontracts.AgentRequest{Ctx: turn, Operation: llmcontracts.OperationDirect, Message: "load skill", ExecID: execution.ID, Agent: agent}, ".")
+				if cancelTurn {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+				replay, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+				require.NoError(t, err)
+				require.Len(t, replay[execution.ID], 1)
+				require.Contains(t, replay[execution.ID][0].TranscriptJSON, "loaded skill instructions")
+				// The service supplies persisted replay before the adapter runs.
+				execution.ReplayMessages = replay[execution.ID]
+				_, err = New(stores.Executions, nil).Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "continue", Followup: true, ChatHistory: []models.Execution{*execution}, Agent: agent}, ".")
+				require.NoError(t, err)
+				data, err := json.Marshal(last["messages"])
+				require.NoError(t, err)
+				require.Contains(t, string(data), "loaded skill instructions")
+				require.Contains(t, string(data), "skill-call")
+				require.Contains(t, string(data), "original thinking sentinel")
+			})
+		}
 	}
 }

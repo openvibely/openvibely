@@ -95,9 +95,21 @@ func TestExecutionEnvironmentSurvivesFreshAdaptersAndDirectoryChanges(t *testing
 		var stored anthropicEnvironmentReplay
 		require.NoError(t, json.Unmarshal([]byte(saved[id][0].TranscriptJSON), &stored))
 		require.Equal(t, executionenv.Context(dir), stored.Environment)
-		require.Equal(t, "answer", stored.Messages[1].Content)
+		require.Contains(t, string(stored.Messages[1].ContentBlocks), "answer")
 		history = append(history, models.Execution{ID: id, PromptSent: "question", Output: result.TextOnlyOutput, Status: models.ExecCompleted})
 		previous = messages
+	}
+}
+
+func TestReplayImageBudgetDoesNotCountBase64AsText(t *testing.T) {
+	for _, size := range []int{100, 1000000} {
+		blocks := json.RawMessage(fmt.Sprintf(`[{"type":"text","text":"question"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"%s"}}]`, strings.Repeat("A", size)))
+		saved, err := json.Marshal(anthropicEnvironmentReplay{Messages: []anthropicclient.Message{{Role: "user", Content: "question", ContentBlocks: blocks}}})
+		require.NoError(t, err)
+		history := []models.Execution{{Status: models.ExecCompleted, PromptSent: "question", ReplayMessages: []models.ExecutionReplayMessage{{UserContent: "question", TranscriptJSON: string(saved)}}}}
+		tokens := EstimateHistoryTokens(history)
+		require.GreaterOrEqual(t, tokens, 2000)
+		require.Less(t, tokens, 2100, "image bytes must not inflate the history estimate")
 	}
 }
 

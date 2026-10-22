@@ -18,6 +18,9 @@
   --ov-menu-active: var(--ov-l-surface-active, #e8e8e8);
   --ov-menu-scroll-thumb: #a0a6b0;
 }
+/* Menu layout utilities must not override the browser's closed-popover rule.
+   Otherwise a closed menu stays painted outside the top layer at its static position. */
+.ov-menu[popover]:not(:popover-open) { display: none !important; }
 .ov-menu [hidden] { display: none !important; }
 .ov-menu-actions, .ov-menu-list { padding: 6px; }
 .ov-menu .ov-menu-actions { font-size: inherit; }

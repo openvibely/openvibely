@@ -380,52 +380,6 @@ func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
 	}
 }
 
-func TestTabVisibilityManager_RetargetsSSEWithoutDuplicateConnections(t *testing.T) {
-	var buf bytes.Buffer
-	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
-		t.Fatalf("failed to render Base: %v", err)
-	}
-	html := buf.String()
-	start := strings.Index(html, "window._tabVisibility = (function() {")
-	end := strings.Index(html[start:], "// Track which element was focused before mousedown")
-	if start < 0 || end < 0 {
-		t.Fatal("tab visibility manager boundaries are missing")
-	}
-	manager := html[start : start+end]
-
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is required to execute the rendered SSE visibility manager")
-	}
-	script := `
-const listeners = {};
-const instances = [];
-global.window = {};
-global.document = {
-  hidden: false,
-  addEventListener: function(name, handler) { listeners[name] = handler; },
-  querySelectorAll: function() { return []; }
-};
-global.EventSource = function(url) {
-  this.url = url;
-  this.closed = false;
-  this.close = function() { this.closed = true; };
-  this.addEventListener = function() {};
-  instances.push(this);
-};
-` + manager + `
-const connection = window._tabVisibility.registerSSE('live-events', '/events/live?project_id=old', {});
-if (instances.length !== 1) throw new Error('expected one initial EventSource');
-window._tabVisibility.retargetSSE('live-events', '/events/live?project_id=new');
-if (!instances[0].closed) throw new Error('retarget did not close the old EventSource');
-if (instances.length !== 2 || instances[1].url !== '/events/live?project_id=new') throw new Error('retarget did not create exactly one new scoped EventSource');
-connection.close();
-if (instances.length !== 2 || !instances[1].closed) throw new Error('connection close did not close the retargeted EventSource');
-`
-	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
-		t.Fatalf("rendered SSE visibility manager failed: %v\n%s", err, output)
-	}
-}
 
 func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
 	var buf bytes.Buffer
@@ -706,7 +660,7 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		t.Skip("node is required to execute worker lifecycle helpers")
 	}
 	script := "global.window = {};\n" +
-		"global.document = { querySelector: function(selector) { return selector === 'script[data-ov-asset=\"marked\"]' ? { src: 'http://127.0.0.1:8080/static/vendor/marked.min.js?v=0123456789ab' } : null; }, createElement: function() { return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
+		"global.location={href:'http://127.0.0.1:8080/'}; global.document = { querySelector: function(selector) { return selector === 'script[data-ov-asset=\"marked\"]' ? { src: 'http://127.0.0.1:8080/static/vendor/marked.min.js?v=0123456789ab' } : {src:'http://127.0.0.1:8080/static/file-math-parser.js'}; }, createElement: function() { return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
 		"let lastBlob = null; global.Blob = function(parts) { this.parts = parts; lastBlob = this; }; window.URL = { createObjectURL: function() { return 'blob:test'; } };\n" +
 		"const workers = []; global.Worker = function(url) { this.url = url; this.terminated = false; workers.push(this); }; Worker.prototype.terminate = function() { this.terminated = true; }; Worker.prototype.postMessage = function(value) { this.value = value; };\n" +
 		"window.marked = global.marked = { parse: function(value) { return '<p>' + value + '</p>'; }, setOptions: function() {} };\n" +
@@ -718,10 +672,10 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		"secondCodeWorker.onmessage({ data: { ranges: [{ start: 1, end: 2 }] } });\n" +
 		"const markdownOwner = {}; const firstMarkdown = window.renderChatMarkdownAsync(large, markdownOwner); const firstMarkdownWorker = workers[workers.length - 1];\n" +
 		"const markdownWorkerSource = lastBlob.parts.join(''); let importedURL = '', workerPost = null; const workerScope = { postMessage: function(value) { workerPost = value; } };\n" +
-		"new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { importedURL = url; }, { setOptions: function() {}, parse: function(value) { return value; } });\n" +
+		"new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { if(url.includes('marked.min.js'))importedURL = url; }, { setOptions: function() {}, parse: function(value) { return value; } });\n" +
 		"workerScope.onmessage({ data: 'outside <img src=x>\\n```html\\n<img src=y>\\n```' });\n" +
 		"if (importedURL !== 'http://127.0.0.1:8080/static/vendor/marked.min.js?v=0123456789ab' || !workerPost || workerPost.error || workerPost.html.indexOf('outside &lt;img src=x>') === -1 || workerPost.html.indexOf('<img src=y>') === -1) throw new Error('generated Markdown worker did not execute safely');\n" +
-		"const ThreadWorker = require('worker_threads').Worker; const threadWorkerSource = \"const {parentPort}=require('worker_threads');var self=globalThis;self.postMessage=function(value){parentPort.postMessage(value);};\" + markdownWorkerSource.replace(/importScripts\\([^;]+\\);/, \"var marked={setOptions:function(){},parse:function(value){return value;}};\") + \";parentPort.on('message',function(data){self.onmessage({data:data});});\";\n" +
+		"const ThreadWorker = require('worker_threads').Worker; const threadWorkerSource = \"const {parentPort}=require('worker_threads');var self=globalThis;self.postMessage=function(value){parentPort.postMessage(value);};\" + markdownWorkerSource.replace(/importScripts\\([^;]+\\);/g, \"var marked={setOptions:function(){},parse:function(value){return value;}};\") + \";parentPort.on('message',function(data){self.onmessage({data:data});});\";\n" +
 		"const threadWorker = new ThreadWorker(threadWorkerSource, { eval: true }); const threadResult = new Promise(function(resolve, reject) { threadWorker.once('message', function(value) { threadWorker.terminate(); if (!value || value.error || value.html.indexOf('outside &lt;img src=thread>') === -1) reject(new Error('real worker thread returned unsafe output')); else resolve(true); }); threadWorker.once('error', reject); }); threadWorker.postMessage('outside <img src=thread>');\n" +
 		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
 		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
@@ -1217,9 +1171,9 @@ func TestChatInputContainerCSS_UsesSameSurfaceShadowAsMessageBubbles(t *testing.
 
 	html := buf.String()
 	for _, expected := range []string{
-		`--ov-chat-surface-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);`,
-		`--ov-chat-surface-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);`,
 		`box-shadow: var(--ov-chat-surface-shadow);`,
+		`--ov-chat-surface-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);`,
+		`--ov-chat-surface-shadow: none;`,
 	} {
 		if !strings.Contains(html, expected) {
 			t.Fatalf("chat input should share the exact message-bubble shadow token; missing %q", expected)
@@ -1400,11 +1354,11 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 		"[data-theme=\"dark\"] .theme-toggle-pill {",
 		"background: #3a4455;",
 		"window.toggleTheme = function() {",
-		"var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };",
-		"html.setAttribute('data-theme', mode);",
-		"html.setAttribute('data-color-theme', themeID);",
-		"localStorage.setItem('theme', themeID);",
-		"window.applyOpenVibelyTheme(nativeThemeByMode[nextMode], true);",
+		"window.openVibelyThemes.toggleMode();",
+		"localStorage.setItem(key, value);",
+		"document.documentElement.setAttribute('data-color-theme', themeID);",
+		"persistUIPreference({ theme: themeID });",
+		"window.applyOpenVibelyTheme = function(themeID, persist)",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
@@ -1425,7 +1379,7 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 		"--ov-primary-action-color: #7480ff;",
 		"[data-theme=\"light\"] {",
 		"--ov-primary-action-color: #7480ff;",
-		"[data-color-theme]:not([data-color-theme=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
+		"[data-color-theme]:not([data-color-theme^=\"openvibely-dark\"]):not([data-color-theme=\"openvibely-light\"]) {",
 		"--ov-primary-action-color: oklch(var(--p) / 1);",
 		"[data-color-theme] .btn-primary.chat-send-button {",
 		"background-color: var(--ov-primary-action-color);",
@@ -1440,7 +1394,7 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 	for _, forbidden := range []string{
 		"background-color: var(--ov-primary-action-color) !important;",
 		"border-color: var(--ov-primary-action-color) !important;",
-		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
+		"[data-color-theme^=\"openvibely-dark\"] .btn-primary.chat-send-button,",
 		"\n\t\t\t\t\t.chat-send-button {",
 	} {
 		if strings.Contains(html, forbidden) {
@@ -1449,7 +1403,7 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 	}
 	sharedRule := strings.Index(html, `[data-color-theme] .btn-primary.chat-send-button {`)
 	for _, hoverSelector := range []string{
-		`[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
+		`[data-color-theme^="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
 		`[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {`,
 	} {
 		hoverRule := strings.Index(html, hoverSelector)
@@ -1496,25 +1450,25 @@ func TestDarkMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-accent:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-info:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-success:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-warning:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-error:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-neutral:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-ghost:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-link:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-primary:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-accent:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-info:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-success:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-warning:hover {",
-		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-error:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-accent:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-info:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-success:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-warning:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-error:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-neutral:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-ghost:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-link:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-primary:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-secondary:hover:where(:not(:disabled):not(.btn-disabled)) {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-accent:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-info:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-success:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-warning:hover {",
+		"[data-color-theme^=\"openvibely-dark\"][data-theme=\"dark\"] .btn-outline.btn-error:hover {",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
@@ -2080,5 +2034,47 @@ function page(version = '1', native = false, runtime = 'web') {
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("update reload regression: %v\n%s", err, output)
+	}
+}
+
+func TestChatVirtualRowsReadinessSettlesOnLoadOrError(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node unavailable")
+	}
+	var buf bytes.Buffer
+	if err := Base("Chat", nil, "default").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	marker := strings.Index(html, "window.chatVirtualRowsReady =")
+	if marker < 0 {
+		t.Fatal("missing virtual-row readiness initialization")
+	}
+	start := strings.LastIndex(html[:marker], "<script>") + len("<script>")
+	end := marker + strings.Index(html[marker:], "</script>")
+	initialization := html[start:end]
+	for _, event := range []string{"load", "error"} {
+		t.Run(event, func(t *testing.T) {
+			script := `const assert = require('node:assert/strict');
+const handlers = {};
+global.window = {};
+global.document = {querySelector: () => ({addEventListener: (event, fn) => {handlers[event] = fn;}})};
+` + initialization + `
+(async () => {
+ const pending = window.chatVirtualRowsReady;
+ let settled = false;
+ pending.then(() => {settled = true;});
+ await Promise.resolve();
+ assert.equal(settled, false, 'rendering must wait while the asset is pending');
+ handlers[` + strconv.Quote(event) + `]();
+ await pending;
+ assert.equal(settled, true);
+ assert.equal(window.chatVirtualRowsReady, null, 'later renders must not wait again, including after an asset failure');
+})().catch(err => {console.error(err); process.exit(1);});`
+			if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+				t.Fatalf("virtual-row readiness: %v\n%s", err, output)
+			}
+		})
 	}
 }

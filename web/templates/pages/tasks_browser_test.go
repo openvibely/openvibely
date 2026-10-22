@@ -960,24 +960,9 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 
 `
 			w.WriteHeader(http.StatusNoContent)
-		case "/events/live":
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			flusher, ok := w.(http.Flusher)
-			if !ok {
-				t.Fatal("test response writer does not support SSE flushing")
-			}
-			w.WriteHeader(http.StatusOK)
-			flusher.Flush()
-			for {
-				select {
-				case event := <-liveEvents:
-					_, _ = w.Write([]byte(event))
-					flusher.Flush()
-				case <-r.Context().Done():
-					return
-				}
-			}
+        case "/events/ws":
+            serveBrowserLiveFixture(w,r,liveEvents)
+
 		case "/tasks":
 			var out bytes.Buffer
 			if r.Header.Get("HX-Request") != "" {
@@ -1077,9 +1062,7 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 		t.Fatal("rendered base layout is missing inline theme styles")
 	}
 	importedCSS := `<style>
-	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; }
-	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
-	[data-color-theme="vscode-test"][data-theme="dark"] .btn.ov-secondary-action:hover:not(:disabled):not(.btn-disabled) { background-color: rgb(7, 8, 9); border-color: rgb(7, 8, 9); }
+	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; --ov-button-bg: oklch(0.7 0.12 190); --ov-button-hover-bg: rgb(4, 5, 6); --ov-focus: rgb(4, 5, 6); }
 	[data-automation-live-edit] { position:fixed; left:20px; width:140px; transform:none; transition:none; z-index:2147483647; }
 	[data-automation-live-edit] { top:120px; }
 	</style>`
@@ -1250,7 +1233,7 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			movePointer(t, 1000, 1000)
-			evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); ''`, tc.mode, tc.id))
+			evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); document.documentElement.setAttribute('data-ov-theme-layer', %q); ''`, tc.mode, tc.id, themeLayer(tc.id)))
 			time.Sleep(400 * time.Millisecond)
 			var normal struct {
 				Send    string     `json:"send"`
@@ -1302,7 +1285,7 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(201, 208, 219)", wantText: "rgb(31, 41, 55)"},
 		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantText: "rgb(59, 59, 59)"},
 		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)", wantText: "rgb(59, 59, 59)"},
-		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(7, 8, 9)"},
+		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(4, 5, 6)"},
 	}
 	secondarySelectors := []struct {
 		name     string
@@ -1315,9 +1298,9 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 			t.Run(tc.name+" "+control.name, func(t *testing.T) {
 				movePointer(t, 1000, 1000)
 				if tc.id == "" {
-					evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.removeAttribute('data-color-theme'); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, control.selector))
+					evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.removeAttribute('data-color-theme'); document.documentElement.setAttribute('data-ov-theme-layer', 'native'); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, control.selector))
 				} else {
-					evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, tc.id, control.selector))
+					evaluate(t, fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); document.documentElement.setAttribute('data-ov-theme-layer', %q); var b=document.querySelector(%q); b.disabled=false; ''`, tc.mode, tc.id, themeLayer(tc.id), control.selector))
 				}
 				time.Sleep(100 * time.Millisecond)
 				var normal struct {
@@ -2685,4 +2668,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		stderr, _ := os.ReadFile(stderrPath)
 		t.Fatalf("Task-board delete-all mobile browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
+}
+
+func themeLayer(id string) string {
+	if id == "openvibely-dark" || id == "openvibely-light" {
+		return "native"
+	}
+	return "custom"
 }

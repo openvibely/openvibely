@@ -195,7 +195,9 @@ jobs:
         run: go test ./web/templates/components -run '^TestBrowserFunctional_' -count=1 -timeout 180s
 
       - name: Run page functional browser tests
-        run: go test ./web/templates/pages -run '^TestBrowserFunctional_' -count=1 -timeout 300s
+        # This is the aggregate budget for all sequential browser fixtures;
+        # individual browser sessions and condition waits remain bounded.
+        run: go test ./web/templates/pages -run '^TestBrowserFunctional_' -count=1 -timeout 600s
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
@@ -277,6 +279,15 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: echo "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1" >> "$GITHUB_ENV"
+
+      - name: Start window manager for native chat tests
+        if: runner.os == 'Linux'
+        run: openbox >/tmp/openvibely-native-chat-wm.log 2>&1 &
+
+      - name: Test native Wails chat scrolling
+        env:
+          OPENVIBELY_RUN_NATIVE_UI: "1"
+        run: go test ./internal/handler -run '^TestTaskNativeWheelPagingInWails$' -count=1 -timeout 300s
 
       - name: Test native shell selection and execution
         run: |

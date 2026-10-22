@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -104,11 +105,11 @@ func TestSupportsChatActionTools(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "ollama does not support runtime action tools",
+			name: "ollama supports shared runtime action tools",
 			agent: models.LLMConfig{
 				Provider: models.ProviderOllama,
 			},
-			want: false,
+			want: true,
 		},
 	}
 
@@ -137,7 +138,7 @@ func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
 		{name: "anthropic oauth", provider: models.ProviderAnthropic, authMethod: models.AuthMethodOAuth, want: true},
 		{name: "openai compatible api key", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodAPIKey, want: true},
 		{name: "openai compatible oauth", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodOAuth, want: true},
-		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: false},
+		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: true},
 	}
 
 	for _, tt := range tests {
@@ -310,7 +311,7 @@ func TestSaveCustomPersonalityRuntimeToolCreatesListsAndSelects(t *testing.T) {
 
 func TestFormatCapabilitiesIncludesSelectedMemoryHandles(t *testing.T) {
 	out := formatCapabilities([]chatcontrol.ActionSummary{{Domain: "memory", Name: "memory_view", Description: "Load selected memory.", Access: "read"}}, []string{"usage_analytics.md"})
-	if !strings.Contains(out, "Selected memories for this turn") || !strings.Contains(out, "usage_analytics.md") {
+	if !strings.Contains(out, "Available memories for this turn") || !strings.Contains(out, "usage_analytics.md") {
 		t.Fatalf("expected selected memory handles in capabilities output, got:\n%s", out)
 	}
 }
@@ -329,11 +330,25 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	if !handled || isErr || err != nil {
 		t.Fatalf("list_capabilities failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
 	}
-	for _, want := range []string{"Selected memories for this turn", "chat_memory.md", "memory_view"} {
+	for _, want := range []string{"Available memories for this turn", "chat_memory.md", "memory_view"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected list_capabilities output to contain %q, got:\n%s", want, out)
 		}
 	}
+}
+
+func TestCapabilitiesHideProhibitedMemoryReaderAndIndex(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	rt := h.buildChatActionToolRuntimeFromDefs(streamingResponseParams{}, nil, chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	ctx := service.WithSelectedMemoryHandles(context.Background(), []string{"private.md"})
+	ctx = llmcontracts.WithRuntimeTools(ctx, &llmcontracts.RuntimeTools{Filter: func(name string) (bool, bool) { return false, name == "memory_view" }})
+	out, handled, isErr, err := rt.Executor(ctx, "list_capabilities", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NotContains(t, out, "memory_view")
+	require.NotContains(t, out, "private.md")
+	require.Contains(t, out, "create_task", "document and other chat capabilities are retained")
 }
 
 func TestViewSwarmRuntimeToolResolvesCurrentTaskThreadParent(t *testing.T) {

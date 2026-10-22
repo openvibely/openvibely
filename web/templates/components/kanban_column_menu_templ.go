@@ -206,7 +206,7 @@ func KanbanColumnMenu(projectID string, category models.TaskCategory, backlogSor
 					}
 					ctx = templ.InitializeContext(ctx)
 					if category == models.CategoryCompleted {
-						templ_7745c5c3_Err = KanbanFilter(cat, "status", "Outcome", []string{"", "completed", "failed", "cancelled"}, []string{"All outcomes", "Succeeded", "Failed", "Cancelled"}).Render(ctx, templ_7745c5c3_Buffer)
+						templ_7745c5c3_Err = KanbanFilter(cat, "status", "Outcome", []string{"", "completed", "goal-met", "failed", "cancelled"}, []string{"All outcomes", "Succeeded", "Goal met", "Failed", "Cancelled"}).Render(ctx, templ_7745c5c3_Buffer)
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

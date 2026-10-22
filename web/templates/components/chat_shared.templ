@@ -295,9 +295,9 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 					for _, att := range attachments {
 						if IsImageMediaType(att.MediaType) {
 							<div class="mb-3">
-								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } target="_blank" class="block" data-image-gallery-item="" data-image-name={ att.FileName }>
+								<a href={ templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)) } target="_blank" class="block" data-image-gallery-item="" data-image-name={ att.FileName }>
 									<img
-										src={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) }
+										src={ templ.SafeURL(FileURLMode(MessageAttachmentDownloadURL(att, projectID),"thumbnail")) }
 										alt={ att.FileName }
 										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
 										style="max-height: 400px; object-fit: contain;"
@@ -313,12 +313,15 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 									<span>({ FormatFileSize(att.FileSize) })</span>
 								</div>
 							</div>
+
+ } else if FilePreviewKind(att.FileName)=="video" {
+ <a href={templ.SafeURL(MessageAttachmentDownloadURL(att,projectID))} data-image-gallery-item="" data-media-kind="video" data-image-name={att.FileName}><video muted preload="metadata" src={templ.SafeURL(MessageAttachmentDownloadURL(att,projectID))} style="max-height:240px;max-width:100%"></video><span>{att.FileName}</span></a>
 						} else {
 							<div class="flex items-center gap-2 text-xs opacity-90 mb-1.5">
 								<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
 								</svg>
-								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } class="hover:underline font-medium" target="_blank">
+								<a href={ templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)) } class="hover:underline font-medium" target="_blank" data-file-preview="">
 									{ att.FileName }
 								</a>
 								<span class="opacity-60">({ FormatFileSize(att.FileSize) })</span>
@@ -363,6 +366,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					var streamingDots = document.currentScript.previousElementSibling;
 					var container = streamingDots.previousElementSibling;
 					var execId = container.getAttribute('data-exec-id');
+					// Capture the owning view's scope before navigation can change the selector.
+					var streamProjectRoot = container.closest('[data-project-id]');
+					var streamProjectID = streamProjectRoot ? streamProjectRoot.getAttribute('data-project-id') : '';
 					var thinkingIndicator = document.getElementById('streaming-thinking-' + execId);
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
@@ -394,16 +400,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 						}
 
-						function restoreThreadPollingFallback() {
-							if (!pauseTarget) return;
-							var pollingEl = document.getElementById(pauseTarget);
-							if (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;
-							var pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');
-							var pausedGet = pollingEl.getAttribute('data-paused-hx-get');
-							if (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);
-							if (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);
-							if (typeof htmx !== 'undefined') htmx.process(pollingEl);
-						}
 
 						function refreshThreadComposerAction() {
 							if (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;
@@ -422,6 +418,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
+							if (status !== 'failed' && status !== 'cancelled') return;
 							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 						var wrap = document.createElement('div');
 						wrap.id = 'task-thread-terminal-status';
@@ -599,7 +596,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
 						}
@@ -766,30 +764,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 						});
 
-						eventSource.onerror = function(error) {
-							console.error('EventSource failed:', error);
-							eventSource.close();
-							removeThreadEventSource(eventSource);
-							removeChatEventSource(execId, eventSource);
-				if (textBuffer === '' && scheduleExecutionStreamRetry()) {
-					return;
-						}
-						if (streamTerminalHandled) return;
-						streamTerminalHandled = true;
-						flushBufferedOutput();
-						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-							// Hide thinking indicator and streaming dots, ensure content shows
-						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
-						if (streamingDots) streamingDots.classList.add('hidden');
-					container.classList.remove('hidden');
-						window._taskThreadStreamingActive = false;
-						if (isThread) {
-							restoreThreadPollingFallback();
-						} else {
-							window._chatStreamInProgress = false;
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-						}
-					};
+
 					}
 					connectExecutionStream();
 				})();
@@ -798,8 +773,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 	</div>
 }
 
-// ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress SSE stream.
-// The EventSource is initialized by _initThreadStreaming() after initial hydration or an
+// ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress execution stream.
+// The subscription is initialized by _initThreadStreaming() after initial hydration or an
 // authoritative Chat/Task Thread morph, since inline scripts do not re-execute after morph swaps.
 // Content is stored in data-raw-content (not as text content) so it renders formatted
 // immediately via the inline script, matching ChatBubble's pattern. This prevents
@@ -863,8 +838,8 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 }
 
 // ChatStreamingResumeInitScript installs the shared resume-stream initializer.
-// It finds [data-streaming-resume] containers without an active EventSource
-// and connects them to the SSE endpoint. Called on initial page load and
+// It finds [data-streaming-resume] containers without an active subscription
+// and subscribes them through the shared WebSocket. Called on initial page load and
 // after each authoritative transcript morph.
 templ ChatStreamingResumeInitScript() {
 	<script type="text/javascript">
@@ -876,6 +851,9 @@ templ ChatStreamingResumeInitScript() {
 				container._sseConnected = true;
 
 					var execId = container.getAttribute('data-exec-id');
+					// Capture the owning view's scope before navigation can change the selector.
+					var streamProjectRoot = container.closest('[data-project-id]');
+					var streamProjectID = streamProjectRoot ? streamProjectRoot.getAttribute('data-project-id') : '';
 					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
@@ -925,16 +903,6 @@ templ ChatStreamingResumeInitScript() {
 						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
 					}
 
-					function restoreThreadPollingFallback() {
-						if (!pauseTarget) return;
-						var pollingEl = document.getElementById(pauseTarget);
-						if (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;
-						var pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');
-						var pausedGet = pollingEl.getAttribute('data-paused-hx-get');
-						if (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);
-						if (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);
-						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
-					}
 
 						function refreshThreadComposerAction() {
 							if (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;
@@ -953,7 +921,8 @@ templ ChatStreamingResumeInitScript() {
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
-						if (!messages || document.getElementById('task-thread-terminal-status')) return;
+						if (status !== 'failed' && status !== 'cancelled') return;
+							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 					var wrap = document.createElement('div');
 					wrap.id = 'task-thread-terminal-status';
 					wrap.className = 'flex items-center justify-center gap-2 py-2';
@@ -1136,7 +1105,8 @@ templ ChatStreamingResumeInitScript() {
 
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
 							eventSource.onmessage = function(event) {
@@ -1263,25 +1233,7 @@ templ ChatStreamingResumeInitScript() {
 					}
 				});
 
-					eventSource.onerror = function(error) {
-						console.error('EventSource failed:', error);
-							eventSource.close();
-							removeResumeEventSource(eventSource);
-							if (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {
-								return;
-							}
-					if (streamTerminalHandled) return;
-					streamTerminalHandled = true;
-					flushCumulativeContent();
-					if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
-					if (streamingDots) streamingDots.classList.add('hidden');
-				container.classList.remove('hidden');
-					window._taskThreadStreamingActive = false;
-					if (pauseTarget) {
-						restoreThreadPollingFallback();
-					}
-				};
+
 				}
 				connectResumeExecutionStream();
 			});
@@ -1425,11 +1377,11 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 
 templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
 	if chatExecutionIsTerminal(exec) {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
 			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	} else {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	}
@@ -1437,7 +1389,7 @@ templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []m
 
 templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string, preservedExecIDs map[string]bool) {
 	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
 	} else {
 		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 	}
@@ -1446,7 +1398,7 @@ templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment, projectID string) {
-	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
+	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
 		if len(attachments) > 0 {
 			@ChatBubbleWithAttachments("User", message, attachments, projectID)
 		} else {
@@ -1556,7 +1508,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
 
-	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6">
+	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2">
 		<form
 			id={ config.FormID }
 			method="post"
@@ -1772,7 +1724,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// breadcrumb focus belongs to navigation, not a new editing choice.
 					if (active.matches('[data-breadcrumb-selector-button]') && active.closest('#task-detail-content')) return active;
 					if (!active.matches('[data-nav-base]')) return null;
-					return active.getAttribute('data-nav-base') === window.location.pathname ? active : null;
+					var displayedPath = window.openVibelyDisplayedURL ? new URL(window.openVibelyDisplayedURL(), window.location.href).pathname : window.location.pathname;
+					return active.getAttribute('data-nav-base') === displayedPath ? active : null;
 				}
 
 				function _rememberComposerFocusNavigationTrigger(event) {
@@ -2021,6 +1974,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var wrapper = script ? script.previousElementSibling : null;
 			var form = wrapper ? wrapper.querySelector('form.chat-input-container') : null;
 			if (!form || form.tagName !== 'FORM') return;
+			// Fragment scripts can run again while the existing composer survives.
+			// Bind once per DOM form so one drop cannot start multiple upload queues.
+			// Use a property, not an attribute: restored/cloned forms need fresh handlers.
+			if (form._chatInputInitialized) return;
+			form._chatInputInitialized = true;
 			var formId = form.id;
 			var inputId = form.querySelector('textarea[name="message"]').id;
 			var messageInput = document.getElementById(inputId);
@@ -2317,6 +2275,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// New-task forms have no transcript history to recover.
 					var root = form.closest('#task-thread-view, #chat-page-root');
 					if (!root) return [];
+					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(root, {renderLazy:false});
 					var entries = [];
 					root.querySelectorAll('.chat-bubble-user-msg .chat-bubble-inner > div:first-child, #pending-thread-inputs [data-pending-input-content]').forEach(function(node) {
 						var message = node.textContent || '';
@@ -2766,10 +2725,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						alert('Maximum 3 files allowed');
 						return;
 					}
-					var maxSize = 10 * 1024 * 1024;
+					var maxSize = 25 * 1024 * 1024;
 					for (var j = 0; j < files.length; j++) {
-						if (files[j].size > maxSize) {
-							alert('File "' + files[j].name + '" exceeds 10MB limit');
+						if (files[j].size > (/\.(mp4|m4v|mov|webm|ogv)$/i.test(files[j].name) ? 200 * 1024 * 1024 : maxSize)) {
+							alert('File "' + files[j].name + '" exceeds the upload size limit');
 							return;
 						}
 					}
@@ -3582,6 +3541,8 @@ templ ChatAutoScrollScript() {
 						self._bubbleJump = null;
 						self._userInteracting = true;
 						self._interactionUp = up === undefined ? null : up;
+						self._interactionScrollTop = self.element.scrollTop;
+						self._interactionScrollHeight = self.element.scrollHeight;
 						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
 						self._userInteractTimeout = setTimeout(function() {
 							if (!self._pointerInteracting) self._userInteracting = false;
@@ -3628,6 +3589,7 @@ templ ChatAutoScrollScript() {
 						var form = target && target.closest ? target.closest('form[data-input-id]') : null;
 						if (form && form.getAttribute('hx-target') !== '#' + el.id) return;
 						if (!form && target && target !== document.body && target !== document.documentElement && !el.contains(target)) return;
+						if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(el, {renderLazy:false});
 						var bubbles = Array.from(el.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg')).filter(function(bubble) {
 							return bubble.getClientRects().length && getComputedStyle(bubble).visibility !== 'hidden';
 						});
@@ -3673,16 +3635,27 @@ templ ChatAutoScrollScript() {
 					this._handlers.scroll = function() {
 						if (!self.element || !self.element.isConnected) return;
 						if (self.element.closest('[data-workspace-hidden="true"]')) return;
-						var isNear = window.chatAutoScroll.isNearBottom(self.element);
 						var el = self.element;
 						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
 						if (self._userInteracting) {
+							// Smooth keyboard/wheel scrolling can outlast the original input
+							// event. Extend its lifetime while it is still moving downward,
+							// but not for height corrections or a stationary boundary event.
+							if (self._interactionUp === false && el.scrollTop > self._interactionScrollTop &&
+								el.scrollHeight === self._interactionScrollHeight) {
+								if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+								self._userInteractTimeout = setTimeout(function() {
+									if (!self._pointerInteracting) self._userInteracting = false;
+								}, 250);
+							}
+							self._interactionScrollTop = el.scrollTop;
+							self._interactionScrollHeight = el.scrollHeight;
 							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 							if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(self.element);
-							// Scrolling up in any amount parks the reader; the near-bottom threshold
-							// only decides when scrolling back down re-pins. Otherwise small trackpad
-							// steps stay "near bottom" and the next streamed chunk undoes them.
-							self.userScrolledUp = self._interactionUp === true ? !atBottom : !isNear;
+							// Follow again only when the reader reaches the actual end. The wider
+							// near-bottom threshold is for UI affordances, not scroll ownership:
+							// re-pinning inside it makes layout updates finish the gesture for them.
+							self.userScrolledUp = !atBottom;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
 						}
@@ -3834,7 +3807,10 @@ templ ChatAutoScrollScript() {
 						if (!messages.isConnected) return;
 						var tracker = currentTracker();
 						if (!tracker || !tracker.shouldAutoScroll()) return;
-						messages.scrollTop = messages.scrollHeight;
+						// Mutations can leave the scroll geometry unchanged. Avoid cancelling
+						// an ongoing boundary gesture with a redundant programmatic scroll.
+						var bottom = messages.scrollHeight - messages.clientHeight;
+						if (bottom - messages.scrollTop > 1) messages.scrollTop = bottom;
 						if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
 					});
 				}
@@ -3877,7 +3853,32 @@ templ ChatAutoScrollScript() {
 				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
 				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
 				if (tracker) tracker.userScrolledUp = !pinned;
-				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
+				// Keep an already-rendered cached transcript visible. Cold history is
+				// revealed as one batch after rendering, before images or fonts settle.
+				// Visibility is controlled by a data attribute, not an inline style:
+				// HTMX's delayed style settling must not hide it again after this reveal.
+				if (pinned) messages.scrollTop = messages.scrollHeight;
+				else if (state) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+				window.observeChatTranscriptLayout({
+					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
+				});
+				var rendered = Promise.resolve(options.renderPromise).catch(function() { return false; }).then(async function() {
+					do {
+						if (!messages.isConnected) return false;
+						if (window.waitForChatTranscriptViewport && !await window.waitForChatTranscriptViewport(messages)) return false;
+						tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+						var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+						if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
+						else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
+						// The reader may switch panels while async Markdown is rendering.
+						// Never mark a hidden, unmeasured viewport ready for first display.
+					} while (messages.isConnected && window.waitForChatTranscriptViewport && !messages.clientHeight);
+					if (!messages.isConnected) return false;
+					messages.style.visibility = '';
+					messages.removeAttribute('data-transcript-hydrating');
+					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
+				});
 
 				function waitForImages() {
 					if (!options.waitForImages) return Promise.resolve();
@@ -3927,7 +3928,7 @@ templ ChatAutoScrollScript() {
 						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
 					});
 				}
-				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
+				return rendered.then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
 					if (!messages.isConnected) return false;
 					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
 					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
@@ -3948,11 +3949,18 @@ templ ChatAutoScrollScript() {
 				});
 			};
 
-			window.initChatEarlierLoader = function(containerOrID) {
-			var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
-			if (!container) return;
-			if (container.dataset.earlierLoaderBound === 'true') return;
-			container.dataset.earlierLoaderBound = 'true';
+				function revealPreparedEarlierPairs(container) {
+					container.querySelectorAll('[data-earlier-pending-visibility]').forEach(function(pair) {
+						pair.style.visibility = pair.dataset.earlierPendingVisibility;
+						delete pair.dataset.earlierPendingVisibility;
+					});
+				}
+				window.initChatEarlierLoader = function(containerOrID) {			var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
+				if (!container) return;
+				// History snapshots can be saved mid-hydration. Their DOM has no
+				// live paging transaction to release these temporary overrides.
+				if (!container._earlierAnchor) revealPreparedEarlierPairs(container);
+				if (container.dataset.earlierLoaderBound === 'true') return;			container.dataset.earlierLoaderBound = 'true';
 
 			function setEarlierLoaderBusy(loader, busy) {
 				if (!loader) return;
@@ -4077,6 +4085,7 @@ templ ChatAutoScrollScript() {
 					pair: anchor && anchor.pair,
 					position: anchor ? anchor.offset + container.scrollTop : container.scrollHeight,
 					intentRevision: tracker ? tracker.intentRevision : 0,
+					existingPairs: new Set(container.querySelectorAll(':scope > [data-execution-pair="true"]')),
 					overflowAnchor: container.style.overflowAnchor
 				};
 				// Own compensation for this transaction; native anchoring must not
@@ -4084,6 +4093,10 @@ templ ChatAutoScrollScript() {
 				container.style.overflowAnchor = 'none';
 				rememberChatEarlierLayout(container);
 			};
+
+			function chatEarlierHasViewport(container) {
+				return container.isConnected && container.clientHeight > 0 && container.clientWidth > 0 && container.getClientRects().length > 0;
+			}
 
 			function rememberChatEarlierLayout(container) {
 				var anchor = container._earlierAnchor;
@@ -4095,17 +4108,40 @@ templ ChatAutoScrollScript() {
 				});
 			}
 
+			// Virtual rows preserve the reader themselves. Rebase the paging transaction
+			// after that compensation so its observer does not apply the same delta again.
+			window.acknowledgeChatEarlierLayout = function(container) {
+				var anchor = container._earlierAnchor;
+				if (!anchor || !chatEarlierHasViewport(container)) return;
+				anchor.position = anchor.pair && anchor.pair.isConnected
+					? anchor.pair.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+					: container.scrollHeight;
+				rememberChatEarlierLayout(container);
+			};
+
 			function compensateChatEarlierLayout(container) {
 				var anchor = container._earlierAnchor;
 				if (!anchor || !container.isConnected) return;
+				if (!chatEarlierHasViewport(container)) { anchor.hidden = true; return; }
+				var beforeCompensation = container.scrollTop;
+				// display:none can clamp scrollTop to zero. That is not new reader
+				// intent: resume from the last visible layout before applying growth.
+				if (anchor.hidden) {
+					container.scrollTop = anchor.scrollTop;
+					anchor.hidden = false;
+				}
 				// Scroll events are queued: rendering may already have resized the DOM.
 				// Select the reader's new row using the last compensated layout, then
 				// measure that row's movement. Selecting from the resized DOM loses
 				// growth above it; compensating the old row includes growth below it.
 				if (container.scrollTop !== anchor.scrollTop) {
-					var row = anchor.rows.find(function(row) {
+					var visibleRows = anchor.rows.filter(function(row) {
 						return row.pair.isConnected && row.bottom > container.scrollTop + 1 && row.top < container.scrollTop + container.clientHeight - 1;
 					});
+					// Do not switch to the just-inserted execution merely because
+					// its estimated tail enters the top of the viewport. Keep the
+					// execution being read until it actually leaves the viewport.
+					var row = visibleRows.find(function(row) { return row.pair === anchor.pair; }) || visibleRows[0];
 					if (row) {
 						anchor.pair = row.pair;
 						anchor.position = row.top;
@@ -4125,7 +4161,10 @@ templ ChatAutoScrollScript() {
 				}
 				anchor.position = position;
 				rememberChatEarlierLayout(container);
+				if (container.scrollTop !== beforeCompensation && window.rebaseChatVirtualScroll) window.rebaseChatVirtualScroll(container);
 			}
+
+			window.compensateChatEarlierLayout = compensateChatEarlierLayout;
 
 			function setAllEarlierLoadersIdle(container) {
 				container.querySelectorAll('[data-earlier-loader="true"]').forEach(function(loader) {
@@ -4149,7 +4188,18 @@ templ ChatAutoScrollScript() {
 				var container = getEarlierContainerForElement(swapped);
 				if (!container) return;
 				if (container._earlierAnchor && container._earlierAnchor.started) return;
-				if (container._earlierAnchor) container._earlierAnchor.started = true;
+				if (container._earlierAnchor) {
+					container._earlierAnchor.started = true;
+					// New executions arrive as empty shells. Keep only those shells
+					// hidden until row models and the visible window are ready; the
+					// conversation already being read must remain visible throughout.
+					Array.from(container.querySelectorAll(':scope > [data-execution-pair="true"]')).filter(function(pair) {
+						return !container._earlierAnchor.existingPairs.has(pair);
+					}).forEach(function(pair) {
+						pair.dataset.earlierPendingVisibility = pair.style.visibility;
+						pair.style.visibility = 'hidden';
+					});
+				}
 				container.dataset.earlierAnchorRestoring = 'true';
 				compensateChatEarlierLayout(container);
 				var anchor = container._earlierAnchor;
@@ -4210,6 +4260,7 @@ templ ChatAutoScrollScript() {
 			function clearChatEarlierRestoreState(container) {
 				var anchor = container._earlierAnchor;
 				if (anchor) {
+					revealPreparedEarlierPairs(container);
 					if (anchor.observer) anchor.observer.disconnect();
 					if (anchor.onScroll) container.removeEventListener('scroll', anchor.onScroll);
 					container.style.overflowAnchor = anchor.overflowAnchor;
@@ -4220,17 +4271,36 @@ templ ChatAutoScrollScript() {
 			}
 
 			window.restoreChatEarlierScroll = function(container) {
-				if (!container) return;
+				if (!container || !container._earlierAnchor) return;
 				var anchor = container._earlierAnchor;
+				if (anchor.restorePromise) return anchor.restorePromise;
 				var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
-				Promise.resolve(hydrationPromise).then(function() {
-					requestAnimationFrame(function() {
+				anchor.restorePromise = (async function() {
+					await hydrationPromise;
+					// Older history can arrive while Changes hides the transcript. Retain
+					// the anchor until there is real geometry, including if it hides again
+					// while visible rows are being rendered.
+					while (container.isConnected && container._earlierAnchor === anchor) {
+						if (!chatEarlierHasViewport(container)) anchor.hidden = true;
+						if (window.waitForChatTranscriptViewport && !await window.waitForChatTranscriptViewport(container)) break;
 						if (container._earlierAnchor !== anchor) return;
+						if (!chatEarlierHasViewport(container)) break;
+						compensateChatEarlierLayout(container);
+						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(container);
+						await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+						if (container._earlierAnchor !== anchor) return;
+						if (!chatEarlierHasViewport(container)) continue;
 						compensateChatEarlierLayout(container);
 						delete container._chatEarlierHydrationPromise;
 						clearChatEarlierRestoreState(container);
-					});
-				});
+						return;
+					}
+					if (!container.isConnected && container._earlierAnchor === anchor) {
+						delete container._chatEarlierHydrationPromise;
+						clearChatEarlierRestoreState(container);
+					}
+				})();
+				return anchor.restorePromise;
 			};
 
 				window.pruneChatExecutionWindow = function(containerOrID) {
@@ -4496,6 +4566,9 @@ templ ChatAutoScrollScript() {
 								var resolved = document.getElementById(messagesEl.id);
 								if (resolved) liveMessages = resolved;
 							}
+							if (liveMessages !== messagesEl || !messagesEl.isConnected) return;
+							var tracker = window['scrollTracker_' + messagesEl.id];
+							if (tracker && !tracker.shouldAutoScroll()) return;
 							if (liveMessages && window.chatAutoScroll) {
 								window.chatAutoScroll.scrollToBottom(liveMessages, !!smooth);
 							}
@@ -5011,6 +5084,8 @@ templ ChatAutoScrollScript() {
 				container.classList.remove('whitespace-pre-wrap');
 				var state = container._incrementalChat;
 				if (!state || state.tail.parentNode !== container || !text.startsWith(state.source)) {
+					if (window.discardChatVirtualRows) window.discardChatVirtualRows(container);
+					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(container, {renderLazy:false});
 					var tail = document.createElement('div');
 					tail.style.display = 'contents';
 					while (container.firstChild) tail.appendChild(container.firstChild);
@@ -5033,17 +5108,18 @@ templ ChatAutoScrollScript() {
 				// Hydration may have rendered sections beyond the boundary into this tail.
 				// Snapshot them before replacing it with only the committed prefix.
 				var thinkingStates = boundary ? Array.from(state.tail.querySelectorAll('details.stream-thinking'), function(d) { return d.open; }) : [];
-				var options = { offset: state.renderOffset, ordinal: state.ordinal };
+				var options = { offset: state.renderOffset, ordinal: state.ordinal, stable: !!boundary };
 				var rendered = await window.renderStreamingContent(state.tail, boundary ? suffix.slice(0, boundary) : suffix, yieldBetweenBatches, options);
 				if (rendered === false || container._incrementalChat !== state || state.generation !== generation) return false;
 				if (boundary) {
-					var remainingThinkingStates = thinkingStates.slice(state.tail.querySelectorAll('details.stream-thinking').length);
+					var remainingThinkingStates = thinkingStates.slice(state.tail._chatVirtualData ? state.tail._chatVirtualData.models.filter(function(row) { return row.kind === 'thinking'; }).length : state.tail.querySelectorAll('details.stream-thinking').length);
 					// Compaction activities share the styling class but are not tool calls.
-					state.ordinal += state.tail.querySelectorAll('.stream-tool[data-tool-render-id]').length;
+					state.ordinal += state.tail._chatVirtualData ? state.tail._chatVirtualData.models.filter(function(row) { return row.kind === 'using'; }).length : state.tail.querySelectorAll('.stream-tool[data-tool-render-id]').length;
 					state.offset += boundary;
 					state.renderOffset += (state.tail.getAttribute('data-raw-content') || '').length;
 					state.tail.removeAttribute('data-raw-content');
 					state.tail.removeAttribute('data-raw-revision');
+					state.tail.setAttribute('data-chat-stable-segment', 'true');
 					state.tail = document.createElement('div');
 					state.tail.style.display = 'contents';
 					container.appendChild(state.tail);
@@ -5136,7 +5212,9 @@ templ ChatAutoScrollScript() {
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
 				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
-				var renderedRevision = container._renderedRevision || container.getAttribute('data-rendered-revision') || '';
+				// Serialized HTML retains revision attributes but loses event handlers.
+				// Only a revision owned by this live node can skip hydration.
+				var renderedRevision = container._renderedRevision || '';
 				var hasRenderedContent = !!(container.textContent && container.textContent.trim()) || !!(container.querySelector && container.querySelector('*'));
 				if (renderedRevision === renderRevision && hasRenderedContent) return Promise.resolve(true);
 				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
@@ -5195,12 +5273,30 @@ templ ChatAutoScrollScript() {
 			};
 
 			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options) {
+				// Inline thread initialization can run before the deferred virtual-list
+				// script. Wait for it before choosing the rendering path, especially
+				// for hidden workspaces whose first paint needs viewport coordination.
+				if (!window.installChatVirtualRows && window.chatVirtualRowsReady) {
+					return window.chatVirtualRowsReady.then(function() {
+						if (!container.isConnected) return false;
+						return window.renderStreamingContent(container, textBuffer, yieldBetweenBatches, options);
+					});
+				}
 				// Live callers also pass a terminal boolean when this is their fallback.
 				if (!options || typeof options !== 'object') options = null;
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
-				var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024;
+				var sourceText = textBuffer;
+				// Promoting an enhanced SVG to lazy rows discards its live figure and
+				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
+				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
+					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable) &&
+					!container.querySelector('.chat-svg-preview');
+				var projectionKey = _thinkingStateKey(container);
+				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
+				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;
+				var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024 || (options?.preparedSegments?.reduce(function(size, seg) { return size + (seg.content || '').length + (seg.resultOutput || '').length + (seg.secondary || '').length; }, 0) || 0) >= 64 * 1024);
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -5224,7 +5320,7 @@ templ ChatAutoScrollScript() {
 					var rawCodeRanges = [];
 					var codeRanges = [];
 					var transcriptToolRanges = [];
-					var segments = [];
+					var segments = options?.preparedSegments ? options.preparedSegments.map(function(seg) { return Object.assign({}, seg); }) : [];
 					function toolBlockRanges(text, protectedRanges) {
 						var ranges = [], protectedIndex = 0;
 						var opener = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?/gm;
@@ -5470,7 +5566,7 @@ templ ChatAutoScrollScript() {
 						return cleaned && /\n[ \t]*$/.test(raw) ? cleaned + '\n' : cleaned;
 					}
 					function prepareLargeMarkdownSegments() {
-						if (!shouldYieldPreparation) return true;
+						if (!shouldYieldPreparation || virtualOwner) return true;
 						while (markdownPreparationIndex < segments.length) {
 							var segment = segments[markdownPreparationIndex];
 							var source = '';
@@ -5544,7 +5640,59 @@ templ ChatAutoScrollScript() {
 						prepareLargeMarkdownSegments
 				];
 
+				function projectRows() {
+					var rows = [], text = '', thinking = [];
+					function flushTextRow() {
+						if (cleanPreparedText(text)) rows.push({kind:'text', segments:[{type:'text',content:text}]});
+						text = '';
+					}
+					function flushThinkingRow() {
+						if (thinking.length) rows.push({kind:'thinking', segments:thinking});
+						thinking = [];
+					}
+					segments.forEach(function(seg, index) {
+						if (seg.type === 'tool_result' || seg.type === 'compaction_end') return;
+						if (seg.type === 'text') {
+							var nextThinking = false;
+							for (var next = index + 1; next < segments.length; next++) {
+								if (segments[next].type === 'thinking') { nextThinking = true; break; }
+								if (segments[next].type !== 'text') break;
+							}
+							if (thinking.length && nextThinking && seg.content.trim().length < 100) thinking.push(seg);
+							else text += seg.content;
+						} else if (seg.type === 'thinking') {
+							if (!seg.content.trim()) return;
+							if (text.trim()) { flushThinkingRow(); flushTextRow(); }
+							thinking.push(seg);
+						} else {
+							flushThinkingRow(); flushTextRow();
+							rows.push({kind:seg.type, segments:[seg]});
+						}
+					});
+					flushThinkingRow(); flushTextRow();
+					return rows;
+				}
+				if (cachedProjection) {
+					preparationPhases = [];
+					textBuffer = cachedProjection.normalized;
+				} else if (options?.preparedSegments) {
+					preparationPhases = [prepareLargeMarkdownSegments];
+				}
 				function renderPreparedSegments() {
+					if (virtualOwner && window.installChatVirtualRows) {
+						var data = cachedProjection || {key:projectionKey, source:sourceText, normalized:textBuffer, offset:options?.offset || 0, models:projectRows()};
+						container.classList.remove('whitespace-pre-wrap');
+						window.setChatRawContent(container, textBuffer);
+						var toolStateKey = container._chatToolStateKey || projectionKey;
+						// Models contain only source data and measurements; no rendered DOM.
+						return window.installChatVirtualRows(container, data, function(node, model, index, synchronous) {
+							node._chatStreamStateKey = model.kind === 'thinking' ? toolStateKey + ':thinking:' + (data.offset + (model.segments[0].index || 0)) : projectionKey + ':row:' + index;
+							node._chatToolStateKey = toolStateKey;
+							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments});
+						});
+					}
+			if (!options?.virtualRow && window.discardChatVirtualRows) window.discardChatVirtualRows(container);
+			if (!options?.virtualRow && window.materializeVirtualChatRows) window.materializeVirtualChatRows(container, {renderLazy:false});
 
 			// Save open state of existing thinking sections before clearing.
 			// Uses both a local array (fast path for same-call re-renders) and a
@@ -6040,8 +6188,12 @@ templ ChatAutoScrollScript() {
 				flushThinking();
 				flushText();
 				container.classList.remove('whitespace-pre-wrap');
-				window.setChatRawContent(container, textBuffer);
-				container.replaceChildren(renderFragment);
+				if (!options?.virtualRow) window.setChatRawContent(container, textBuffer);
+				if (window.prepareChatMath) window.prepareChatMath(renderFragment, container);
+				if (window.prepareChatSVG) window.prepareChatSVG(renderFragment, container);
+                window.OVFileViewer?.prepareStream(renderFragment, container);
+				if (options?.virtualRow && window.preserveChatVirtualScroll) window.preserveChatVirtualScroll(container, function() { container.replaceChildren(renderFragment); container.style.minHeight = ''; });
+				else container.replaceChildren(renderFragment);
 				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(container);
 
 			// Restore open state of thinking sections from before re-render
@@ -6057,18 +6209,22 @@ templ ChatAutoScrollScript() {
 
 			// Restore per-tool output scroll positions without synchronously measuring
 			// every tool body. CSS overflow:auto handles non-overflowing bodies.
-			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-				var toolID = el.getAttribute('data-tool-render-id') || '';
-				var rowKind = el.getAttribute('data-tool-row') || '';
-				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
-				if (!state || state.pinned) {
-					el.scrollTop = Number.MAX_SAFE_INTEGER;
-					el.setAttribute('data-scroll-pinned', 'true');
-				} else {
-					el.scrollTop = state.scrollTop;
-					el.setAttribute('data-scroll-pinned', 'false');
-				}
-			});
+			function restoreToolRows() {
+				container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
+					var toolID = el.getAttribute('data-tool-render-id') || '';
+					var rowKind = el.getAttribute('data-tool-row') || '';
+					var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(toolContainerKey || 'chat') + ':' + toolID + ':' + rowKind];
+					if (!state || state.pinned) {
+						el.scrollTop = Number.MAX_SAFE_INTEGER;
+						el.setAttribute('data-scroll-pinned', 'true');
+					} else {
+						el.scrollTop = state.scrollTop;
+						el.setAttribute('data-scroll-pinned', 'false');
+					}
+				});
+			}
+			if (options?.virtualRow && window.restoreChatVirtualRowScroll) window.restoreChatVirtualRowScroll(container, restoreToolRows);
+			else restoreToolRows();
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
 				window.convertTaskLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
@@ -6076,6 +6232,7 @@ templ ChatAutoScrollScript() {
 			if (window.convertTaskEditLinksInMessage) {
 				window.convertTaskEditLinksInMessage(options ? container : (container.closest('.chat-bubble-assistant-msg') || container));
 			}
+			if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(container);
 			}
 				function fillLargeToolOutputChunks(done, fail) {
 					var outputIndex = 0;
@@ -6371,7 +6528,7 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					var renderedRevision = el._renderedRevision || '';
 					if (renderedRevision === revision && hasRenderedContent) return;
 					if (el._renderingRevision === revision) {
 						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
@@ -6421,7 +6578,7 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					var renderedRevision = el._renderedRevision || '';
 					if (renderedRevision === revision && hasRenderedContent) return;
 					if (el._renderingRevision === revision) {
 						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);

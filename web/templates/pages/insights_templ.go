@@ -787,7 +787,7 @@ func gradeReportCard(title string, subtitle string, postURL string, targetID str
 			templ_7745c5c3_Var30 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"card bg-base-100 shadow-lg border-2 border-primary/20\"><div class=\"card-body\"><div class=\"flex justify-between items-center mb-4\"><div><h3 class=\"card-title text-xl\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><div class=\"flex justify-between items-center mb-4\"><div><h3 class=\"card-title text-xl\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

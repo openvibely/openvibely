@@ -1,12 +1,12 @@
 package contextlimits
 
 import (
-	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
 const (
+	DefaultOllamaContextWindow           = 8192
 	DefaultOpenAICompatibleContextWindow = 128000
 	DefaultAnthropicContextWindow        = 200000
 	DefaultOpenAIContextWindow           = 200000
@@ -45,7 +45,7 @@ func openAIContextWindow(model string) int {
 }
 
 func providerInputWindow(agent models.LLMConfig) int {
-	if agent.ProviderContextWindow > 0 {
+	if agent.Provider != models.ProviderOllama && agent.ProviderContextWindow > 0 {
 		return agent.ProviderContextWindow
 	}
 	switch agent.Provider {
@@ -63,13 +63,23 @@ func providerInputWindow(agent models.LLMConfig) int {
 		}
 		return DefaultOpenAICompatibleContextWindow
 	case models.ProviderOllama:
-		return llmollama.DefaultContextWindow
+		// Active Ollama windows are transient discovery data, not saved capacity.
+		if agent.ContextWindow > 0 {
+			return agent.ContextWindow
+		}
+		return DefaultOllamaContextWindow
 	default:
 		return DefaultOpenAIContextWindow
 	}
 }
 
 func providerOutputWindow(agent models.LLMConfig) int {
+	if agent.Provider == models.ProviderOllama {
+		if agent.DefaultMaxTokens > 0 {
+			return agent.DefaultMaxTokens
+		}
+		return 4096
+	}
 	if agent.Provider == models.ProviderOpenAICompatible && agent.ProviderMaxOutputTokens <= 0 && agent.DefaultMaxTokens > 0 {
 		return agent.DefaultMaxTokens
 	}
@@ -119,6 +129,10 @@ func Resolve(agent models.LLMConfig) Resolved {
 		} else if effectiveIn < 32768 {
 			effectiveOut = minPositive(effectiveOut, max(1, effectiveIn/4))
 		}
+	}
+
+	if agent.Provider == models.ProviderOllama && agent.DefaultMaxTokens <= 0 && effectiveIn < 32768 {
+		effectiveOut = minPositive(effectiveOut, max(1, effectiveIn/4))
 	}
 
 	autoLimit := (effectiveIn * 90) / 100

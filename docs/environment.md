@@ -25,6 +25,35 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | `OPENVIBELY_CODEX_REASONING_EFFORT` | Fallback reasoning effort for Codex requests when model config does not set one | `none`, `low`, `medium`, `high`, `xhigh`, `max` (model support varies; GPT-6 Astra does not support `none`) | If unset/invalid, uses the selected model's default: `medium` for GPT-6 Astra/Sol/Luna, GPT-5.6, GPT-5.5, GPT-5.4, and GPT-5.4 mini; `high` for most older Codex models | `medium` \| `none` |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | Overrides the per-call output token budget for Anthropic API/OAuth calls. When set to a positive integer, the value is applied up to the model's hard upper limit. | Positive integer string | Defaults to `128 000` for Claude Opus 5.5; `64 000` for Claude Opus 5, Sonnet 5, Fable 5/5.1, Mythos 5, and Opus 4.6–4.8; `32 000` for Sonnet 4.6 and most Claude 4/3.7 models; `8 192` for Claude 3.5; and `4 096` for older Claude 3 Opus/Haiku models. Model-specific upper limits still apply. | unset \| `32000` |
 
+## Live WebSocket Limits
+
+These startup settings apply to server and desktop backends. Values are positive
+integers; unset, malformed, nonpositive, or overflowing values use the default.
+Restart the backend after changing them.
+
+| Variable | Scope | Default |
+|---|---|---:|
+| `OPENVIBELY_LIVE_MAX_CONNECTIONS` | Connected browser tabs/desktop windows per backend | 500 |
+| `OPENVIBELY_LIVE_MAX_SUBSCRIPTIONS_PER_CONNECTION` | Combined live and execution subscriptions per connection | 200 |
+| `OPENVIBELY_LIVE_MAX_PROJECT_SUBSCRIPTIONS` | Live subscriptions across all connections/projects | 5,000 |
+| `OPENVIBELY_LIVE_MAX_EXECUTION_SUBSCRIPTIONS` | Execution-output subscriptions across all connections/runs | 25,000 |
+
+Built-in project tabs share their window's connection. Watching the same execution
+from two windows uses two execution subscriptions. These limits do not control
+agent execution concurrency and are not a load-tested capacity guarantee. See
+[the live transport documentation](live-websocket.md) for admission and recovery behavior.
+
+## Document Skill Development
+
+Document skills resolve executable paths through `skill_view`. To test a local build instead of downloading the declared dependency, set these variables on the OpenVibely process:
+
+| Variable | Purpose |
+|---|---|
+| `OPENVIBELY_TOOL_PAPERWORKS` | Absolute path to a local Paperworks executable. |
+| `OPENVIBELY_TOOL_LIBREOFFICE` | Absolute path to the LibreOffice executable (`soffice`). |
+
+The dependency manager validates the override and returns its path as `PAPERWORKS` or `DOCUMENT_SOFFICE` in the skill environment. These are developer overrides, not variables the model should invent or change to bypass missing dependencies.
+
 ## Application Updates
 
 Build artifact identity is compiled into official releases and cannot be changed by environment variables. Source builds perform a metric-only daily check and never show or apply updates.

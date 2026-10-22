@@ -20,11 +20,13 @@ import (
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/stretchr/testify/require"
 )
 
 func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testing.T) {
+	attempts := map[string]int{}
 	profiles := map[string]string{
 		"Bearer access-a": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-shared","display_name":"Primary account"}}`,
 		"Bearer access-b": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-shared","display_name":"Primary account"}}`,
@@ -32,6 +34,11 @@ func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testi
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		attempts[r.URL.Path]++
+		if attempts[r.URL.Path] == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		if r.URL.Path == "/api/oauth/profile" {
 			profile, ok := profiles[r.Header.Get("Authorization")]
 			require.True(t, ok, "unexpected profile authorization")
@@ -58,15 +65,15 @@ func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testi
 			OAuthAccessToken:  "old-access-" + suffix,
 			OAuthRefreshToken: "old-refresh-" + suffix,
 		}
-		require.NoError(t, repo.Create(context.Background(), cfg))
+		require.NoError(t, repo.Create(retrytest.Context(), cfg))
 		configs = append(configs, cfg)
 	}
 
 	for i, cfg := range configs {
-		current, err := repo.GetByID(context.Background(), cfg.ID)
+		current, err := repo.GetByID(retrytest.Context(), cfg.ID)
 		require.NoError(t, err)
 		suffix := string(rune('a' + i))
-		_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
+		_, err = h.exchangeOAuthCodeAndSaveTokensContext(retrytest.Context(), &oauthPendingFlow{
 			ConfigID:       current.ID,
 			ConnectionID:   current.OAuthConnectionID,
 			Provider:       models.ProviderAnthropic,
@@ -76,21 +83,21 @@ func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testi
 		require.NoError(t, err)
 	}
 
-	first, err := repo.GetByID(context.Background(), configs[0].ID)
+	first, err := repo.GetByID(retrytest.Context(), configs[0].ID)
 	require.NoError(t, err)
-	second, err := repo.GetByID(context.Background(), configs[1].ID)
+	second, err := repo.GetByID(retrytest.Context(), configs[1].ID)
 	require.NoError(t, err)
-	third, err := repo.GetByID(context.Background(), configs[2].ID)
+	third, err := repo.GetByID(retrytest.Context(), configs[2].ID)
 	require.NoError(t, err)
 	require.Equal(t, second.OAuthConnectionID, first.OAuthConnectionID, "verified same-user connections should be adopted automatically")
 	require.NotEqual(t, second.OAuthConnectionID, third.OAuthConnectionID, "same-organization different-user connection must remain isolated")
 
-	connections, err := repo.ListOAuthConnections(context.Background(), models.ProviderAnthropic)
+	connections, err := repo.ListOAuthConnections(retrytest.Context(), models.ProviderAnthropic)
 	require.NoError(t, err)
 	require.Len(t, connections, 2)
 	names := []string{connections[0].Name, connections[1].Name}
 	require.ElementsMatch(t, []string{"Primary account", "Other account"}, names)
-	fullConnection, err := repo.GetOAuthConnectionByID(context.Background(), second.OAuthConnectionID)
+	fullConnection, err := repo.GetOAuthConnectionByID(retrytest.Context(), second.OAuthConnectionID)
 	require.NoError(t, err)
 	require.Equal(t, "Primary account", fullConnection.ProviderDisplayName)
 	require.NotEmpty(t, fullConnection.PrincipalHash)
@@ -1512,6 +1519,7 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 	t.Run("classifies token exchange failure and consumes state", func(t *testing.T) {
 		h, _, _ := setupTestHandler(t)
 		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "121") // Terminal fixture: beyond the standard retry wait budget.
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":"invalid_grant","access_token":"secret-access","email":"private@example.com"}`))
 		}))

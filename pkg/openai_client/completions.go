@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,6 +17,9 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
@@ -37,6 +41,7 @@ type CompletionsOptions struct {
 	System                   string
 	WorkDir                  string
 	MaxTurns                 int
+	ContinueFromHistory      bool // Resume recovered history without repeating the consumed prompt.
 	OmitExecutionEnvironment bool // Raw utility requests may omit coding environment context.
 	DisableTools             bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
@@ -59,6 +64,10 @@ type CompletionsOptions struct {
 	ToolExecutor func(ctx context.Context, name string, input json.RawMessage) (string, bool, error)
 	// ToolFilter can deny tool execution by name at runtime.
 	ToolFilter func(name string) bool
+
+	// OnToolBoundarySteering consumes pending text after all tool results and
+	// images have been appended, before the next model request.
+	OnToolBoundarySteering func(context.Context) (string, error)
 
 	// Callbacks for real-time output
 	OnText       func(text string)
@@ -112,7 +121,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			toolDefs = append(toolDefs, DefaultTools()...)
 		}
 		toolDefs = append(toolDefs, opts.ExtraTools...)
-		toolDefs = filterToolDefinitions(toolDefs, opts.ToolFilter)
+		// Retain candidates; filter immediately before each request.
 	}
 
 	tools := make([]map[string]interface{}, 0, len(toolDefs))
@@ -153,9 +162,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	if existingCompletionsHistory != nil {
 		for _, msg := range existingCompletionsHistory {
-			content := msg.Content
+			var content interface{} = msg.Content
+			if len(msg.ImageContent) > 0 {
+				content = msg.ImageContent
+			}
 			if msg.Role == "tool" {
-				content = truncateToolOutputForModelInput(content, opts.ToolOutputTokenLimit)
+				content = truncateToolOutputForModelInput(msg.Content, opts.ToolOutputTokenLimit)
 			}
 			messages = append(messages, completionsMessage{
 				Role:             msg.Role,
@@ -178,8 +190,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 	}
 
+	var promptBlocks []map[string]interface{}
 	// Add current prompt with optional attachments
-	if len(opts.Attachments) > 0 {
+	if len(opts.Attachments) > 0 && !opts.ContinueFromHistory {
 		content := make([]map[string]interface{}, 0, 1+len(opts.Attachments))
 		if prompt != "" {
 			content = append(content, map[string]interface{}{
@@ -200,6 +213,8 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 						"url": imageDataURL(att.MediaType, data),
 					},
 				})
+			} else if att.MediaType == "application/pdf" {
+				return nil, fmt.Errorf("PDF document input is unavailable on this Chat Completions connection; use a document-capable Responses or Anthropic connection")
 			} else if IsTextMediaType(att.MediaType) {
 				// For non-image files, add as text context
 				content = append(content, map[string]interface{}{
@@ -212,7 +227,8 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			Role:    "user",
 			Content: content,
 		})
-	} else {
+		promptBlocks = content
+	} else if !opts.ContinueFromHistory {
 		messages = append(messages, completionsMessage{
 			Role:    "user",
 			Content: prompt,
@@ -225,12 +241,47 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
 	finalReasoningContent := ""
-	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
+	var currentTranscript []CompletionsHistoryMessage
+	if !opts.ContinueFromHistory {
+		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt, ImageContent: promptBlocks}}
+	}
+
+	// Publish completed exchanges even when a subsequent request is cancelled.
+	defer func() {
+		c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
+		c.lastCompletionsReasoning = finalReasoningContent
+		c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
+	}()
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
-		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
+		readContext := func(m completionsMessage) (string, string) {
+			text, _ := m.Content.(string)
+			return m.Role, text
+		}
+		makeReplayContext := func(text string) CompletionsHistoryMessage {
+			return CompletionsHistoryMessage{Role: "user", Content: text}
+		}
+		makeWireContext := func(text string) completionsMessage { return completionsMessage{Role: "user", Content: text} }
+		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
+		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		currentTranscript = attachmentcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
+		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		// Summary compaction sends first and trims only after provider overflow.
+		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
 			return nil, err
 		}
+		// Keep text actually delivered to the caller if this sampling attempt
+		// fails before it can publish a completed assistant message.
+		var partialText strings.Builder
+		streamOpts := *opts
+		streamOpts.OnText = func(text string) {
+			partialText.WriteString(text)
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
@@ -241,9 +292,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*completionsTurnResult, error) {
-			return c.sendCompletionsTurn(attemptCtx, messages, tools, opts)
+			return c.sendCompletionsTurn(attemptCtx, messages, tools, &streamOpts)
 		})
 		if err != nil {
+			if text := partialText.String(); text != "" {
+				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "assistant", Content: text})
+			}
 			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
@@ -294,6 +348,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		// answer cannot authorize calls whose arguments were produced before it.
 		requestInputIndex := exclusiveCompletionsRequestUserInput(turnResult.toolCalls)
 		// Execute tools and add results
+		var imageMessages []completionsMessage
 		for toolIndex, tc := range turnResult.toolCalls {
 			inputJSON := json.RawMessage(tc.Function.Arguments)
 			if opts.OnToolUse != nil {
@@ -354,7 +409,29 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Content:    output,
 				ToolCallID: tc.ID,
 			})
+			if image, ok := attachment.TakeToolImage(ctx, output); ok && !isError {
+				content := []map[string]interface{}{
+					{"type": "text", "text": "Image returned by view_image: " + image.Name},
+					{"type": "image_url", "image_url": map[string]interface{}{"url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)}},
+				}
+				imageMessages = append(imageMessages, completionsMessage{Role: "user", Content: content})
+			}
 		}
+		messages = append(messages, imageMessages...)
+		for _, message := range imageMessages {
+			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: message.Content.([]map[string]interface{})})
+		}
+		if opts.OnToolBoundarySteering != nil {
+			steering, err := opts.OnToolBoundarySteering(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("tool-boundary steering: %w", err)
+			}
+			if steering = strings.TrimSpace(steering); steering != "" {
+				messages = append(messages, completionsMessage{Role: "user", Content: steering})
+				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", Content: steering})
+			}
+		}
+
 	}
 
 	result.Text = allText.String()
@@ -365,9 +442,6 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
-	c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
-	c.lastCompletionsReasoning = finalReasoningContent
-	c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
 
 	return result, nil
 }
@@ -505,6 +579,17 @@ func completionsSupportsTemperature(model, reasoningEffort string) bool {
 }
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
+	if opts.ToolFilter != nil {
+		permitted := make([]map[string]interface{}, 0, len(tools))
+		for _, tool := range tools {
+			function, _ := tool["function"].(map[string]interface{})
+			name, _ := function["name"].(string)
+			if opts.ToolFilter(name) {
+				permitted = append(permitted, tool)
+			}
+		}
+		tools = permitted
+	}
 	payload := map[string]interface{}{
 		"model":    opts.Model,
 		"messages": messages,

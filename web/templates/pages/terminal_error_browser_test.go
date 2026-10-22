@@ -24,6 +24,7 @@ window.__terminalEventSources = [];
 window.EventSource = function(url) { this.url = url; this.listeners = {}; this.closed = false; window.__terminalEventSources.push(this); };
 window.EventSource.prototype.addEventListener = function(name, handler) { this.listeners[name] = handler; };
 window.EventSource.prototype.close = function() { this.closed = true; };
+window.openVibelyLive = {execution: function(id, offset) { return new window.EventSource("/events/chat/" + id + "?offset=" + offset); }};
 window.EventSource.prototype.emit = function(name, data) {
   var event = {data: data};
   if (name === 'message' && this.onmessage) this.onmessage(event);

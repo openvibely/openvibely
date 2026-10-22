@@ -4629,12 +4629,27 @@ func TestTelegramService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 }
 
 func TestTelegramActiveProjectCacheConcurrentResolutionAndRuntimeSwitch(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
+	env := teststores.New(t)
+	projectRepo := env.Projects
+	svc := &TelegramService{projectRepo: projectRepo, userProjects: make(map[int64]string)}
 	ctx := context.Background()
-	alpha := &models.Project{Name: "Concurrent Alpha", IsDefault: true}
+	alpha := &models.Project{Name: "Concurrent Alpha"}
 	require.NoError(t, projectRepo.Create(ctx, alpha))
+	// The migrated fixture already contains a default project. Creating another
+	// IsDefault project leaves two valid fallbacks, making resolution depend on
+	// list order. Explicitly select Alpha before racing resolution with a switch.
+	require.NoError(t, env.Fixtures.SetDefaultProject(ctx, alpha.ID))
 	beta := &models.Project{Name: "Concurrent Beta"}
 	require.NoError(t, projectRepo.Create(ctx, beta))
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	var defaults []string
+	for _, project := range projects {
+		if project.IsDefault {
+			defaults = append(defaults, project.ID)
+		}
+	}
+	require.Equal(t, []string{alpha.ID}, defaults)
 
 	const userID = int64(174)
 	svc.userProjectsMu.Lock()

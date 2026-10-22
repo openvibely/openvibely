@@ -1649,6 +1649,9 @@ func TestScheduleContent_ConsistentBorderStyling(t *testing.T) {
 	if strings.Contains(output, `border-top: 2px dashed`) {
 		t.Fatal("timeline should not rely on browser-default dashed border rendering")
 	}
+	if !strings.Contains(output, `zone.style.outline = '2px solid var(--ov-schedule-drop-valid-outline`) {
+		t.Fatal("valid task drop feedback must preserve main’s solid outline")
+	}
 }
 
 // TestBuildTaskOccurrenceMap_DisabledScheduleIncluded verifies that disabled

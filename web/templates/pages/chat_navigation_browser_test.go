@@ -10,12 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -33,12 +34,13 @@ func TestBrowserFunctional_ChatNavigationStateAndActiveStreamInChrome(t *testing
 		t.Fatalf("render base navigation script: %v", err)
 	}
 	baseHTML := base.String()
-	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	navStart := strings.Index(baseHTML, "// One owner for full-page fragment navigation")
 	navEnd := strings.Index(baseHTML[navStart:], "// Scroll position restoration for drop zones")
 	if navStart < 0 || navEnd < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
 	}
 	navigationScript := baseHTML[navStart : navStart+navEnd]
+	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	history := make([]models.Execution, 0, 14)
 	for i := 0; i < 14; i++ {
@@ -266,7 +268,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
+			doc := `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + style + runner + `</head><body><main id="main-content">` + fragment + `</main></body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -281,48 +283,72 @@ html, body, #main-content { height: 100%; margin: 0; }
 				"session_id":  "session-browser",
 				"attachments": []map[string]any{{"filename": "pending.txt", "size": 7}},
 			})
-		case "/events/chat/exec-live":
-			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-			stateMu.Lock()
-			streamOffsets = append(streamOffsets, offset)
-			latestConnection++
-			connection := latestConnection
-			stateMu.Unlock()
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			flusher, ok := w.(http.Flusher)
-			if !ok {
-				http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		case "/events/ws":
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
 				return
 			}
-			writeChunk := func(chunk string) {
-				stateMu.Lock()
-				if len(persistedOutput) == offset {
-					persistedOutput += chunk
+			defer conn.CloseNow()
+			streamCtx, stop := context.WithCancel(r.Context())
+			defer stop()
+			_ = wsjson.Write(streamCtx, conn, map[string]any{"event": "ready"})
+			subs := map[string]context.CancelFunc{}
+			for {
+				var cmd struct {
+					Op     string `json:"op"`
+					ID     string `json:"id"`
+					Offset int    `json:"offset"`
 				}
-				stateMu.Unlock()
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)
-				flusher.Flush()
-			}
-			switch offset {
-			case 0:
-				writeChunk("hé")
-			case 3:
-				writeChunk("llo")
-			default:
-				select {
-				case <-growthRelease:
-					stateMu.Lock()
-					isLatest := connection == latestConnection
-					stateMu.Unlock()
-					if isLatest && r.Context().Err() == nil {
-						writeChunk(strings.Repeat(" growth", 140))
-					}
-				case <-r.Context().Done():
+				if wsjson.Read(streamCtx, conn, &cmd) != nil {
 					return
 				}
+				if cmd.Op == "unsubscribe" {
+					if cancel := subs[cmd.ID]; cancel != nil {
+						cancel()
+						delete(subs, cmd.ID)
+					}
+					continue
+				}
+				if cmd.Op != "execution" {
+					continue
+				}
+				offset, id := cmd.Offset, cmd.ID
+				stateMu.Lock()
+				streamOffsets = append(streamOffsets, offset)
+				latestConnection++
+				connection := latestConnection
+				stateMu.Unlock()
+				subctx, cancel := context.WithCancel(streamCtx)
+				subs[id] = cancel
+				go func() {
+					writeChunk := func(chunk string) {
+						stateMu.Lock()
+						if len(persistedOutput) == offset {
+							persistedOutput += chunk
+						}
+						stateMu.Unlock()
+						_ = wsjson.Write(subctx, conn, map[string]any{"id": id, "event": "message", "data": chunk, "start": offset, "offset": offset + len(chunk)})
+					}
+					switch offset {
+					case 0:
+						writeChunk("hé")
+					case 3:
+						writeChunk("llo")
+					default:
+						select {
+						case <-growthRelease:
+							stateMu.Lock()
+							isLatest := connection == latestConnection
+							stateMu.Unlock()
+							if isLatest && subctx.Err() == nil {
+								writeChunk(strings.Repeat(" growth", 140))
+							}
+						case <-subctx.Done():
+						}
+					}
+				}()
 			}
-			<-r.Context().Done()
+
 		case "/release-growth":
 			releaseGrowth.Do(func() { close(growthRelease) })
 			w.WriteHeader(http.StatusNoContent)
@@ -461,7 +487,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
 		t.Fatal(err)
 	}
-	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	navStart := strings.Index(baseHTML, "// One owner for full-page fragment navigation")
 	if navStart < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
 	}
@@ -470,6 +496,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 		t.Fatal("could not find end of production HTMX navigation helper")
 	}
 	navigationScript := baseHTML[navStart : navStart+navEndOffset]
+	performanceScripts := `<script src="` + static.URL("thread-navigation.js") + `"></script><script src="` + static.URL("chat-virtual-list.js") + `"></script>`
 
 	var renderedChat bytes.Buffer
 	if err := ChatContent(nil, nil, "project-actions", nil, nil, nil, false, false, 30).Render(context.Background(), &renderedChat); err != nil {
@@ -685,7 +712,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 				_, _ = w.Write([]byte(chatFragment))
 				return
 			}
-			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script>` + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
+			doc := `<!doctype html><html lang="en" data-theme="dark" data-openvibely-runtime="` + runtime + `"><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>` + navigationScript + `</script><script src="` + static.URL("live-transport.js") + `"></script>` + performanceScripts + productionStyle + fixtureStyle + runner + `</head><body><main id="main-content">` + chatFragment + `</main>` + confirmation.String() + `</body></html>`
 			_, _ = w.Write([]byte(doc))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

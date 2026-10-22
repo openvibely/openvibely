@@ -281,7 +281,7 @@ func historyContent(history *models.History, currentProjectID string) templ.Comp
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div><!-- Summary Stats --><div class=\"stats shadow w-full mb-6 bg-base-100\"><div class=\"stat\"><div class=\"stat-title\">Total Executions</div><div class=\"stat-value text-xl\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div><!-- Summary Stats --><div class=\"stats shadow-sm border border-base-300 w-full mb-6 bg-base-100\"><div class=\"stat\"><div class=\"stat-title\">Total Executions</div><div class=\"stat-value text-xl\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -634,7 +634,7 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 			templ_7745c5c3_Var33 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<!-- Code Change Stats --><div class=\"stats shadow w-full mb-4 bg-base-100\"><div class=\"stat\"><div class=\"stat-figure text-primary\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-6 w-6\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"></path></svg></div><div class=\"stat-title\">Commits</div><div class=\"stat-value text-primary\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<!-- Code Change Stats --><div class=\"stats shadow-sm border border-base-300 w-full mb-4 bg-base-100\"><div class=\"stat\"><div class=\"stat-figure text-primary\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-6 w-6\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"></path></svg></div><div class=\"stat-title\">Commits</div><div class=\"stat-value text-primary\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

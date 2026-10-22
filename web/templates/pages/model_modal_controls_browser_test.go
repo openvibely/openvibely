@@ -263,6 +263,7 @@ func TestBrowserFunctional_OllamaDiscovery(t *testing.T) {
  window.htmx={process:function(){}};
  var models=[{name:'installed:a'},{model:'installed:b'}], fail=false, pending=null, requested=[];
  window.fetch=function(url,options){
+  if(String(url).startsWith('/models/ollama/context?')) return Promise.resolve({ok:true,json:function(){return Promise.resolve({context_length:8192,model_context_length:131072});}});
   requested.push(url);
   if(pending)return new Promise(function(resolve){pending.resolve=resolve;});
   return Promise.resolve({ok:!fail,json:function(){return Promise.resolve(fail?{error:'Server offline'}:models);}});

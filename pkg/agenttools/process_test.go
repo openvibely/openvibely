@@ -225,3 +225,50 @@ func TestProcessShutdown(t *testing.T) {
 		t.Fatal("shutdown retained sessions")
 	}
 }
+
+func TestProcessExecutionCancellation(t *testing.T) {
+	// Cleanups run in reverse order. Stop the independent shell before removing
+	// its working directory, which Windows keeps locked while the shell is alive.
+	dir := t.TempDir()
+	m := testProcessManager(t)
+	_, command := testCommands(t)
+	owner, cancelOwner := context.WithCancel(context.Background())
+	defer cancelOwner()
+	request, cancelRequest := context.WithCancel(WithProcessLifetime(owner))
+	defer cancelRequest()
+	out, err := m.start(request, dir, command, 30, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := processID(t, out)
+	m.mu.Lock()
+	session := m.sessions[id]
+	m.mu.Unlock()
+	otherOut, err := m.start(context.Background(), dir, command, 30, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	other := m.sessions[processID(t, otherOut)]
+	m.mu.Unlock()
+	cancelRequest()
+	select {
+	case <-session.done:
+		t.Fatal("tool request cancellation killed execution process")
+	case <-time.After(30 * time.Millisecond):
+	}
+	cancelOwner()
+	select {
+	case <-session.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("execution cancellation left process running")
+	}
+	select {
+	case <-other.done:
+		t.Fatal("cancelled another execution in the same directory")
+	default:
+	}
+	if _, err := m.start(context.WithoutCancel(request), dir, command, 30, time.Millisecond); err == nil {
+		t.Fatal("started process for cancelled execution")
+	}
+}

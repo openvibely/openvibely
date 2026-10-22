@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 const (
@@ -655,7 +656,7 @@ func (c *HostedSSOClient) Exchange(parent context.Context, code, verifier string
 			return nil, &ExchangeError{Category: "client_request_error"}
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		resp, doErr := client.Do(req)
+		resp, doErr := httpretry.DoRequest(client, req)
 		if doErr != nil {
 			attemptCancel()
 			return nil, &ExchangeError{Category: "network_error"}

@@ -138,13 +138,14 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 					</div>
 						// Unified actions dropdown with Local and GitHub sections
 						<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">
-							<div tabindex="0" role="button" class="btn btn-primary btn-sm whitespace-nowrap">
+							<button type="button" role="button" popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap">
 								Actions
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
 								</svg>
-							</div>
-							<ul tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content z-[100] menu w-52 max-w-[calc(100vw-2rem)]">
+							</button>
+							<ul id="changes-actions-menu" popover="auto" class="ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]" style="position:fixed;inset:auto;margin:0;">
+
 								if conflictRecovery {
 									<li class="menu-title"><span>Conflict recovery</span></li>
 									<li>
@@ -202,6 +203,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 								</li>
 							}
 							</ul>
+							@changesActionsPopoverScript()
 						</div>
 					</div>
 				}
@@ -324,4 +326,34 @@ func joinParts(parts []string) string {
 		result += p
 	}
 	return result
+}
+
+// Use the browser top layer so sticky/composited diff headers cannot cover actions.
+templ changesActionsPopoverScript() {
+ <script>
+ (() => {
+  if (window._changesActionsPopoverInstalled) return;
+  window._changesActionsPopoverInstalled = true;
+  const current = () => document.getElementById('changes-actions-menu');
+  const close = () => { const menu=current(); if(menu && menu.matches(':popover-open')) menu.hidePopover(); };
+  function position(menu) {
+   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;
+   const trigger=document.querySelector('[popovertarget="changes-actions-menu"]');
+   if(!trigger) { menu.hidePopover(); return; }
+   const rect=trigger.getBoundingClientRect();
+   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }
+   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';
+   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';
+   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';
+  }
+  document.addEventListener('beforetoggle', event => {
+   // Native input can flush microtasks before the popover has entered the top
+   // layer. Measure on the next frame, after opening and before it is painted.
+   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));
+  }, true);
+  window.addEventListener('resize',()=>position(current()));
+  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);
+  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);
+ })();
+ </script>
 }

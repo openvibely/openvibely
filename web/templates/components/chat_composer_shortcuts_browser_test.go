@@ -287,6 +287,9 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
     }
   }
 
+  // Until the window has system focus Chrome defers focusin, so the
+  // breadcrumb restore below would fire after htmx-settling is removed.
+  await waitFor(function() { return document.hasFocus(); }, 'page never received focus');
   await waitFor(function() { return document.activeElement && document.activeElement.id === 'message-input'; }, 'direct Chat did not focus');
   var directChat = document.getElementById('message-input');
   typeImmediately(directChat, 'direct chat');

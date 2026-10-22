@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestPrepareRequestAppliesRequiredHeadersAndExactBodySignature(t *testing.T) {
@@ -364,6 +366,7 @@ func TestRedactedConfigRemovesRefreshParameters(t *testing.T) {
 }
 
 func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
+	calls := 0
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	var gotHeaders http.Header
 	var gotBody map[string]string
@@ -371,6 +374,11 @@ func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
 		gotHeaders = r.Header.Clone()
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &gotBody)
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"fresh","refresh_token":"rotated"}`))
 	}))
@@ -387,7 +395,7 @@ func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
 		RefreshHeaders:          map[string]string{"X-Refresh-Header": "refresh-value"},
 		RefreshParameters:       map[string]string{"audience": "custom-api"},
 	}
-	tokens, err := Refresh(context.Background(), NewHTTPClient(time.Second, true), cfg, "old-refresh", RefreshOptions{
+	tokens, err := Refresh(retrytest.Context(), NewHTTPClient(time.Second, true), cfg, "old-refresh", RefreshOptions{
 		ClientID: "client-id", ClientSecret: "client-secret",
 	})
 	if err != nil {

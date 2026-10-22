@@ -946,7 +946,7 @@ const docTemplate = `{
         },
         "/api/chat/message": {
             "post": {
-                "description": "Send a chat message to the AI agent with optional file attachments.\nMessages containing only spaces, tabs, or line breaks are rejected with HTTP 400.\nReturns 201 immediately with a message ID. The AI processes the message asynchronously.\nPoll GET /api/chat/message/{id} to check status and retrieve the response.\nSupported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)\nMaximum file size: 10 MB per file\nMaximum files per request: 10",
+                "description": "Send a chat message to the AI agent with optional file attachments.\nMessages containing only spaces, tabs, or line breaks are rejected with HTTP 400.\nReturns 201 immediately with a message ID. The AI processes the message asynchronously.\nPoll GET /api/chat/message/{id} to check status and retrieve the response.\nSupported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)\nMaximum file size: 25 MiB per file, 200 MiB for video, 256 KiB for ordinary text, 10 MiB for PNG/JPEG/GIF/WebP images\nMaximum files per request: 10",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1273,28 +1273,6 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": true
                         }
-                    }
-                }
-            }
-        },
-        "/api/system/update/events": {
-            "get": {
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "system"
-                ],
-                "summary": "Stream system update events",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "204": {
-                        "description": "No Content"
                     }
                 }
             }
@@ -2283,6 +2261,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/models.AnalyticsInsight"
                     }
                 },
+                "model_activity": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelPerformance"
+                    }
+                },
                 "model_categories": {
                     "type": "array",
                     "items": {
@@ -2892,6 +2876,9 @@ const docTemplate = `{
                 },
                 "tokens": {
                     "type": "integer"
+                },
+                "total_duration_ms": {
+                    "type": "integer"
                 }
             }
         },
@@ -2982,6 +2969,12 @@ const docTemplate = `{
                     "$ref": "#/definitions/models.AnalyticsMetric"
                 },
                 "token_covered_tasks": {
+                    "type": "integer"
+                },
+                "total_duration_ms": {
+                    "type": "integer"
+                },
+                "total_follow_ups": {
                     "type": "integer"
                 },
                 "total_tokens": {

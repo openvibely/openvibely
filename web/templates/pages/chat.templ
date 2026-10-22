@@ -46,7 +46,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 		@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 	}
 	for _, exec := range chatHistory {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
 			} else {
@@ -102,7 +102,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 		</div>
 		<!-- Chat Messages Container -->
 		<div class="relative flex-1 min-h-0 min-w-0">
-			<div id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
+			<div id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
 				if hasEarlier && len(chatHistory) > 0 {
 					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
@@ -112,7 +112,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					for _, exec := range chatHistory {
 						<div
 							id={ "chat-execution-" + exec.ID }
-							class="chat-execution-pair space-y-6"
+							class="chat-execution-pair space-y-4"
 							data-execution-pair="true"
 							data-exec-id={ exec.ID }
 							data-exec-status={ string(exec.Status) }
@@ -316,8 +316,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if (!chatRoot) return;
 				var projectId = chatRoot.getAttribute('data-project-id');
 
-				// Track /events/chat/:exec_id EventSources so reconnect swaps/navigation
-				// cannot leak stale streams and consume browser connection slots.
+				// Track execution subscription handles so reconnect swaps/navigation
+				// release stale views without closing the shared WebSocket.
 				window._chatEventSources = window._chatEventSources || [];
 				window._chatEventSourceByExec = window._chatEventSourceByExec || {};
 				window.registerChatStreamEventSource = function(execId, eventSource) {
@@ -1007,7 +1007,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var streamOffset = utf8ByteLength(textBuffer);
 							contentDiv._sseConnected = true;
 							contentDiv.setAttribute('data-initial-byte-length', String(streamOffset));
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							eventSource = window.openVibelyLive.execution(execId, streamOffset, projectId);
+							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 							if (window.registerChatStreamEventSource) {
 								window.registerChatStreamEventSource(execId, eventSource);
 							}
@@ -1124,23 +1125,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 							});
 
-							eventSource.onerror = function() {
-								eventSource.close();
-								if (window.unregisterChatStreamEventSource) {
-									window.unregisterChatStreamEventSource(execId, eventSource);
-								}
-								if (textBuffer === '' && streamRetryCount < 5) {
-									streamRetryCount++;
-									setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
-									return;
-								}
-								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-								thinking.classList.add('hidden');
-						dots.classList.add('hidden');
-						contentDiv.classList.remove('hidden');
-						window._chatStreamInProgress = false;
-						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-					};
+
 					}
 					connectChatExecutionStream();
 
@@ -1728,7 +1713,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									// Append user bubble and streaming assistant for a real running turn.
 									var pair = document.createElement('div');
 									pair.id = 'chat-execution-' + data.exec_id;
-									pair.className = 'chat-execution-pair space-y-6';
+									pair.className = 'chat-execution-pair space-y-4';
 									pair.setAttribute('data-execution-pair', 'true');
 									pair.setAttribute('data-exec-id', data.exec_id);
 									pair.setAttribute('data-exec-status', 'running');
@@ -1810,7 +1795,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						? swapTarget
 						: (swapTarget && swapTarget.querySelector ? swapTarget.querySelector('#chat-messages') : null);
 					if (swappedChatMessages) {
-						window._chatInputRevision = (window._chatInputRevision || 0) + 1;
+						// Showing a local preview is not a new authoritative input
+						// snapshot. Counting it would reject its own pending refresh.
+						if (!event.detail._ovCachedPreview) window._chatInputRevision = (window._chatInputRevision || 0) + 1;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(swappedChatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(swappedChatMessages);
 						swappedChatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {

@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 )
@@ -288,7 +289,6 @@ type channelChatContextOptions struct {
 	AgentRepo             persistence.AgentStore
 	SettingsRepo          persistence.SettingsStore
 	CustomPersonalityRepo persistence.CustomPersonalityStore
-	AttachmentContext     string
 }
 
 func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions) string {
@@ -311,9 +311,6 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 		}
 	}
 	systemContext := BuildChatContextWithAgentDefinitions(existingTasks, availableModels, listChannelChatAssignableAgentDefinitions(ctx, opts.Platform, opts.AgentRepo), schedules, time.Now())
-	if opts.AttachmentContext != "" {
-		systemContext += opts.AttachmentContext
-	}
 	if personalityPrompt := getChannelChatPersonalityContext(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo); personalityPrompt != "" {
 		systemContext += personalityPrompt
 	}
@@ -1090,7 +1087,6 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		AgentRepo:             opts.AgentRepo,
 		SettingsRepo:          opts.SettingsRepo,
 		CustomPersonalityRepo: opts.CustomPersonalityRepo,
-		AttachmentContext:     opts.AttachmentContext,
 	})
 	workDir := resolveChannelChatWorkDir(ctx, opts.ProjectRepo, opts.ProjectID)
 	initialAckID := opts.InitialAckID
@@ -1119,6 +1115,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		Agent:               *opts.Agent,
 		ChatHistory:         history,
 		SystemContext:       systemContext,
+		AttachmentContext:   opts.AttachmentContext,
 		WorkDir:             workDir,
 		ImageAttachments:    opts.ImageAttachments,
 		Surface:             opts.Surface,
@@ -1230,32 +1227,16 @@ func channelChatImageFormatMediaType(format string) string {
 const channelChatMaxInlineTextAttachmentSize = 100 * 1024
 
 func channelChatAttachmentContextAndImages(chatAttachments []models.ChatAttachment, maxTextFileSize int64) (string, []models.Attachment) {
-	var imageAttachments []models.Attachment
-	var attachmentContents []string
-	for _, att := range chatAttachments {
-		if isChannelChatImageMediaType(att.MediaType) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  att.FileName,
-				FilePath:  att.FilePath,
-				MediaType: att.MediaType,
-				FileSize:  att.FileSize,
-			})
-			continue
+	var attachments, references []models.Attachment
+	for _, file := range chatAttachments {
+		att := models.Attachment{FileName: file.FileName, FilePath: file.FilePath, MediaType: file.MediaType, FileSize: file.FileSize}
+		attachments = append(attachments, att)
+		if !isChannelChatImageMediaType(att.MediaType) {
+			references = append(references, att)
 		}
-		if att.FileSize <= maxTextFileSize {
-			content, readErr := os.ReadFile(att.FilePath)
-			if readErr == nil {
-				attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", att.FileName, string(content)))
-				continue
-			}
-		}
-		attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", att.FileName, att.FileSize))
 	}
-	attachmentContext := ""
-	if len(attachmentContents) > 0 {
-		attachmentContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return attachmentContext, imageAttachments
+	return llmprompt.BuildAttachmentInstructions(references), attachments
+
 }
 
 func saveChannelChatAttachmentsToPendingSession(uploadsDir, fallbackName string, attachments []models.ChatAttachment) (string, error) {

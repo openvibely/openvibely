@@ -28,3 +28,27 @@ func TestProcessStopKillsDescendants(t *testing.T) {
 		t.Fatalf("descendant survived: %v", err)
 	}
 }
+
+func TestExecutionCancellationKillsDescendants(t *testing.T) {
+	m := testProcessManager(t)
+	dir := t.TempDir()
+	owner, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out, err := m.start(WithProcessLifetime(owner), dir, "(sleep 1; echo leaked > child-survived) & wait", 10, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	session := m.sessions[processID(t, out)]
+	m.mu.Unlock()
+	cancel()
+	select {
+	case <-session.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("process did not stop")
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(dir, "child-survived")); !os.IsNotExist(err) {
+		t.Fatalf("descendant survived cancellation: %v", err)
+	}
+}

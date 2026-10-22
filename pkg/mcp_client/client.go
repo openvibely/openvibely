@@ -10,7 +10,6 @@ import (
 	"net/http"
 
 	"github.com/openvibely/openvibely/internal/applog"
-	"github.com/openvibely/openvibely/internal/httpclient"
 	"os"
 	"os/exec"
 	"sort"
@@ -19,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
@@ -610,7 +611,7 @@ func (s *MCPServer) call(ctx context.Context, method string, params interface{})
 	for k, v := range s.headers {
 		httpReq.Header.Set(k, v)
 	}
-	httpResp, err := s.httpClient.Do(httpReq)
+	httpResp, err := httpretry.DoRequest(s.httpClient, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("MCP HTTP request failed: %w", err)
 	}

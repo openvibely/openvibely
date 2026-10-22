@@ -58,7 +58,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
 	}
 
-	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	if !strings.Contains(content, `data-messages-id="chat-messages"`) || !strings.Contains(content, `data-tracker-key="scrollTracker_chat-messages"`) || !strings.Contains(content, `aria-label="Scroll to latest message"`) {
@@ -114,8 +114,8 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
 		`class="relative flex-1 min-h-0 min-w-0"`,
-		`id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6"`,
-		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`,
+		`id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4"`,
+		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
@@ -288,7 +288,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	if !strings.Contains(bubbleSection, "function utf8ByteLength(value)") ||
 		!strings.Contains(bubbleSection, "var streamOffset = utf8ByteLength(textBuffer);") ||
-		!strings.Contains(bubbleSection, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
+		!strings.Contains(bubbleSection, "window.openVibelyLive.execution(execId, streamOffset, projectId)") {
 		t.Fatal("live-created assistant stream must reconnect with the current UTF-8 byte offset")
 	}
 	if !strings.Contains(bubbleSection, "progressDiv.id = 'mixture-progress-' + execId;") || !strings.Contains(bubbleSection, "innerDiv.appendChild(progressDiv);") {
@@ -355,7 +355,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("expected error event listener in createStreamingBubble")
 	}
-	errEndOffset := strings.Index(bubbleSection[errIdx:], "eventSource.onerror = function() {")
+	errEndOffset := strings.Index(bubbleSection[errIdx:], "connectChatExecutionStream();")
 	if errEndOffset == -1 {
 		t.Fatal("expected createStreamingBubble error handler boundary")
 	}
@@ -370,25 +370,10 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 		t.Error("error handler in createStreamingBubble must re-evaluate plan prompt")
 	}
 
-	// Also check onerror handler
-	oeIdx := strings.Index(bubbleSection, "eventSource.onerror = function() {")
-	if oeIdx == -1 {
-		t.Fatal("expected onerror handler in createStreamingBubble")
-	}
-	oeEnd := oeIdx + 1200
-	if oeEnd > len(bubbleSection) {
-		oeEnd = len(bubbleSection)
-	}
-	oeBody := bubbleSection[oeIdx:oeEnd]
-	if !strings.Contains(oeBody, "setTimeout(connectChatExecutionStream, 150 * streamRetryCount)") {
-		t.Error("onerror handler in createStreamingBubble must retry empty early stream failures")
-	}
-	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
-		t.Error("onerror handler in createStreamingBubble must clear _chatStreamInProgress")
-	}
-	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
-		t.Error("onerror handler in createStreamingBubble must re-evaluate plan prompt")
-	}
+    if strings.Contains(bubbleSection, "eventSource.onerror") {
+        t.Error("network failures must be recovered by the shared transport, not terminate the execution")
+    }
+
 }
 
 func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
@@ -842,7 +827,7 @@ func TestChatContent_WindowedTranscriptUsesTopLoaderAndPrunesLivePairs(t *testin
 	if strings.Count(content, `data-execution-pair="true"`) < 2 {
 		t.Fatal("expected rendered executions to be wrapped as whole-turn pairs")
 	}
-	if strings.Count(content, `chat-execution-pair space-y-6`) < 2 {
+	if strings.Count(content, `chat-execution-pair space-y-4`) < 2 {
 		t.Fatal("expected execution pairs to preserve equal vertical spacing between user and assistant bubbles")
 	}
 	if strings.Contains(content, `chat-execution-pair space-y-3`) {

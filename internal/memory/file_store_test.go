@@ -3,7 +3,6 @@ package memory
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -31,8 +30,8 @@ func TestFileStore_EnsureProjectCreatesDirectoryAndIndexWhenMissing(t *testing.T
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	if !strings.Contains(string(data), "# Project Memory") {
-		t.Fatalf("index missing header: %q", string(data))
+	if string(data) != defaultIndexContents {
+		t.Fatalf("unexpected default index contents:\nwant: %q\ngot:  %q", defaultIndexContents, string(data))
 	}
 }
 

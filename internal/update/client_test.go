@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/buildinfo"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestCanonicalJSONUsesRFC8785NumberSerialization(t *testing.T) {
@@ -30,6 +31,7 @@ func TestCanonicalJSONUsesRFC8785NumberSerialization(t *testing.T) {
 }
 
 func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
+	calls := 0
 	unsetEnvForTest(t, installIDOptOutEnvForTest)
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +41,11 @@ func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(CheckResponse{SchemaVersion: 1, UpdateAvailable: true, LatestVersion: "9.9.9", Action: "manual", Message: "upgrade"})
 	}))
 	defer srv.Close()
@@ -46,7 +53,7 @@ func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
 	now := time.Unix(1000, 0)
 	client := NewClient(ClientConfig{ServiceURL: srv.URL, Channel: "main", StatePath: filepath.Join(dir, "update-state.json"), HTTPClient: srv.Client(), Now: func() time.Time { return now }, Random: func(time.Duration) time.Duration { return 0 }})
 	current := CurrentBuild{Build: buildinfo.Build{Version: "dev-abc", Commit: "abc", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionSource}
-	result, checked, err := client.CheckIfDue(context.Background(), current)
+	result, checked, err := client.CheckIfDue(retrytest.Context(), current)
 	if err != nil || !checked {
 		t.Fatalf("result=%#v checked=%v err=%v", result, checked, err)
 	}
@@ -59,7 +66,7 @@ func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "update-state.json")); err != nil {
 		t.Fatal(err)
 	}
-	if _, checked, err := client.CheckIfDue(context.Background(), current); err != nil || checked {
+	if _, checked, err := client.CheckIfDue(retrytest.Context(), current); err != nil || checked {
 		t.Fatalf("second checked=%v err=%v", checked, err)
 	}
 }
@@ -319,6 +326,7 @@ func TestClientPausesForDayAfterThreeFailures(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++
 				if fail {
+					w.Header().Set("Retry-After", "121") // Exercise update cooldown after HTTP retries decline the delay.
 					w.WriteHeader(status)
 					return
 				}

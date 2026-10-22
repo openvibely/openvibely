@@ -128,8 +128,8 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 			t.Error("dialog should contain 'Default Model' label")
 		}
 		// Check that the dialog contains max workers selector
-		if !strings.Contains(body, "Max Concurrent Workers") {
-			t.Error("dialog should contain 'Max Concurrent Workers' label")
+		if !strings.Contains(body, "Worker limit") {
+			t.Error("dialog should contain 'Worker limit' label")
 		}
 		// Check that both configs are in the dropdown
 		if !strings.Contains(body, "Opus Config") {
@@ -485,12 +485,12 @@ func TestNewProjectDialog(t *testing.T) {
 	if !strings.Contains(body, `name="repo_path"`) {
 		t.Error("dialog should contain repo_path input")
 	}
-	// Check that "Use global default" option exists
-	if !strings.Contains(body, "Use global default") {
-		t.Error("dialog should contain 'Use global default' option")
+	// Check that "Global default" option exists
+	if !strings.Contains(body, "Global default") {
+		t.Error("dialog should contain 'Global default' option")
 	}
 	// Check that blank/zero inheritance guidance exists for the numeric input.
-	if !strings.Contains(body, "leave blank to inherit") {
+	if !strings.Contains(body, "Leave blank to inherit") {
 		t.Error("dialog should explain how to inherit the global worker limit")
 	}
 	// Regression: directory selection UI should use folder-selection wording, not upload

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func resetSharedStateForTests() {
@@ -444,5 +446,32 @@ func TestHTTPMCPConcurrentToolCalls(t *testing.T) {
 			close(releaseFirst)
 			awaitResult(firstDone, nil)
 		})
+	}
+}
+
+func TestHTTPMCPRetriesSameRPCRequest(t *testing.T) {
+	calls := 0
+	var original string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		calls++
+		if calls == 1 {
+			original = string(body)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if string(body) != original || r.Header.Get("X-MCP-Token") != "fixture" {
+			t.Error("retry changed RPC identity/body/auth")
+		}
+		var request jsonRPCRequest
+		_ = json.Unmarshal(body, &request)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: request.ID, Result: json.RawMessage(`{"ok":true}`)})
+	}))
+	defer srv.Close()
+	server := &MCPServer{kind: "http", url: srv.URL, httpClient: srv.Client(), headers: map[string]string{"X-MCP-Token": "fixture"}}
+	_, err := server.call(retrytest.Context(), "tools/list", nil)
+	if err != nil || calls != 2 {
+		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 }

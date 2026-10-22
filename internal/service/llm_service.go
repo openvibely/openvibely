@@ -21,6 +21,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/pkg/agenttools"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -31,6 +33,7 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
+	taskRuntimeProvider       func(context.Context, models.Task, string, map[string]bool) *llmcontracts.RuntimeTools
 	llmConfigRepo             persistence.LLMConfigStore
 	execRepo                  persistence.ExecutionStore
 	taskRepo                  persistence.TaskStore
@@ -245,8 +248,13 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 	}
 }
 
-func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
-	if s == nil {
+// SetTaskRuntimeProvider supplies application handlers missing from the service-only runtime.
+func (s *LLMService) SetTaskRuntimeProvider(provider func(context.Context, models.Task, string, map[string]bool) *llmcontracts.RuntimeTools) {
+	s.taskRuntimeProvider = provider
+}
+
+func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Task, executionIDs ...string) *llmcontracts.RuntimeTools {
+	if s == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
 	}
 	_, automationBound := AutomationContextFromContext(ctx)
@@ -263,7 +271,65 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 		SuppressIssueComments:    automationBound,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	runtime := llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	if s.taskRuntimeProvider != nil {
+		missing := chatcontrol.TaskToolNames(task.CreatedVia)
+		// Automation deliberately suppresses status comments; the application fallback
+		// must not reintroduce a tool removed by its specialized GitHub runtime.
+		if automationBound {
+			delete(missing, "github_comment_on_issue")
+		}
+		if runtime != nil {
+			for _, def := range runtime.Definitions {
+				delete(missing, def.Name)
+			}
+		}
+		execID := ""
+		if len(executionIDs) > 0 {
+			execID = executionIDs[0]
+		}
+		runtime = llmcontracts.CompositeRuntimeTools(runtime, s.taskRuntimeProvider(ctx, task, execID, missing))
+	}
+	// Every service/application bundle is subordinate to the shared task policy.
+	// Non-registry tools (selected skills and bootstrap tools) retain their own gates.
+	if runtime != nil {
+		policy := chatcontrol.TaskToolNames(task.CreatedVia)
+		if automationBound {
+			delete(policy, "github_comment_on_issue")
+		}
+		definitions := make([]llmcontracts.RuntimeToolDefinition, 0, len(runtime.Definitions))
+		for _, def := range runtime.Definitions {
+			if chatcontrol.Get(def.Name) == nil || policy[def.Name] {
+				definitions = append(definitions, def)
+			}
+		}
+		runtime.Definitions = definitions
+		base := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			normalized := strings.ToLower(strings.TrimSpace(name))
+			if chatcontrol.Get(normalized) != nil && !policy[normalized] {
+				return "", false, false, nil
+			}
+			return base(ctx, name, input)
+		}
+	}
+
+	if runtime != nil && runtime.HasDefinition("list_capabilities") {
+		baseExecutor := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name == "list_capabilities" {
+				var summaries []chatcontrol.ActionSummary
+				for _, summary := range chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb) {
+					if runtime.HasDefinition(summary.Name) {
+						summaries = append(summaries, summary)
+					}
+				}
+				return formatChannelCapabilities(summaries), true, false, nil
+			}
+			return baseExecutor(ctx, name, input)
+		}
+	}
+	return runtime
 }
 
 func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
@@ -400,58 +466,16 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	}
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
-	allowed := map[string]bool{
-		"list_tasks":                             true,
-		"create_task":                            true,
-		"create_swarm_task":                      true,
-		"execute_tasks":                          true,
-		"set_task_goal":                          true,
-		"clear_task_goal":                        true,
-		"get_task_goal":                          true,
-		"pause_task_goal":                        true,
-		"resume_task_goal":                       true,
-		"list_schedules":                         true,
-		"view_usage_analytics":                   true,
-		"view_pulse":                             true,
-		"schedule_task":                          true,
-		"delete_schedule":                        true,
-		"modify_schedule":                        true,
-		"create_alert":                           true,
-		"create_notification":                    true,
-		"list_existing_automation_notifications": true,
-		"list_alerts":                            true,
-		"get_alert":                              true,
-		"claim_alert":                            true,
-		"create_alert_implementation_task":       true,
-		"link_alert_implementation_task":         true,
-		"complete_alert_processing":              true,
-		"fail_alert_processing":                  true,
-		"release_alert_claim":                    true,
-		"list_capabilities":                      true,
-	}
-	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
-		delete(allowed, "create_task")
-		delete(allowed, "create_swarm_task")
-		delete(allowed, "execute_tasks")
-		delete(allowed, "create_alert_implementation_task")
-		delete(allowed, "link_alert_implementation_task")
-	}
-	for _, def := range defs {
-		name := strings.ToLower(strings.TrimSpace(def.Name))
-		if !allowed[name] {
-			continue
-		}
-		if name == "list_alerts" && task.Category == models.CategoryScheduled {
-			def.Schema = def.Schema.WithoutProperties("project_id", "read")
-			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
-		}
-		filtered = append(filtered, def)
-	}
-	if len(filtered) == 0 {
-		return nil
+	allowed := chatcontrol.TaskToolNames(task.CreatedVia)
+
+	taskUploadsDir := "uploads"
+	if s.taskSvc != nil && strings.TrimSpace(s.taskSvc.uploadsDir) != "" {
+		taskUploadsDir = s.taskSvc.uploadsDir
 	}
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:          task.ProjectID,
+		AttachmentRepo:     s.attachmentRepo,
+		UploadsDir:         taskUploadsDir,
 		TaskSvc:            s.taskSvc,
 		SwarmSvc:           nil,
 		TaskRepo:           s.taskRepo,
@@ -496,6 +520,29 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
 		},
 	}))
+	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
+		var summaries []chatcontrol.ActionSummary
+		for _, summary := range chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb) {
+			if allowed[summary.Name] {
+				summaries = append(summaries, summary)
+			}
+		}
+		return formatChannelCapabilities(summaries), nil
+	}
+	for _, def := range defs {
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if !allowed[name] || handlers[name] == nil {
+			continue
+		}
+		if name == "list_alerts" && task.Category == models.CategoryScheduled {
+			def.Schema = def.Schema.WithoutProperties("project_id", "read")
+			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
+		}
+		filtered = append(filtered, def)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
 	if task.Category == models.CategoryScheduled {
 		if listAlerts := handlers["list_alerts"]; listAlerts != nil {
 			handlers["list_alerts"] = func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -511,9 +558,12 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 			}
 		}
 	}
-	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
+	for name := range allowed {
+		if handlers[name] == nil {
+			delete(allowed, name)
+		}
 	}
+
 	return &llmcontracts.RuntimeTools{
 		Definitions: filtered,
 		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
@@ -1032,22 +1082,20 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 
 // Swarm children consume the parent's shared inputs without duplicating files.
 func (s *LLMService) loadTaskRunAttachments(ctx context.Context, task *models.Task) ([]models.Attachment, error) {
-	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
-	if err != nil || task.SwarmRole == "" || task.ParentTaskID == nil {
-		return attachments, err
+	return ListTaskConversationAttachments(ctx, s.attachmentRepo, s.taskRepo, task)
+}
+
+// directTaskRunAttachments keeps task-level files as direct request inputs.
+// Files attached to earlier thread messages are carried by the task-wide
+// attachment context as references instead of re-sending their bytes.
+func directTaskRunAttachments(attachments []models.Attachment) []models.Attachment {
+	direct := make([]models.Attachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment.ExecutionID == "" {
+			direct = append(direct, attachment)
+		}
 	}
-	parent, err := s.taskRepo.GetByID(ctx, *task.ParentTaskID)
-	if err != nil {
-		return nil, err
-	}
-	if parent == nil || parent.ProjectID != task.ProjectID || parent.SwarmRole != models.SwarmRoleParent {
-		return attachments, nil
-	}
-	shared, err := s.attachmentRepo.ListByTask(ctx, parent.ID)
-	if err != nil {
-		return nil, err
-	}
-	return append(attachments, shared...), nil
+	return direct
 }
 
 func (s *LLMService) reconcileMissingTaskAttachments(ctx context.Context, taskID string, attachments []models.Attachment) []models.Attachment {
@@ -1091,6 +1139,7 @@ func applyPlannerFollowupEffort(task models.Task, agent *models.LLMConfig, model
 }
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	modelDefaultEffort := agent.ReasoningEffort
 	if s.taskRepo != nil {
 		if err := s.taskRepo.ApplyModelEffort(ctx, task.ID, &agent); err != nil {
@@ -1224,7 +1273,13 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Load attachments for the task
 	attachments, err := s.loadTaskRunAttachments(ctx, &task)
+	attachmentSource := NewTaskAttachmentContextSource(s.attachmentRepo, s.taskRepo, task)
+	if err == nil {
+		attachments = directTaskRunAttachments(s.reconcileMissingTaskAttachments(ctx, task.ID, attachments))
+		err = attachmentSource.Load(ctx)
+	}
 	if err != nil {
+		err = fmt.Errorf("couldn't load task attachments. Retry the task: %w", err)
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after attachment load failure: %v", completeErr)
@@ -1239,7 +1294,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
-	attachments = s.reconcileMissingTaskAttachments(ctx, task.ID, attachments)
 	applog.Debugf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
 	// Vision-aware agent override: if the task has image attachments and the
@@ -1423,6 +1477,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 
 	// Call the LLM
 	callCtx := llmcontracts.WithDirectUsageProject(ctx, task.ProjectID)
+	callCtx = attachmentcontext.WithSource(callCtx, attachmentSource)
 	var preparedSteering []models.ThreadInput
 	var unsubscribeSteeringWakeup func()
 	if s.threadInputRepo != nil {
@@ -1447,15 +1502,29 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			preparedSteering = append(preparedSteering, inputs...)
-			messages, steeringErr := s.hydrateTaskSteeringMessages(inputs)
+			messages, steeringErr := s.hydrateTaskSteeringMessages(inputs, exec.ID)
 			if steeringErr != nil {
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
-				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
+			// Delivery publishes files and atomically records the applied inputs with
+			// their history. Subsequent checkpoints only persist history. Applied
+			// inputs are durable and are not claimed again after a restart.
+			var commitSteering llmcontracts.InitialSteeringCommit
+			commitSteering = func(commitCtx context.Context, history []any) error {
+				finishAttachments, err := s.publishTaskSteeringAttachments(commitCtx, task.ID, exec.ID, inputs)
+				if err != nil {
 					return err
 				}
+				if err := attachmentSource.Load(commitCtx); err != nil {
+					finishAttachments(false)
+					return fmt.Errorf("couldn't refresh steering attachments; message was not sent: %w", err)
+				}
+				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, InputIDs: threadInputIDs(inputs), ResponsesHistory: history}); err != nil {
+					finishAttachments(false)
+					return err
+				}
+				finishAttachments(true)
 				consumed := make(map[string]bool, len(inputs))
 				for _, input := range inputs {
 					consumed[input.ID] = true
@@ -1467,7 +1536,13 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 					}
 				}
 				preparedSteering = remaining
+				commitSteering = func(historyCtx context.Context, history []any) error {
+					return s.threadInputRepo.CommitLocalSteering(historyCtx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, ResponsesHistory: history})
+				}
 				return nil
+			}
+			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
+				return commitSteering(commitCtx, history)
 			}}, nil
 		})
 		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
@@ -1485,7 +1560,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
 	if runtimeToolsSupported {
-		taskActionTools = s.taskActionRuntimeTools(callCtx, task)
+		taskActionTools = s.taskActionRuntimeTools(callCtx, task, exec.ID)
 	}
 	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
 		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
@@ -1957,11 +2032,10 @@ func formatSteeringInstruction(steeringMessage string) string {
 	return strings.TrimSpace(steeringMessage)
 }
 
-func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput) ([]models.Attachment, error) {
-	uploadsRoot := "uploads"
-	if s.taskSvc != nil && strings.TrimSpace(s.taskSvc.uploadsDir) != "" {
-		uploadsRoot = s.taskSvc.uploadsDir
-	}
+// hydrateTaskSteeringAttachments reads pending steering uploads. Image bytes
+// come from the pending path; file tools see the path published on commit.
+func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput, execID string) ([]models.Attachment, error) {
+	uploadsRoot := s.taskAttachmentUploadsRoot()
 	var attachments []models.Attachment
 	for i := range inputs {
 		sessionID := strings.TrimSpace(inputs[i].AttachmentSessionID)
@@ -1982,33 +2056,17 @@ func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput)
 			if err != nil {
 				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
 			}
-			if taskSteeringImageMediaType(entry.Name()) != "" {
-				attachments = append(attachments, models.Attachment{
-					FileName: entry.Name(), FilePath: path,
-					MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size(),
-				})
-				continue
-			}
-			if info.Size() > 100*1024 {
-				inputs[i].Content = combineProjectInstructions(inputs[i].Content,
-					fmt.Sprintf("File: %s (attached, %d bytes - too large to include inline)", entry.Name(), info.Size()))
-				continue
-			}
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
-			}
-			inputs[i].Content = combineProjectInstructions(inputs[i].Content,
-				fmt.Sprintf("--- Attached Files ---\nFile: %s\n```\n%s\n```", entry.Name(), string(content)))
+			attachments = append(attachments, models.Attachment{FileName: entry.Name(), FilePath: path, ReferencePath: filepath.Join(uploadsRoot, "chat", execID, entry.Name()), MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size()})
+
 		}
 	}
 	return attachments, nil
 }
 
-func (s *LLMService) hydrateTaskSteeringMessages(inputs []models.ThreadInput) ([]llmcontracts.LocalSteeringMessage, error) {
+func (s *LLMService) hydrateTaskSteeringMessages(inputs []models.ThreadInput, execID string) ([]llmcontracts.LocalSteeringMessage, error) {
 	messages := make([]llmcontracts.LocalSteeringMessage, 0, len(inputs))
 	for i := range inputs {
-		attachments, err := s.hydrateTaskSteeringAttachments(inputs[i : i+1])
+		attachments, err := s.hydrateTaskSteeringAttachments(inputs[i:i+1], execID)
 		if err != nil {
 			return nil, err
 		}
@@ -2467,6 +2525,7 @@ func (s *LLMService) directScopedFilesRuntime(ctx context.Context, agentDef *mod
 // workDir is the project's repo path used as the working directory for model calls.
 // isTaskFollowup when true uses the coding agent system prompt instead of task management prompt.
 func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, workDir string, agentDef *models.Agent, isTaskFollowup ...bool) (llmcontracts.AgentResult, error) {
+	ctx = agenttools.WithProcessLifetime(ctx)
 	followup := len(isTaskFollowup) > 0 && isTaskFollowup[0]
 	applog.Infof("[agent-svc] CallAgentDirectStreaming agent=%s model=%s message_len=%d exec=%s history=%d workDir=%s isTaskFollowup=%v", agent.Name, agent.Model, len(message), execID, len(chatHistory), workDir, followup)
 	chatMode := llmcontracts.ChatModeFromContext(ctx)

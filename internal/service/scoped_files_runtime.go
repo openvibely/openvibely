@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -15,6 +14,8 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -32,7 +33,8 @@ type scopedFilesScope struct {
 }
 
 type scopedFilesToolSession struct {
-	scopes []scopedFilesScope
+	scopes      []scopedFilesScope
+	memoryFiles memory.FileSession
 
 	mu      sync.Mutex
 	touched map[string]struct{}
@@ -169,7 +171,7 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"file_path"},
 		AdditionalProperties: toolschema.Pointer(false),
 	}},
-	{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file." + scopePrefixDoc, Schema: &toolschema.Schema{
+	{Name: "write_file", Description: "Write a file inside the configured scoped directory. Overwrites the file. For managed memory, read existing files first; if a concurrent-change error occurs, reread and recompute the update before retrying." + scopePrefixDoc, Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"file_path": {
@@ -180,7 +182,7 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"file_path", "content"},
 		AdditionalProperties: toolschema.Pointer(false),
 	}},
-	{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string." + scopePrefixDoc, Schema: &toolschema.Schema{
+	{Name: "edit_file", Description: "Edit a file inside the configured scoped directory by replacing old_string with new_string. Read managed memory files first; reread and recompute after a concurrent-change error." + scopePrefixDoc, Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"file_path": {
@@ -208,7 +210,7 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"pattern"},
 		AdditionalProperties: toolschema.Pointer(false),
 	}},
-	{Name: "delete_file", Description: "Delete a file inside the configured scoped directory." + scopePrefixDoc, Schema: &toolschema.Schema{
+	{Name: "delete_file", Description: "Delete a file inside the configured scoped directory. Read managed memory files first; reread and reconsider deletion after a concurrent-change error." + scopePrefixDoc, Schema: &toolschema.Schema{
 		Type: "object",
 		Properties: map[string]*toolschema.Schema{
 			"file_path": {
@@ -220,6 +222,37 @@ var scopedFileDefinitions = []llmcontracts.RuntimeToolDefinition{
 }
 
 func (s *scopedFilesToolSession) execute(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "read_file" || name == "write_file" || name == "edit_file" || name == "delete_file" {
+		var params struct {
+			FilePath string `json:"file_path"`
+		}
+		if err := json.Unmarshal(input, &params); err != nil {
+			return "", true, true, err
+		}
+		perm := readPerm()
+		if name == "write_file" || name == "edit_file" {
+			perm = writePerm()
+		}
+		if name == "delete_file" {
+			perm = deletePerm()
+		}
+		path, _, _, err := s.scopedPath(params.FilePath, false, perm)
+		if err != nil {
+			return "", true, true, err
+		}
+		var output string
+		err = s.memoryFiles.Do(ctx, path, name != "read_file", func() error {
+			var callErr error
+			output, _, _, callErr = s.executeUnchecked(ctx, name, input)
+			return callErr
+		})
+		return output, true, err != nil, err
+	}
+	return s.executeUnchecked(ctx, name, input)
+}
+
+func (s *scopedFilesToolSession) executeUnchecked(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "list_files":
 		out, err := s.listFiles(input)
@@ -478,7 +511,7 @@ func (s *scopedFilesToolSession) writeFile(input json.RawMessage) (string, error
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return "", err
 	}
-	if err := atomicWriteService(abs, []byte(memory.Redact(params.Content))); err != nil {
+	if err := util.WriteFileAtomic(abs, []byte(memory.Redact(params.Content)), 0o644); err != nil {
 		return "", err
 	}
 	s.recordTouched(rel)
@@ -520,7 +553,7 @@ func (s *scopedFilesToolSession) editFile(input json.RawMessage) (string, error)
 	} else {
 		next = strings.Replace(content, params.OldString, params.NewString, 1)
 	}
-	if err := atomicWriteService(abs, []byte(memory.Redact(next))); err != nil {
+	if err := util.WriteFileAtomic(abs, []byte(memory.Redact(next)), 0o644); err != nil {
 		return "", err
 	}
 	s.recordTouched(rel)
@@ -539,49 +572,17 @@ func (s *scopedFilesToolSession) grepSearch(ctx context.Context, input json.RawM
 	if params.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
-	re, err := regexp.Compile(params.Pattern)
-	if err != nil {
-		return "", err
-	}
 	abs, baseRel, scope, err := s.scopedPath(params.Path, true, readPerm())
 	if err != nil {
 		return "", err
 	}
-	var matches []string
-	err = filepath.WalkDir(abs, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if err := memory.AssertPathWithin(scope.absoluteDir, path); err != nil {
-			return nil
-		}
-		if params.Include != "" && !matchGlob(params.Include, filepath.Base(path)) {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		rel, _ := filepath.Rel(abs, path)
-		fullRel := filepath.ToSlash(filepath.Join(baseRel, rel))
-		fullRel = strings.TrimPrefix(fullRel, "./")
-		for i, line := range strings.Split(string(data), "\n") {
-			if re.MatchString(line) {
-				matches = append(matches, fmt.Sprintf("%s:%d: %s", fullRel, i+1, line))
-				if len(matches) >= 200 {
-					return filepath.SkipAll
-				}
-			}
-		}
-		return nil
+	matches, err := agenttools.SearchFiles(ctx, abs, params.Pattern, agenttools.SearchOptions{
+		Include: params.Include, MaxResults: 200,
+		AllowFile: func(path string) bool { return memory.AssertPathWithin(scope.absoluteDir, path) == nil },
+		DisplayPath: func(path string) string {
+			rel, _ := filepath.Rel(abs, path)
+			return strings.TrimPrefix(filepath.ToSlash(filepath.Join(baseRel, rel)), "./")
+		},
 	})
 	if err != nil {
 		return "", err
@@ -616,22 +617,4 @@ func (s *scopedFilesToolSession) recordTouched(rel string) {
 func matchGlob(pattern, name string) bool {
 	ok, err := filepath.Match(pattern, name)
 	return err == nil && ok
-}
-
-func atomicWriteService(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	_, writeErr := tmp.Write(data)
-	closeErr := tmp.Close()
-	if writeErr != nil || closeErr != nil {
-		_ = os.Remove(tmpName)
-		if writeErr != nil {
-			return writeErr
-		}
-		return closeErr
-	}
-	return os.Rename(tmpName, path)
 }

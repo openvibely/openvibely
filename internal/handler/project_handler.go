@@ -325,6 +325,7 @@ func (h *Handler) CreateProject(c echo.Context) error {
 		DefaultAgentConfigID: settings.DefaultAgentConfigID,
 		MaxWorkers:           settings.MaxWorkers,
 	}
+	applyProjectKnowledgeForm(c, p)
 	if settings.RepoSource == "github" {
 		p.RepoPath = ""
 	}
@@ -448,6 +449,8 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	p.Description = settings.Description
 	p.DefaultAgentConfigID = settings.DefaultAgentConfigID
 	p.MaxWorkers = settings.MaxWorkers
+	applyProjectKnowledgeForm(c, p)
+
 	if recloneGitHubRepo {
 		reclonedPath, normalizedURL, err := h.githubSvc.RecloneProjectRepo(c.Request().Context(), p.ID, currentRepoPath, settings.RepoURL)
 		if err != nil {
@@ -675,4 +678,15 @@ func render(c echo.Context, status int, component templ.Component) error {
 	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Response().WriteHeader(status)
 	return component.Render(ctx, c.Response().Writer)
+}
+
+func applyProjectKnowledgeForm(c echo.Context, p *models.Project) {
+	if c.FormValue("skill_memory_settings_present") != "true" {
+		return
+	}
+	p.SkillMemoryPermissions = &models.SkillMemoryPermissions{
+		AllowGlobalSkillWrites: c.FormValue("allow_global_skill_writes") == "on",
+		ReadSkills:             c.FormValue("read_skills") == "on", WriteSkills: c.FormValue("write_skills") == "on",
+		ReadMemories: c.FormValue("read_memories") == "on", WriteMemories: c.FormValue("write_memories") == "on",
+	}
 }

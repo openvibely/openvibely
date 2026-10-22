@@ -697,7 +697,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, params.ProjectID, []service.ToggleAlertRequest{req})), nil
 		},
 		"memory_view": func(_ context.Context, _ json.RawMessage) (string, error) {
-			return "memory_view is available only after the lifecycle memory router selects memory handles for this turn. Use memory_view only with handles listed in the selected memory index.", nil
+			return "memory_view is unavailable for this turn. Only permitted handles in the current project memory index can be read.", nil
 		},
 		"get_chat_mode": func(_ context.Context, _ json.RawMessage) (string, error) {
 			return fmt.Sprintf("Current chat mode: %s", mode), nil
@@ -717,8 +717,33 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			selectedMemoryHandles := service.SelectedMemoryHandlesFromContext(ctx)
 			if params.IsTaskFollowup {
 				summaries = filterTaskThreadCapabilitySummaries(summaries, params.AgentDefinition, len(selectedMemoryHandles) > 0)
+				if params.Task != nil {
+					policy := chatcontrol.TaskToolNames(params.Task.CreatedVia)
+					defaults := chatcontrol.TaskToolNames("")
+					kept := summaries[:0]
+					for _, summary := range summaries {
+						if !defaults[summary.Name] || policy[summary.Name] {
+							kept = append(kept, summary)
+						}
+					}
+					summaries = kept
+				}
+
 			} else if params.AgentDefinition != nil {
 				summaries = filterAssignedAgentCapabilitySummaries(summaries, params.AgentDefinition)
+			}
+			if runtime := llmcontracts.RuntimeToolsFromContext(ctx); runtime != nil && runtime.Filter != nil {
+				kept := summaries[:0]
+				for _, summary := range summaries {
+					if allow, handled := runtime.Filter(summary.Name); handled && !allow {
+						if summary.Name == "memory_view" {
+							selectedMemoryHandles = nil
+						}
+						continue
+					}
+					kept = append(kept, summary)
+				}
+				summaries = kept
 			}
 			return formatCapabilities(summaries, selectedMemoryHandles), nil
 		},
@@ -1092,7 +1117,7 @@ func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHan
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Available capabilities (%d actions):\n", len(summaries)))
 	if len(selectedMemoryHandles) > 0 {
-		sb.WriteString("\nSelected memories for this turn:\n")
+		sb.WriteString("\nAvailable memories for this turn:\n")
 		for _, handle := range selectedMemoryHandles {
 			sb.WriteString(fmt.Sprintf("  - %s\n", handle))
 		}
@@ -1116,10 +1141,21 @@ func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHan
 // definitions and the shared executor. Used by processStreamingResponse which
 // computes defs from the registry before calling this.
 func (h *Handler) buildChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
-	return &llmcontracts.RuntimeTools{
-		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
+	executor := h.chatActionExecutor(params, collector, mode, surface)
+	if params.IsTaskFollowup {
+		base := executor
+		allowed := make(map[string]bool, len(defs))
+		for _, def := range defs {
+			allowed[def.Name] = true
+		}
+		executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if !allowed[strings.ToLower(strings.TrimSpace(name))] {
+				return "", false, false, nil
+			}
+			return base(ctx, name, input)
+		}
 	}
+	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: executor}
 }
 
 func (h *Handler) buildLifecycleChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
@@ -1481,54 +1517,7 @@ func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
 }
 
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
-	allowed := map[string]bool{
-		"list_tasks":                             true,
-		"view_swarm":                             true,
-		"view_task_thread":                       true,
-		"send_to_task":                           true,
-		"send_message":                           true,
-		"create_task":                            true,
-		"execute_tasks":                          true,
-		"create_swarm_task":                      true,
-		"list_schedules":                         true,
-		"view_usage_analytics":                   true,
-		"view_pulse":                             true,
-		"view_system_update":                     true,
-		"schedule_task":                          true,
-		"delete_schedule":                        true,
-		"modify_schedule":                        true,
-		"create_alert":                           true,
-		"create_notification":                    true,
-		"list_alerts":                            true,
-		"get_alert":                              true,
-		"list_existing_automation_notifications": true,
-		"decide_alert":                           true,
-		"claim_alert":                            true,
-		"create_alert_implementation_task":       true,
-		"link_alert_implementation_task":         true,
-		"complete_alert_processing":              true,
-		"fail_alert_processing":                  true,
-		"release_alert_claim":                    true,
-		"github_create_issue":                    true,
-		"github_get_issue":                       true,
-		"github_get_project_inbox":               true,
-		"github_is_actor_authorized":             true,
-		"github_list_my_assigned_issues":         true,
-		"github_list_existing_automation_issues": true,
-		"github_list_assigned_issues":            true,
-		"github_list_assigned_issues_with_prs":   true,
-		"github_comment_on_issue":                true,
-		"github_add_issue_labels":                true,
-		"github_close_issue":                     true,
-		"github_open_pull_request":               true, "github_replace_pull_request_branch": true,
-		"github_forward_pr_feedback_to_tasks": true,
-		"set_task_goal":                       true,
-		"clear_task_goal":                     true,
-		"get_task_goal":                       true,
-		"pause_task_goal":                     true,
-		"resume_task_goal":                    true,
-		"list_capabilities":                   true,
-	}
+	allowed := chatcontrol.TaskToolNames("")
 	for _, tool := range explicitlyGrantedTaskThreadRuntimeTools(agentDef) {
 		allowed[tool] = true
 	}
@@ -1584,4 +1573,15 @@ func filterRuntimeToolDefs(defs []llmcontracts.RuntimeToolDefinition, allowed ma
 		}
 	}
 	return out
+}
+
+// initialTaskRuntimeTools reuses the task-thread policy and handlers for tools
+// not owned by the service runtime (thread messaging, swarm inspection, etc.).
+func (h *Handler) initialTaskRuntimeTools(ctx context.Context, task models.Task, executionID string, missing map[string]bool) *llmcontracts.RuntimeTools {
+	if len(missing) == 0 {
+		return nil
+	}
+	params := streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, Task: &task, ExecID: executionID, IsTaskFollowup: true, ChatMode: models.ChatModeOrchestrate}
+	defs := filterRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), missing)
+	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), missing)}
 }
