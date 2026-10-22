@@ -1133,6 +1133,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Shared browser/native WebSocket transport
 	e.GET("/events/ws", h.LiveWebSocket)
+	e.GET("/events/running-executions", h.RunningExecutions)
 	e.POST("/events/native-ticket", h.NativeLiveTicket)
 }
 

@@ -2,24 +2,48 @@
 
 Each document owns one WebSocket at `/events/ws`. Chat output, task-thread output,
 project/task notifications, file changes, and system-update snapshots share it.
-HTMX navigation, follow-ups, and subsequent runs replace subscriptions, not the
-socket. Execution cleanup belongs to the outgoing view when navigation commits;
-retargeting notifications during a pending or failed project switch does not stop
-that view's output. Execution renderers capture the owning view's project ID, so
+HTMX navigation detaches execution render listeners, not running execution
+subscriptions. Follow-ups add execution subscriptions on the same socket.
+Retargeting project notifications does not stop background output updates. Execution renderers capture the owning view's project ID, so
 cached previews subscribe correctly while the URL and selector still refer to
 the outgoing project. Each browser tab or native window has its own connection.
 A full document reload necessarily creates a replacement connection.
 
 HTTP still serves pages, history windows, fragments, reconciliation snapshots and
-actions. Rendering, virtualization, draft ownership, scroll tracking and thread
-caches retain their existing owners. **This does not implement background updates
-to cached, unviewed threads.** Existing internal `sse-*` DOM event names and some
+actions. Rendering, virtualization, draft ownership and scroll tracking remain
+view-owned. Existing internal `sse-*` DOM event names and some
 stream-handle variable names remain compatibility interfaces for those owners;
 there are no EventSource constructors or browser-facing SSE routes in production.
 
+## Thread snapshots and background updates
+
+`thread-snapshots.js` owns the memory-only snapshot cache: page shells, raw
+execution output, byte offsets and terminal state. `thread-navigation.js` saves
+shells and references these output records rather than freezing another copy of
+running output. Each execution has one transport subscription and detachable
+view listeners. Navigation closes the listener only; reopening replays the
+retained output to the renderer and uses the same subscription. No background
+Markdown rendering or detached page DOM is required.
+
+Authenticated `GET /events/running-executions` returns active execution IDs,
+projects, task IDs and categories without transcript blobs. Discovery runs on
+connection, relevant task events and every five seconds across all projects,
+in browser tabs as well as desktop windows. It also finds runs never viewed in
+that document. Missing IDs in discovery are not completion: execution streams
+must deliver their final bytes and terminal event first. Transport capacity
+limits still apply; a refused subscription is retried by discovery.
+
+Running or viewed entries are pinned. Idle groups use the existing 30-minute,
+20-thread and 64 MiB estimated-size limits, with at most five settled execution
+records per thread. Active data is outside that idle budget, so many parallel
+runs or large outputs can use more memory. Cache storage is not persisted to disk.
+A new execution missing from a saved page invalidates that shell; the normal HTTP
+load supplies its markup while output is already retained. HTTP remains necessary
+for page/composer metadata and authoritative history reconciliation.
+
 ## Wire protocol
 
-Commands are JSON objects with a unique `id` for each subscription/view generation:
+Commands are JSON objects with a unique `id` for each subscription generation:
 
 ```json
 {"op":"live","id":"1","project_id":"project-id","task_id":"optional-task-id"}
@@ -34,7 +58,8 @@ Execution frames have `id`, `event`, `data`, and UTF-8 byte `start`/`offset` cur
 execution errors or subscription rejection. Omitted byte fields mean zero.
 `retry` means capacity is temporarily unavailable; the client retries only that
 subscription with bounded backoff. `done` and `error` retire only their subscription.
-Late frames for detached view IDs are ignored.
+Late frames for unsubscribed IDs are ignored. Detached view listeners do not
+receive output, while their running execution subscription continues updating its snapshot.
 
 The client retains applied offsets across network failures, uses jittered
 exponential reconnect delays (250 ms initial, capped at 15 s plus jitter), and

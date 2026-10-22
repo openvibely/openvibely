@@ -158,8 +158,8 @@
             return subscribe({op: 'execution', exec_id: execID, project_id: projectID, offset: offset});
         },
         live: function (projectID, taskID, handlers) {
-            // The view owns execution cleanup when navigation commits. A live
-            // scope can change before a project navigation succeeds or rolls back.
+            // Notification scope is independent of execution subscriptions, which
+            // may stay live in the thread snapshot owner after navigation.
             return subscribe({op: 'live', project_id: projectID, task_id: taskID || ''}, handlers);
         }
     };

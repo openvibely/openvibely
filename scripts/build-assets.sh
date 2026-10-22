@@ -96,6 +96,7 @@ mkdir -p "$dist/vendor"
 cp "$assets/kanban.js" "$dist/kanban.js"
 cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"
 cp "$assets/live-transport.js" "$dist/live-transport.js"
+cp "$assets/thread-snapshots.js" "$dist/thread-snapshots.js"
 cp "$assets/chat-virtual-list.js" "$dist/chat-virtual-list.js"
 for entry in "${FILES[@]}"; do
   IFS='|' read -r dest url sha <<<"$entry"

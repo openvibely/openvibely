@@ -1,8 +1,9 @@
-// A small, memory-only cache for normal thread navigation. HTMX remains the
-// owner of requests, history, stream teardown, and authoritative replacements.
+// Cached page shells reference the shared execution snapshots. HTMX owns
+// requests, history, view cleanup, and authoritative replacements.
 (function () {
     'use strict';
-    const entries = new Map();
+    const cache = window.openVibelyThreadCache;
+    const entries = cache ? cache.pages : new Map();
     const composerRefreshes = new WeakMap();
     const ttl = 30 * 60 * 1000;
     const maxBytes = 64 * 1024 * 1024;
@@ -47,6 +48,7 @@
         return root.querySelector('#task-thread-view, #chat-page-root');
     }
     function forgetExpired() {
+        if (cache) { cache.sweep(); return; }
         let bytes = 0;
         entries.forEach(function (entry, id) {
             if (Date.now() - entry.time > ttl) entries.delete(id);
@@ -60,7 +62,7 @@
     }
     window.findCachedChatVirtualData = function (key, source) {
         for (const entry of entries.values()) {
-            if (Date.now() - entry.time > ttl) continue;
+            if (!cache && Date.now() - entry.time > ttl) continue;
             const data = entry.virtual?.find(data => data.key === key && (data.source === source || data.normalized === source));
             if (data) return data;
         }
@@ -74,7 +76,10 @@
             const source = restoringEntry.sources[Number(node.getAttribute('data-cached-thread-source'))];
             if (!source) return;
             if (source.kind === 'text') node.textContent = source.text;
-            else node.setAttribute('data-raw-content', source.text);
+            else {
+                node.setAttribute('data-raw-content', source.text);
+                if (node.hasAttribute('data-initial-byte-length')) node.setAttribute('data-initial-byte-length', String(source.byteLength ?? new TextEncoder().encode(source.text).length));
+            }
             node.removeAttribute('data-cached-thread-source');
         });
         root.querySelector('[data-cached-thread-bootstrap]')?.remove();
@@ -125,7 +130,21 @@
             // sections. The outer source already owns the complete response.
             if (!clone.contains(node) || node.parentElement.closest('[data-raw-content]')) return;
             const kind = node.hasAttribute('data-raw-content') ? 'output' : 'text';
-            sources.push({kind, text: kind === 'output' ? node.getAttribute('data-raw-content') : node.textContent});
+            const liveKey = node.getAttribute('data-live-snapshot-key');
+            const live = liveKey && cache?.source(liveKey);
+            if (kind === 'output' && live) {
+                // Discovery may still be replaying older bytes behind this HTTP
+                // seed. Never replace the saved view with that shorter prefix.
+                let seed = node.getAttribute('data-raw-content');
+                const seedOffset = Number(node.getAttribute('data-initial-byte-length')) || new TextEncoder().encode(seed).length;
+                function caughtUp() {
+                    if (live.offset >= seedOffset || live.terminal) seed = null;
+                    return seed === null;
+                }
+                sources.push({kind, liveKey,
+                    get text() { return caughtUp() ? live.output : seed; },
+                    get byteLength() { return caughtUp() ? live.offset : seedOffset; }});
+            } else sources.push({kind, text: kind === 'output' ? node.getAttribute('data-raw-content') : node.textContent});
             node.replaceChildren();
             node.removeAttribute('data-raw-content');
             node.removeAttribute('data-rendered-revision');
@@ -160,7 +179,11 @@
         let bytes = overhead;
         strings.forEach(text => { bytes += text.length * 2; });
         entries.delete(id);
-        if (bytes <= maxBytes) entries.set(id, { html: html, sources: sources, virtual: virtual, bytes: bytes, time: Date.now() });
+        const project = thread.getAttribute('data-project-id') || main.querySelector('[data-project-id]')?.getAttribute('data-project-id') || document.getElementById('project-selector')?.value || '';
+        const task = thread.id === 'chat-page-root' ? 'chat' : thread.getAttribute('data-task-id');
+        if (cache || bytes <= maxBytes) entries.set(id, { html: html, sources: sources, virtual: virtual, bytes: bytes, time: Date.now(),
+            threadKey: cache && task ? cache.threadKey(project, task) : id, executionIDs: Array.from(retained),
+            runKeys: sources.filter(source => source.liveKey).map(source => source.liveKey) });
         forgetExpired();
     }
     function releaseHistorySnapshot() {

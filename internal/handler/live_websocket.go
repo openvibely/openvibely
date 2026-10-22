@@ -458,3 +458,14 @@ func clampOffsetToUTF8Boundary(offset int, s string) int {
 	}
 	return offset
 }
+
+// RunningExecutions uses the same instance-wide session authentication as the
+// WebSocket. Subscription authorization still checks each execution's project.
+func (h *Handler) RunningExecutions(c echo.Context) error {
+	items, err := h.execRepo.ListLiveExecutions(c.Request().Context())
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Could not list running executions")
+	}
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(http.StatusOK, items)
+}

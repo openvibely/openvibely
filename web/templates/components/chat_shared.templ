@@ -596,7 +596,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
-							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource = window.openVibelyThreadCache ? window.openVibelyThreadCache.execution(execId, streamProjectID, textBuffer, container, streamOffset) : window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
 							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
@@ -1105,7 +1105,7 @@ templ ChatStreamingResumeInitScript() {
 
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
-							eventSource = window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource = window.openVibelyThreadCache ? window.openVibelyThreadCache.execution(execId, streamProjectID, cumulativeContent, container, streamOffset) : window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
 							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
