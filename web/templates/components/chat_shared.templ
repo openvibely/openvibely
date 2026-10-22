@@ -596,7 +596,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
-							eventSource = window.openVibelyThreadCache ? window.openVibelyThreadCache.execution(execId, streamProjectID, textBuffer, container, streamOffset) : window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource = window.openVibelyThreadController.attach(execId, streamProjectID, textBuffer, container, streamOffset);
 							eventSource.addEventListener('reset', function(event) { textBuffer = event.data; });
 						if (!isThread && window.registerChatStreamEventSource) {
 							window.registerChatStreamEventSource(execId, eventSource);
@@ -1105,7 +1105,7 @@ templ ChatStreamingResumeInitScript() {
 
 					var streamTerminalHandled = false;
 					function connectResumeExecutionStream() {
-							eventSource = window.openVibelyThreadCache ? window.openVibelyThreadCache.execution(execId, streamProjectID, cumulativeContent, container, streamOffset) : window.openVibelyLive.execution(execId, streamOffset, streamProjectID);
+							eventSource = window.openVibelyThreadController.attach(execId, streamProjectID, cumulativeContent, container, streamOffset);
 							eventSource.addEventListener('reset', function(event) { cumulativeContent = event.data; streamOffset = utf8ByteLength(cumulativeContent); persistResumeStreamState(true); });
 							registerResumeEventSource(eventSource);
 
@@ -3211,6 +3211,7 @@ templ ChatLatestMessageButton(messagesID string, trackerKey string) {
 // ChatAutoScrollScript emits shared auto-scroll and transcript rendering/cleaning JS.
 // Should be included once per page that uses chat components.
 templ ChatAutoScrollScript() {
+	@ThreadControllerScript()
 	<script>
 		// Shared auto-scroll utility
 		window.chatAutoScroll = {
@@ -3861,113 +3862,6 @@ templ ChatAutoScrollScript() {
 				}
 			};
 
-			window.restoreChatTranscriptScroll = function(options) {
-				options = options || {};
-				var messages = options.messages;
-				if (!messages) return Promise.resolve(false);
-				var tracker = typeof options.getTracker === 'function' ? options.getTracker() : options.tracker;
-				var state = options.state || window.getChatTranscriptScrollState(options.stateKey);
-				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
-				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
-				if (tracker) tracker.userScrolledUp = !pinned;
-				// Keep an already-rendered cached transcript visible. Cold history is
-				// revealed as one batch after rendering, before images or fonts settle.
-				// Visibility is controlled by a data attribute, not an inline style:
-				// HTMX's delayed style settling must not hide it again after this reveal.
-				if (pinned) messages.scrollTop = messages.scrollHeight;
-				else if (state) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-				window.observeChatTranscriptLayout({
-					messages: messages, tracker: tracker, getTracker: options.getTracker, stateKey: options.stateKey
-				});
-				var rendered = Promise.resolve(options.renderPromise).catch(function() { return false; }).then(async function() {
-					do {
-						if (!messages.isConnected) return false;
-						if (window.waitForChatTranscriptViewport && !await window.waitForChatTranscriptViewport(messages)) return false;
-						tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
-						if (tracker && tracker.flushPendingScrollIntent) tracker.flushPendingScrollIntent();
-						var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
-						if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
-						else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
-						// The reader may switch panels while async Markdown is rendering.
-						// Never mark a hidden, unmeasured viewport ready for first display.
-					} while (messages.isConnected && window.waitForChatTranscriptViewport && !messages.clientHeight);
-					if (!messages.isConnected) return false;
-					messages.style.visibility = '';
-					messages.removeAttribute('data-transcript-hydrating');
-					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
-					if (window.releaseInitialTranscriptRender) window.releaseInitialTranscriptRender(messages);
-				});
-
-				function waitForImages() {
-					if (!options.waitForImages) return Promise.resolve();
-					var images = messages.querySelectorAll('img[data-chat-attachment-image="true"]');
-					return Promise.all(Array.prototype.map.call(images, function(img) {
-						function decodeImage() {
-							if (typeof img.decode !== 'function') return Promise.resolve();
-							return Promise.resolve(img.decode()).catch(function() {});
-						}
-						if (img.complete) return decodeImage();
-						return new Promise(function(resolve) {
-							var finished = false;
-							var timeout;
-							function finish() {
-								if (finished) return;
-								finished = true;
-								clearTimeout(timeout);
-								img.removeEventListener('load', loaded);
-								img.removeEventListener('error', finish);
-								resolve();
-							}
-							function loaded() { decodeImage().then(finish, finish); }
-							function timeoutImage() {
-								if (finished) return;
-								img.style.display = 'none';
-								img.removeAttribute('src');
-								img.removeAttribute('srcset');
-								img.setAttribute('data-chat-attachment-image-timeout', 'true');
-								finish();
-							}
-							img.addEventListener('load', loaded);
-							img.addEventListener('error', finish);
-							timeout = setTimeout(timeoutImage, 3000);
-							if (img.loading === 'lazy') img.loading = 'eager';
-						});
-					}));
-				}
-				function waitForFonts() {
-					if (!document.fonts || !document.fonts.ready) return Promise.resolve();
-					return Promise.race([
-						Promise.resolve(document.fonts.ready).catch(function() {}),
-						new Promise(function(resolve) { setTimeout(resolve, 1000); })
-					]);
-				}
-				function waitForLayout() {
-					return new Promise(function(resolve) {
-						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
-					});
-				}
-				return rendered.then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
-					if (!messages.isConnected) return false;
-					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
-					if (tracker && tracker.flushPendingScrollIntent) tracker.flushPendingScrollIntent();
-					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
-					if (intentChanged) pinned = !tracker.userScrolledUp;
-					if (pinned) messages.scrollTop = messages.scrollHeight;
-					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-					if (tracker && !intentChanged) tracker.userScrolledUp = !pinned;
-					messages.style.visibility = '';
-					messages.removeAttribute('data-transcript-hydrating');
-					window.observeChatTranscriptLayout({
-						messages: messages,
-						tracker: tracker,
-						getTracker: options.getTracker,
-						stateKey: options.stateKey
-					});
-					if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
-					return true;
-				});
-			};
 
 				function revealPreparedEarlierPairs(container) {
 					container.querySelectorAll('[data-earlier-pending-visibility]').forEach(function(pair) {
@@ -4854,181 +4748,7 @@ templ ChatAutoScrollScript() {
 		// into styled DOM elements matching Claude Code VSCode extension style.
 		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
 		// Thinking: collapsible <details> with italic label and markdown content.
-			if (!window._chatContentRenderQueue) window._chatContentRenderQueue = [];
-			if (typeof window._chatContentRenderActive !== 'number') window._chatContentRenderActive = 0;
-			window.initialTranscriptRender = function(messages) {
-				if (!messages) return null;
-				if (!messages._initialTranscriptRender && messages.getAttribute && messages.getAttribute('data-transcript-hydrating') === 'true') {
-					messages._initialTranscriptRender = { initial: new Map(), pending: new Map() };
-				}
-				return messages._initialTranscriptRender;
-			};
-			window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches) {
-				if (!container) return Promise.resolve(false);
-				var initialMessages = container.closest && container.closest('#chat-messages, #task-thread-messages');
-				var initialRender = window.initialTranscriptRender(initialMessages);
-				if (initialRender && initialRender.initial.has(container)) return initialRender.initial.get(container);
-				var activeRequest = window._activeChatContentRender;
-				if (activeRequest && !activeRequest.container.isConnected && activeRequest.finish) activeRequest.finish(false, false, true);
-				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null, enqueuedAt: Date.now() };
-				// Live/terminal output can advance while a hydration render is queued,
-				// without scheduling a replacement hydration request for this element.
-				request.sourceRevision = container.getAttribute('data-raw-revision') || container.getAttribute('data-raw-content');
-				function isCurrentRequest(queued) {
-					return queued.container._scheduledChatRender === queued && queued.container.isConnected &&
-						(queued.initialRender || queued.sourceRevision === (queued.container.getAttribute('data-raw-revision') || queued.container.getAttribute('data-raw-content')));
-				}
-				container._scheduledChatRender = request;
-				var promise = new Promise(function(resolve) { request.resolve = resolve; });
-				request.initialRender = !!initialRender;
-				if (initialRender) initialRender.initial.set(container, promise);
-					window._chatContentRenderQueue.push(request);
-					function drain() {
-						if (window._chatContentRenderActive >= 1) return;
-						while (window._chatContentRenderQueue.length > 0) {
-							var queuedRequest = window._chatContentRenderQueue[0];
-							if (isCurrentRequest(queuedRequest)) break;
-							window._chatContentRenderQueue.shift();
-							if (queuedRequest.container._scheduledChatRender === queuedRequest) queuedRequest.container._scheduledChatRender = null;
-							queuedRequest.finished = true;
-							queuedRequest.resolve(false);
-						}
-						if (window._chatContentRenderQueue.length === 0) return;
-						var now = Date.now();
-					var oldestRequest = window._chatContentRenderQueue[0];
-					var maxDeferralRemaining = oldestRequest && !oldestRequest.initialRender ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
-					if ((window._liveChatRenderActive || 0) > 0) {
-						if (maxDeferralRemaining > 0) {
-							clearTimeout(window._chatRenderResumeTimer);
-							window._chatRenderResumeTimer = setTimeout(drain, maxDeferralRemaining);
-							return;
-						}
-						if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
-					}
-					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - now;
-					if (quietRemaining > 0 && maxDeferralRemaining > 0) {
-						clearTimeout(window._chatRenderResumeTimer);
-						window._chatRenderResumeTimer = setTimeout(drain, Math.min(quietRemaining, maxDeferralRemaining));
-						return;
-					}
-					var next = window._chatContentRenderQueue.shift();
-					while (next && !isCurrentRequest(next)) {
-						if (next.container._scheduledChatRender === next) next.container._scheduledChatRender = null;
-						next.finished = true;
-						next.resolve(false);
-						next = window._chatContentRenderQueue.shift();
-					}
-					if (!next) return;
-					window._chatContentRenderActive++;
-					next.container._scheduledChatRender = null;
-					next.container._activeScheduledChatRender = next;
-					window._activeChatContentRender = next;
-					function finish(result, showFallback, cancelRender) {
-						if (next.finished) return;
-						next.finished = true;
-						if (next.timeout) clearTimeout(next.timeout);
-						if (next.container._activeScheduledChatRender === next) {
-							if (cancelRender) {
-								next.container._streamRenderVersion = (next.container._streamRenderVersion || 0) + 1;
-								if (next.container._codeRangeWorkerState && next.container._codeRangeWorkerState.finish) next.container._codeRangeWorkerState.finish(null);
-								if (next.container._markdownWorkerState) {
-									var markdownState = next.container._markdownWorkerState;
-									markdownState.cancelled = true;
-									if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
-									markdownState.worker.terminate();
-									markdownState.resolve(null);
-									next.container._markdownWorkerState = null;
-								}
-							}
-							if (showFallback && next.container.isConnected) {
-								var fallbackCommitted = false;
-								try {
-									var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(next.text) : null;
-									next.container.replaceChildren(fallback || document.createTextNode(next.text));
-									fallbackCommitted = true;
-								} catch (ignored) {
-									try {
-										next.container.textContent = next.text;
-										fallbackCommitted = true;
-									} catch (ignoredAgain) {}
-								}
-								if (fallbackCommitted) result = true;
-							}
-							next.container._activeScheduledChatRender = null;
-						}
-						if (window._activeChatContentRender === next) window._activeChatContentRender = null;
-						next.resolve(result);
-						window._chatContentRenderActive--;
-						setTimeout(drain, 0);
-					}
-					next.finish = finish;
-					var renderPromise;
-					try {
-						renderPromise = window.renderStreamingContent(next.container, next.text, next.yield);
-					} catch (err) {
-						finish(false, true, true);
-						return;
-					}
-					Promise.resolve(renderPromise).then(function(result) {
-						finish(result !== false, false, false);
-					}, function() {
-						finish(false, true, true);
-					});
-					next.timeout = setTimeout(function() { finish(false, true, true); }, window._chatContentRenderTimeoutMS || 30000);
-				}
-				window._drainChatContentRenderQueue = drain;
-				setTimeout(drain, 0);
-				return promise;
-			};
-			window.cancelChatContentRenders = function() {
-				var activeRequest = window._activeChatContentRender;
-				if (activeRequest && activeRequest.finish) activeRequest.finish(false, false, true);
-				var queued = window._chatContentRenderQueue.splice(0);
-				queued.forEach(function(request) {
-					if (request.finished) return;
-					request.finished = true;
-					if (request.container._scheduledChatRender === request) request.container._scheduledChatRender = null;
-					request.resolve(false);
-				});
-				if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
-			};
-			function cancelOwnedLiveRenderWork(liveRequest) {
-				var container = liveRequest && liveRequest.container;
-				if (!container || container._activeLiveChatRender !== liveRequest) return;
-				container._activeLiveChatRender = null;
-				if (container._incrementalChat) {
-					container._incrementalChat.generation++;
-					var tail = container._incrementalChat.tail;
-					tail._streamRenderVersion = (tail._streamRenderVersion || 0) + 1;
-					if (tail._codeRangeWorkerState && tail._codeRangeWorkerState.finish) tail._codeRangeWorkerState.finish(null);
-					if (tail._markdownWorkerState) {
-						var work = tail._markdownWorkerState;
-						work.cancelled = true;
-						clearTimeout(work.fallbackTimer);
-						work.worker.terminate();
-						work.resolve(null);
-						tail._markdownWorkerState = null;
-					}
-				}
-				container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
-				if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
-				if (container._markdownWorkerState) {
-					var markdownState = container._markdownWorkerState;
-					markdownState.cancelled = true;
-					markdownState.finished = true;
-					if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
-					markdownState.worker.terminate();
-					markdownState.resolve(null);
-					container._markdownWorkerState = null;
-				}
-			}
-			window.cancelLiveChatRenders = function() {
-				if (window._liveChatRenderRequests) {
-					window._liveChatRenderRequests.forEach(function(liveRequest) {
-						liveRequest.cancel();
-					});
-				}
-			};
+
 			// Normalize provider-specific tool aliases to canonical IDs so
 			// [Using tool: X] can be linked with [Tool X done] across providers.
 			var normalizedToolNames = {
@@ -5162,136 +4882,6 @@ templ ChatAutoScrollScript() {
 					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
 				}
 				return rendered !== false && container._incrementalChat === state && state.generation === generation;
-			};
-			// Finish the initial transcript (cached or refreshed) before applying deltas.
-			// Subscriptions keep collecting output; retain only the latest render per bubble.
-			window.releaseInitialTranscriptRender = function(messages) {
-				var restore = messages._initialTranscriptRender;
-				if (!restore) return;
-				delete messages._initialTranscriptRender;
-				restore.pending.forEach(function(update, container) {
-					if (!container.isConnected) return;
-					window.renderLiveChatContent(container, update.text, update.yield, update.final).catch(function() {
-						container.textContent = update.text;
-					});
-				});
-				restore.pending.clear();
-				restore.initial.clear();
-			};
-			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches, final) {
-				var initialMessages = container.closest && container.closest('#chat-messages, #task-thread-messages');
-				var initialRender = window.initialTranscriptRender(initialMessages);
-				if (initialRender) {
-					initialRender.pending.set(container, {text:textBuffer || '', yield:yieldBetweenBatches, final:final});
-					return window.scheduleChatContentRender(container, textBuffer, yieldBetweenBatches);
-				}
-				var renderRevision = window.setChatRawContent ? window.setChatRawContent(container, textBuffer || '') : (textBuffer || '');
-				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
-				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
-				var liveRequest = { container: container, finished: false, cancel: null, timeout: null };
-				var outerResolve;
-				var outerReject;
-				var outerPromise = new Promise(function(resolve, reject) { outerResolve = resolve; outerReject = reject; });
-				liveRequest.promise = outerPromise;
-				var activeRequest = window._activeChatContentRender;
-				if (activeRequest && activeRequest.finish) {
-					var interruptedRequest = activeRequest;
-					activeRequest.finish(false, false, true);
-					setTimeout(function() {
-						if (!interruptedRequest.container.isConnected) return;
-						var newerRequest = interruptedRequest.container._scheduledChatRender;
-						if (newerRequest && newerRequest !== interruptedRequest) return;
-						var hasRaw = interruptedRequest.container.hasAttribute && interruptedRequest.container.hasAttribute('data-raw-content');
-						var raw = hasRaw ? interruptedRequest.container.getAttribute('data-raw-content') : null;
-						if (hasRaw && raw !== interruptedRequest.text) return;
-						if (hasRaw && window.scheduleChatElementRender) {
-							window.scheduleChatElementRender(interruptedRequest.container, interruptedRequest.text, interruptedRequest.yield);
-						} else if (window.scheduleChatContentRender) {
-							window.scheduleChatContentRender(interruptedRequest.container, interruptedRequest.text, interruptedRequest.yield);
-						}
-					}, 0);
-				}
-				function finishLiveRender(result, err) {
-					if (liveRequest.finished) return;
-					liveRequest.finished = true;
-					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
-					if (!err && result !== false) {
-						container._renderedRevision = renderRevision;
-						if (container.getAttribute('data-raw-revision')) container.setAttribute('data-rendered-revision', renderRevision);
-					}
-					if (container._activeLiveChatRender === liveRequest) container._activeLiveChatRender = null;
-					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
-					window._liveChatRenderRequests.delete(liveRequest);
-					var quietMS = window._chatLiveRenderQuietMS || 300;
-					window._chatLiveRenderQuietUntil = Date.now() + quietMS;
-					// Continuous output may finish faster than the quiet period. Keep
-					// the oldest hydration request's deadline instead of postponing
-					// it on every delta (the transcript stays hidden until it resolves).
-					var oldestQueued = window._chatContentRenderQueue && window._chatContentRenderQueue[0];
-					var resumeMS = oldestQueued ? Math.min(quietMS, Math.max(0,
-						(window._chatRenderMaxLiveDeferralMS || 1000) - (Date.now() - oldestQueued.enqueuedAt))) : quietMS;
-					clearTimeout(window._chatRenderResumeTimer);
-					window._chatRenderResumeTimer = setTimeout(function() {
-						if (window._drainChatContentRenderQueue) window._drainChatContentRenderQueue();
-					}, resumeMS);
-					if (err) outerReject(err);
-					else outerResolve(result);
-				}
-				liveRequest.cancel = function() {
-					cancelOwnedLiveRenderWork(liveRequest);
-					finishLiveRender(false, null);
-				};
-				var previousLiveRequest = container._activeLiveChatRender;
-				if (previousLiveRequest && previousLiveRequest.cancel) previousLiveRequest.cancel();
-				container._activeLiveChatRender = liveRequest;
-				window._liveChatRenderRequests.add(liveRequest);
-				var renderPromise;
-				try {
-					var pair = container.closest('[data-exec-status]');
-					var terminal = final || Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') ||
-						(pair && /^(completed|failed|cancelled)$/.test(pair.getAttribute('data-exec-status')));
-					if (terminal) {
-						delete container._incrementalChat;
-						renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
-					} else {
-						renderPromise = window.renderIncrementalChatContent(container, textBuffer || '', yieldBetweenBatches);
-					}
-				} catch (err) {
-					finishLiveRender(false, err);
-					return outerPromise;
-				}
-				Promise.resolve(renderPromise).then(function(result) {
-					finishLiveRender(result, null);
-				}, function(err) {
-					finishLiveRender(false, err);
-				});
-				liveRequest.timeout = setTimeout(liveRequest.cancel, window._chatLiveRenderTimeoutMS || 30000);
-				return outerPromise;
-			};
-			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
-				if (!container || !raw) return Promise.resolve(false);
-				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
-				// Serialized HTML retains revision attributes but loses event handlers.
-				// Only a revision owned by this live node can skip hydration.
-				var renderedRevision = container._renderedRevision || '';
-				var hasRenderedContent = !!(container.textContent && container.textContent.trim()) || !!(container.querySelector && container.querySelector('*'));
-				if (renderedRevision === renderRevision && hasRenderedContent) return Promise.resolve(true);
-				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
-				container._renderingRevision = renderRevision;
-				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
-					if (container._renderingRevision !== renderRevision) return rendered;
-					delete container._renderingRevision;
-					if (rendered && (container.getAttribute('data-raw-revision') || raw || '') === renderRevision) {
-						container._renderedRevision = renderRevision;
-						if (container.getAttribute('data-raw-revision')) container.setAttribute('data-rendered-revision', renderRevision);
-					} else if (container._renderedRevision === renderRevision || container.getAttribute('data-rendered-revision') === renderRevision) {
-						delete container._renderedRevision;
-						container.removeAttribute('data-rendered-revision');
-					}
-					return rendered;
-				});
-				container._chatElementRenderPromise = promise;
-				return promise;
 			};
 
 			window.linkStreamingToolResults = function(segments, options) {

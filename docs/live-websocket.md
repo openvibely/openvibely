@@ -10,9 +10,10 @@ the outgoing project. Each browser tab or native window has its own connection.
 A full document reload necessarily creates a replacement connection.
 
 HTTP still serves pages, history windows, fragments, reconciliation snapshots and
-actions. Rendering, virtualization, draft ownership and scroll tracking remain
-view-owned. Existing internal `sse-*` DOM event names and some
-stream-handle variable names remain compatibility interfaces for those owners;
+actions. The shared thread controller coordinates view attachment, rendering and
+scroll restoration; virtualization, message formatting, trackers and draft controls
+remain view helpers. Existing internal `sse-*` DOM event names and some
+stream-handle variable names remain compatibility interfaces for those helpers;
 there are no EventSource constructors or browser-facing SSE routes in production.
 
 ## Thread snapshots and background updates
@@ -47,6 +48,26 @@ to disk.
 A new execution missing from a saved page invalidates that shell; the normal HTTP
 load supplies its markup while output is already retained. HTTP remains necessary
 for page/composer metadata and authoritative history reconciliation.
+
+## Thread view controller
+
+`web/templates/components/thread_controller.templ` installs one
+`openVibelyThreadController` per document, shared by Chat and task threads:
+
+- `attach` acquires a view listener from the snapshot cache, replacing any previous
+  listener for that bubble. `detach` closes that listener, not the background run.
+  Removed views are also released after swaps/history restoration; page exit releases all views.
+- `schedule` and `prepare` serialize history rendering. `render` coordinates live
+  output with that work, including cancellation and render deadlines.
+- `restore` coordinates initial rendering with scroll restoration. Incoming render
+  updates are coalesced while the initial transcript is prepared; `reveal` releases
+  the latest update for each bubble once the transcript is visible.
+
+The cache remains the output owner. The controller calls the existing Markdown,
+virtual-list and scroll helpers rather than implementing another cache or renderer.
+Page adapters still handle execution-specific UI (status, errors, composer and
+terminal reconciliation). Legacy render/scroll globals alias the controller's
+implementations so existing callbacks use the same scheduling policy.
 
 ## Wire protocol
 
