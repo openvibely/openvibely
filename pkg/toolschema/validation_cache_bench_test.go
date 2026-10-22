@@ -31,7 +31,7 @@ func BenchmarkValidatorCacheConcurrentColdDistinct(b *testing.B) {
 		wg.Wait()
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(workers)*1e9/float64(b.Elapsed().Nanoseconds()), "validations/s")
+	b.ReportMetric(float64(workers)*float64(b.N)*1e9/float64(b.Elapsed().Nanoseconds()), "validations/s")
 }
 
 func BenchmarkValidatorCacheConcurrentWarmHits(b *testing.B) {
@@ -56,7 +56,7 @@ func BenchmarkValidatorCacheConcurrentWarmHits(b *testing.B) {
 		wg.Wait()
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(workers)*1e9/float64(b.Elapsed().Nanoseconds()), "validations/s")
+	b.ReportMetric(float64(workers)*float64(b.N)*1e9/float64(b.Elapsed().Nanoseconds()), "validations/s")
 }
 
 func BenchmarkValidatorCacheWarmHitsAlongsideColdMiss(b *testing.B) {
