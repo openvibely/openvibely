@@ -180,3 +180,22 @@ These additions also require a newer build than the pinned release. Check `schem
 `fit_text:true` sizes a text leaf's height at its allocated width; omit its fixed `height`. Column siblings follow the measured height and gap. Runs must have resolved, available fonts (`Go` faces are bundled for measurement). Measurement uses glyph advances, wrapping, mixed run sizes, text insets, point-based paragraph spacing and proportional line spacing. Unavailable fonts/glyphs, unresolved fields, rotated/vertical text, fixed-point line spacing, nonzero character spacing, percentage-based before/after paragraph spacing and overflow fail explicitly. Use explicit sizes for those cases; verify rendered text for font substitution and complex-script shaping. Rerun layout after text/width edits.
 
 Grid children may use positive `column_span` and `row_span`, defaulting to 1. For a heading across two columns above two items, use `{"mode":"grid","columns":2,"children":[{"shape_id":"2","column_span":2},{"shape_id":"3"},{"shape_id":"4"}]}`. Items occupy free cells in row-major order; rows divide the frame equally and spans include internal gaps. Check both placement and text fit in the resulting preview.
+
+## Line spacing
+
+On newer builds, `paragraph_style.line_spacing` sets a line-height multiplier
+(`1` is single spacing, `1.2` is 120%; supported range 0.00001–1000).
+This differs from `before`/`after`, which are paragraph spacing in points.
+Confirm `line_spacing` appears in the `ParagraphStyle` definition returned by
+`"$PAPERWORKS" schema slide-edit`; the pinned release lacks it. If absent,
+report the runtime limitation instead of sending an ignored field.
+
+Save an edit spec using the actual inspected shape ID and zero-based paragraph:
+
+```json
+{"edits":[{"operation":"paragraph-format","slide":1,"shape_id":"2","paragraph":0,"paragraph_style":{"line_spacing":1.2}}]}
+```
+
+Run `"$PAPERWORKS" slide-edit input.pptx --spec spacing.json --output spaced.pptx`.
+New paragraph definitions accept the same setting in `format`. Reapply any
+measured layout after changing spacing, then render and inspect wrapping and overflow.
