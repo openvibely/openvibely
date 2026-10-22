@@ -101,7 +101,13 @@ Use `comment-edit` to append text or change resolution state. Check the target a
 
 Use `materialize` for supported SEQ/REF updates without an Office re-save. Pagination-dependent fields and indexes need an Office engine. When the task permits an Office re-save, use `"$PAPERWORKS" refresh input.docx --output new-directory` to create a refreshed copy through LibreOffice. Reopen it, inspect every rendered page and check TOC/PAGE/REF results against the document. Check TOC entries against heading pages, PAGE/NUMPAGES against page count, and REF/PAGEREF against bookmarked targets. A refresh-on-open flag does not establish saved results.
 
-`refresh` can rewrite unrelated package parts. For strict preservation, use `materialize` where sufficient; resolve any conflict between pagination refresh and unchanged-part requirements before an Office re-save.
+`refresh` can rewrite unrelated package parts. For strict preservation, use `materialize` where sufficient. If a Word refresh is unavailable, request deferred refresh with `word-edit` and `{"operation":"update-fields"}`. First confirm `update-fields` appears in `"$PAPERWORKS" schema word-edit`; it requires a newer build than the pinned release. Save the spec as `refresh-on-open.json`, then run:
+
+```sh
+"$PAPERWORKS" word-edit input.docx --spec refresh-on-open.json --output deferred.docx
+```
+
+This sets `w:updateFields=true`; it does not calculate fields or refresh cached page numbers. When settings already exist, only that part changes. If absent, the command also registers the settings part in content types and document relationships. Authorize those exact package changes in the preservation contract. State that refresh is deferred until Word opens and updates the document, then verify the displayed results; locked fields or application settings can prevent updating. If the command is unavailable, report the runtime limitation rather than treating stale caches as verified.
 
 ## Advanced document edits
 

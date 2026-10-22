@@ -12,7 +12,7 @@ Run `"$PAPERWORKS" verify-preservation before.docx --against after.docx --requir
 
 Render and compare all pages against the source, checking wrapping, overflow, pagination, table widths and header/footer placement. Verify updated fields using the field-refresh policy in `references/review-and-fields.md`. Neither unchanged package hashes nor successful rendering alone proves that the filled content is correct.
 
-For strict unchanged-part preservation, avoid an Office re-save because it can rewrite unrelated markup. Use `materialize` for supported SEQ/REF fields; resolve conflicts between pagination refresh and preservation before proceeding.
+For strict unchanged-part preservation, avoid an Office re-save because it can rewrite unrelated markup. Use `materialize` for supported SEQ/REF fields. If Word refresh is unavailable, follow the `update-fields` fallback in `references/review-and-fields.md` and disclose deferred refresh; do not claim saved pagination fields are current.
 
 ## Clone a template component
 

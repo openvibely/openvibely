@@ -6,6 +6,8 @@ Use the sections relevant to the requested workbook. These are checks, not a rea
 
 Prefer familiar, inspectable formulas and one owner for each calculation. Preserve valid existing formulas unless the task requires changing them. Use bounded, aligned ranges. Choose SUM for addition, PRODUCT for multiplication, and SUMPRODUCT for aligned row-wise products; missing factors must not silently become valid zero results.
 
+For new conditional counts, sums and averages, prefer COUNTIFS, SUMIFS and AVERAGEIFS even with one condition. Do not introduce LET, array/spill formulas, MAP, REDUCE or LAMBDA; use familiar formulas and labeled intermediate steps. Ordinary range arguments in SUMIFS and SUMPRODUCT are fine. Preserve required existing/template formulas during narrow edits.
+
 Choose exact versus approximate lookup intentionally. Confirm whether duplicate keys require aggregation instead of first-match lookup. Distinguish a missing lookup value from a legitimate zero; a zero SUMIFS result does not establish that matching records exist. Keep missing-data checks explicit rather than wrapping every formula in IFERROR.
 
 Use invariant Excel number-format syntax; do not swap comma/decimal characters to imitate a locale. Match displayed precision to counts, rates and decision outputs. Keep counts and identifiers exact; do not invent scores or confidence precision.
