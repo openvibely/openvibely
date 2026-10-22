@@ -167,13 +167,17 @@
         });
         runs.forEach(run => {
             const g = add(group(run));
-            g.runs.push(run.key); g.strings.add(run.output); g.time = Math.max(g.time, run.time);
+            g.runs.push(run.key); g.time = Math.max(g.time, run.time);
             g.pinned ||= run.live || run.views.size > 0;
         });
         // Only five settled executions per thread survive as idle snapshots.
         groups.forEach(g => {
             const settled = g.runs.map(key => runs.get(key)).filter(run => !run.live && !run.views.size).sort((a,b) => b.time-a.time);
             settled.slice(5).forEach(run => { runs.delete(run.key); });
+            g.runs = g.runs.filter(key => runs.has(key));
+            // Count only retained execution output. Sources still held by a page
+            // were added above and remain chargeable even if their run was pruned.
+            g.runs.forEach(key => g.strings.add(runs.get(key).output));
             g.strings.forEach(value => { g.bytes += (value || '').length * 2; });
         });
         let idle = Array.from(groups.values()).filter(g => !g.pinned).sort((a,b) => a.time-b.time);
