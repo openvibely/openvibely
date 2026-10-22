@@ -57,17 +57,20 @@ window.addEventListener('DOMContentLoaded',()=>{
   if(!root)throw Error('Missing Actions');
   root.parentElement.style.cssText='position:relative;z-index:0;transform:translateZ(0)';
   const button=root.querySelector('button[popovertarget]'),menu=root.querySelector('ul');
+  if(menu.getClientRects().length)throw Error('Closed menu visible on load');
   for(const mode of ['inline','split']) {
    switchDiffView(mode,false); await wait(100);
    button.click(); await wait(100);
    if(!menu.matches(':popover-open'))throw Error('Menu not in top layer');
+   const box=menu.getBoundingClientRect();
+   if(box.left<0 || box.top<0 || box.right>innerWidth || box.bottom>innerHeight)throw Error('Open menu outside viewport');
    const header=Array.from(document.querySelectorAll('.diff-file-header')).find(e=>e.getClientRects().length);
    const a=menu.getBoundingClientRect(),b=header.getBoundingClientRect();
    const x=(Math.max(a.left,b.left)+Math.min(a.right,b.right))/2,y=(Math.max(a.top,b.top)+Math.min(a.bottom,b.bottom))/2;
    if(Math.min(a.bottom,b.bottom)<=Math.max(a.top,b.top))throw Error('No header overlap');
    if(!menu.contains(document.elementFromPoint(x,y)))throw Error('Menu obscured in '+mode);
    button.click();await wait(50);
-   if(menu.matches(':popover-open'))throw Error('Toggle did not close');
+   if(menu.matches(':popover-open') || menu.getClientRects().length)throw Error('Toggle did not hide menu');
   }
   button.click();await wait(50);window.dispatchEvent(new Event('resize'));await wait(50);
   if(!menu.matches(':popover-open') || menu.getBoundingClientRect().right>innerWidth)throw Error('Resize lost menu position');
