@@ -64,4 +64,5 @@ type LiveExecution struct {
 	TaskID    string       `json:"task_id"`
 	ProjectID string       `json:"project_id"`
 	Category  TaskCategory `json:"category"`
+	StartedAt time.Time    `json:"started_at"`
 }

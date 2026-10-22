@@ -191,6 +191,36 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   now+=31*60*1000;cache.sweep();assert(record('displayed'),'displayed completed thread lost its exemption');
   displayed.remove();cache.sweep();assert(!record('displayed'),'departed thread kept display exemption');
   cache.clear();
+  // Opening the newest run before discovery must not make it the first one
+  // pruned. Include sub-millisecond timestamps and equal-time ID tie breaks.
+  let knownStart=null;
+  const executionOwner={closest(selector){
+   if(selector==='[data-task-id]')return {getAttribute:()=> 'ordered-task'};
+   if(selector==='[data-execution-pair]')return {getAttribute:()=> knownStart};
+   return null;
+  },setAttribute(){}};
+  const newest=cache.execution('ordered-6','p','latest output',executionOwner);await tick();
+  const newestStream=streams.at(-1);
+  active=Array.from({length:6},(_,i)=>({id:'ordered'+String.fromCharCode(122-i),project_id:'p',task_id:'ordered-task',category:'active',started_at:'2026-10-22T01:00:00.00000'+(i+1)+'Z'}));
+  active[5].id='ordered-6';
+  await cache.discover();newest.close();
+  assert(record('ordered-6')&&!newestStream.closed&&!record('orderedz'),'admission order evicted newest viewed execution');
+  const orderedCount=streams.length;await cache.discover();
+  assert(streams.length===orderedCount&&record('ordered-6'),'discovery lost newest execution or restarted pruned output');
+  newestStream.emit('message',' background');newestStream.emit('done','completed');
+  assert(record('ordered-6').output==='latest output background','newest background final output missing');
+  cache.clear();
+  // Discovering old work after a newer run completed must preserve the latter,
+  // even when that completed run is no longer in the active inventory.
+  knownStart='2026-10-22T01:00:00.000006Z';
+  const settled=cache.execution('settled-newest','p','final output',executionOwner);await tick();
+  streams.at(-1).emit('done','completed');settled.close();
+  active=active.slice(0,5).reverse();await cache.discover();
+  assert(record('settled-newest')&&!record('orderedz'),'old discovery displaced newer completed output');
+  cache.clear();
+  active=Array.from({length:6},(_,i)=>({id:'tie-'+i,project_id:'p',task_id:'ties',category:'active',started_at:'2026-10-22T01:00:00Z'})).reverse();
+  await cache.discover();assert(record('tie-5')&&!record('tie-0'),'equal timestamps did not use deterministic execution ID order');
+  cache.clear();
   // Five executions is a limit on running history too, not just finished runs.
   active=Array.from({length:8},(_,i)=>({id:'parallel'+i,project_id:'p',task_id:'parallel-task',category:'active'}));
   await cache.discover();assert(cache.runs.size===5&&!record('parallel0')&&record('parallel7'),'running execution window was not bounded');
@@ -204,6 +234,9 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
 		case "/":
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, doc)
+		case "/native-test-bridge":
+			// This fixture needs no native input, but can also run in the Wails host.
+			w.WriteHeader(http.StatusNoContent)
 		case "/result":
 			select {
 			case result <- r.URL.Query().Get("value"):

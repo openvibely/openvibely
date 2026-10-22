@@ -1879,7 +1879,7 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 // ListLiveExecutions is an instance-scoped discovery projection. Output is sent
 // only by the authorized, offset-based execution WebSocket subscription.
 func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveExecution, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT e.id, e.task_id, t.project_id, t.category
+	rows, err := r.db.QueryContext(ctx, `SELECT e.id, e.task_id, t.project_id, t.category, e.started_at
  FROM executions e JOIN tasks t ON t.id = e.task_id
  WHERE e.status IN ('queued', 'running') ORDER BY e.started_at, e.id`)
 	if err != nil {
@@ -1889,7 +1889,7 @@ func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveEx
 	result := make([]models.LiveExecution, 0)
 	for rows.Next() {
 		var item models.LiveExecution
-		if err := rows.Scan(&item.ID, &item.TaskID, &item.ProjectID, &item.Category); err != nil {
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.ProjectID, &item.Category, &item.StartedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
