@@ -133,8 +133,9 @@ corresponding resources.
 
 The defaults allow 200 windows with 100 output subscriptions each on paper,
 with headroom. They are resource safeguards, **not load-tested capacity claims**.
-This change does not add background subscriptions or output caching for unviewed
-threads, and does not change execution concurrency limits.
+Background subscriptions and output caching for unviewed threads obey the
+[snapshot cache limits](#thread-snapshots-and-background-updates) as well as these
+transport budgets. Execution concurrency limits are unchanged.
 
 There is a 4 KiB command limit and a 128-frame outbound queue per connection.
 The writer and queue have five-second deadlines; stalled clients disconnect and
