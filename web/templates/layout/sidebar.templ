@@ -204,7 +204,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         previousProjectID = startupProjectID;
                     }
 
-					sel.addEventListener('change', async function(event) {
+					sel.addEventListener('change', function(event) {
+                        // Publish completion before confirmation can yield, so closing an
+                        // active tab waits for the entire switch, including confirmation.
+                        const navigation = switchSelectedProject();
+                        if (event.detail) event.detail.navigation = navigation;
+                    });
+
+                    async function switchSelectedProject() {
 						const newProjectId = sel.value;
 						if (!newProjectId || newProjectId === previousProjectID) {
 							syncProjectSelector();
@@ -292,9 +299,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 
 						// HTMX owns the content swap, URL update, and history cache.
-						const navigation = navigateProject(newUrl, newProjectId);
-                        if (event.detail) event.detail.navigation = navigation;
-					});
+						return navigateProject(newUrl, newProjectId);
+					}
 
                     async function navigateProject(url, id) {
                         const generation = ++projectSwitchGeneration;
