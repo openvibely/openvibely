@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,10 +14,17 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
+var cacheTestSchemaSequence atomic.Uint64
+
+func uniqueCacheTestSchema(raw string) []byte {
+	titlePrefix := fmt.Sprintf(`"title":"cache-test-%d-`, cacheTestSchemaSequence.Add(1))
+	return []byte(strings.Replace(raw, `"title":"`, titlePrefix, 1))
+}
+
 func TestConcurrentDistinctSchemaMissesCompileInParallel(t *testing.T) {
 	raws := [][]byte{
-		[]byte(`{"type":"object","properties":{"value":{"type":"string"}},"title":"parallel-string"}`),
-		[]byte(`{"type":"object","properties":{"value":{"type":"integer"}},"title":"parallel-integer"}`),
+		uniqueCacheTestSchema(`{"type":"object","properties":{"value":{"type":"string"}},"title":"parallel-string"}`),
+		uniqueCacheTestSchema(`{"type":"object","properties":{"value":{"type":"integer"}},"title":"parallel-integer"}`),
 	}
 	started := make(chan struct{}, len(raws))
 	release := make(chan struct{})
@@ -70,7 +78,7 @@ func TestConcurrentDistinctSchemaMissesCompileInParallel(t *testing.T) {
 }
 
 func TestConcurrentSameSchemaMissesShareCompilation(t *testing.T) {
-	raw := []byte(`{"type":"object","properties":{"value":{"type":"string"}},"title":"same-schema-flight"}`)
+	raw := uniqueCacheTestSchema(`{"type":"object","properties":{"value":{"type":"string"}},"title":"same-schema-flight"}`)
 	const callers = 16
 	var compileCalls atomic.Int32
 	compileStarted := make(chan struct{}, callers)
@@ -117,11 +125,11 @@ func TestConcurrentSameSchemaMissesShareCompilation(t *testing.T) {
 }
 
 func TestWarmCacheHitDoesNotWaitForColdCompilation(t *testing.T) {
-	warmRaw := []byte(`{"type":"object","title":"warm-during-cold"}`)
+	warmRaw := uniqueCacheTestSchema(`{"type":"object","title":"warm-during-cold"}`)
 	if _, err := cachedValidator(warmRaw); err != nil {
 		t.Fatal(err)
 	}
-	coldRaw := []byte(`{"type":"object","title":"cold-during-warm-hit"}`)
+	coldRaw := uniqueCacheTestSchema(`{"type":"object","title":"cold-during-warm-hit"}`)
 	compileStarted := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
@@ -159,7 +167,7 @@ func TestWarmCacheHitDoesNotWaitForColdCompilation(t *testing.T) {
 }
 
 func TestFailedSchemaCompilationCanBeRetried(t *testing.T) {
-	raw := []byte(`{"type":"object","title":"failed-schema-retry"}`)
+	raw := uniqueCacheTestSchema(`{"type":"object","title":"failed-schema-retry"}`)
 	const callers = 8
 	wantErr := errors.New("synthetic compilation failure")
 	var compileCalls atomic.Int32
