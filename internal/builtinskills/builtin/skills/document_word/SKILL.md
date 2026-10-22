@@ -151,7 +151,13 @@ When edits affect fields, captions, contents or pagination, load the field-refre
 
 For a new ordinary report, start with readable 11-point body text, one restrained font family, clear 20–28-point title and progressively smaller named heading styles. Keep headings with the next paragraph, provide intentional space before/after, and avoid blank paragraphs as spacing. Retain a supplied brand/template instead of imposing these defaults. Match page dimensions and section orientation to the content.
 
+For new documents without a controlling template, use Word's `Title` style for the title. Use descriptive titles, subtitles and section headings containing words, numbers and spaces rather than slogans or punctuation. Set titles, headings and page headers to black; remove conflicting theme/direct colors, title underlines and decorative rules. These defaults do not authorize restyling unrelated content in an existing document.
+
 Keep tables within the active section's usable column width. Use consistent cell padding, deliberate header emphasis, restrained borders and right-aligned numeric values with stated units. Repeat headers across pages and avoid splitting a short row unnecessarily. Form labels need enough room for their values and an obvious reading order; whitespace should separate groups rather than scatter controls.
+
+For new tables, use visible light-gray (`D9D9D9`) outer and internal borders. Choose light/dark gray or blue headers deliberately, with white text on dark fills and black text on light fills. Dark-header tables may alternate white and pale gray/blue body rows. Center text vertically, choose horizontal alignment by content, and let rows expand rather than using fixed heights that clip text. Use table-style XML through `styles_overlay_file` for borders and vertical alignment (see `references/creation.md`); use `table-cell-format` for supported fills, fonts and horizontal alignment. Do not invent creation or edit fields for missing settings. Use tables for comparable records or values, not to box narrative paragraphs.
+
+Do not add shaded callout cards, accent-bar blocks or boxed summaries. Use ordinary paragraphs, optionally with a bold lead-in. Preserve explicit user/template directions over these defaults.
 
 Before delivery, check that the title describes the result, each section advances the request, claims have sources, dates/units are explicit, and numbers reconcile. Remove duplicated conclusions, filler headings, unfinished placeholders and unexplained abbreviations. Inspect page breaks, widows/orphans, caption placement and field results on rendered pages.
 
