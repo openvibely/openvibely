@@ -1620,7 +1620,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					function _restoreThreadScrollOrBottom(taskId, forceBottom) {
 						requestAnimationFrame(function() {
 							var chatMessages = document.getElementById('task-thread-messages');
-							if (!chatMessages || !window.chatAutoScroll || !_isChatTabActive()) return;
+							if (!chatMessages || !window.chatAutoScroll || !_isChatTabActive() || _currentTaskIdFromPath() !== taskId) return;
+							// The delayed page initializer can run after the reader has moved
+							// in the cached preview. Its saved state must not override live intent.
+							var liveTracker = window._taskThreadPageTracker;
+							if (!forceBottom && liveTracker && liveTracker.element === chatMessages) {
+								if (liveTracker.flushPendingScrollIntent) liveTracker.flushPendingScrollIntent();
+								if (!liveTracker.shouldAutoScroll()) return;
+							}
 
 							var state = _getTaskThreadScrollState(taskId);
 							if (!forceBottom && state) {

@@ -6029,7 +6029,8 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			var interactiveRestore = window.restoreChatTranscriptScroll({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', defaultPinned: true, renderPromise: interactiveRender});
 			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
 			interactiveHydration.scrollTop = 110;
-			interactiveHydration.dispatchEvent(new Event('scroll'));
+			// Do not dispatch scroll manually: the rendering promise can settle
+			// before the browser delivers the event for this user movement.
 			resolveInteractiveHydration();
 			await interactiveRestore;
 			if (Math.abs(interactiveHydration.scrollTop - 110) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier overrode upward intent made during hydration');
@@ -6040,10 +6041,19 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			var continuedReadingRestore = window.restoreChatTranscriptScroll({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', state: continuedReadingState, renderPromise: readingHydrationRender});
 			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
 			interactiveHydration.scrollTop = 60;
-			interactiveHydration.dispatchEvent(new Event('scroll'));
+			// Do not dispatch scroll manually: the rendering promise can settle
+			// before the browser delivers the event for this user movement.
 			resolveReadingHydration();
 			await continuedReadingRestore;
 			if (Math.abs(interactiveHydration.scrollTop - 60) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier restored a stale position after an already-scrolled-up user moved again');
+			// Navigation can snapshot before Chrome delivers the scroll event too.
+			// Input without movement (e.g. in a nested scroller) must stay pinned.
+			interactiveTracker.returnToLatest(false);
+			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			if (!interactiveTracker.snapshot().pinned) fail('wheel input without transcript movement disabled following');
+			interactiveHydration.scrollTop = 90;
+			var pendingSnapshot = interactiveTracker.snapshot();
+			if (pendingSnapshot.pinned || pendingSnapshot.scrollTop !== 90) fail('navigation snapshot lost pending upward movement');
 			await verifySendSupersedesEarlierRestore('chat-messages-pagination-send');
 			await verifySendSupersedesEarlierRestore('task-thread-messages-pagination-send');
 			await verifyReadingSupersedesEarlierRestore('chat-messages-pagination-reading');
