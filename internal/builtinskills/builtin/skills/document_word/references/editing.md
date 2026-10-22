@@ -16,6 +16,7 @@ Use `word-edit` with the operations below. `paragraph`, `run`, `table`, `row`, `
 | `section-format` | `section`; page `width`, `height`, margins `top`, `bottom`, `left`, `right`, `header`, `footer`, `gutter`, all in twips (1440 per inch). |
 | `section-insert` | Source `section`, terminating `paragraph`, `type:nextPage/continuous/evenPage/oddPage`. |
 | `header-footer` | `section`, `kind:header/footer`, `type:default/first/even`, `text` or the table specification below on newer builds. Check inherited headers/footers on affected sections. |
+| `header-footer-link` | On newer builds: `section`, `kind:header/footer`, optional `type:default/first/even`, boolean `linked`; see linkage below. |
 | `batch` | `edits` array of these general operations. Indices reflect earlier edits. No nested batches or specialized review operations inside a batch. |
 
 ### General editing example
@@ -47,3 +48,17 @@ On newer builds, `header-footer` accepts `rows` instead of `text`. Check `schema
 ```
 
 Run with `word-edit` as above. The zero-based section receives a private header/footer part containing a native table; this replaces its selected header/footer without changing the body. Later sections that inherit it also display the replacement. Inspect section references before editing. A private part does not break inheritance: for a section-only edit, preserve later sections' original headers/footers with explicit references before replacing the selected one. Use `kind:header` for a header and `type:first/even` when requested. Rows must be rectangular strings; provide one positive column width in twips (1440 per inch), within the section's usable width. Text and rows are mutually exclusive. Inspect the saved part/section relationship and apply existing table formatting operations with its `part` path if needed. Render all pages to check header/footer placement and page variants.
+
+
+## Link to the previous section
+
+Check `schema word-edit` for `header-footer-link` and the boolean `linked` field.
+This requires a newer local build than the pinned `v0.0.1-rc2`.
+
+```json
+{"operation":"header-footer-link","section":1,"kind":"footer","type":"default","linked":false}
+```
+
+Run with `word-edit` as above, or include it in a general `batch`. Sections are zero-based. `linked:false` gives an inherited header/footer an **empty** independent definition; it does not copy inherited content. If already independent, its content stays unchanged. `linked:true` restores inheritance from the nearest preceding definition of that kind/type; without one, it displays nothing. Other sections' explicit references and their parts remain intact.
+
+Inspect the target and following sections before changing linkage: later sections that inherit from the target can change appearance too. To keep their existing content, retain their original definitions explicitly; do not treat unlinking as a content-copy command. Linkage does not enable first/even-page display flags. Do not supply `text`, `rows`, `widths_twips` or a header/footer `part`; use `header-footer` separately to replace content. Verify effective references and render affected pages.
