@@ -108,16 +108,21 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   reset=view('reset','long stale seed');await tick();resetStream.emit('reset','new');
   assert(reset.output==='new','reset did not replace an ahead HTTP seed');resetStream.emit('done','completed');reset.listener.close();
   active=[];
-  // Pin running data across idle expiry; completed data expires normally.
-  now+=31*60*1000;cache.sweep();
-  assert(!record('a')&&record('c')&&record('remote','other'),'idle expiry removed active runs or retained completed run');
-  // Capacity eviction includes unseen finished threads and preserves live ones.
+  // Only a mounted viewer is exempt. Background output must not renew idle age.
+  const foreground=view('foreground');await tick();
+  now+=29*60*1000;remote.emit('message',' still running');
+  now+=2*60*1000;cache.sweep();
+  assert(!record('a')&&!record('c')&&!record('remote','other')&&record('foreground'),'idle running snapshots did not expire or the viewer was evicted');
+  assert(cs.closed&&remote.closed,'expiry did not unsubscribe background streams');
   for(let i=0;i<22;i++){const v=view('idle'+i);await tick();streams.at(-1).emit('done','completed');v.listener.close();now++;}
-  cache.sweep();assert(!record('idle0')&&record('idle21')&&record('c'),'count eviction/pinning incorrect');
+  cache.sweep();assert(!record('idle0')&&record('idle21')&&record('foreground'),'count eviction/viewer exemption incorrect');
   const big=view('large');await tick();const largeStream=streams.at(-1);
-  largeStream.emit('message','x'.repeat(33*1024*1024));big.listener.close();cache.sweep();
-  assert(record('large'),'active output evicted by idle byte budget');
-  largeStream.emit('done','completed');cache.sweep();assert(!record('large'),'oversize settled output retained');
+  largeStream.emit('message','x'.repeat(33*1024*1024));cache.sweep();
+  assert(record('large'),'displayed output evicted by background byte budget');
+  big.listener.close();cache.sweep();
+  assert(!record('large')&&largeStream.closed,'oversize running output retained after leaving');
+  largeStream.emit('message','late');largeStream.emit('done','completed');
+  assert(!record('large'),'late callbacks resurrected an evicted run');
   const container={closest(selector){return selector==='[data-task-id]'?{getAttribute:()=> 'same-task'}:null},setAttribute(){}};
   for(let i=0;i<7;i++){
    const listener=cache.execution('turn'+i,'p','',container);await tick();
@@ -140,6 +145,57 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   // continue to count, rather than being subtracted merely because its run left.
   cache.pages.set('older-shell',{threadKey:cache.threadKey('p','same-task'),time:now,html:'',sources:[{text:oldestOutput}],virtual:[]});
   cache.sweep();assert(cache.runs.size===0&&cache.pages.size===0,'page-held pruned output was excluded from byte budget');
+  cache.clear();
+  // Automatic discovery shares the 20-thread budget and does not cycle through
+  // evicted work on every scan. Reopening explicitly admits an evicted thread.
+  active=Array.from({length:24},(_,i)=>({id:'discover'+i,project_id:'p',task_id:'task'+i,category:'active'}));
+  await cache.discover();assert(cache.runs.size===20,'discovery exceeded thread count');
+  const discoveredCount=streams.length;
+  const evicted=active.find(item=>!record(item.id));
+  const evictedStream=streams.find(s=>s.id===evicted.id);
+  assert(evictedStream.closed,'count eviction kept its subscription');
+  await cache.discover();await cache.discover();
+  assert(streams.length===discoveredCount,'discovery immediately reloaded evicted output');
+  const owner={closest(selector){return selector==='[data-task-id]'?{getAttribute:()=>evicted.task_id}:null},setAttribute(){}};
+  const reopened=cache.execution(evicted.id,'p','current HTTP output',owner);await tick();
+  assert(record(evicted.id)?.output==='current HTTP output'&&streams.at(-1).offset===bytes('current HTTP output'),'reopening failed to resume evicted run from HTTP');
+  reopened.close();const afterReopen=streams.length;
+  await cache.discover();assert(cache.runs.size===20&&streams.length===afterReopen,'reopened admission caused discovery churn');
+  cache.clear();
+  // Background growth is enforced without waiting for terminal output or the
+  // five-second discovery interval; completed and running data share one budget.
+  active=[{id:'growing',project_id:'p',task_id:'growing-task',category:'active'}];
+  await cache.discover();const growing=streams.at(-1);
+  growing.emit('message','g'.repeat(33*1024*1024));
+  await new Promise(r=>setTimeout(r,30));
+  assert(!record('growing')&&growing.closed,'growing background output exceeded byte budget');
+  const afterGrowth=streams.length;await cache.discover();assert(streams.length===afterGrowth,'oversize run rediscovered');
+  // Expiration likewise remains suppressed while the backend still runs it.
+  cache.clear();await cache.discover();const expiring=streams.at(-1);
+  now+=29*60*1000;expiring.emit('message','busy');now+=2*60*1000;cache.sweep();
+  const afterExpiry=streams.length;await cache.discover();
+  assert(!record('growing')&&expiring.closed&&streams.length===afterExpiry,'streaming or discovery renewed idle expiry');
+  cache.clear();
+  // Starting another execution while away must not renew the thread's idle age.
+  active=[{id:'older-run',project_id:'p',task_id:'aging-thread',category:'active'}];
+  await cache.discover();now+=29*60*1000;
+  active.push({id:'newer-run',project_id:'p',task_id:'aging-thread',category:'active'});
+  await cache.discover();now+=2*60*1000;cache.sweep();
+  assert(!record('older-run')&&!record('newer-run'),'new background execution renewed thread expiry');
+  cache.clear();
+  // A completed thread can still be displayed after its stream listener closes.
+  const displayed=document.createElement('div');displayed.id='task-thread-view';
+  displayed.dataset.taskId='displayed-task';displayed.dataset.projectId='p';displayed.textContent='Visible thread';document.body.appendChild(displayed);
+  const displayedListener=cache.execution('displayed','p','',displayed);await tick();
+  streams.at(-1).emit('message','v'.repeat(33*1024*1024));streams.at(-1).emit('done','completed');displayedListener.close();
+  now+=31*60*1000;cache.sweep();assert(record('displayed'),'displayed completed thread lost its exemption');
+  displayed.remove();cache.sweep();assert(!record('displayed'),'departed thread kept display exemption');
+  cache.clear();
+  // Five executions is a limit on running history too, not just finished runs.
+  active=Array.from({length:8},(_,i)=>({id:'parallel'+i,project_id:'p',task_id:'parallel-task',category:'active'}));
+  await cache.discover();assert(cache.runs.size===5&&!record('parallel0')&&record('parallel7'),'running execution window was not bounded');
+  const parallelCount=streams.length;await cache.discover();assert(streams.length===parallelCount,'pruned executions were rediscovered');
+  cache.clear();
   navigator.sendBeacon('/result?value=pass');
  }catch(error){navigator.sendBeacon('/result?value='+encodeURIComponent(error.stack||error));}
  })();</script></body></html>`
@@ -173,6 +229,14 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
 // Exercise task resume streaming through the real lazy thread endpoint, including
 // final output received with no mounted page and a cached return before HTTP.
 func TestTaskBackgroundSnapshotNavigationInChrome(t *testing.T) {
+	testTaskBackgroundSnapshotNavigation(t, false)
+}
+
+func TestTaskEvictedSnapshotNavigationInChrome(t *testing.T) {
+	testTaskBackgroundSnapshotNavigation(t, true)
+}
+
+func testTaskBackgroundSnapshotNavigation(t *testing.T, evict bool) {
 	if testing.Short() {
 		t.Skip("browser regression")
 	}
@@ -203,6 +267,16 @@ window.addEventListener('load',async()=>{
   await openVibelyNavigate(%q);
   await wait(()=>view()?.dataset.taskId===%q&&source()?.views.size===0);
   assert(source().live,'navigation released running data');
+  if(%t){
+   source().time=Date.now()-31*60*1000;
+   openVibelyThreadCache.pages.forEach(page=>page.time=Date.now()-31*60*1000);
+   openVibelyThreadCache.sweep();assert(!source(),'expired background task was not evicted');
+   await openVibelyThreadCache.discover();assert(!source(),'discovery reloaded evicted task');
+   await fetch('/test/complete',{method:'POST'});
+   await openVibelyNavigate(%q);
+   await wait(()=>view()?.dataset.taskId===%q&&Array.from(view().querySelectorAll('[data-raw-content]')).some(n=>n.dataset.rawContent==='initial final'));
+   await fetch('/test/result?value=pass');return;
+  }
   testSockets[0].close();
   await fetch('/test/complete',{method:'POST'});
   await wait(()=>source()?.terminal);
@@ -217,7 +291,7 @@ window.addEventListener('load',async()=>{
   await wait(()=>Array.from(view().querySelectorAll('[data-raw-content]')).some(n=>n.dataset.rawContent==='initial final'));
   await fetch('/test/result?value=pass');
  }catch(error){await fetch('/test/result?value='+encodeURIComponent(error.stack||error))}
-});</script>`, project.ID, ex.ID, task.ID, "/tasks/"+other.ID, other.ID, path, task.ID)
+});</script>`, project.ID, ex.ID, task.ID, "/tasks/"+other.ID, other.ID, evict, path, task.ID, path, task.ID)
 	result := make(chan string, 1)
 	release := make(chan struct{})
 	var once sync.Once
