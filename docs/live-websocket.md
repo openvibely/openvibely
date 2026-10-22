@@ -123,6 +123,20 @@ have separate connections. An execution-output subscription counts once per
 watcher, even when several watchers receive the same run. These budgets do not
 limit the number of agents that can run.
 
+Keep `OPENVIBELY_LIVE_MAX_SUBSCRIPTIONS_PER_CONNECTION` above the background
+cache's allowance of 20 threads × five executions (100 execution subscriptions),
+with additional room for the displayed thread and live notifications. The default
+of 200 provides that headroom for normal use. Displayed threads are exempt from
+cache limits, so 100 is not a hard cap on all execution subscriptions.
+
+The client does not reserve slots for the displayed thread or preempt background
+subscriptions. If a lower connection limit is filled by background runs, opening
+another thread can leave its live output waiting for capacity. Discovery retries
+refused execution subscriptions, but does not free a slot; an existing subscription
+must finish, be evicted, or otherwise close first. Backend tasks continue running
+and saving output. Size this limit for the expected foreground and background use
+rather than relying on retries to prioritize the displayed thread.
+
 Each live subscription counts once, although it attaches to task, Chat, and
 optionally file broadcasters. Their individual budgets match the live budget,
 so the former 50-subscriber ceiling no longer applies. The execution hub uses its
