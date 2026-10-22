@@ -347,7 +347,9 @@ templ changesActionsPopoverScript() {
    menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';
   }
   document.addEventListener('beforetoggle', event => {
-   if(event.target.id==='changes-actions-menu' && event.newState==='open') queueMicrotask(()=>position(event.target));
+   // Native input can flush microtasks before the popover has entered the top
+   // layer. Measure on the next frame, after opening and before it is painted.
+   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));
   }, true);
   window.addEventListener('resize',()=>position(current()));
   document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);
