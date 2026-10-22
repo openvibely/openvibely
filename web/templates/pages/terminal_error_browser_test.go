@@ -388,7 +388,8 @@ func TestBrowserFunctional_ChatLiveCreatedFailureProductionWiringInChrome(t *tes
 	}
 	returnTailJS := string(returnTailJSON)
 	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "chat-live-created-terminal-wiring", func(browser *composerFocusCDP) {
-		browser.waitFor("production Chat page", `Boolean(document.getElementById('chat-page-root'))+':'+Boolean(document.getElementById('chat-messages'))`, "true:true")
+		// The live-event listener is registered by a script far below #chat-messages.
+		browser.waitFor("production Chat page", `Boolean(document.getElementById('chat-page-root'))+':'+Boolean(document.getElementById('chat-messages'))+':'+Boolean(window._chatLiveEventHandlers)`, "true:true:true")
 		installGatedTerminalBrowserRenderer(browser)
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'live Chat failure',source:'api'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch production Chat live event: %s", got)
