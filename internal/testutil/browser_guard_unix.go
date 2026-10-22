@@ -73,8 +73,15 @@ func StopBrowserProcessGroup(cmd *exec.Cmd) {
 
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	if !waitForProcessGroup(pgid, 2*time.Second) {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		waitForProcessGroup(pgid, 5*time.Second)
+		// SIGKILL cannot interrupt a thread blocked in a filesystem call, so during
+		// an I/O stall an exiting browser can still create profile files. Returning
+		// early would race the caller's profile cleanup.
+		for {
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			if waitForProcessGroup(pgid, 5*time.Second) {
+				break
+			}
+		}
 	}
 	<-waited
 }
