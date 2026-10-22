@@ -429,6 +429,22 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.click("#new-project-btn")
 				browser.waitFor("create action loads existing project form route", `String(!!document.querySelector('#new-project-container #create-project-fixture') && !document.getElementById('project-selector-dialog').open)`, "true")
 
+				// A reopened project is appended at the end and must close on one click.
+				browser.click(`[data-project-tab="p02"]`)
+				browser.waitFor("appended tab active", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+				// Confirmation is asynchronous, just like the app's unsaved-changes prompt.
+				browser.evaluate(`(function(){window.savedTabConfirm=window.openVibelyConfirm;window.openVibelyConfirm=()=>Promise.resolve(false);var dialog=document.createElement('dialog');dialog.id='tab-close-confirm-fixture';document.body.append(dialog);dialog.show();return 'ready';})()`)
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("cancelled close keeps active tab", `String(document.getElementById('project-selector').value === 'p02' && !document.querySelector('[data-close-project="p02"]').disabled && document.getElementById('tab-close-confirm-fixture').open)`, "true")
+				browser.evaluate(`window.openVibelyConfirm=()=>Promise.resolve(true); 'ready'`)
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("appended active tab closes on first click", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
+				browser.waitFor("closing last tab selects previous tab", `document.getElementById('project-selector').value`, "p23")
+				browser.evaluate(`(function(){window.openVibelyConfirm=window.savedTabConfirm;document.getElementById('tab-close-confirm-fixture').remove();document.getElementById('project-selector-search').value='';document.getElementById('project-selector-search').dispatchEvent(new Event('input',{bubbles:true}));return 'ready';})()`)
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("reopen appended project", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+
 			})
 			if desktop {
 				mu.Lock()
