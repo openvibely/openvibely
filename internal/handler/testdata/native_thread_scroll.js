@@ -55,12 +55,25 @@
     positionForGesture(160);
     await stableLayout(m);
     if(Math.abs(m.scrollTop-160)>=1) throw Error('Native calibration changed starting window: '+debug());
-    let input = 0, events = 0, cancelled = 0, loaded = false, measured = 0;
+    let input = 0, reachableInput = 0, events = 0, cancelled = 0, loaded = false, measured = 0;
+    m.addEventListener('wheel', event => {
+        if (!event.isTrusted) return;
+        // Predict movement BEFORE the synchronous WebKit handler, independently
+        // of its resulting offset. History may be inserted between wheel events
+        // in a single frame, adding room above what used to be the top boundary.
+        // Clamping the entire frame to its starting scrollTop would incorrectly
+        // flag legitimate input after that insertion as a jump.
+        const top = Math.max(0, m.scrollTop);
+        const bottom = Math.max(0, m.scrollHeight - m.clientHeight - top);
+        reachableInput += Math.max(-bottom, Math.min(top, -event.deltaY));
+    }, {passive: true, capture: true});
+    // Observe cancellation after the production handler, not in a capture-phase
+    // microtask (native dispatch can run those before bubbling in WebKit).
     m.addEventListener('wheel', event => {
         if (!event.isTrusted) return;
         input -= event.deltaY;
         events++;
-        queueMicrotask(() => { if (event.defaultPrevented) cancelled++; });
+        if (event.defaultPrevented) cancelled++;
     }, {passive: true});
     const bounds = m.getBoundingClientRect();
     nativeInput.postMessage({dy: -2, count: 600, x: bounds.left + 6, y: bounds.top + 75});
@@ -75,7 +88,7 @@
                 if (!response.ok) throw Error('Could not release delayed history: '+response.status);
             }).catch(error => errors.push(String(error)));
         }
-        const b = m.getBoundingClientRect(), ranges = [], before = m.scrollTop, startInput = input;
+        const b = m.getBoundingClientRect(), ranges = [], before = m.scrollTop, startInput = input, startReachableInput = reachableInput;
         // Whole-bubble bounds miss jumps within a bubble. Follow actual text at
         // several viewport positions, including partially clipped paragraphs.
         for (const y of [b.top + 24, b.top + 100, b.bottom - 30]) {
@@ -88,7 +101,7 @@
             }
         }
         await new Promise(resolve => requestAnimationFrame(resolve));
-        const expected = Math.min(before, input - startInput);
+        const expected = webkit ? reachableInput - startReachableInput : Math.min(before, input - startInput);
         for (const {range, top} of ranges) {
             measured++;
             if (!range.startContainer.isConnected) throw Error('Reading text detached during native scroll');
@@ -96,7 +109,7 @@
             // Allow event/frame coalescing, but not a page-sized offset overwrite.
             if (Math.abs(shift) > 10) throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame + ' '+JSON.stringify({
                 expected,actual:range.getBoundingClientRect().top-top,before,after:m.scrollTop,
-                startInput,input,events,loaded,burstDone:!!window._nativeBurstDone,
+                startInput,input,startReachableInput,reachableInput,events,loaded,burstDone:!!window._nativeBurstDone,
                 restoring:m.dataset.earlierAnchorRestoring,hydrating:m.dataset.transcriptHydrating,
                 height:m.scrollHeight,viewport:m.clientHeight,webkit,wheelScale
             }));
