@@ -509,13 +509,17 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	// Success - refresh task data and trigger changes tab refresh
 	task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 
-	// Set response headers to trigger changes tab refresh and show success message
+	// Changes actions return the refreshed panel below. Emitting refreshChanges
+	// as well would fetch and swap that panel a second time, rebuilding its diffs.
+	// Other surfaces still need to notify the Changes panel.
+	var refreshTriggers map[string]any
+	if !fromChangesTab {
+		refreshTriggers = map[string]any{"refreshChanges": true}
+	}
 	if targetBranch == "" {
 		targetBranch = "main"
 	}
-	setHTMXToastWithOptionsAndTriggers(c, fmt.Sprintf("Merged locally into %s", targetBranch), "completed", "", "", task.ID, "", "", map[string]any{
-		"refreshChanges": true,
-	})
+	setHTMXToastWithOptionsAndTriggers(c, fmt.Sprintf("Merged locally into %s", targetBranch), "completed", "", "", task.ID, "", "", refreshTriggers)
 
 	if fromTaskCard {
 		return h.renderTaskCardRefresh(c, taskID)
