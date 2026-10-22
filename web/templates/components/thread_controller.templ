@@ -21,6 +21,16 @@ templ ThreadControllerScript() {
                 if (closed) return;
                 closed = true;
                 if (views.get(container) === source) views.delete(container);
+                // Page adapters still use these registries for bulk cleanup.
+                // Remove only this lease: a replacement may already be registered.
+                if (window._chatEventSourceByExec && window._chatEventSourceByExec[id] === source) {
+                    delete window._chatEventSourceByExec[id];
+                }
+                [window._chatEventSources, window._threadEventSources].forEach(function(registry) {
+                    if (!registry) return;
+                    var index = registry.indexOf(source);
+                    if (index >= 0) registry.splice(index, 1);
+                });
                 close();
             };
             views.set(container, source);

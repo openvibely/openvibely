@@ -618,7 +618,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							window._taskThreadStreamingActive = false;
 							// Close thread EventSource connections
 							if (window._threadEventSources) {
-								window._threadEventSources.forEach(function(es) {
+								window._threadEventSources.slice().forEach(function(es) {
 									try { es.close(); } catch(e) {}
 								});
 								window._threadEventSources = [];
