@@ -3,6 +3,8 @@ package stream
 import (
 	"fmt"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/llm/tooloutput"
 )
 
 // EventType represents a canonical stream event emitted by provider parsers/callbacks.
@@ -83,7 +85,7 @@ func WriteEvent(writer *Writer, event Event, skipThinking bool) {
 		if event.IsError {
 			status = "error"
 		}
-		writer.Write([]byte(fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", event.ToolName, status, event.Output)))
+		writer.Write([]byte(fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", event.ToolName, status, tooloutput.Encode(event.Output))))
 	case EventSessionID:
 		if event.SessionID != "" {
 			writer.SetSessionID(event.SessionID)

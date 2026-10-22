@@ -5546,6 +5546,15 @@ templ ChatAutoScrollScript() {
 				}
 
 				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
+				// Decode only after transcript parsing, never before marker matching.
+				if (outputText.indexOf('tool-output-base64:') === 0) {
+					try {
+						var toolPayload = atob(outputText.substring('tool-output-base64:'.length));
+						var toolBytes = new Uint8Array(toolPayload.length);
+						for (var ti = 0; ti < toolPayload.length; ti++) toolBytes[ti] = toolPayload.charCodeAt(ti);
+						outputText = new TextDecoder().decode(toolBytes).trim();
+					} catch (_) {}
+				}
 				var webSearchSources = [];
 				if (window.normalizeStreamingToolName(seg.name) === 'web_search' && outputText.indexOf('web-search-json:') === 0) {
 					try {

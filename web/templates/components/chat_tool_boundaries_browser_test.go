@@ -1,6 +1,11 @@
 package components
 
-import "testing"
+import (
+	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/tooloutput"
+	"strings"
+	"testing"
+)
 
 func TestBrowserFunctional_ChatToolBackticksStayWithinBoundaries(t *testing.T) {
 	runIncrementalChatBrowser(t, `
@@ -164,6 +169,38 @@ func TestBrowserFunctional_ToolDisplayNamesAndShellInputRows(t *testing.T) {
    assert(card.querySelector('.tool-spinner'), 'pending process call missing spinner');
   }
  }
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_NestedToolOutputStaysInCard(t *testing.T) {
+	output := "[Using tool: skill_view]\n[Tool skill_view done]\npending\n[/Tool]\nErrorMessage: TokensUsed:0\n--- FAIL: TestToolInputResumeUsesPersistedProviderTranscript\n源码 🐚"
+	raw, _ := json.Marshal(output)
+	encoded, _ := json.Marshal(tooloutput.Encode(output))
+	runIncrementalChatBrowser(t, `
+ const output = `+strings.ReplaceAll(string(raw), "源码 🐚", `\u6e90\u7801 \ud83d\udc1a`)+`, encoded = `+string(encoded)+`;
+ for (const prefix of ['', 'Earlier prose. '.repeat(6000)+'\n']) {
+  const call = prefix+'[Using tool: shell]\n[Tool shell done]\n';
+  const ending = '\n[/Tool]\nFinal answer.\n[Using tool: shell]\n[Tool shell done]\nsecond result\n[/Tool]\n';
+  for (const suffix of ['', '\n[/To', ending]) {
+   await renderStreamingContent(stream, call+encoded+suffix, true);
+   const cards = stream.querySelectorAll('.stream-tool');
+   assert(cards.length === (suffix === ending ? 2 : 1), 'nested output created or swallowed cards');
+   for (const toggle of cards[0].querySelectorAll('button')) {
+    if (toggle.textContent.includes('Show')) toggle.click();
+   }
+   assert(!Array.from(stream.querySelectorAll('.chat-markdown')).some(el=>el.textContent.includes('ErrorMessage:')), 'tool output leaked into prose');
+   if (suffix === ending) {
+    assert(cards[0].textContent.includes('ErrorMessage: TokensUsed:0'), 'output tail escaped card');
+    assert(cards[0].textContent.includes('\u6e90\u7801 \ud83d\udc1a'), 'Unicode output changed: '+JSON.stringify(cards[0].textContent));
+    assert(cards[0].textContent.includes(output), 'nested transcript did not round trip');
+    assert(cards[1].textContent.includes('second result'), 'following card swallowed');
+   }
+  }
+ }
+ // A literal encoding prefix must be decoded exactly once.
+ await renderStreamingContent(stream, '[Using tool: shell]\n[Tool shell done]\ntool-output-base64:dG9vbC1vdXRwdXQtYmFzZTY0OllXSmo=\n[/Tool]\n', false);
+ assert(stream.querySelector('.stream-tool').textContent.includes('tool-output-base64:YWJj'), 'literal prefix decoded twice');
  return {};
  `)
 }
