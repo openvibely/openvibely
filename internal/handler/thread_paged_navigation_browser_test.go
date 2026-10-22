@@ -114,10 +114,10 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
  const bounded=%t, scrollStability=%t, hiddenPaging=%t, hiddenRow=%t;
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
- const errors=[];window.addEventListener('error',e=>errors.push(e.message));window.addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+ const errors=window._pagedStartupErrors;
  const messages=()=>document.getElementById('task-thread-messages');
  const view=()=>document.getElementById('task-thread-view');
- function debug(){const m=messages();return JSON.stringify({errors,queue:window._chatContentRenderQueue?.length,active:window._chatContentRenderActive,top:m?.scrollTop,height:m?.scrollHeight,viewport:m?.clientHeight,hydrating:m?.dataset.transcriptHydrating,owners:Array.from(m?.querySelectorAll('[data-chat-virtual-owner]')||[],o=>({rows:o._chatVirtualRows?.length,text:o.textContent.length,revision:!!o._renderedRevision,rendering:!!o._renderingRevision,scheduled:!!o._scheduledChatRender,active:!!o._activeScheduledChatRender,raw:!!o.getAttribute('data-raw-content'),class:o.className,rect:[o.getBoundingClientRect().top,o.getBoundingClientRect().height],ready:o._chatVirtualRows?.filter(r=>r.ready).length}))})}
+ function debug(){const m=messages();return JSON.stringify({errors,url:location.href,readyState:document.readyState,htmx:typeof window.htmx,htmxTrigger:typeof window.htmx?.trigger,view:!!view(),messages:!!m,virtualizer:typeof window.renderVisibleChatRows,queue:window._chatContentRenderQueue?.length,active:window._chatContentRenderActive,top:m?.scrollTop,height:m?.scrollHeight,viewport:m?.clientHeight,hydrating:m?.dataset.transcriptHydrating,owners:Array.from(m?.querySelectorAll('[data-chat-virtual-owner]')||[],o=>({rows:o._chatVirtualRows?.length,text:o.textContent.length,revision:!!o._renderedRevision,rendering:!!o._renderingRevision,scheduled:!!o._scheduledChatRender,active:!!o._activeScheduledChatRender,raw:!!o.getAttribute('data-raw-content'),class:o.className,rect:[o.getBoundingClientRect().top,o.getBoundingClientRect().height],ready:o._chatVirtualRows?.filter(r=>r.ready).length}))})}
  function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
  (async()=>{
   await until(visible,'initial messages'); await wait(150);
@@ -142,7 +142,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
     check();await paint();check();
     if(cycle<2)window.taskWorkspace.openChanges();
    }
-   if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   if(errors.length)throw Error('Browser errors '+JSON.stringify(errors));
    await fetch('/browser-result?status=pass');return;
   }
 
@@ -172,7 +172,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
     if(maxShift>3)throw Error('Page '+page+' moved visible content by '+maxShift+'px from '+before+' '+JSON.stringify(trace)+' '+debug());
     if(!visible())throw Error('Page '+page+' left empty viewport');
    }
-   if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   if(errors.length)throw Error('Browser errors '+JSON.stringify(errors));
    await fetch('/browser-result?status=pass');return;
   }
   const m=messages();m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));m.scrollTop=0;m.dispatchEvent(new Event('scroll'));
@@ -197,7 +197,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
    if(bounded && previewCount!==5)throw Error('Expected five cached executions, got '+previewCount);
    await until(visible,'visible returned messages');await wait(200);
    if(!visible())throw Error('Returned messages disappeared '+debug());
-   if(errors.length)throw Error('Browser errors '+errors.join('; '));
+   if(errors.length)throw Error('Browser errors '+JSON.stringify(errors));
    if(bounded){
     const current=messages(),loader=current.querySelector('[data-earlier-loader]');
     const first=current.querySelector(':scope > [data-execution-pair]');
@@ -271,7 +271,26 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			bridgeMu.Lock()
 			bridge := nativeBridge
 			bridgeMu.Unlock()
-			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", bridge+runner+"</body>", 1)))
+			// Capture startup failures before dependencies and page initializers run.
+			// DOMContentLoaded-only listeners miss the error that caused a lazy
+			// transcript never to mount, leaving only an unhelpful timeout.
+			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>
+window._pagedStartupErrors=[];
+window.addEventListener('error',function(event){
+ const target=event.target;
+ window._pagedStartupErrors.push({message:event.message||'Resource failed to load',
+  source:event.filename||target?.src||target?.href||'',line:event.lineno,column:event.colno,
+  stack:event.error?.stack||'',readyState:document.readyState});
+},true);
+window.addEventListener('unhandledrejection',function(event){
+ window._pagedStartupErrors.push({message:String(event.reason),stack:event.reason?.stack||'',readyState:document.readyState});
+});
+document.addEventListener('htmx:responseError',function(event){
+ window._pagedStartupErrors.push({message:'HTMX response error',status:event.detail?.xhr?.status,
+  url:event.detail?.xhr?.responseURL||'',target:event.detail?.target?.id||''});
+});
+</script>`, 1)
+			_, _ = w.Write([]byte(strings.Replace(html, "</body>", bridge+runner+"</body>", 1)))
 			return
 		}
 		e.ServeHTTP(w, r)
