@@ -2,8 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"github.com/openvibely/openvibely/internal/events"
-	"github.com/openvibely/openvibely/internal/models"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -13,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
@@ -273,14 +273,20 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
 // Exercise task resume streaming through the real lazy thread endpoint, including
 // final output received with no mounted page and a cached return before HTTP.
 func TestTaskBackgroundSnapshotNavigationInChrome(t *testing.T) {
-	testTaskBackgroundSnapshotNavigation(t, false)
+	testTaskBackgroundSnapshotNavigation(t, false, false)
 }
 
 func TestTaskEvictedSnapshotNavigationInChrome(t *testing.T) {
-	testTaskBackgroundSnapshotNavigation(t, true)
+	testTaskBackgroundSnapshotNavigation(t, true, false)
 }
 
-func testTaskBackgroundSnapshotNavigation(t *testing.T, evict bool) {
+// Keep deltas arriving faster than the renderer's quiet period. Cached history
+// must become visible without waiting for the run (or its HTTP refresh) to finish.
+func TestTaskRunningSnapshotNavigationInChrome(t *testing.T) {
+	testTaskBackgroundSnapshotNavigation(t, false, true)
+}
+
+func testTaskBackgroundSnapshotNavigation(t *testing.T, evict, running bool) {
 	if testing.Short() {
 		t.Skip("browser regression")
 	}
@@ -297,6 +303,10 @@ func testTaskBackgroundSnapshotNavigation(t *testing.T, evict bool) {
 		task.Status = models.StatusCompleted
 		task.Category = models.CategoryCompleted
 	})
+	if running {
+		prior := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecCompleted; ex.PromptSent = "Earlier question" })
+		require.NoError(t, h.execRepo.Complete(t.Context(), prior.ID, models.ExecCompleted, "Earlier answer", "", 0, 0))
+	}
 	ex := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecRunning; ex.PromptSent = "Keep running while away" })
 	require.NoError(t, h.execRepo.FinalizeOutput(t.Context(), ex.ID, "initial"))
 	path := "/tasks/" + task.ID
@@ -321,6 +331,21 @@ window.addEventListener('load',async()=>{
    await wait(()=>view()?.dataset.taskId===%q&&Array.from(view().querySelectorAll('[data-raw-content]')).some(n=>n.dataset.rawContent==='initial final'));
    await fetch('/test/result?value=pass');return;
   }
+  if(%t){
+   await fetch('/test/start',{method:'POST'});
+   const visible=()=>{const m=document.getElementById('task-thread-messages');return m&&getComputedStyle(m).visibility==='visible'&&m.textContent.includes('initial')&&m.textContent.includes('Earlier answer')};
+   let returned=false;
+   const navigation=openVibelyNavigate(%q).then(()=>returned=true);
+   await wait(()=>view()?.dataset.taskId===%q&&visible());
+   assert(!returned,'running preview waited for HTTP');
+   await fetch('/test/release',{method:'POST'});await navigation;
+   await wait(visible);
+   await wait(()=>visible()&&document.getElementById('task-thread-messages').textContent.includes('continuing'));
+   const renderedLength=document.getElementById('task-thread-messages').textContent.length;
+   await wait(()=>visible()&&document.getElementById('task-thread-messages').textContent.length>renderedLength);
+   assert(source().live&&!source().terminal,'test completed before live return');
+   await fetch('/test/result?value=pass');return;
+  }
   testSockets[0].close();
   await fetch('/test/complete',{method:'POST'});
   await wait(()=>source()?.terminal);
@@ -334,12 +359,17 @@ window.addEventListener('load',async()=>{
   await navigation;
   await wait(()=>Array.from(view().querySelectorAll('[data-raw-content]')).some(n=>n.dataset.rawContent==='initial final'));
   await fetch('/test/result?value=pass');
- }catch(error){await fetch('/test/result?value='+encodeURIComponent(error.stack||error))}
-});</script>`, project.ID, ex.ID, task.ID, "/tasks/"+other.ID, other.ID, evict, path, task.ID, path, task.ID)
+ }catch(error){await fetch('/test/result?value='+encodeURIComponent(String(error)+'\n'+(error.stack||'')))}
+});</script>`, project.ID, ex.ID, task.ID, "/tasks/"+other.ID, other.ID, evict, path, task.ID, running, path, task.ID, path, task.ID)
 	result := make(chan string, 1)
 	release := make(chan struct{})
 	var once sync.Once
 	unlock := func() { once.Do(func() { close(release) }) }
+	stopOutput := make(chan struct{})
+	var outputWorkers sync.WaitGroup
+	defer func() { close(stopOutput); outputWorkers.Wait() }()
+	var startOutput sync.Once
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -359,6 +389,30 @@ window.addEventListener('load',async()=>{
 			return
 		case "/test/release":
 			unlock()
+			w.WriteHeader(204)
+			return
+		case "/test/start":
+			startOutput.Do(func() {
+				outputWorkers.Add(1)
+				go func() {
+					defer outputWorkers.Done()
+					ticker := time.NewTicker(50 * time.Millisecond)
+					defer ticker.Stop()
+					output := "initial"
+					for {
+						select {
+						case <-stopOutput:
+							return
+						case <-ticker.C:
+							output += " continuing"
+							if err := h.execRepo.FinalizeOutput(t.Context(), ex.ID, output); err != nil {
+								return
+							}
+							h.executionStreamHub.Publish(events.ExecutionStreamEvent{ExecID: ex.ID, Type: events.ExecutionStreamDelta, Delta: " continuing", Offset: len(output)})
+						}
+					}
+				}()
+			})
 			w.WriteHeader(204)
 			return
 		case "/test/complete":

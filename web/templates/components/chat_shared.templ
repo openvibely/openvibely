@@ -5190,10 +5190,16 @@ templ ChatAutoScrollScript() {
 					window._liveChatRenderRequests.delete(liveRequest);
 					var quietMS = window._chatLiveRenderQuietMS || 300;
 					window._chatLiveRenderQuietUntil = Date.now() + quietMS;
+					// Continuous output may finish faster than the quiet period. Keep
+					// the oldest hydration request's deadline instead of postponing
+					// it on every delta (the transcript stays hidden until it resolves).
+					var oldestQueued = window._chatContentRenderQueue && window._chatContentRenderQueue[0];
+					var resumeMS = oldestQueued ? Math.min(quietMS, Math.max(0,
+						(window._chatRenderMaxLiveDeferralMS || 1000) - (Date.now() - oldestQueued.enqueuedAt))) : quietMS;
 					clearTimeout(window._chatRenderResumeTimer);
 					window._chatRenderResumeTimer = setTimeout(function() {
 						if (window._drainChatContentRenderQueue) window._drainChatContentRenderQueue();
-					}, quietMS);
+					}, resumeMS);
 					if (err) outerReject(err);
 					else outerResolve(result);
 				}
