@@ -211,6 +211,11 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e)+'\n'+(e.stack||''))));
  });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, nativeScript, "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
+	var documentReady chan struct{}
+	if nativeWheel {
+		documentReady = make(chan struct{})
+	}
+	var documentDelivered sync.Once
 	var bridgeMu sync.Mutex
 	var nativeBridge string
 	nativeInputFinished := make(chan struct{})
@@ -291,6 +296,9 @@ document.addEventListener('htmx:responseError',function(event){
 });
 </script>`, 1)
 			_, _ = w.Write([]byte(strings.Replace(html, "</body>", bridge+runner+"</body>", 1)))
+			if documentReady != nil {
+				documentDelivered.Do(func() { close(documentReady) })
+			}
 			return
 		}
 		e.ServeHTTP(w, r)
@@ -298,18 +306,44 @@ document.addEventListener('htmx:responseError',function(event){
 	defer server.Close()
 	// Unblock a pending history request if the browser fails before signalling.
 	defer finishNativeInput.Do(func() { close(nativeInputFinished) })
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	require.NoError(t, startHandlerBrowserProcess(cmd))
-	var outcome string
-	select {
-	case outcome = <-results:
-	case <-ctx.Done():
-		outcome = "timeout"
-	}
+	outcome := waitPagedBrowserResult(ctx, documentReady, results, 40*time.Second)
 	stopHandlerBrowserProcess(cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
+}
+
+// Native WebKit startup can consume most of the scenario budget on CI. Bound
+// startup separately, then allow the full scenario budget from document delivery.
+// Asset loading and transcript initialization remain part of the scenario. Only
+// the first document counts; navigation must not extend the deadline again.
+// A nil documentReady preserves the single budget used by Chrome tests.
+func waitPagedBrowserResult(ctx context.Context, documentReady <-chan struct{}, results <-chan string, budget time.Duration) string {
+	if documentReady != nil {
+		startup := time.NewTimer(budget)
+		defer startup.Stop()
+		select {
+		case result := <-results:
+			return result
+		case <-documentReady:
+		case <-startup.C:
+			return "timeout: native startup (initial document not delivered)"
+		case <-ctx.Done():
+			return ctx.Err().Error()
+		}
+	}
+	scenario := time.NewTimer(budget)
+	defer scenario.Stop()
+	select {
+	case result := <-results:
+		return result
+	case <-scenario.C:
+		return "timeout: browser scenario"
+	case <-ctx.Done():
+		return ctx.Err().Error()
+	}
 }
