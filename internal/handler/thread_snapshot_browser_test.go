@@ -192,7 +192,7 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   displayed.remove();cache.sweep();assert(!record('displayed'),'departed thread kept display exemption');
   cache.clear();
   // Opening the newest run before discovery must not make it the first one
-  // pruned. Include sub-millisecond timestamps and equal-time ID tie breaks.
+  // pruned. Include sub-millisecond timestamps and equal-time insertion-order tie breaks.
   let knownStart=null;
   const executionOwner={closest(selector){
    if(selector==='[data-task-id]')return {getAttribute:()=> 'ordered-task'};
@@ -218,8 +218,19 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   active=active.slice(0,5).reverse();await cache.discover();
   assert(record('settled-newest')&&!record('orderedz'),'old discovery displaced newer completed output');
   cache.clear();
-  active=Array.from({length:6},(_,i)=>({id:'tie-'+i,project_id:'p',task_id:'ties',category:'active',started_at:'2026-10-22T01:00:00Z'})).reverse();
-  await cache.discover();assert(record('tie-5')&&!record('tie-0'),'equal timestamps did not use deterministic execution ID order');
+  active=Array.from({length:6},(_,i)=>({id:'tie-'+i,project_id:'p',task_id:'ties',category:'active',started_at:'2026-10-22T01:00:00Z',history_order:String(9007199254740990n+BigInt(5-i))})).reverse();
+  await cache.discover();assert(record('tie-0')&&!record('tie-5'),'equal timestamps retained random ID order instead of history insertion order');
+  cache.clear();
+  // A run completed before discovery uses metadata from its rendered pair.
+  const tiedOwner={closest(selector){
+   if(selector==='[data-task-id]')return {getAttribute:()=> 'ties'};
+   if(selector==='[data-execution-pair]')return {getAttribute:name=>name==='data-started-at'?'2026-10-22T01:00:00Z':'9007199254740995'};
+   return null;
+  },setAttribute(){}};
+  const completedTie=cache.execution('a-completed','p','final',tiedOwner);await tick();
+  streams.at(-1).emit('done','completed');completedTie.close();
+  active=active.filter(item=>item.id!=='tie-0');await cache.discover();
+  assert(record('a-completed')&&!record('tie-5'),'completed page metadata lost insertion order');
   cache.clear();
   // Five executions is a limit on running history too, not just finished runs.
   active=Array.from({length:8},(_,i)=>({id:'parallel'+i,project_id:'p',task_id:'parallel-task',category:'active'}));

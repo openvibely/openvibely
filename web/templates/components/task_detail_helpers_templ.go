@@ -910,7 +910,7 @@ func TaskThreadLiveEventsScript(taskID string) templ.Component {
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
 // Delegates to the shared ChatFollowupResponse component with thread settings.
-func TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string) templ.Component {
+func TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string, execution ...models.Execution) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -931,7 +931,7 @@ func TaskThreadFollowupResponse(message string, execID string, attachments []mod
 			templ_7745c5c3_Var29 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID, execution...).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

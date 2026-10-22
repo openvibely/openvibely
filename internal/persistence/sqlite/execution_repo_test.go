@@ -1510,3 +1510,62 @@ func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *t
 		t.Fatalf("successful output = %q, want complete streamed transcript", stored.Output)
 	}
 }
+
+func TestExecutionRepo_LiveSnapshotOrderMatchesHistory(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryChat} {
+		t.Run(string(category), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := t.Context()
+			task := &models.Task{ProjectID: "default", Title: "Same-second runs", Category: category, Status: models.StatusRunning}
+			if err := NewTaskRepo(db, nil).Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			repo := NewExecutionRepo(db)
+			// IDs sort opposite to insertion order; all six share the same second.
+			for _, id := range []string{"f", "e", "d", "c", "b", "a"} {
+				if _, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, started_at) VALUES (?, ?, 'running', '2026-10-22 01:00:00')`, id, task.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			live, err := repo.ListLiveExecutions(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var history []models.Execution
+			if category == models.CategoryChat {
+				history, err = repo.ListChatHistory(ctx, "default", 5)
+			} else {
+				history, err = repo.ListByTaskChronologicalLimit(ctx, task.ID, 5)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(live) != 6 || len(history) != 5 {
+				t.Fatalf("unexpected lengths live=%d history=%d", len(live), len(history))
+			}
+			for i, ex := range history {
+				if ex.ID != live[i+1].ID || ex.HistoryOrder != live[i+1].HistoryOrder || ex.HistoryOrder <= live[i].HistoryOrder {
+					t.Fatalf("history and live ordering differ: history=%+v live=%+v", history, live)
+				}
+			}
+			if history[4].ID != "a" {
+				t.Fatalf("newest execution missing: %+v", history)
+			}
+			// The narrow task-page projection and full single-execution projection
+			// must also carry metadata for records that finish before discovery.
+			page, err := repo.ListByTaskChronologicalPage(ctx, task.ID, 1, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, ex := range page {
+				full, err := repo.GetByID(ctx, ex.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if ex.HistoryOrder != history[i].HistoryOrder || full.HistoryOrder != ex.HistoryOrder {
+					t.Fatalf("projection lost history order: page=%+v full=%+v", ex, full)
+				}
+			}
+		})
+	}
+}
