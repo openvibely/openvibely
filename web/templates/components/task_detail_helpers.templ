@@ -460,8 +460,8 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					var state = _getTaskThreadScrollState(taskId);
 					var tracker = window._taskThreadPageTracker;
 					var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;
-					if (!window.restoreChatTranscriptScroll) return Promise.resolve(renderPromise);
-					return window.restoreChatTranscriptScroll({
+					if (!window.openVibelyThreadController) return Promise.resolve(renderPromise);
+					return window.openVibelyThreadController.restore({
 						messages: messages,
 						tracker: tracker,
 						getTracker: function() { return window._taskThreadPageTracker; },

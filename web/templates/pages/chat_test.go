@@ -68,7 +68,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		"var chatScrollStateKey = 'chat-scroll-' + projectId;",
 		"window._chatPageTracker = window.resolveScrollTracker('scrollTracker_chat-messages', chatMessages);",
 		"window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);",
-		"window.restoreChatTranscriptScroll({",
+		"window.openVibelyThreadController.restore({",
 		"stateKey: chatScrollStateKey",
 		"renderPromise: renderPromise",
 		"document.body.addEventListener('htmx:historyRestore'",
@@ -88,7 +88,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
 		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
 	}
-	chatRestoreStart := strings.Index(content, "return window.restoreChatTranscriptScroll({")
+	chatRestoreStart := strings.Index(content, "return window.openVibelyThreadController.restore({")
 	if chatRestoreStart < 0 {
 		t.Fatal("could not isolate global Chat transcript restore options")
 	}
@@ -370,9 +370,9 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 		t.Error("error handler in createStreamingBubble must re-evaluate plan prompt")
 	}
 
-    if strings.Contains(bubbleSection, "eventSource.onerror") {
-        t.Error("network failures must be recovered by the shared transport, not terminate the execution")
-    }
+	if strings.Contains(bubbleSection, "eventSource.onerror") {
+		t.Error("network failures must be recovered by the shared transport, not terminate the execution")
+	}
 
 }
 
@@ -720,7 +720,7 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;") {
 		t.Fatal("chat page should consume submit scroll intent through the shared initialization path")
 	}
-	if !strings.Contains(content, "return window.restoreChatTranscriptScroll({") {
+	if !strings.Contains(content, "return window.openVibelyThreadController.restore({") {
 		t.Fatal("chat page should reconcile variable-sized attachments and later layout through the shared scroll coordinator")
 	}
 	if !strings.Contains(content, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {") {

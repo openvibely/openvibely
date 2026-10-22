@@ -24,8 +24,19 @@ window.__terminalEventSources = [];
 window.EventSource = function(url) { this.url = url; this.listeners = {}; this.closed = false; window.__terminalEventSources.push(this); };
 window.EventSource.prototype.addEventListener = function(name, handler) { this.listeners[name] = handler; };
 window.EventSource.prototype.close = function() { this.closed = true; };
-window.openVibelyLive = {execution: function(id, offset) { return new window.EventSource("/events/chat/" + id + "?offset=" + offset); }};
+// Match the transport contract used by the snapshot cache: offsets advance
+// before callbacks, and the page can subscribe to project-wide live events.
+window.openVibelyLive = {
+  execution: function(id, offset) {
+    var source = new window.EventSource("/events/chat/" + id + "?offset=" + offset);
+    source.offset = offset || 0;
+    return source;
+  },
+  live: function(project) { return new window.EventSource('/events/live?project_id=' + project); }
+};
 window.EventSource.prototype.emit = function(name, data) {
+  if (name === 'message') this.offset += new TextEncoder().encode(data).length;
+  if (name === 'reset') this.offset = new TextEncoder().encode(data).length;
   var event = {data: data};
   if (name === 'message' && this.onmessage) this.onmessage(event);
   if (this.listeners[name]) this.listeners[name](event);

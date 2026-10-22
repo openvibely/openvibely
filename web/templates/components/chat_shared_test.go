@@ -716,7 +716,7 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	content := buf.String()
 
 	// Verify EventSource is used for streaming
-	if !strings.Contains(content, "window.openVibelyLive.execution") {
+	if !strings.Contains(content, "window.openVibelyThreadController.attach") {
 		t.Error("Missing EventSource for streaming")
 	}
 	if !strings.Contains(content, "window.registerChatStreamEventSource(execId, eventSource)") {
@@ -849,7 +849,7 @@ if (!appended.length || appended[appended.length - 1].textContent.indexOf('Error
 source.listeners.error({ data: 'boom' });
 if (renders !== 2 || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(6);
 `
-	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
+	if output, err := exec.Command(node, "-e", harness+`window.openVibelyThreadController = {attach: (id, project, seed, container, offset) => window.openVibelyLive.execution(id, offset, project)};`+source+assertions).CombinedOutput(); err != nil {
 		t.Fatalf("streaming scheduler failed to flush delayed output before error: %v\n%s", err, output)
 	}
 }
@@ -919,7 +919,7 @@ exhausted.listeners.error({ data: 'execution not found' });
 exhausted.listeners.error({ data: 'execution not found' });
 if (timers.size !== 0 || appended.length !== 1 || appended[0].textContent.indexOf('execution not found') === -1) process.exit(21);
 `
-	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
+	if output, err := exec.Command(node, "-e", harness+`window.openVibelyThreadController = {attach: (id, project, seed, container, offset) => window.openVibelyLive.execution(id, offset, project)};`+source+assertions).CombinedOutput(); err != nil {
 		t.Fatalf("fifth streaming retry was terminated by the duplicate error callback: %v\n%s", err, output)
 	}
 }
@@ -979,7 +979,7 @@ setImmediate(function() {
   if (container.textContent !== 'complete final response' || container.attrs['data-raw-content'] !== 'complete final response') process.exit(31);
 });
 `
-	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
+	if output, err := exec.Command(node, "-e", harness+`window.openVibelyThreadController = {attach: (id, project, seed, container, offset) => window.openVibelyLive.execution(id, offset, project)};`+source+assertions).CombinedOutput(); err != nil {
 		t.Fatalf("terminal render rejection did not preserve the complete response: %v\n%s", err, output)
 	}
 }
@@ -1548,7 +1548,7 @@ func TestBrowserPerformance_CodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome
 
 func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+	if err := ThreadControllerScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render chat scheduler: %v", err)
 	}
 	content := buf.String()
@@ -1557,12 +1557,12 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 			t.Fatalf("full transcript render state must not be copied into a data attribute: %s", forbidden)
 		}
 	}
-	start := strings.Index(content, "if (!window._chatContentRenderQueue)")
-	end := strings.Index(content[start:], "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches, options)")
-	if start == -1 || end == -1 {
-		t.Fatal("chat render scheduler source is missing")
+	start := strings.Index(content, "<script>") + len("<script>")
+	end := strings.LastIndex(content, "</script>")
+	if start < len("<script>") || end < start {
+		t.Fatal("thread controller script missing")
 	}
-	scheduler := content[start : start+end]
+	scheduler := content[start:end]
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node is required to execute the chat render scheduler")
@@ -2596,7 +2596,7 @@ func TestUserScrollTracking(t *testing.T) {
 			}
 
 			// Verify EventSource connection setup
-			if !strings.Contains(content, "window.openVibelyLive.execution") {
+			if !strings.Contains(content, "window.openVibelyThreadController.attach") {
 				t.Error("Missing EventSource setup")
 			}
 
@@ -4439,7 +4439,7 @@ func TestChatBubbleStreaming_UsesUTF8ByteOffsetInEventSourceURL(t *testing.T) {
 	if !strings.Contains(html, "function utf8ByteLength") || !strings.Contains(html, "streamTextEncoder.encode(value || '').length") {
 		t.Fatal("fresh stream should compute offsets as UTF-8 byte lengths")
 	}
-	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "window.openVibelyLive.execution(execId, streamOffset, streamProjectID)") {
+	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "window.openVibelyThreadController.attach(execId, streamProjectID, textBuffer, container, streamOffset)") {
 		t.Fatal("fresh stream EventSource URL should include current textBuffer byte offset")
 	}
 }
@@ -4462,7 +4462,7 @@ func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
 	for _, snippet := range []string{
 		"var cumulativeContent = container.getAttribute('data-raw-content') || '';",
 		"var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;",
-		"window.openVibelyLive.execution(execId, streamOffset, streamProjectID)",
+		"window.openVibelyThreadController.attach(execId, streamProjectID, cumulativeContent, container, streamOffset)",
 		"function persistResumeStreamState(active)",
 		"streamOffset += utf8ByteLength(event.data);",
 		"container.setAttribute('data-initial-byte-length', String(streamOffset));",
@@ -5378,7 +5378,7 @@ func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
-	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
+	if !strings.Contains(content, "window.openVibelyThreadController.restore({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
 		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
 	}
 	if !strings.Contains(content, "waitForImages: true,") {
@@ -5517,7 +5517,7 @@ func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
 		"resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function()",
 		"initialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);",
 		"_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));",
-		"return window.restoreChatTranscriptScroll({",
+		"return window.openVibelyThreadController.restore({",
 		"var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;",
 		"defaultPinned: !userScrolledUp,",
 		"renderPromise: renderPromise",
@@ -5985,7 +5985,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		var tracker = new window.ChatScrollTracker(messages);
 		var resolveHydration;
 		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
-		var restored = window.restoreChatTranscriptScroll({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
+		var restored = window.openVibelyThreadController.restore({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
 		if (getComputedStyle(messages).visibility !== 'hidden') fail('cold transcript revealed partial history while hydration was pending');
 		pair(messages); pair(messages); pair(messages);
 		resolveHydration();
@@ -6000,7 +6000,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			for (var i = 0; i < 6; i++) pair(replacement);
 			root.appendChild(replacement);
 			var replacementTracker = new window.ChatScrollTracker(replacement);
-			await window.restoreChatTranscriptScroll({messages: replacement, tracker: replacementTracker, stateKey: 'browser-chat', renderPromise: Promise.resolve()});
+			await window.openVibelyThreadController.restore({messages: replacement, tracker: replacementTracker, stateKey: 'browser-chat', renderPromise: Promise.resolve()});
 			if (bottomDistance(replacement) > 1) fail('pinned navigation restoration missed true bottom: ' + bottomDistance(replacement));
 
 			pair(replacement);
@@ -6021,7 +6021,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			for (var j = 0; j < 8; j++) pair(restoredReading);
 			root.appendChild(restoredReading);
 			var readingTracker = new window.ChatScrollTracker(restoredReading);
-			await window.restoreChatTranscriptScroll({messages: restoredReading, tracker: readingTracker, stateKey: 'browser-chat', state: readingState, renderPromise: Promise.resolve()});
+			await window.openVibelyThreadController.restore({messages: restoredReading, tracker: readingTracker, stateKey: 'browser-chat', state: readingState, renderPromise: Promise.resolve()});
 			if (Math.abs(restoredReading.scrollTop - 75) > 1 || !readingTracker.userScrolledUp) fail('navigation restoration lost intentional reading position');
 
 			restoredReading.remove();
@@ -6033,7 +6033,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			interactiveHydration.scrollTop = interactiveHydration.scrollHeight;
 			var resolveInteractiveHydration;
 			var interactiveRender = new Promise(function(resolve) { resolveInteractiveHydration = resolve; });
-			var interactiveRestore = window.restoreChatTranscriptScroll({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', defaultPinned: true, renderPromise: interactiveRender});
+			var interactiveRestore = window.openVibelyThreadController.restore({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', defaultPinned: true, renderPromise: interactiveRender});
 			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
 			interactiveHydration.scrollTop = 110;
 			// Do not dispatch scroll manually: the rendering promise can settle
@@ -6045,7 +6045,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 			var resolveReadingHydration;
 			var readingHydrationRender = new Promise(function(resolve) { resolveReadingHydration = resolve; });
 			var continuedReadingState = window.saveChatTranscriptScrollState('interactive-chat', interactiveHydration, interactiveTracker);
-			var continuedReadingRestore = window.restoreChatTranscriptScroll({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', state: continuedReadingState, renderPromise: readingHydrationRender});
+			var continuedReadingRestore = window.openVibelyThreadController.restore({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', state: continuedReadingState, renderPromise: readingHydrationRender});
 			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
 			interactiveHydration.scrollTop = 60;
 			// Do not dispatch scroll manually: the rendering promise can settle

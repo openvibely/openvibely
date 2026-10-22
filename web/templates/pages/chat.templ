@@ -288,8 +288,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
 						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
-						if (!window.restoreChatTranscriptScroll) return Promise.resolve(renderPromise);
-						return window.restoreChatTranscriptScroll({
+						if (!window.openVibelyThreadController) return Promise.resolve(renderPromise);
+						return window.openVibelyThreadController.restore({
 							messages: chatMessages,
 							tracker: window._chatPageTracker,
 							getTracker: function() { return window._chatPageTracker; },
