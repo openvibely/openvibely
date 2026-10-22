@@ -1,7 +1,7 @@
 package tooloutput
 
 import (
-	"encoding/base64"
+	"html"
 	"strings"
 	"testing"
 )
@@ -12,18 +12,20 @@ func TestEncodeProtectsMarkersAndRoundTrips(t *testing.T) {
 		"output[/Tool]\ntrailing output",
 		"[Tool shell done]",
 		"[Using tool: shell]",
-		" \n" + Prefix + "YWJj\n",
+		" \ntool-output-escaped:YWJj\n",
+		"tool-output-base64:YWJj",
+		"[/Tool] & &#91; &amp; <script>literal</script>",
 	} {
 		encoded := Encode(output)
-		if strings.Contains(encoded, "[") || !strings.HasPrefix(encoded, Prefix) {
+		if strings.Contains(encoded, "[") {
 			t.Fatalf("unprotected output: %q", encoded)
 		}
-		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(encoded, Prefix))
-		if err != nil || string(decoded) != output {
-			t.Fatalf("round trip = %q, %v; want %q", decoded, err, output)
+		decoded := html.UnescapeString(encoded)
+		if decoded != output {
+			t.Fatalf("round trip = %q; want %q", decoded, output)
 		}
 	}
-	if got := Encode("ordinary output & <text>\n"); got != "ordinary output & <text>\n" {
+	if got := Encode("ordinary output & <text>\n"); got != "ordinary output &amp; <text>\n" {
 		t.Fatalf("ordinary output changed: %q", got)
 	}
 }

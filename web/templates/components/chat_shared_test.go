@@ -3602,27 +3602,18 @@ func TestChatBubble_PreservesTaskIDMarkers(t *testing.T) {
 	}
 }
 
-// TestRenderStreamingContent_StripsProtocolArtifacts verifies that
-// renderStreamingContent pre-strips multi_tool_use.parallel protocol artifact
-// lines from the text buffer so they don't leak between tool cards.
+// TestRenderStreamingContent_StripsProtocolArtifacts preserves tool output while
+// removing stray protocol text from surrounding prose.
 func TestRenderStreamingContent_StripsProtocolArtifacts(t *testing.T) {
-	var buf bytes.Buffer
-	err := ChatAutoScrollScript().Render(context.Background(), &buf)
-	if err != nil {
-		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
-	}
-
-	content := buf.String()
-
-	// renderStreamingContent must strip multi_tool_use protocol artifact lines
-	if !strings.Contains(content, "multi_tool_use") {
-		t.Error("renderStreamingContent should contain multi_tool_use artifact stripping regex")
-	}
-
-	// Verify the regex pattern is applied to textBuffer before segment parsing
-	if !strings.Contains(content, "textBuffer = textBuffer.replace") {
-		t.Error("renderStreamingContent should pre-strip protocol artifacts from textBuffer")
-	}
+	runIncrementalChatBrowser(t, `
+ const output = 'to=multi_tool_use.parallel literal log line';
+ await renderStreamingContent(stream, 'to=multi_tool_use.parallel stray prose\n[Using tool: shell]\n[Tool shell done]\n'+output+'\n[/Tool]\nAnswer.', false);
+ assert(stream.querySelector('.stream-tool').textContent.includes(output), 'tool output was cleaned');
+ const prose = Array.from(stream.querySelectorAll('.chat-markdown')).map(el=>el.textContent).join('');
+ assert(!prose.includes('multi_tool_use'), 'stray prose was not cleaned');
+ assert(prose.includes('Answer.'), 'answer was lost');
+ return {};
+ `)
 }
 
 // TestCleanTranscriptControls_StripsProtocolArtifacts verifies that cleanTranscriptControls

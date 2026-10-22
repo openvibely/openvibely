@@ -177,8 +177,15 @@ func TestBrowserFunctional_NestedToolOutputStaysInCard(t *testing.T) {
 	output := "[Using tool: skill_view]\n[Tool skill_view done]\npending\n[/Tool]\nErrorMessage: TokensUsed:0\n--- FAIL: TestToolInputResumeUsesPersistedProviderTranscript\n源码 🐚"
 	raw, _ := json.Marshal(output)
 	encoded, _ := json.Marshal(tooloutput.Encode(output))
+	literalCases := []string{"[/Tool] & &#91; &amp; <script>literal</script>", "tool-output-base64:YWJj", "tool-output-escaped:&#91;", "[/Tool]\nto=multi_tool_use.parallel literal log line\nend", "&#91; &amp; &lt; &#116;"}
+	var pairs [][2]string
+	for _, value := range literalCases {
+		pairs = append(pairs, [2]string{value, tooloutput.Encode(value)})
+	}
+	casesJSON, _ := json.Marshal(pairs)
+
 	runIncrementalChatBrowser(t, `
- const output = `+strings.ReplaceAll(string(raw), "源码 🐚", `\u6e90\u7801 \ud83d\udc1a`)+`, encoded = `+string(encoded)+`;
+ const output = `+strings.ReplaceAll(string(raw), "源码 🐚", `\u6e90\u7801 \ud83d\udc1a`)+`, encoded = `+strings.ReplaceAll(string(encoded), "源码 🐚", `\u6e90\u7801 \ud83d\udc1a`)+`;
  for (const prefix of ['', 'Earlier prose. '.repeat(6000)+'\n']) {
   const call = prefix+'[Using tool: shell]\n[Tool shell done]\n';
   const ending = '\n[/Tool]\nFinal answer.\n[Using tool: shell]\n[Tool shell done]\nsecond result\n[/Tool]\n';
@@ -198,9 +205,15 @@ func TestBrowserFunctional_NestedToolOutputStaysInCard(t *testing.T) {
    }
   }
  }
- // A literal encoding prefix must be decoded exactly once.
- await renderStreamingContent(stream, '[Using tool: shell]\n[Tool shell done]\ntool-output-base64:dG9vbC1vdXRwdXQtYmFzZTY0OllXSmo=\n[/Tool]\n', false);
- assert(stream.querySelector('.stream-tool').textContent.includes('tool-output-base64:YWJj'), 'literal prefix decoded twice');
+ for (const [literal, escaped] of `+string(casesJSON)+`) {
+  await renderStreamingContent(stream, '[Using tool: shell]\n[Tool shell done]\n'+escaped+'\n[/Tool]\n', false);
+  const card = stream.querySelector('.stream-tool');
+  assert(card.textContent.includes(literal), 'literal entities or prefix changed: '+card.textContent);
+  assert(!card.querySelector('script'), 'output interpreted as HTML');
+ }
+ // Old saved entities use the same decoding now.
+ await renderStreamingContent(stream, '[Using tool: shell]\n[Tool shell done]\n&#91; &amp;\n[/Tool]\n', false);
+ assert(stream.querySelector('.stream-tool').textContent.includes('[ &'), 'old saved entities were not decoded');
  return {};
  `)
 }

@@ -1646,7 +1646,7 @@ func TestOpenAIToolMarkersAndTextEmitterHelpers(t *testing.T) {
 	if !strings.Contains(openAIFormatToolResultMarker("web_search", "", ""), "[Tool WebSearch done]\n(no output)") {
 		t.Fatalf("empty tool result marker mismatch")
 	}
-	if got := openAIFormatToolResultMarker("shell", "done", "nested [/Tool]\ntrailing output"); strings.Count(got, "[/Tool]") != 1 || !strings.Contains(got, "tool-output-base64:") {
+	if got := openAIFormatToolResultMarker("shell", "done", "nested [/Tool]\ntrailing output"); strings.Count(got, "[/Tool]") != 1 || !strings.Contains(got, "nested &#91;/Tool]") {
 		t.Fatalf("nested tool marker was not protected: %q", got)
 	}
 	if !openAIIsMarkerChunk("prefix [Using tool: Bash]") || !openAIIsMarkerChunk("[Tool Bash done]") || openAIIsMarkerChunk("plain text") {
