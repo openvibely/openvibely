@@ -69,3 +69,13 @@ JSON
 
 `recalculate` writes a copy with the input basename under its new output directory; confirm the path in its JSON result. Verify `B2=4`, `D2=160`, `D3=80`, `D4=240` and that `D2:D4` still contain formulas. Call `view_image` for the range PNG, and render the chart too if delivering the whole workbook. Publish `calculated/changed.xlsx`, not the unrecalculated `changed.xlsx`. `workbook-inputs` rejects formula overwrites, merged cells and array/table result cells; do not bypass that by replacing the workbook with a new creation spec.
 
+
+## Fit row heights to content
+
+On newer builds, `workbook-edit` supports `autofit-rows`; confirm it appears in `"$PAPERWORKS" help workbook-edit`. It is absent from the pinned `v0.0.1-rc2`.
+
+```json
+{"edits":[{"operation":"autofit-rows","sheet":"Data","range":"A1:D20"}]}
+```
+
+Set final column widths, formats and wrapping first. Recalculate formula results before fitting: this operation measures formatted saved values and rich-text runs, not recalculated formulas. Include all columns whose content should determine the selected row heights, up to 10,000 cells. Unselected rows remain unchanged. It uses available fonts and handles explicit newlines and complete horizontal merges. Vertical merges, rotated text, shrink-to-fit, unavailable fonts/glyphs, missing formula caches and heights beyond Excel's 409.5-point limit fail explicitly. Render the affected range afterward; fonts and shaping can differ in the target engine. Use explicit `row-height` when automatic measurement cannot handle the source.

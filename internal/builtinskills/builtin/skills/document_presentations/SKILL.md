@@ -94,7 +94,7 @@ References inherit the working-file and verification rules in this skill. Exampl
 
 ## Current Paperworks limits
 
-Table merge/unmerge, nested layouts, pattern/image fills and formatted notes require a newer local build than the pinned `v0.0.1-rc2`; see `references/editing.md` for availability and commands. General template-component cloning and grouped-shape creation remain unsupported. Nested layouts position top-level shapes; they do not measure text or automatically reflow after later edits. Native comment display, animations and video playback require target-application checks.
+Table merge/unmerge, nested layouts, pattern/image fills and formatted notes require a newer local build than the pinned `v0.0.1-rc2`; see `references/editing.md` for availability and commands. General template-component cloning and grouped-shape creation remain unsupported. Nested layouts position top-level shapes. Newer builds support measured text height and grid spans; layout must be rerun after later edits. Native comment display, animations and video playback require target-application checks.
 
 ## Working files
 
