@@ -111,6 +111,54 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				_, _ = w.Write(buf.Bytes())
 			}))
 			defer server.Close()
+			checkActiveTabClose := func(browser *composerFocusCDP) {
+				// A reopened project is appended at the end and must close on one click.
+				browser.click(`[data-project-tab="p02"]`)
+				browser.waitFor("appended tab active", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+				// Confirmation is asynchronous, just like the app's unsaved-changes prompt.
+				browser.evaluate(`(function(){window.savedTabConfirm=window.openVibelyConfirm;window.openVibelyConfirm=()=>Promise.resolve(false);var dialog=document.createElement('dialog');dialog.id='tab-close-confirm-fixture';document.body.append(dialog);dialog.show();return 'ready';})()`)
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("cancelled close keeps active tab", `String(document.getElementById('project-selector').value === 'p02' && !document.querySelector('[data-close-project="p02"]').disabled && document.getElementById('tab-close-confirm-fixture').open)`, "true")
+				browser.evaluate(`window.openVibelyConfirm=()=>Promise.resolve(true); 'ready'`)
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("appended active tab closes on first click", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
+				browser.waitFor("closing last tab selects previous tab", `document.getElementById('project-selector').value`, "p23")
+				browser.evaluate(`(function(){window.openVibelyConfirm=window.savedTabConfirm;document.getElementById('tab-close-confirm-fixture').remove();document.getElementById('project-selector-search').value='';document.getElementById('project-selector-search').dispatchEvent(new Event('input',{bubbles:true}));return 'ready';})()`)
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("reopen appended project", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+
+				// Exercise the reported flow with the real selector and no open dialog
+				// or confirmation mock: add an existing project, then close it once.
+				browser.waitFor("new project is the active last tab with no dialog", `String(Array.from(document.querySelectorAll('#desktop-project-tabs [data-project-tab]')).at(-1).dataset.projectTab === 'p02' && !!document.querySelector('[data-project-tab="p02"][aria-selected="true"]') && !document.querySelector('dialog[open]'))`, "true")
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("single click removes newly opened active project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p23' && new URLSearchParams(location.search).get('project_id') === 'p23')`, "true")
+				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (!html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("restore project for restart coverage", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+
+				// Also close immediately while the newly opened project's response
+				// is still pending, rather than waiting for its content to load.
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("prepare immediate close", `String(!document.querySelector('[data-project-tab="p02"]') && !window.openVibelyProtectedProjectID)`, "true")
+				gate := make(chan struct{})
+				defer close(gate)
+				mu.Lock()
+				projectOpenGate = gate
+				mu.Unlock()
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("new active tab is still loading", `String(!!document.querySelector('[data-project-tab="p02"][aria-selected="true"]') && window.openVibelyProtectedProjectID === 'p23' && !document.querySelector('dialog[open]'))`, "true")
+				browser.click(`[data-close-project="p02"]`)
+				browser.waitFor("single click closes loading tab and restores previous project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p23' && !window.openVibelyProtectedProjectID)`, "true")
+				mu.Lock()
+				projectOpenGate = nil
+				mu.Unlock()
+				browser.click("#project-selector-trigger")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("restore project after immediate close", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+			}
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks?view=board#keep", "project-tabs", func(browser *composerFocusCDP) {
 				browser.waitFor("initial scope", `new URL(location.href).searchParams.get('project_id') || ''`, "p00")
 				// Tab setup moves the selector on DOMContentLoaded, which would demote an already-open modal menu.
@@ -155,6 +203,14 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.reload()
 					browser.waitFor("independent web tab", `document.readyState === 'complete' ? document.getElementById('project-selector').value : ''`, "p00")
 					browser.call("Target.closeTarget", map[string]any{"targetId": target.ID}, nil)
+					// Give the shared close scenarios the same appended active tab
+					// as the desktop flow, using the real project picker.
+					browser.click(`[data-close-project="p02"]`)
+					browser.waitFor("remove web project before reopening", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
+					browser.click("#project-selector-trigger")
+					browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+					browser.waitFor("web project appended and loaded", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+					checkActiveTabClose(browser)
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
@@ -438,52 +494,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.click("#new-project-btn")
 				browser.waitFor("create action loads existing project form route", `String(!!document.querySelector('#new-project-container #create-project-fixture') && !document.getElementById('project-selector-dialog').open)`, "true")
 
-				// A reopened project is appended at the end and must close on one click.
-				browser.click(`[data-project-tab="p02"]`)
-				browser.waitFor("appended tab active", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
-				// Confirmation is asynchronous, just like the app's unsaved-changes prompt.
-				browser.evaluate(`(function(){window.savedTabConfirm=window.openVibelyConfirm;window.openVibelyConfirm=()=>Promise.resolve(false);var dialog=document.createElement('dialog');dialog.id='tab-close-confirm-fixture';document.body.append(dialog);dialog.show();return 'ready';})()`)
-				browser.click(`[data-close-project="p02"]`)
-				browser.waitFor("cancelled close keeps active tab", `String(document.getElementById('project-selector').value === 'p02' && !document.querySelector('[data-close-project="p02"]').disabled && document.getElementById('tab-close-confirm-fixture').open)`, "true")
-				browser.evaluate(`window.openVibelyConfirm=()=>Promise.resolve(true); 'ready'`)
-				browser.click(`[data-close-project="p02"]`)
-				browser.waitFor("appended active tab closes on first click", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
-				browser.waitFor("closing last tab selects previous tab", `document.getElementById('project-selector').value`, "p23")
-				browser.evaluate(`(function(){window.openVibelyConfirm=window.savedTabConfirm;document.getElementById('tab-close-confirm-fixture').remove();document.getElementById('project-selector-search').value='';document.getElementById('project-selector-search').dispatchEvent(new Event('input',{bubbles:true}));return 'ready';})()`)
-				browser.click("#project-selector-trigger")
-				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
-				browser.waitFor("reopen appended project", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
-
-				// Exercise the reported flow with the real selector and no open dialog
-				// or confirmation mock: add an existing project, then close it once.
-				browser.waitFor("new project is the active last tab with no dialog", `String(Array.from(document.querySelectorAll('#desktop-project-tabs [data-project-tab]')).at(-1).dataset.projectTab === 'p02' && !!document.querySelector('[data-project-tab="p02"][aria-selected="true"]') && !document.querySelector('dialog[open]'))`, "true")
-				browser.click(`[data-close-project="p02"]`)
-				browser.waitFor("single click removes newly opened active project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p23' && new URLSearchParams(location.search).get('project_id') === 'p23')`, "true")
-				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (!html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
-				browser.click("#project-selector-trigger")
-				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
-				browser.waitFor("restore project for restart coverage", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
-
-				// Also close immediately while the newly opened project's response
-				// is still pending, rather than waiting for its content to load.
-				browser.click(`[data-close-project="p02"]`)
-				browser.waitFor("prepare immediate close", `String(!document.querySelector('[data-project-tab="p02"]') && !window.openVibelyProtectedProjectID)`, "true")
-				gate := make(chan struct{})
-				defer close(gate)
-				mu.Lock()
-				projectOpenGate = gate
-				mu.Unlock()
-				browser.click("#project-selector-trigger")
-				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
-				browser.waitFor("new active tab is still loading", `String(!!document.querySelector('[data-project-tab="p02"][aria-selected="true"]') && window.openVibelyProtectedProjectID === 'p23' && !document.querySelector('dialog[open]'))`, "true")
-				browser.click(`[data-close-project="p02"]`)
-				browser.waitFor("single click closes loading tab and restores previous project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p23' && !window.openVibelyProtectedProjectID)`, "true")
-				mu.Lock()
-				projectOpenGate = nil
-				mu.Unlock()
-				browser.click("#project-selector-trigger")
-				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
-				browser.waitFor("restore project after immediate close", `String(location.search === '?project_id=p02' && !window.openVibelyProtectedProjectID)`, "true")
+				checkActiveTabClose(browser)
 
 			})
 			if desktop {
