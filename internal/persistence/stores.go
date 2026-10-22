@@ -316,6 +316,7 @@ type ExecutionStore interface {
 	HasActiveTaskExecution(ctx context.Context, taskID string, excludeExecID string) (bool, error)
 	HasActiveTaskThreadExecution(ctx context.Context, taskID string, excludeExecID string) (bool, error)
 	IsTaskExecutionAtHistoryCutoff(ctx context.Context, taskID string, execID string, cutoff int64) (bool, error)
+	ListLiveExecutions(ctx context.Context) ([]models.LiveExecution, error)
 	ListByTask(ctx context.Context, taskID string) ([]models.Execution, error)
 	ListByTaskChronological(ctx context.Context, taskID string) ([]models.Execution, error)
 	ListByTaskChronologicalBefore(ctx context.Context, taskID string, beforeExecID string, limit int) ([]models.Execution, error)

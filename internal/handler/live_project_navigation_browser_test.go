@@ -78,14 +78,16 @@ window.addEventListener('load',async()=>{
   const selector=document.getElementById('project-selector');
   selector.value=secondProject;selector.dispatchEvent(new Event('change'));
   await wait(()=>new URLSearchParams(location.search).get('project_id')===secondProject&&testCommands.some(c=>c.op==='execution'&&c.exec_id===second));
+  await fetch('/test/output',{method:'POST'});
+  await wait(()=>openVibelyThreadCache.source(JSON.stringify(['default',first]))?.terminal);
+  const background=openVibelyThreadCache.source(JSON.stringify(['default',first]));
+  assert(background.output==='partial live'&&background.views.size===0,'background completion retained a page listener or lost output');
   const before=testCommands.length;
   selector.value='default';selector.dispatchEvent(new Event('change'));
-  await wait(()=>testCommands.slice(before).some(c=>c.op==='execution'&&c.exec_id===first));
+  await wait(()=>document.getElementById('chat-page-root')?.dataset.projectId==='default'&&raw(first)==='partial live');
   assert(document.getElementById('chat-page-root').dataset.projectId==='default','cached view did not restore project A');
   assert(new URLSearchParams(location.search).get('project_id')===secondProject,'HTTP refresh committed before the cached-view assertion');
-  const resumed=testCommands.slice(before).find(c=>c.op==='execution'&&c.exec_id===first);
-  assert(resumed.project_id==='default','cached project A execution subscribed under project '+resumed.project_id);
-  await fetch('/test/output',{method:'POST'});
+  assert(!testCommands.slice(before).some(c=>c.op==='execution'&&c.exec_id===first),'completed snapshot reopened an output subscription');
   await wait(()=>raw(first)==='partial live');
   assert(testErrors.length===0,'subscription rejected: '+JSON.stringify(testErrors));
   assert(testSockets.length===1&&socket.readyState===1&&testSSE===0,'cached project switch replaced the shared socket');
@@ -104,16 +106,17 @@ window.addEventListener('load',async()=>{
 	e := echo.New()
 	e.Use(tc.handler.AuthMiddleware())
 	e.GET("/events/ws", tc.handler.LiveWebSocket)
+	e.GET("/events/running-executions", tc.handler.RunningExecutions)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
 		}
 		switch r.URL.Path {
-		case "/events/ws":
+		case "/events/ws", "/events/running-executions":
 			e.ServeHTTP(w, r)
 		case "/test/output":
-			require.NoError(t, tc.execRepo.FinalizeOutput(r.Context(), first.ID, "partial live"))
-			tc.handler.executionStreamHub.Publish(events.ExecutionStreamEvent{ExecID: first.ID, Type: events.ExecutionStreamDelta, Delta: " live", Offset: len("partial live")})
+			require.NoError(t, tc.execRepo.Complete(r.Context(), first.ID, models.ExecCompleted, "partial live", "", 0, 0))
+			tc.handler.executionStreamHub.CloseTerminal(first.ID, models.ExecCompleted, "")
 			w.WriteHeader(http.StatusNoContent)
 		case "/test/release":
 			release()

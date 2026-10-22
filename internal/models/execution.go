@@ -57,3 +57,11 @@ type ExecutionReplayMessage struct {
 	ReasoningContent string
 	TranscriptJSON   string
 }
+
+// LiveExecution identifies an active thread without loading transcript blobs.
+type LiveExecution struct {
+	ID        string       `json:"id"`
+	TaskID    string       `json:"task_id"`
+	ProjectID string       `json:"project_id"`
+	Category  TaskCategory `json:"category"`
+}
