@@ -11,20 +11,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
-
-const chatSSETimeout = chatProcessingTimeout + 30*time.Second
 
 const (
 	chatUIWindowLimitDefault = 5
@@ -141,6 +140,35 @@ func (h *Handler) loadChatExecutionWindow(ctx context.Context, projectID, before
 	}
 	visible, hasEarlier := trimExecutionWindow(rows, limit)
 	return visible, hasEarlier, nil
+}
+
+// loadTaskThreadAttachmentsForExecutions loads per-message attachments of a
+// task thread from task_attachments for display.
+func (h *Handler) loadTaskThreadAttachmentsForExecutions(ctx context.Context, executions []models.Execution, label string) map[string][]models.ChatAttachment {
+	result := make(map[string][]models.ChatAttachment)
+	if h.attachmentRepo == nil {
+		return result
+	}
+	byExec, err := h.attachmentRepo.ListByExecutionIDs(ctx, executionIDs(executions))
+	if err != nil {
+		applog.Infof("[handler] %s error loading attachments: %v", label, err)
+		return result
+	}
+	for execID, attachments := range byExec {
+		for _, att := range attachments {
+			result[execID] = append(result[execID], models.MessageAttachmentFromTask(att))
+		}
+	}
+	return result
+}
+
+// loadMessageAttachmentsForTask picks the attachment store from the task's
+// persisted conversation type.
+func (h *Handler) loadMessageAttachmentsForTask(ctx context.Context, task *models.Task, executions []models.Execution, label string) map[string][]models.ChatAttachment {
+	if service.IsTaskThread(task) {
+		return h.loadTaskThreadAttachmentsForExecutions(ctx, executions, label)
+	}
+	return h.loadChatAttachmentsForExecutions(ctx, executions, label)
 }
 
 func (h *Handler) loadChatAttachmentsForExecutions(ctx context.Context, executions []models.Execution, label string) map[string][]models.ChatAttachment {
@@ -338,19 +366,20 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
 	if err := h.startStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           task.ID,
-		Message:          message,
-		Agent:            *agent,
-		ChatHistory:      priorHistory,
-		ProjectID:        projectID,
-		PrincipalID:      h.authPrincipalID(c),
-		SystemContext:    combineContexts(attachmentContext, personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   false,
-		ChatMode:         chatMode,
-		Surface:          chatcontrol.SurfaceWeb,
+		ExecID:            exec.ID,
+		TaskID:            task.ID,
+		Message:           message,
+		Agent:             *agent,
+		ChatHistory:       priorHistory,
+		ProjectID:         projectID,
+		PrincipalID:       h.authPrincipalID(c),
+		SystemContext:     personalityContext,
+		AttachmentContext: attachmentContext,
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    false,
+		ChatMode:          chatMode,
+		Surface:           chatcontrol.SurfaceWeb,
 	}); err != nil {
 		c.Response().Header().Set("Retry-After", "30")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
@@ -556,44 +585,21 @@ type chatAttachmentModelContextOptions struct {
 }
 
 func buildChatAttachmentModelContext(files []chatAttachmentModelContextFile, opts chatAttachmentModelContextOptions) (string, []models.Attachment, error) {
-	var attachmentContents []string
-	var imageAttachments []models.Attachment
-
+	var attachments []models.Attachment
 	for _, file := range files {
 		mediaType := file.MediaType
 		if mediaType == "" {
 			mediaType = mediaTypeFromExtension(file.FileName)
 		}
-
-		if isImageFile(file.FileName) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  file.FileName,
-				FilePath:  file.FilePath,
-				MediaType: mediaType,
-				FileSize:  file.FileSize,
-			})
-			continue
-		}
-
-		if file.FileSize <= maxTextAttachmentSize {
-			content, err := os.ReadFile(file.FilePath)
-			if err != nil {
-				if opts.IgnoreReadErrors {
-					continue
-				}
-				return "", nil, fmt.Errorf("reading file %s: %w", file.FilePath, err)
-			}
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.FileName, string(content)))
-		} else {
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.FileName, file.FileSize))
+		attachments = append(attachments, models.Attachment{FileName: file.FileName, FilePath: file.FilePath, MediaType: mediaType, FileSize: file.FileSize})
+	}
+	var references []models.Attachment
+	for _, att := range attachments {
+		if !isImageFile(att.FileName) {
+			references = append(references, att)
 		}
 	}
-
-	textContext := ""
-	if len(attachmentContents) > 0 {
-		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return textContext, imageAttachments, nil
+	return llmprompt.BuildAttachmentInstructions(references), attachments, nil
 }
 
 // processAttachments moves uploaded files from pending directory to execution directory,
@@ -605,10 +611,100 @@ func (h *Handler) processAttachments(ctx context.Context, sessionID, execID stri
 	return textContext, imageAttachments, err
 }
 
-// processAttachmentsWithReturn is like processAttachments but also returns the created ChatAttachment records
+// messageAttachmentOwner resolves where an execution's message attachments are
+// stored from the persisted task category: Chat-page conversations use
+// chat_attachments; task threads use task_attachments with execution_id.
+func (h *Handler) messageAttachmentOwner(ctx context.Context, execID string) (taskThreadID string, err error) {
+	if h.execRepo == nil || h.taskRepo == nil {
+		return "", nil
+	}
+	exec, err := h.execRepo.GetByID(ctx, execID)
+	if err != nil {
+		return "", fmt.Errorf("resolve attachment owner execution=%s: %w", execID, err)
+	}
+	if exec == nil || exec.TaskID == "" {
+		return "", nil
+	}
+	task, err := h.taskRepo.GetByID(ctx, exec.TaskID)
+	if err != nil {
+		return "", fmt.Errorf("resolve attachment owner task=%s: %w", exec.TaskID, err)
+	}
+	if service.IsTaskThread(task) {
+		return task.ID, nil
+	}
+	return "", nil
+}
+
+func (h *Handler) listMessageAttachments(ctx context.Context, execID string) ([]models.ChatAttachment, error) {
+	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
+	if err != nil {
+		return nil, err
+	}
+	if taskThreadID == "" {
+		return h.chatAttachmentRepo.ListByExecution(ctx, execID)
+	}
+	byExec, err := h.attachmentRepo.ListByExecutionIDs(ctx, []string{execID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]models.ChatAttachment, 0, len(byExec[execID]))
+	for _, att := range byExec[execID] {
+		out = append(out, models.MessageAttachmentFromTask(att))
+	}
+	return out, nil
+}
+
+// processAttachmentsWithReturn is like processAttachments but also returns the
+// published per-message attachment records for display.
 func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, error) {
-	if h.chatAttachmentRepo == nil {
-		return "", nil, nil, fmt.Errorf("chat attachment repository is unavailable")
+	text, images, records, finish, err := h.stageMessageAttachments(ctx, sessionID, execID)
+	if err == nil {
+		finish(true)
+	}
+	return text, images, records, err
+}
+
+// stageMessageAttachments retains pending uploads until delivery succeeds.
+// finish(false) rolls back published copies and metadata so delivery can retry.
+func (h *Handler) stageMessageAttachments(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
+	return h.stageMessageAttachmentsForDelivery(ctx, sessionID, execID, false)
+}
+
+func (h *Handler) stageSteeringAttachments(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
+	return h.stageMessageAttachmentsForDelivery(ctx, sessionID, execID, true)
+}
+
+// Each steering upload session has its own destination directory. Preview and
+// publication can therefore agree on a path before any files are copied.
+func steeringAttachmentDirectory(sessionID, execID string) string {
+	return filepath.Join(uploadsDir, "chat", execID, "steering", sessionID)
+}
+
+func (h *Handler) stageMessageAttachmentsForDelivery(ctx context.Context, sessionID, execID string, steering bool) (string, []models.Attachment, []models.ChatAttachment, func(bool), error) {
+	taskThreadID, err := h.messageAttachmentOwner(ctx, execID)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	if taskThreadID == "" && h.chatAttachmentRepo == nil {
+		return "", nil, nil, nil, fmt.Errorf("chat attachment repository is unavailable")
+	}
+	if taskThreadID != "" && h.attachmentRepo == nil {
+		return "", nil, nil, nil, fmt.Errorf("task attachment repository is unavailable")
+	}
+	createMetadata := func(ctx context.Context, att *models.ChatAttachment) error {
+		return h.chatAttachmentRepo.Create(ctx, att)
+	}
+	deleteMetadata := func(ctx context.Context, id string) error { return h.chatAttachmentRepo.Delete(ctx, id) }
+	if taskThreadID != "" {
+		createMetadata = func(ctx context.Context, att *models.ChatAttachment) error {
+			row := &models.Attachment{TaskID: taskThreadID, ExecutionID: att.ExecutionID, FileName: att.FileName, FilePath: att.FilePath, MediaType: att.MediaType, FileSize: att.FileSize}
+			if err := h.attachmentRepo.Create(ctx, row); err != nil {
+				return err
+			}
+			*att = models.MessageAttachmentFromTask(*row)
+			return nil
+		}
+		deleteMetadata = func(ctx context.Context, id string) error { return h.attachmentRepo.Delete(ctx, id) }
 	}
 	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 
@@ -617,32 +713,36 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	if _, err := os.Stat(pendingDir); err != nil {
 		if os.IsNotExist(err) {
 			applog.Infof("[handler] attachment lifecycle stage=session-source session=%s execution=%s source=%s error=file-not-found", sessionID, execID, pendingDir)
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, os.ErrNotExist)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, os.ErrNotExist)
 		}
-		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, err)
+		return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-source session=%s execution=%s source=%s: %w", sessionID, execID, pendingDir, err)
 	}
 
 	// Read files from pending directory
 	files, err := os.ReadDir(pendingDir)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("reading pending directory: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("reading pending directory: %w", err)
 	}
 
 	if len(files) == 0 {
-		return "", nil, nil, nil
+		return "", nil, nil, func(bool) {}, nil
 	}
 
 	// Create execution-specific directory
 	execDir := filepath.Join(uploadsDir, "chat", execID)
+	if steering {
+		execDir = steeringAttachmentDirectory(sessionID, execID)
+	}
 	if err := os.MkdirAll(execDir, 0755); err != nil {
-		return "", nil, nil, fmt.Errorf("creating execution directory: %w", err)
+		return "", nil, nil, nil, fmt.Errorf("creating execution directory: %w", err)
 	}
 
+	usedNames := make(map[string]bool)
 	var contextFiles []chatAttachmentModelContextFile
 	var chatAttachments []models.ChatAttachment
 	var staged []attachmentPublication
 	rollback := func() {
-		for _, rollbackErr := range rollbackAttachmentPublications(ctx, staged, h.chatAttachmentRepo.Delete) {
+		for _, rollbackErr := range rollbackAttachmentPublications(ctx, staged, deleteMetadata) {
 			applog.Infof("[handler] attachment lifecycle stage=rollback-chat session=%s execution=%s error=%v", sessionID, execID, rollbackErr)
 		}
 	}
@@ -653,28 +753,32 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		}
 
 		srcPath := filepath.Join(pendingDir, file.Name())
-		destPath := filepath.Join(execDir, file.Name())
+		destName := file.Name()
+		if !steering {
+			destName = uniqueAttachmentName(execDir, destName, usedNames)
+		}
+		destPath := filepath.Join(execDir, destName)
 		applog.Infof("[handler] attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s", sessionID, srcPath, execID, destPath)
 		if err := copyFileAtomically(srcPath, destPath); err != nil {
 			rollback()
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 
 		info, err := os.Stat(destPath)
 		if err != nil {
 			_ = os.Remove(destPath)
 			rollback()
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-verify session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-verify session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 		mediaType := mediaTypeFromExtension(file.Name())
 		attachment := &models.ChatAttachment{
 			ExecutionID: execID, FileName: file.Name(), FilePath: destPath,
 			MediaType: mediaType, FileSize: info.Size(),
 		}
-		if err := h.chatAttachmentRepo.Create(ctx, attachment); err != nil {
+		if err := createMetadata(ctx, attachment); err != nil {
 			_ = os.Remove(destPath)
 			rollback()
-			return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
+			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
 		staged = append(staged, attachmentPublication{id: attachment.ID, path: destPath})
 		chatAttachments = append(chatAttachments, *attachment)
@@ -690,15 +794,19 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 	textContext, imageAttachments, err := buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{})
 	if err != nil {
 		rollback()
-		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s execution=%s: %w", sessionID, execID, err)
+		return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s execution=%s: %w", sessionID, execID, err)
 	}
 
-	if err := os.RemoveAll(pendingDir); err != nil {
-		applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
+	finish := func(committed bool) {
+		if !committed {
+			rollback()
+			return
+		}
+		if err := os.RemoveAll(pendingDir); err != nil {
+			applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
+		}
 	}
-	applog.Infof("[handler] attachment lifecycle stage=session-committed session=%s execution=%s attachments=%d", sessionID, execID, len(chatAttachments))
-
-	return textContext, imageAttachments, chatAttachments, nil
+	return textContext, imageAttachments, chatAttachments, finish, nil
 }
 
 func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.Attachment, error) {
@@ -829,7 +937,7 @@ func rollbackAttachmentPublications(
 // when possible and retains files for metadata rows that cannot be deleted, so task execution
 // never observes a metadata reference to a file removed by rollback.
 func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, taskID string) (int, error) {
-	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, executionID)
+	chatAttachments, err := h.listMessageAttachments(ctx, executionID)
 	if err != nil {
 		return 0, fmt.Errorf("attachment lifecycle stage=list-source execution=%s task=%s: %w", executionID, taskID, err)
 	}
@@ -886,7 +994,7 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 		for _, item := range published {
 			fileRefs = append(fileRefs, fmt.Sprintf("%s (path: %s)", item.name, item.path))
 		}
-		task.Prompt += fmt.Sprintf("\n\n[Attached files from chat:\n%s]", strings.Join(fileRefs, "\n"))
+		task.Prompt += fmt.Sprintf("\n\n[Attached files:\n%s]", strings.Join(fileRefs, "\n"))
 		if updateErr := h.taskRepo.Update(ctx, task); updateErr != nil {
 			applog.Infof("[handler] attachment lifecycle stage=update-prompt execution=%s task=%s error=%v", executionID, taskID, updateErr)
 		}
@@ -980,307 +1088,19 @@ func copyFileAtomically(srcPath, destPath string) error {
 	return nil
 }
 
-// writeSSEData writes a potentially multi-line string as properly formatted SSE data.
-// SSE spec requires each line to be prefixed with "data: ". The browser's EventSource
-// automatically joins multiple "data:" lines with "\n" when firing onmessage.
-func writeSSEData(c echo.Context, data string) {
-	lines := strings.Split(data, "\n")
-	for _, line := range lines {
-		fmt.Fprintf(c.Response(), "data: %s\n", line)
+// OpenAI commits steering attachments before the next sample. Keep the source
+// path for loading image bytes, but expose the committed path to file tools.
+func (h *Handler) previewSteeringAttachments(sessionID, executionID string, provider models.LLMProvider) (string, []models.Attachment, error) {
+	text, attachments, err := h.previewPendingAttachments(sessionID)
+	if err != nil || provider != models.ProviderOpenAI {
+		return text, attachments, err
 	}
-	fmt.Fprintf(c.Response(), "\n") // Empty line terminates the event
-}
-
-func writeChatSSEEvent(c echo.Context, eventName string, data string) {
-	fmt.Fprintf(c.Response(), "event: %s\n", eventName)
-	lines := strings.Split(data, "\n")
-	for _, line := range lines {
-		fmt.Fprintf(c.Response(), "data: %s\n", line)
-	}
-	fmt.Fprintf(c.Response(), "\n")
-}
-
-func parseStreamOffset(raw string) int {
-	offset, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || offset < 0 {
-		return 0
-	}
-	return offset
-}
-
-func clampOffsetToUTF8Boundary(offset int, s string) int {
-	if offset <= 0 {
-		return 0
-	}
-	if offset >= len(s) {
-		return len(s)
-	}
-	for offset > 0 && !utf8.RuneStart(s[offset]) {
-		offset--
-	}
-	return offset
-}
-
-func (h *Handler) writeExecutionTerminalSSE(c echo.Context, exec *models.Execution) bool {
-	if exec == nil {
-		return false
-	}
-	switch exec.Status {
-	case models.ExecCompleted:
-		writeChatSSEEvent(c, "done", "completed")
-		c.Response().Flush()
-		return true
-	case models.ExecCancelled:
-		writeChatSSEEvent(c, "done", "cancelled")
-		c.Response().Flush()
-		return true
-	case models.ExecFailed:
-		applog.Infof("[handler] ChatStreamSSE exec=%s failed: %s", exec.ID, exec.ErrorMessage)
-		writeChatSSEEvent(c, "error", exec.ErrorMessage)
-		c.Response().Flush()
-		return true
-	default:
-		return false
-	}
-}
-
-func (h *Handler) replayExecutionOutputSSE(ctx context.Context, c echo.Context, execID string, sentLen *int) (*models.Execution, error) {
-	exec, err := h.execRepo.GetByID(ctx, execID)
-	if err != nil {
-		return nil, err
-	}
-	if exec == nil {
-		return nil, fmt.Errorf("execution not found")
-	}
-	start := clampOffsetToUTF8Boundary(*sentLen, exec.Output)
-	if len(exec.Output) > start {
-		writeSSEData(c, exec.Output[start:])
-		c.Response().Flush()
-		*sentLen = len(exec.Output)
-	}
-	return exec, nil
-}
-
-func (h *Handler) catchUpExecutionSSE(ctx context.Context, c echo.Context, execID string, sentLen *int, appendTerminal bool) (bool, error) {
-	exec, err := h.replayExecutionOutputSSE(ctx, c, execID, sentLen)
-	if err != nil {
-		return false, err
-	}
-	if appendTerminal || exec.Status != models.ExecRunning {
-		if h.writeExecutionTerminalSSE(c, exec) {
-			return true, nil
+	var references []models.Attachment
+	for i := range attachments {
+		attachments[i].ReferencePath = filepath.Join(steeringAttachmentDirectory(sessionID, executionID), attachments[i].FileName)
+		if !isImageFile(attachments[i].FileName) {
+			references = append(references, attachments[i])
 		}
 	}
-	return false, nil
-}
-
-// ChatStreamSSE streams chat execution output via SSE
-func (h *Handler) ChatStreamSSE(c echo.Context) error {
-	execID := c.Param("exec_id")
-	if execID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "exec_id is required")
-	}
-
-	applog.Infof("[handler] ChatStreamSSE exec=%s connected", execID)
-
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().Header().Set("X-Accel-Buffering", "no")
-
-	ctx := c.Request().Context()
-	exec, err := h.execRepo.GetByID(ctx, execID)
-	if err != nil {
-		applog.Infof("[handler] ChatStreamSSE exec=%s error: %v", execID, err)
-		writeChatSSEEvent(c, "error", err.Error())
-		c.Response().Flush()
-		return nil
-	}
-	if exec == nil {
-		applog.Infof("[handler] ChatStreamSSE exec=%s not found", execID)
-		writeChatSSEEvent(c, "error", "execution not found")
-		c.Response().Flush()
-		return nil
-	}
-
-	sentLen := parseStreamOffset(c.QueryParam("offset"))
-	if h.executionStreamHub == nil {
-		return h.chatStreamSSEDBFallback(ctx, c, execID, sentLen)
-	}
-
-	sub, unsubscribe, err := h.executionStreamHub.Subscribe(execID)
-	if err != nil {
-		writeChatSSEEvent(c, "error", err.Error())
-		c.Response().Flush()
-		return nil
-	}
-	defer unsubscribe()
-
-	if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
-		applog.Infof("[handler] ChatStreamSSE exec=%s catch-up error: %v", execID, err)
-		writeChatSSEEvent(c, "error", err.Error())
-		c.Response().Flush()
-		return nil
-	} else if done {
-		return nil
-	}
-
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-	catchup := time.NewTicker(2 * time.Second)
-	defer catchup.Stop()
-	timeout := time.NewTimer(chatSSETimeout)
-	defer timeout.Stop()
-	gapPending := false
-
-	resetTimeout := func() {
-		if !timeout.Stop() {
-			select {
-			case <-timeout.C:
-			default:
-			}
-		}
-		timeout.Reset(chatSSETimeout)
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			applog.Infof("[handler] ChatStreamSSE exec=%s client disconnected", execID)
-			return nil
-		case <-timeout.C:
-			applog.Infof("[handler] ChatStreamSSE exec=%s timeout", execID)
-			writeChatSSEEvent(c, "error", "timeout")
-			c.Response().Flush()
-			return nil
-		case <-heartbeat.C:
-			fmt.Fprintf(c.Response(), ": heartbeat\n\n")
-			c.Response().Flush()
-		case <-catchup.C:
-			if gapPending {
-				if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
-					applog.Infof("[handler] ChatStreamSSE exec=%s catch-up error: %v", execID, err)
-					writeChatSSEEvent(c, "error", err.Error())
-					c.Response().Flush()
-					return nil
-				} else if done {
-					return nil
-				}
-				gapPending = false
-				resetTimeout()
-				continue
-			}
-			if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
-				applog.Infof("[handler] ChatStreamSSE exec=%s terminal fallback error: %v", execID, err)
-				writeChatSSEEvent(c, "error", err.Error())
-				c.Response().Flush()
-				return nil
-			} else if done {
-				return nil
-			}
-		case ev, ok := <-sub:
-			if !ok {
-				if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
-					applog.Infof("[handler] ChatStreamSSE exec=%s final reconcile error: %v", execID, err)
-					writeChatSSEEvent(c, "error", err.Error())
-					c.Response().Flush()
-					return nil
-				} else if done {
-					return nil
-				}
-				return nil
-			}
-			if ev.ExecID != execID {
-				continue
-			}
-			switch ev.Type {
-			case events.ExecutionStreamDelta:
-				eventStart := ev.Offset - len(ev.Delta)
-				if ev.Offset <= sentLen {
-					continue
-				}
-				if eventStart > sentLen {
-					if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
-						applog.Infof("[handler] ChatStreamSSE exec=%s gap catch-up error: %v", execID, err)
-						writeChatSSEEvent(c, "error", err.Error())
-						c.Response().Flush()
-						return nil
-					} else if done {
-						return nil
-					}
-					if eventStart > sentLen {
-						gapPending = true
-						continue
-					}
-				}
-				start := sentLen - eventStart
-				if start < 0 {
-					start = 0
-				}
-				start = clampOffsetToUTF8Boundary(start, ev.Delta)
-				if start < len(ev.Delta) {
-					writeSSEData(c, ev.Delta[start:])
-					c.Response().Flush()
-					sentLen = ev.Offset
-					gapPending = false
-					resetTimeout()
-				}
-			case events.ExecutionStreamDone:
-				if done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, false); err != nil {
-					applog.Infof("[handler] ChatStreamSSE exec=%s terminal catch-up error: %v", execID, err)
-					writeChatSSEEvent(c, "error", err.Error())
-					c.Response().Flush()
-					return nil
-				} else if done {
-					return nil
-				}
-				status := ev.Status
-				if status == "" {
-					status = "completed"
-				}
-				writeChatSSEEvent(c, "done", status)
-				c.Response().Flush()
-				return nil
-			case events.ExecutionStreamError:
-				if _, err := h.replayExecutionOutputSSE(ctx, c, execID, &sentLen); err != nil {
-					applog.Infof("[handler] ChatStreamSSE exec=%s error catch-up error: %v", execID, err)
-					writeChatSSEEvent(c, "error", err.Error())
-					c.Response().Flush()
-					return nil
-				}
-				writeChatSSEEvent(c, "error", ev.Error)
-				c.Response().Flush()
-				return nil
-			}
-		}
-	}
-}
-
-func (h *Handler) chatStreamSSEDBFallback(ctx context.Context, c echo.Context, execID string, sentLen int) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.After(chatSSETimeout)
-	for {
-		select {
-		case <-ctx.Done():
-			applog.Infof("[handler] ChatStreamSSE exec=%s client disconnected", execID)
-			return nil
-		case <-timeout:
-			applog.Infof("[handler] ChatStreamSSE exec=%s timeout", execID)
-			writeChatSSEEvent(c, "error", "timeout")
-			c.Response().Flush()
-			return nil
-		case <-ticker.C:
-			done, err := h.catchUpExecutionSSE(ctx, c, execID, &sentLen, true)
-			if err != nil {
-				applog.Infof("[handler] ChatStreamSSE exec=%s fallback error: %v", execID, err)
-				writeChatSSEEvent(c, "error", err.Error())
-				c.Response().Flush()
-				return nil
-			}
-			if done {
-				return nil
-			}
-		}
-	}
+	return llmprompt.BuildAttachmentInstructions(references), attachments, nil
 }

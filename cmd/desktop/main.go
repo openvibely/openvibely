@@ -221,7 +221,7 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 }
 
 func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBackend, error) {
-	inst, err := server.Start(ctx, cfg, server.Options{ProjectFolderPicker: desktopProjectFolderPicker()})
+	inst, err := server.Start(ctx, cfg, server.Options{ProjectFolderPicker: desktopProjectFolderPicker(), DesktopFileSaver: desktopFileSaver()})
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +260,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		return fmt.Errorf("parse desktop backend URL: %w", err)
 	}
 	// Keep the document and native runtime on Wails' origin. Application routes
-	// still use the shared backend; immediate flushing preserves SSE streaming.
+	// still use the shared backend; live updates use a ticketed loopback WebSocket.
 	proxy := desktopAssetProxy(backendURL)
 	app := application.New(application.Options{
 		Assets:      application.AssetOptions{Handler: proxy},

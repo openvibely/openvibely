@@ -144,3 +144,20 @@ func MidTurnSteeringWakeupFromContext(ctx context.Context) <-chan struct{} {
 	wakeup, _ := ctx.Value(midTurnSteeringWakeupKey{}).(<-chan struct{})
 	return wakeup
 }
+
+// ResponsesRecovery records the latest ordinary turn snapshot for context-error
+// recovery, independently of whether any steering input was consumed.
+type responsesRecoveryKey struct{}
+
+func WithResponsesRecovery(ctx context.Context, record func(string)) context.Context {
+	return context.WithValue(ctx, responsesRecoveryKey{}, record)
+}
+
+func RecordResponsesRecovery(ctx context.Context, transcript string) {
+	if ctx == nil {
+		return
+	}
+	if record, ok := ctx.Value(responsesRecoveryKey{}).(func(string)); ok && record != nil {
+		record(transcript)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestResponsesPromptCacheKeyAndTextVerbosityAcrossTurnsAndFallback(t *testing.T) {
@@ -102,7 +103,7 @@ func TestResponsesPromptCacheKeyAndTextVerbosityAcrossTurnsAndFallback(t *testin
 						if transport == "http" {
 							client.supportsResponsesWebsockets = false
 						}
-						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						ctx, cancel := context.WithTimeout(retrytest.Context(), 10*time.Second)
 						defer cancel()
 						for turn := 0; turn < 4; turn++ {
 							if turn == 2 {

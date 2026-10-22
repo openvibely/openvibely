@@ -20,11 +20,13 @@ import (
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -429,7 +431,12 @@ func (s *SlackService) HandleOAuthCallback(ctx context.Context, code, state, red
 	form.Set("client_secret", clientSecret)
 	form.Set("redirect_uri", redirectURI)
 
-	resp, err := s.httpClient.PostForm(strings.TrimRight(s.oauthBaseURL, "/")+"/oauth.v2.access", form)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(s.oauthBaseURL, "/")+"/oauth.v2.access", strings.NewReader(form.Encode()))
+	if err != nil {
+		return fmt.Errorf("create oauth request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpretry.DoRequest(s.httpClient, req)
 	if err != nil {
 		return fmt.Errorf("exchange oauth code: %w", err)
 	}
@@ -1224,7 +1231,7 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
 	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
 		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution, attachments []models.ChatAttachment) (bool, error) {
-			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
+			alreadyHandedOff, err := s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(tx persistence.Tx) error {
 				if err := s.taskRepo.CreateInTx(ctx, tx, task); err != nil {
 					return err
 				}
@@ -1258,6 +1265,10 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				}
 				return nil
 			})
+			if err == nil && !alreadyHandedOff && len(attachments) > 0 {
+				attachmentcontext.Invalidate(attachmentcontext.ChatProjectKey(task.ProjectID))
+			}
+			return alreadyHandedOff, err
 		}
 	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
@@ -1967,7 +1978,7 @@ func (s *SlackService) downloadSlackPrivateFile(ctx context.Context, botToken, d
 	}
 	client := s.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		client = httpclient.New(httpclient.MessagingTimeout)
 	}
 	downloadClient := *client
 	downloadClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -1991,7 +2002,7 @@ func (s *SlackService) downloadSlackPrivateFile(ctx context.Context, botToken, d
 		req.Header.Set("Authorization", "Bearer "+botToken)
 		req.Header.Set("User-Agent", "OpenVibely Slack file downloader")
 
-		resp, err := downloadClient.Do(req)
+		resp, err := httpretry.DoRequest(&downloadClient, req)
 		if err != nil {
 			return err
 		}

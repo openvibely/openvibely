@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/stretchr/testify/require"
@@ -713,7 +714,7 @@ func TestHandler_GenerateAgent_RetriesTransientTimeoutThenSucceeds(t *testing.T)
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -762,7 +763,7 @@ func TestHandler_GenerateAgent_TimeoutUsesClearFallbackError(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -1038,7 +1039,7 @@ func TestHandler_GenerateAgent_MalformedJSONFallsBackWithClearError(t *testing.T
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -1169,7 +1170,7 @@ func TestHandler_GenerateAgent_ProviderMalformedJSONFallsBackWithActionableError
 
 	form := url.Values{}
 	form.Set("description", "Generate a coding agent")
-	req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(retrytest.Context(), http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -3369,7 +3370,14 @@ func TestHandler_UpdateAgent_AllowsProtectedSystemAgentSaveWithDisabledFieldsOmi
 		t.Fatalf("create protected agent: %v", err)
 	}
 
+	h.SetLifecycleRepo(db.Lifecycle)
+	hook := &models.AgentLifecycleHook{AgentID: agent.ID, When: models.LifecycleWhen("before_run"), SkillKey: "prepare", Enabled: true}
+	if err := db.Lifecycle.CreateHook(t.Context(), hook); err != nil {
+		t.Fatal(err)
+	}
 	form := url.Values{}
+	payload, _ := json.Marshal([]hookSavePayload{{ID: hook.ID, When: string(hook.When), SkillKey: hook.SkillKey, Enabled: false}})
+	form.Set("lifecycle_hooks_json", string(payload))
 	// Browser-shaped protected-agent save: disabled text fields such as name and
 	// system_prompt are omitted, while hidden serializer fields are submitted.
 	form.Set("model", modelCfg.ID)
@@ -3391,6 +3399,10 @@ func TestHandler_UpdateAgent_AllowsProtectedSystemAgentSaveWithDisabledFieldsOmi
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	hooks, err := db.Lifecycle.HooksByAgent(t.Context(), agent.ID)
+	if err != nil || len(hooks) != 1 || hooks[0].Enabled {
+		t.Fatalf("hook toggle not saved: %+v %v", hooks, err)
 	}
 	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
 	if err != nil || stored == nil {

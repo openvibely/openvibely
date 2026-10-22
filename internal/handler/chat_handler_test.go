@@ -582,7 +582,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -592,15 +592,15 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "HTTP Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -626,14 +626,14 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Ollama mixture aggregator request")
 	}
-	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable aggregator must not receive tool definitions")
+	require.Contains(t, providerRequest, "tools", "Ollama aggregator must receive shared runtime tools")
 	messages, _ := providerRequest["messages"].([]any)
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable aggregator must not receive marker guidance")
+	}), "aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
 		return err == nil && active == nil
@@ -653,7 +653,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -663,15 +663,15 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"Plan mode must not create this task\",\"prompt\":\"This marker must remain inert.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "HTTP Ollama Plan Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -693,7 +693,8 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorPlanModeDoesNotExecuteMarker(t 
 
 	select {
 	case providerRequest := <-providerRequests:
-		require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable Plan aggregator must not receive tool definitions")
+		raw, _ := json.Marshal(providerRequest["tools"])
+		require.NotContains(t, string(raw), `"name":"create_task"`, "Plan must exclude write tools")
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Ollama Plan mixture aggregator request")
 	}
@@ -822,14 +823,14 @@ func TestHandler_ChatMessageWithExec_GeneratesCorrectHTML(t *testing.T) {
 		t.Error("expected data-exec-id attribute in streaming message div")
 	}
 
-	// Should contain SSE connection code
-	if !strings.Contains(body, "EventSource") {
-		t.Error("expected EventSource code for SSE streaming")
+	// Should subscribe through the document-wide transport.
+	if !strings.Contains(body, "window.openVibelyLive.execution") {
+		t.Error("expected shared execution subscription")
 	}
 
-	// Should contain the SSE endpoint path
-	if !strings.Contains(body, "/events/chat/") {
-		t.Error("expected SSE endpoint path in JavaScript")
+	// Per-execution HTTP streaming has been removed.
+	if strings.Contains(body, "/events/chat/") || strings.Contains(body, "new EventSource") {
+		t.Error("obsolete SSE transport in JavaScript")
 	}
 
 	// Should read exec ID from data attribute
@@ -903,67 +904,6 @@ func TestHandler_ChatSend_CreatesTaskWithChatCategory(t *testing.T) {
 		if cat == models.CategoryChat {
 			t.Error("CategoryChat should not be in AllCategories to prevent it from appearing in kanban board")
 		}
-	}
-}
-
-func TestWriteSSEData_SingleLine(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "Hello world")
-
-	body := rec.Body.String()
-	expected := "data: Hello world\n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
-	}
-}
-
-func TestWriteSSEData_MultiLine(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "Line 1\nLine 2\nLine 3")
-
-	body := rec.Body.String()
-	expected := "data: Line 1\ndata: Line 2\ndata: Line 3\n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
-	}
-}
-
-func TestWriteSSEData_EmptyString(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "")
-
-	body := rec.Body.String()
-	expected := "data: \n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
-	}
-}
-
-func TestWriteSSEData_TrailingNewline(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	writeSSEData(c, "Content with trailing newline\n")
-
-	body := rec.Body.String()
-	// "Content with trailing newline\n" splits into ["Content with trailing newline", ""]
-	expected := "data: Content with trailing newline\ndata: \n\n"
-	if body != expected {
-		t.Errorf("expected %q, got %q", expected, body)
 	}
 }
 
@@ -1614,30 +1554,6 @@ func TestHandler_Chat_RendersSendButtonWhenNoActiveTurn(t *testing.T) {
 	assertContains(t, rec, `<path d="M2 3l20 9-20 9 5-9-5-9z"></path>`)
 	assertNotContains(t, rec, `data-tooltip-disabled aria-label="Stop response"`)
 	assertNotContains(t, rec, `/chat/stop`)
-}
-
-func TestHandler_ChatStreamSSE_EmitsDoneForCancelledExecution(t *testing.T) {
-	h, e, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Cancelled SSE Project")
-	task := createTask(t, h, project.ID, "Cancelled Chat SSE", func(tk *models.Task) {
-		tk.Category = models.CategoryChat
-		tk.Status = models.StatusCancelled
-		tk.AgentID = &agent.ID
-	})
-	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecCancelled
-		ex.PromptSent = "stopped chat"
-	})
-	require.NoError(t, h.execRepo.FinalizeOutput(ctx, exec.ID, "partial output"))
-
-	req := httptest.NewRequest(http.MethodGet, "/events/chat/"+exec.ID, nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "event: done")
-	assertContains(t, rec, "data: cancelled")
 }
 
 func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
@@ -2723,7 +2639,7 @@ func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t 
 	require.NoError(t, os.MkdirAll(apiDir, 0755))
 
 	notesContent := []byte("remember this note")
-	largeContent := []byte(strings.Repeat("x", maxTextAttachmentSize+1))
+	largeContent := []byte(strings.Repeat("x", (256<<10)+1))
 	imageContent := []byte{0x89, 0x50, 0x4e, 0x47}
 	files := []struct {
 		name    string
@@ -2752,22 +2668,22 @@ func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t 
 	apiText, apiImages, err := buildChatAttachmentModelContext(apiFiles, chatAttachmentModelContextOptions{})
 	require.NoError(t, err)
 
-	assert.Equal(t, pendingText, apiText)
-	assert.Contains(t, pendingText, "--- Attached Files ---")
-	assert.Contains(t, pendingText, "File: notes.txt")
-	assert.Contains(t, pendingText, string(notesContent))
-	assert.Contains(t, pendingText, "File: large.txt (attached")
-	assert.Contains(t, pendingText, "too large to include inline")
-	assert.NotContains(t, pendingText, "screen.png")
+	assert.Equal(t, strings.ReplaceAll(pendingText, pendingDir, apiDir), apiText)
+	assert.Contains(t, pendingText, "notes.txt")
+	assert.NotContains(t, pendingText, string(notesContent))
+	assert.Contains(t, pendingText, "large.txt")
 	assert.NotContains(t, pendingText, string(largeContent[:50]))
+	assert.NotContains(t, pendingText, "screen.png")
+	require.Len(t, pendingImages, 3)
+	require.Len(t, apiImages, 3)
+	for i := range pendingImages {
+		assert.Equal(t, pendingImages[i].FileName, apiImages[i].FileName)
+		assert.Equal(t, pendingImages[i].MediaType, apiImages[i].MediaType)
+		assert.Equal(t, pendingImages[i].FileSize, apiImages[i].FileSize)
+		assert.Equal(t, filepath.Join(pendingDir, files[i].name), pendingImages[i].FilePath)
+		assert.Equal(t, filepath.Join(apiDir, files[i].name), apiImages[i].FilePath)
+	}
 
-	require.Len(t, pendingImages, 1)
-	require.Len(t, apiImages, 1)
-	assert.Equal(t, pendingImages[0].FileName, apiImages[0].FileName)
-	assert.Equal(t, pendingImages[0].MediaType, apiImages[0].MediaType)
-	assert.Equal(t, pendingImages[0].FileSize, apiImages[0].FileSize)
-	assert.Equal(t, filepath.Join(pendingDir, "screen.png"), pendingImages[0].FilePath)
-	assert.Equal(t, filepath.Join(apiDir, "screen.png"), apiImages[0].FilePath)
 }
 
 func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T) {
@@ -2819,15 +2735,16 @@ func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T
 
 	// Text file should be included in text context
 	assert.Contains(t, textContext, "notes.txt")
-	assert.Contains(t, textContext, textContent)
+	assert.NotContains(t, textContext, textContent)
 
 	// Image file should NOT be in text context (this was the bug - binary content was injected as text)
 	assert.NotContains(t, textContext, "screenshot.png")
 
 	// Image file should be returned as a separate attachment for multimodal handling
-	require.Len(t, imageAttachments, 1)
-	assert.Equal(t, "screenshot.png", imageAttachments[0].FileName)
-	assert.Equal(t, "image/png", imageAttachments[0].MediaType)
+	require.Len(t, imageAttachments, 2)
+	assert.Equal(t, "notes.txt", imageAttachments[0].FileName)
+	assert.Equal(t, "screenshot.png", imageAttachments[1].FileName)
+	assert.Equal(t, "image/png", imageAttachments[1].MediaType)
 }
 
 func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
@@ -2865,8 +2782,8 @@ func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
 	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
 	require.NoError(t, os.MkdirAll(pendingDir, 0755))
 
-	// Create a text file larger than maxTextAttachmentSize
-	largeContent := make([]byte, maxTextAttachmentSize+1)
+	// Large files must remain references without inline contents.
+	largeContent := make([]byte, (256<<10)+1)
 	for i := range largeContent {
 		largeContent[i] = 'x'
 	}
@@ -2877,11 +2794,12 @@ func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
 
 	// Large file should be mentioned but content should NOT be included
 	assert.Contains(t, textContext, "large.txt")
-	assert.Contains(t, textContext, "too large to include inline")
+	assert.Contains(t, textContext, "path:")
 	assert.NotContains(t, textContext, string(largeContent[:50]))
 
-	// No image attachments
-	assert.Empty(t, imageAttachments)
+	// Non-image file travels as a reference.
+	require.Len(t, imageAttachments, 1)
+	assert.Equal(t, "large.txt", imageAttachments[0].FileName)
 }
 
 func TestProcessAttachments_NoSession(t *testing.T) {
@@ -3067,7 +2985,7 @@ func TestCopyChatAttachmentsToTask(t *testing.T) {
 	// Verify task prompt was updated with absolute file paths
 	updatedTask, err := h.taskRepo.GetByID(ctx, regularTask.ID)
 	require.NoError(t, err)
-	assert.Contains(t, updatedTask.Prompt, "[Attached files from chat:")
+	assert.Contains(t, updatedTask.Prompt, "[Attached files:")
 	assert.Contains(t, updatedTask.Prompt, "test1.txt (path: ")
 	assert.Contains(t, updatedTask.Prompt, "test2.png (path: ")
 	// Verify paths are absolute (start with tmpDir since uploadsDir was set to tmpDir)
@@ -4165,7 +4083,7 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 		"chat root must not clip the composer shadow")
 	assert.Contains(t, body, `class="relative flex-1 min-h-0 min-w-0"`,
 		"chat messages shell must anchor transcript controls")
-	assert.Contains(t, body, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3`,
+	assert.Contains(t, body, `id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-2 space-y-4`,
 		"chat messages pane must be present")
 	assert.NotContains(t, body, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden`,
 		"chat messages pane must not hard-clip chat bubble shadows")
@@ -4720,7 +4638,7 @@ func TestHandler_Chat_PlanCompletionPrompt_MultiTurnRegression(t *testing.T) {
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
-	// Verify that per-exec stream error/onerror handlers (in ChatBubbleStreaming)
+	// Verify that per-execution terminal error handlers (in ChatBubbleStreaming)
 	// clear _chatStreamInProgress and re-evaluate the plan prompt. Without this,
 	// the flag stays stuck true after a streaming failure and blocks prompt evaluation.
 	h, e, llmConfigRepo := setupTestHandler(t)
@@ -4759,7 +4677,7 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	// The handler body with isThread branch can be ~1200 chars.
 	errIdx := strings.Index(body, "eventSource.addEventListener('error'")
 	require.NotEqual(t, -1, errIdx, "streaming bubble must have error event listener")
-	errEndOffset := strings.Index(body[errIdx:], "eventSource.onerror")
+	errEndOffset := strings.Index(body[errIdx:], "connectExecutionStream();")
 	require.Greater(t, errEndOffset, 0, "streaming bubble error handler boundary must exist")
 	errBody := body[errIdx : errIdx+errEndOffset]
 
@@ -4775,21 +4693,8 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	assert.Contains(t, errBody, "evaluatePlanCompletionPrompt",
 		"streaming bubble error handler must re-evaluate plan prompt for chat context")
 
-	// onerror handler too
-	oeIdx := strings.Index(body, "eventSource.onerror")
-	require.NotEqual(t, -1, oeIdx, "streaming bubble must have onerror handler")
-	oeEnd := oeIdx + 2000
-	if oeEnd > len(body) {
-		oeEnd = len(body)
-	}
-	oeBody := body[oeIdx:oeEnd]
+	assert.NotContains(t, body, "eventSource.onerror", "connection recovery must not clear execution streaming state")
 
-	assert.Contains(t, oeBody, "scheduleExecutionStreamRetry()",
-		"streaming bubble onerror must reconnect before failing empty streams")
-	assert.Contains(t, oeBody, "_chatStreamInProgress = false",
-		"streaming bubble onerror must clear _chatStreamInProgress for chat context")
-	assert.Contains(t, oeBody, "evaluatePlanCompletionPrompt",
-		"streaming bubble onerror must re-evaluate plan prompt for chat context")
 }
 
 func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
@@ -5492,7 +5397,7 @@ func createRunningChatStreamExecution(t *testing.T, tc *TestContext, output stri
 func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.ExecutionStatus, taskStatus models.TaskStatus, output, errMsg string) *models.Execution {
 	t.Helper()
 	ctx := context.Background()
-	task := &models.Task{ProjectID: "default", Title: "SSE task", Prompt: "stream", Category: models.CategoryChat, Status: taskStatus}
+	task := &models.Task{ProjectID: "default", Title: fmt.Sprintf("Stream %d", time.Now().UnixNano()), Prompt: "stream", Category: models.CategoryChat, Status: taskStatus}
 	require.NoError(t, tc.taskRepo.Create(ctx, task))
 	agent, err := tc.llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
@@ -5512,73 +5417,6 @@ func createChatStreamExecution(t *testing.T, tc *TestContext, execStatus models.
 	return updated
 }
 
-type synchronizedResponseRecorder struct {
-	*httptest.ResponseRecorder
-	mu sync.RWMutex
-}
-
-func newSynchronizedResponseRecorder() *synchronizedResponseRecorder {
-	return &synchronizedResponseRecorder{ResponseRecorder: httptest.NewRecorder()}
-}
-
-func (r *synchronizedResponseRecorder) Write(data []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.ResponseRecorder.Write(data)
-}
-
-func (r *synchronizedResponseRecorder) WriteHeader(statusCode int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ResponseRecorder.WriteHeader(statusCode)
-}
-
-func (r *synchronizedResponseRecorder) Flush() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ResponseRecorder.Flush()
-}
-
-func (r *synchronizedResponseRecorder) BodyString() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.Body.String()
-}
-
-func startChatStreamSSETest(t *testing.T, h *Handler, execID, rawQuery string) (*synchronizedResponseRecorder, context.CancelFunc, chan error) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	path := "/events/chat/" + execID
-	if rawQuery != "" {
-		path += "?" + rawQuery
-	}
-	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
-	rec := newSynchronizedResponseRecorder()
-	e := echo.New()
-	c := e.NewContext(req, rec)
-	c.SetParamNames("exec_id")
-	c.SetParamValues(execID)
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- h.ChatStreamSSE(c)
-	}()
-	return rec, cancel, errCh
-}
-
-func waitForSSEBody(t *testing.T, rec *synchronizedResponseRecorder, want string) string {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		body := rec.BodyString()
-		if strings.Contains(body, want) {
-			return body
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for SSE body containing %q; body=%q", want, rec.BodyString())
-	return ""
-}
-
 func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStreamHub, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -5589,153 +5427,4 @@ func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStream
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %d execution stream subscribers; got %d", want, hub.SubscriberCount())
-}
-
-func stopChatStreamSSETest(t *testing.T, cancel context.CancelFunc, errCh <-chan error) {
-	t.Helper()
-	cancel()
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for ChatStreamSSE to stop")
-	}
-}
-
-func TestChatStreamSSE_StreamsHubDeltaBeforeDBUpdate(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-	exec := createRunningChatStreamExecution(t, tc, "")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "")
-	defer stopChatStreamSSETest(t, cancel, errCh)
-	waitForExecutionStreamSubscribers(t, hub, 1)
-
-	hub.Publish(events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamDelta, Delta: "instant", Offset: len("instant")})
-	body := waitForSSEBody(t, rec, "data: instant")
-	assert.Contains(t, body, "data: instant\n\n")
-
-	persisted, err := tc.execRepo.GetByID(context.Background(), exec.ID)
-	require.NoError(t, err)
-	require.NotNil(t, persisted)
-	assert.Empty(t, persisted.Output, "live hub delta should not depend on a DB output update")
-}
-
-func TestChatStreamSSE_DoesNotSubscribeMissingExecution(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, "missing-exec", "")
-	defer cancel()
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("missing execution stream did not return")
-	}
-	assert.Contains(t, rec.BodyString(), "event: error\ndata: execution not found\n\n")
-	assert.Equal(t, 0, hub.SubscriberCount())
-}
-
-func TestChatStreamSSE_DBFallbackHonorsOffsetAndClampsMidRune(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	exec := createRunningChatStreamExecution(t, tc, "héllo")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=2")
-	defer stopChatStreamSSETest(t, cancel, errCh)
-
-	body := waitForSSEBody(t, rec, "data: éllo")
-	assert.Contains(t, body, "data: éllo\n\n")
-	assert.NotContains(t, body, "\ufffd")
-}
-
-func TestChatStreamSSE_ReplaysTerminalOutputBeforeTerminalEvent(t *testing.T) {
-	cases := []struct {
-		name          string
-		execStatus    models.ExecutionStatus
-		taskStatus    models.TaskStatus
-		errMsg        string
-		terminalEvent string
-	}{
-		{name: "completed", execStatus: models.ExecCompleted, taskStatus: models.StatusCompleted, terminalEvent: "event: done\ndata: completed\n\n"},
-		{name: "failed", execStatus: models.ExecFailed, taskStatus: models.StatusFailed, errMsg: "db failure", terminalEvent: "event: error\ndata: db failure\n\n"},
-		{name: "cancelled", execStatus: models.ExecCancelled, taskStatus: models.StatusCancelled, errMsg: "cancelled", terminalEvent: "event: done\ndata: cancelled\n\n"},
-	}
-	for _, tcse := range cases {
-		t.Run(tcse.name, func(t *testing.T) {
-			tc := NewStoreTestContext(t)
-			hub := events.NewExecutionStreamHub()
-			tc.handler.SetExecutionStreamHub(hub)
-			exec := createChatStreamExecution(t, tc, tcse.execStatus, tcse.taskStatus, "héllo final", tcse.errMsg)
-
-			rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=2")
-			defer cancel()
-
-			body := waitForSSEBody(t, rec, tcse.terminalEvent)
-			missingOutput := "data: éllo final\n\n"
-			outputIndex := strings.Index(body, missingOutput)
-			terminalIndex := strings.Index(body, tcse.terminalEvent)
-			require.NotEqual(t, -1, outputIndex, "body=%q", body)
-			require.NotEqual(t, -1, terminalIndex, "body=%q", body)
-			assert.Less(t, outputIndex, terminalIndex, "missing DB output should be replayed before terminal event")
-			assert.NotContains(t, body, "�")
-			select {
-			case err := <-errCh:
-				require.NoError(t, err)
-			case <-time.After(2 * time.Second):
-				t.Fatal("terminal stream did not return")
-			}
-		})
-	}
-}
-
-func TestChatStreamSSE_HubErrorReplaysDBOutputBeforeExactHubError(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-	exec := createRunningChatStreamExecution(t, tc, "hello durable tail")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "offset=6")
-	defer cancel()
-	waitForExecutionStreamSubscribers(t, hub, 1)
-
-	hub.Close(exec.ID, events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamError, Error: "hub exact failure"})
-	body := waitForSSEBody(t, rec, "data: hub exact failure")
-	missingOutput := "data: durable tail\n\n"
-	terminalEvent := "event: error\ndata: hub exact failure\n\n"
-	outputIndex := strings.Index(body, missingOutput)
-	terminalIndex := strings.Index(body, terminalEvent)
-	require.NotEqual(t, -1, outputIndex, "body=%q", body)
-	require.NotEqual(t, -1, terminalIndex, "body=%q", body)
-	assert.Less(t, outputIndex, terminalIndex, "missing DB output should be replayed before hub error")
-	assert.NotContains(t, body, "event: error\ndata: \n\n")
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("terminal error stream did not return")
-	}
-}
-
-func TestChatStreamSSE_TerminalErrorFramesMultilineData(t *testing.T) {
-	tc := NewStoreTestContext(t)
-	hub := events.NewExecutionStreamHub()
-	tc.handler.SetExecutionStreamHub(hub)
-	exec := createRunningChatStreamExecution(t, tc, "")
-
-	rec, cancel, errCh := startChatStreamSSETest(t, tc.handler, exec.ID, "")
-	defer cancel()
-	waitForExecutionStreamSubscribers(t, hub, 1)
-
-	hub.Close(exec.ID, events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamError, Error: "line one\nline two"})
-	body := waitForSSEBody(t, rec, "data: line two")
-	assert.Contains(t, body, "event: error\ndata: line one\ndata: line two\n\n")
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("terminal error stream did not return")
-	}
 }

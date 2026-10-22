@@ -1425,12 +1425,13 @@ func TestLLMService_HydrateTaskSteeringAttachmentsKeepsImagesStructured(t *testi
 
 	svc := &LLMService{taskSvc: &TaskService{uploadsDir: uploadsDir}}
 	inputs := []models.ThreadInput{{Content: "inspect these", AttachmentSessionID: sessionID}}
-	attachments, err := svc.hydrateTaskSteeringAttachments(inputs)
+	attachments, err := svc.hydrateTaskSteeringAttachments(inputs, "exec-1")
 	require.NoError(t, err)
-	require.Contains(t, inputs[0].Content, "attachment notes")
-	require.Len(t, attachments, 1)
-	require.Equal(t, "screen.png", attachments[0].FileName)
-	require.Equal(t, "image/png", attachments[0].MediaType)
+	require.NotContains(t, inputs[0].Content, "attachment notes")
+	require.Len(t, attachments, 2)
+	require.Equal(t, "notes.txt", attachments[0].FileName)
+	require.Equal(t, "screen.png", attachments[1].FileName)
+	require.Equal(t, "image/png", attachments[1].MediaType)
 }
 
 func TestLLMService_HydrateTaskSteeringMessagesPreservesBoundaries(t *testing.T) {
@@ -1445,7 +1446,7 @@ func TestLLMService_HydrateTaskSteeringMessagesPreservesBoundaries(t *testing.T)
 		{Content: "first correction"},
 		{Content: "second correction", AttachmentSessionID: sessionID},
 	}
-	messages, err := svc.hydrateTaskSteeringMessages(inputs)
+	messages, err := svc.hydrateTaskSteeringMessages(inputs, "exec-1")
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
 	require.Equal(t, "first correction", messages[0].Text)
@@ -1692,6 +1693,103 @@ func TestLLMService_ExecuteTaskWithAgent_DrainsLocalSteering(t *testing.T) {
 			if err != nil {
 				return llmcontracts.AgentResult{}, err
 			}
+			return llmcontracts.AgentResult{Output: "done", TextOnlyOutput: "done", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	require.NoError(t, err)
+	require.NotEmpty(t, steeringID)
+	stored, err := threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+}
+
+func TestLLMService_ExecuteTaskWithAgent_SteeringFilesArePublishedOnlyOnDelivery(t *testing.T) {
+	env := teststores.New(t)
+	llmConfigRepo := env.LLMConfigs
+	execRepo := env.Executions
+	taskRepo := env.Tasks
+	threadInputRepo := env.ThreadInputs
+	ctx := context.Background()
+
+	store := &failingAttachmentListStore{AttachmentStore: env.Attachments}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, env.Projects, env.Schedules, store)
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-mid-turn-steer-test")
+	task := &models.Task{ProjectID: "default", Title: "Steering file delivery", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	svc.taskSvc = &TaskService{uploadsDir: t.TempDir()}
+	pending := filepath.Join(svc.taskSvc.uploadsDir, "chat", "pending", "steering-files")
+	require.NoError(t, os.MkdirAll(pending, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "report.txt"), []byte("original report"), 0o644))
+	var steeringID string
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			steering := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID,
+				AgentConfigID: req.Agent.ID, ExpectedTurnID: req.ExecID, Content: "change direction", AttachmentSessionID: "steering-files",
+			}
+			require.NoError(t, threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, req.ExecID))
+			steeringID = steering.ID
+			callback := llmcontracts.LocalSteeringCallbackFromContext(req.Ctx)
+			require.NotNil(t, callback)
+			input, err := callback(req.Ctx)
+			require.NoError(t, err)
+			require.NotNil(t, input.Commit)
+			// A failed delivery rolls back copies but preserves the source for retry.
+			require.Error(t, input.Commit(req.Ctx, []any{make(chan int)}))
+			require.DirExists(t, pending)
+			files, err := env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, files)
+			stored, err := threadInputRepo.GetByID(ctx, steeringID)
+			require.NoError(t, err)
+			require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+
+			history := []any{map[string]any{"type": "message", "role": "user", "content": "change direction"}}
+			store.failAt = store.calls + 1
+			require.ErrorContains(t, input.Commit(req.Ctx, history), "couldn't refresh steering attachments")
+			require.DirExists(t, pending)
+			files, err = env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, files)
+			stored, err = threadInputRepo.GetByID(ctx, steeringID)
+			require.NoError(t, err)
+			require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+			require.NoError(t, input.Commit(req.Ctx, history))
+			require.NoDirExists(t, pending)
+			files, err = env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			fileID := files[0].ID
+
+			// History failures and later checkpoints must never revisit the upload.
+			require.Error(t, input.Commit(req.Ctx, []any{make(chan int)}))
+			for i := 0; i < 3; i++ {
+				history = append(history, map[string]any{"type": "message", "role": "assistant", "content": fmt.Sprintf("checkpoint %d", i)})
+				require.NoError(t, input.Commit(req.Ctx, history))
+			}
+			files, err = env.Attachments.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			require.Equal(t, fileID, files[0].ID)
+			data, err := os.ReadFile(files[0].FilePath)
+			require.NoError(t, err)
+			require.Equal(t, "original report", string(data))
+			replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{req.ExecID})
+			require.NoError(t, err)
+			require.Len(t, replay[req.ExecID], 1)
+			require.Contains(t, replay[req.ExecID][0].TranscriptJSON, "checkpoint 2")
+			// Recovery uses persisted applied status, not the callback's lifetime.
+			requeued, err := threadInputRepo.RequeuePendingSteeringForExecution(ctx, req.ExecID)
+			require.NoError(t, err)
+			require.Empty(t, requeued)
+
 			return llmcontracts.AgentResult{Output: "done", TextOnlyOutput: "done", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
 		}),
 	}
@@ -2247,7 +2345,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrant
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLeavesMarkersInert(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorSharesToolsAndLeavesMarkersInert(t *testing.T) {
 	env := teststores.New(t)
 	llmConfigRepo := env.LLMConfigs
 	execRepo := env.Executions
@@ -2258,7 +2356,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -2268,9 +2366,9 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"This marker-looking text must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"This marker-looking text must remain inert.\"}\n[/CREATE_TASK]"}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
@@ -2280,15 +2378,15 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 	ollamaAdapter := svc.providerAdapters[models.ProviderOllama]
 	svc.providerAdapters[models.ProviderTest] = recorder
 	svc.providerAdapters[models.ProviderOllama] = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
-			t.Fatalf("runtime-tool-incapable aggregator inherited tools: %#v", rt)
+		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt == nil || !rt.HasDefinition("agent_allowed") {
+			t.Fatalf("Ollama aggregator lost granted tools: %#v", rt)
 		}
 		return ollamaAdapter.Call(req)
 	})
 
 	ref := createMixtureTestConfig(t, llmConfigRepo, "Initial Ollama Reference", models.ProviderTest, "ref")
 	recorder.responses[ref.ID] = llmcontracts.AgentResult{Output: "private advice", TextOnlyOutput: "private advice"}
-	aggregator := &models.LLMConfig{Name: "Initial Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: providerServer.URL}
+	aggregator := &models.LLMConfig{Name: "Initial Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: providerServer.URL, ContextWindow: 65536}
 	if err := llmConfigRepo.Create(ctx, aggregator); err != nil {
 		t.Fatalf("create Ollama aggregator: %v", err)
 	}
@@ -2321,8 +2419,8 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLea
 	}
 	select {
 	case providerRequest := <-providerRequests:
-		if _, exists := providerRequest["tools"]; exists {
-			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
+		if _, exists := providerRequest["tools"]; !exists {
+			t.Fatal("Ollama payload omitted runtime tools")
 		}
 		messages, _ := providerRequest["messages"].([]any)
 		for _, raw := range messages {
@@ -2494,29 +2592,18 @@ func TestLLMService_ExecuteTaskWithAgent_CustomAgentSkillLibraryToolsUseRoutedSe
 		t.Fatal("expected execution")
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
-	if rt == nil || !rt.HasDefinition("skill_manage") || !rt.HasDefinition("skills_list") || !rt.HasDefinition("agent_list") || !rt.HasDefinition("agent_view") || rt.HasDefinition("agent_manage") {
-		t.Fatalf("custom agent should get explicitly declared scoped skill tools, got %#v", rt)
+	if rt == nil || !rt.HasDefinition("skill_view") || rt.HasDefinition("skill_manage") {
+		t.Fatal("custom task must get scoped reads only")
 	}
-	out, handled, isErr, err := rt.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "## standalone_skill") || strings.Contains(out, "custom_librarian/curate") {
-		t.Fatalf("skills_list should expose standalone skills only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	out, handled, isErr, err := rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"curate"}`))
+	if !handled || isErr || err != nil || !strings.Contains(out, "custom selected skill body") {
+		t.Fatalf("assigned skill unavailable: %s %v", out, err)
 	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"standalone_skill"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "standalone body") {
-		t.Fatalf("final runtime should view listed standalone skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	_, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{}`))
+	if !handled || !isErr || err != nil {
+		t.Fatalf("direct write not rejected: %v %v %v", handled, isErr, err)
 	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"curate"}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "custom selected skill body") {
-		t.Fatalf("final runtime should view router-selected agent-owned skill handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "agent_list", json.RawMessage(`{}`))
-	if !handled || err != nil || isErr || !strings.Contains(out, "custom_librarian") || strings.Contains(out, "skill_curator") || strings.Contains(out, "memory_curator") {
-		t.Fatalf("agent_list should expose user-managed agents only handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
-	out, handled, isErr, err = rt.Executor(context.Background(), "skill_manage", json.RawMessage(`{"action":"write_file","handle":"custom_librarian/curate","scope":"global","support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`))
-	if !handled || err != nil || !isErr || !strings.Contains(out, "invalid standalone skill handle") {
-		t.Fatalf("skill_manage must not mutate agent-owned custom skills handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
-	}
+
 }
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *testing.T) {
@@ -2527,6 +2614,13 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	agentRepo := env.Agents
 	projectRepo := env.Projects
 	ctx := context.Background()
+
+	project, err := projectRepo.GetByID(ctx, "default")
+	require.NoError(t, err)
+	permissions := project.ManagedPermissions()
+	permissions.AllowGlobalSkillWrites = true
+	project.SkillMemoryPermissions = &permissions
+	require.NoError(t, projectRepo.Update(ctx, project))
 
 	root := t.TempDir()
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, env.Schedules, env.Attachments)
@@ -2566,7 +2660,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
 		return routePayload([]string{"maintain_skill_library"}, 0.9), nil
 	}), nil)
-	worker := NewWorkerService(nil, 0, nil)
+	worker := NewWorkerService(nil, 0, projectRepo)
 	worker.SetLifecycleRunner(runner)
 	worker.SetLifecycleSkillRoot(root)
 	worker.SetLifecycleAgentRepo(agentRepo)
@@ -2641,7 +2735,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsScheduledSkillCuratorTask(t *test
 	} {
 		params := fmt.Sprintf(`{"action":"write_file","agent":%q,"scope":"global","handle":%q,"support":{"kind":"references","path":"forbidden.md","content":"blocked"}}`, tc.agent, tc.skill)
 		out, handled, isErr, err = rt.Executor(context.Background(), "agent_skill_manage", json.RawMessage(params))
-		if !handled || err != nil || !isErr || !strings.Contains(out, tc.want) {
+		if !handled || err != nil || !isErr || !strings.Contains(out, "target agent is unavailable or outside the requested scope") {
 			t.Fatalf("final runtime agent_skill_manage must block %s agent skills handled=%v isErr=%v err=%v out=%q", tc.want, handled, isErr, err, out)
 		}
 	}
@@ -5018,7 +5112,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"list_tasks", "create_task", "edit_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
@@ -5039,9 +5133,22 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected list_capabilities handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") {
+	if !strings.Contains(out, "schedule_task") || !strings.Contains(out, "github_get_project_inbox") || !strings.Contains(out, "edit_task") {
 		t.Fatalf("expected capabilities to include bootstrap tools, got %s", out)
 	}
+	for _, name := range []string{"cancel_task", "merge_task", "mark_task_goal_achieved", "report_task_goal_blocked", "request_user_input"} {
+		require.False(t, rt.HasDefinition(name), name)
+		require.NotContains(t, out, name)
+		_, handled, _, _ := rt.Executor(ctx, name, json.RawMessage(`{}`))
+		require.False(t, handled, name)
+	}
+	edited, handled, isErr, err := rt.Executor(ctx, "edit_task", json.RawMessage(fmt.Sprintf(`{"id":%q,"priority":4}`, task.ID)))
+	require.NoError(t, err, edited)
+	require.True(t, handled)
+	require.False(t, isErr)
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, updated.Priority)
 	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"Implement GitHub issue #42","prompt":"Implement assigned GitHub issue #42 and open a PR."}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected create_task handler for implementation task on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
@@ -5095,4 +5202,105 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if loopGoal != nil {
 		t.Fatalf("expected scheduled loop task to have no persisted goal, got %#v", loopGoal)
 	}
+}
+
+func TestTaskRuntimeEditTask(t *testing.T) {
+	ctx := context.Background()
+	env := teststores.New(t)
+	project := &models.Project{Name: "Task edits"}
+	require.NoError(t, env.Projects.Create(ctx, project))
+	foreignProject := &models.Project{Name: "Other project"}
+	require.NoError(t, env.Projects.Create(ctx, foreignProject))
+	caller := &models.Task{ProjectID: project.ID, Title: "Caller", Prompt: "Edit tasks", Category: models.CategoryActive, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, caller))
+	target := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "Original", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, target))
+	foreign := &models.Task{ProjectID: foreignProject.ID, Title: "Foreign", Prompt: "Untouched", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, env.Tasks.Create(ctx, foreign))
+	model := ensureDefaultAgent(t, env.LLMConfigs)
+	agent := &models.Agent{Key: "editor", Name: "Editor", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, env.Agents.Create(ctx, agent))
+	taskSvc := NewTaskService(env.Tasks, env.Attachments, NewWorkerService(nil, 0, nil))
+	taskSvc.SetAgentRepo(env.Agents)
+	taskSvc.SetDeletionUploadsDir(t.TempDir())
+	svc := NewLLMService(env.LLMConfigs, env.Executions, env.Tasks, env.Projects, env.Schedules, env.Attachments)
+	svc.SetTaskService(taskSvc)
+	rt := svc.taskActionRuntimeTools(ctx, *caller)
+	require.True(t, rt.HasDefinition("edit_task"))
+	attachment := filepath.Join(t.TempDir(), "input.txt")
+	require.NoError(t, os.WriteFile(attachment, []byte("task attachment"), 0600))
+	payload, err := json.Marshal(map[string]any{
+		"id": target.ID, "title": "Edited", "prompt": "Updated prompt", "priority": 4,
+		"category": "scheduled", "tag": "bug", "agent_id": model.ID, "agent_definition_id": agent.ID,
+		"chain":      map[string]any{"enabled": true, "trigger": "on_completion", "child_title": "Next task"},
+		"auto_merge": true, "auto_merge_on_goal_achieved": true, "merge_target_branch": "develop",
+		"attachments": []string{attachment},
+	})
+	require.NoError(t, err)
+	out, handled, isErr, err := rt.Executor(ctx, "edit_task", payload)
+	require.NoError(t, err, out)
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	updated, err := env.Tasks.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Edited", updated.Title)
+	require.Contains(t, updated.Prompt, "Updated prompt")
+	require.Equal(t, 4, updated.Priority)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.TaskTag("bug"), updated.Tag)
+	require.Equal(t, model.ID, *updated.AgentID)
+	require.Equal(t, agent.ID, *updated.AgentDefinitionID)
+	require.True(t, updated.AutoMerge)
+	require.True(t, updated.AutoMergeOnGoalAchieved)
+	require.Equal(t, "develop", updated.MergeTargetBranch)
+	chain, err := updated.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, chain.Enabled)
+	require.Equal(t, "Next task", chain.ChildTitle)
+	attachments, err := env.Attachments.ListByTask(ctx, target.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	content, err := os.ReadFile(attachments[0].FilePath)
+	require.NoError(t, err)
+	require.Equal(t, "task attachment", string(content))
+	require.Contains(t, updated.Prompt, attachments[0].FilePath)
+
+	payload, err = json.Marshal(map[string]any{"id": foreign.ID, "title": "Must not change", "attachments": []string{attachment}})
+	require.NoError(t, err)
+	out, handled, isErr, err = rt.Executor(ctx, "edit_task", payload)
+	require.Error(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, err.Error(), "edit_task: no tasks were updated")
+	unchanged, err := env.Tasks.GetByID(ctx, foreign.ID)
+	require.NoError(t, err)
+	require.Equal(t, foreign.Title, unchanged.Title)
+	require.Equal(t, foreign.Prompt, unchanged.Prompt)
+	attachments, err = env.Attachments.ListByTask(ctx, foreign.ID)
+	require.NoError(t, err)
+	require.Empty(t, attachments)
+}
+
+func TestTaskRuntimeApplicationProviderCannotBypassPolicy(t *testing.T) {
+	svc := &LLMService{}
+	called := false
+	svc.SetTaskRuntimeProvider(func(_ context.Context, task models.Task, execID string, missing map[string]bool) *llmcontracts.RuntimeTools {
+		called = true
+		require.Equal(t, "execution", execID)
+		require.True(t, missing["view_task_thread"])
+		require.False(t, missing["edit_task"])
+		return &llmcontracts.RuntimeTools{
+			Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "cancel_task"}},
+			Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+				t.Fatal("forbidden executor invoked")
+				return "", true, false, nil
+			},
+		}
+	})
+	rt := svc.taskActionRuntimeTools(context.Background(), models.Task{ID: "task", ProjectID: "project"}, "execution")
+	require.True(t, called)
+	require.False(t, rt.HasDefinition("cancel_task"))
+	_, handled, _, err := rt.Executor(context.Background(), "cancel_task", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, handled)
 }

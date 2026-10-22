@@ -111,9 +111,6 @@ func (h *Handler) SaveAgentLifecycleHooks(c echo.Context) error {
 	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
 		return err
 	}
-	if agent.GeneratedStatus == models.AgentStatusProtected {
-		return echo.NewHTTPError(http.StatusForbidden, "lifecycle hooks for protected built-in agents cannot be modified through the dialog")
-	}
 
 	var payloads []hookSavePayload
 	if err := json.NewDecoder(c.Request().Body).Decode(&payloads); err != nil {
@@ -143,6 +140,16 @@ func (h *Handler) saveAgentLifecycleHooksFromForm(c echo.Context, agentID string
 }
 
 func (h *Handler) reconcileAgentLifecycleHooks(ctx context.Context, agentID string, payloads []hookSavePayload) error {
+	agent, err := h.agentRepo.GetByID(ctx, agentID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if agent.GeneratedStatus == models.AgentStatusProtected {
+		return h.updateProtectedHookEnabledStates(ctx, agentID, payloads)
+	}
 	// Validate every entry first so we never partially mutate.
 	seen := map[string]struct{}{}
 	for i, p := range payloads {
@@ -217,6 +224,40 @@ func (h *Handler) reconcileAgentLifecycleHooks(ctx context.Context, agentID stri
 			continue
 		}
 		if err := h.lifecycleRepo.DeleteHook(ctx, id); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+	return nil
+}
+
+// Protected hook definitions stay bundled; users may change only their enabled state.
+func (h *Handler) updateProtectedHookEnabledStates(ctx context.Context, agentID string, payloads []hookSavePayload) error {
+	hooks, err := h.lifecycleRepo.HooksByAgent(ctx, agentID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	byID := map[string]models.AgentLifecycleHook{}
+	for _, hook := range hooks {
+		if hook.When != models.LifecycleWhen("task_mode") {
+			byID[hook.ID] = hook
+		}
+	}
+	denied := echo.NewHTTPError(http.StatusForbidden, "protected lifecycle hooks only allow enabled-state changes")
+	if len(payloads) != len(byID) {
+		return denied
+	}
+	updates := make([]models.AgentLifecycleHook, 0, len(payloads))
+	for _, p := range payloads {
+		hook, ok := byID[p.ID]
+		if !ok || p.When != string(hook.When) || p.SkillKey != hook.SkillKey || p.Blocking != hook.Blocking || p.PromptOverride != hook.PromptOverride || p.OutputContract != string(hook.OutputContract) || (p.RunPolicyJSON != "" && p.RunPolicyJSON != hook.RunPolicyJSON) || (p.ScheduleJSON != "" && p.ScheduleJSON != hook.ScheduleJSON) {
+			return denied
+		}
+		delete(byID, p.ID)
+		hook.Enabled = p.Enabled
+		updates = append(updates, hook)
+	}
+	for i := range updates {
+		if err := h.lifecycleRepo.UpdateHook(ctx, &updates[i]); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
 	}

@@ -16,11 +16,13 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/pkg/filecontent"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 const (
-	maxUploadSize                     = 10 << 20 // 10 MB
+	maxUploadSize                     = 25 << 20 // Ordinary file limit; video is bounded separately.
 	maxTaskAttachmentFilesPerRequest  = 10       // Bound browser task attachment batches while preserving existing multi-file uploads.
 	multipartRequestOverheadAllowance = 1 << 20  // 1 MB for boundaries and form fields
 )
@@ -72,6 +74,9 @@ func parseBoundedMultipartForm(c echo.Context, maxFileSize int64, maxFiles int) 
 		return nil, nil
 	}
 	maxRequestBytes := attachmentRequestLimit(maxFileSize, maxFiles)
+	if maxFileSize == filecontent.MaxVideoBytes && maxRequestBytes > 250<<20+multipartRequestOverheadAllowance {
+		maxRequestBytes = 250<<20 + multipartRequestOverheadAllowance
+	}
 	if req.ContentLength > maxRequestBytes {
 		return nil, echo.NewHTTPError(http.StatusRequestEntityTooLarge, "request body too large")
 	}
@@ -87,7 +92,7 @@ func parseBoundedMultipartForm(c echo.Context, maxFileSize int64, maxFiles int) 
 		req.Body = boundedBody
 	}
 
-	if err := req.ParseMultipartForm(maxRequestBytes); err != nil {
+	if err := req.ParseMultipartForm(8 << 20); err != nil {
 		if req.MultipartForm != nil {
 			_ = req.MultipartForm.RemoveAll()
 		}
@@ -100,8 +105,17 @@ func parseBoundedMultipartForm(c echo.Context, maxFileSize int64, maxFiles int) 
 }
 
 func parseTaskAttachmentForm(c echo.Context, logScope string) (*multipart.Form, error) {
-	form, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest)
+	form, err := parseBoundedMultipartForm(c, filecontent.MaxVideoBytes, maxTaskAttachmentFilesPerRequest)
 	if err == nil {
+		if form != nil {
+			for _, files := range form.File {
+				for _, file := range files {
+					if validationErr := validateFileUpload(file); validationErr != nil {
+						return nil, echo.NewHTTPError(http.StatusBadRequest, validationErr.Error())
+					}
+				}
+			}
+		}
 		return form, nil
 	}
 
@@ -114,13 +128,14 @@ func parseTaskAttachmentForm(c echo.Context, logScope string) (*multipart.Form, 
 }
 
 type multipartFileLimitReadCloser struct {
-	src         io.ReadCloser
-	boundary    []byte
-	maxFileSize int64
-	pending     []byte
-	inBody      bool
-	currentFile bool
-	fileBytes   int64
+	currentLimit int64
+	src          io.ReadCloser
+	boundary     []byte
+	maxFileSize  int64
+	pending      []byte
+	inBody       bool
+	currentFile  bool
+	fileBytes    int64
 }
 
 func newMultipartFileLimitReadCloser(contentType string, src io.ReadCloser, maxFileSize int64) (io.ReadCloser, error) {
@@ -166,6 +181,19 @@ func (r *multipartFileLimitReadCloser) scan(data []byte) error {
 			}
 			headerBlock := r.pending[:idx+len("\r\n\r\n")]
 			r.currentFile = isMultipartFileHeader(headerBlock)
+			r.currentLimit = r.maxFileSize
+			if r.currentFile && r.maxFileSize == filecontent.MaxVideoBytes {
+				for _, line := range strings.Split(string(headerBlock), "\r\n") {
+					pair := strings.SplitN(line, ":", 2)
+					if len(pair) != 2 || !strings.EqualFold(strings.TrimSpace(pair[0]), "Content-Disposition") {
+						continue
+					}
+					_, params, err := mime.ParseMediaType(strings.TrimSpace(pair[1]))
+					if err == nil {
+						r.currentLimit = filecontent.UploadLimit(params["filename"])
+					}
+				}
+			}
 			r.fileBytes = 0
 			r.inBody = true
 			r.pending = r.pending[idx+len("\r\n\r\n"):]
@@ -259,7 +287,11 @@ func (r *multipartFileLimitReadCloser) countFileBytes(n int64) error {
 		return nil
 	}
 	r.fileBytes += n
-	if r.fileBytes > r.maxFileSize {
+	limit := r.currentLimit
+	if limit == 0 {
+		limit = r.maxFileSize
+	}
+	if r.fileBytes > limit {
 		return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "request body too large")
 	}
 	return nil
@@ -356,11 +388,19 @@ func (h *Handler) renderTaskAttachmentList(c echo.Context, taskID, projectID str
 	if err != nil {
 		return err
 	}
-	messages, err := h.chatAttachmentRepo.ListByTask(c.Request().Context(), taskID)
+	var messages []models.ChatAttachment
+	if task, taskErr := h.taskRepo.GetByID(c.Request().Context(), taskID); taskErr == nil && !service.IsTaskThread(task) && h.chatAttachmentRepo != nil {
+		// Chat-page conversations keep message files in chat_attachments.
+		messages, err = h.chatAttachmentRepo.ListByTask(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+	}
+	generated, err := h.attachmentRepo.ListGeneratedFiles(c.Request().Context(), projectID, taskID)
 	if err != nil {
 		return err
 	}
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, projectID, messages))
+	return render(c, http.StatusOK, components.TaskFilesList(attachments, projectID, [][]models.ChatAttachment{messages}, generated))
 }
 
 type taskAttachmentUploadResult struct {
@@ -392,7 +432,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 	}
 
 	for _, file := range files {
-		if file.Size > maxUploadSize {
+		if file.Size > filecontent.UploadLimit(file.Filename) {
 			applog.Infof("[handler] %s file %s too large (%d bytes)", logScope, file.Filename, file.Size)
 			continue
 		}
@@ -423,6 +463,9 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 		dest.Close()
 
 		mediaType := file.Header.Get("Content-Type")
+		if known, ok := allowedFileExtensions[strings.ToLower(filepath.Ext(filename))]; ok {
+			mediaType = known
+		}
 		if mediaType == "" {
 			mediaType = "application/octet-stream"
 		}
@@ -512,8 +555,7 @@ func (h *Handler) DeleteAttachment(c echo.Context) error {
 	applog.Infof("[handler] DeleteAttachment success id=%s", attachmentID)
 
 	// Return updated attachments list
-	attachments, _ := h.attachmentRepo.ListByTask(ctx, task.ID)
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, task.ProjectID))
+	return h.renderTaskAttachmentList(c, task.ID, task.ProjectID)
 }
 
 // DownloadTaskAttachment resolves the attachment through its owning project.
@@ -528,7 +570,7 @@ func (h *Handler) DownloadTaskAttachment(c echo.Context) error {
 	}
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("Content-Security-Policy", "sandbox")
-	return c.File(attachment.FilePath)
+	return serveFileContent(c, attachment.FilePath, attachment.FileName)
 }
 
 // saveDeferredTaskUploads publishes draft files before returning a non-running task.

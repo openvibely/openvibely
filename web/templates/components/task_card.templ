@@ -480,6 +480,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
+		data-task-goal-met={ fmt.Sprintf("%t", task.GoalMet) }
 		data-task-title={ task.Title }
 		data-task-priority={ fmt.Sprintf("%d", task.Priority) }
 		data-task-merge={ string(task.MergeStatus) }
@@ -489,7 +490,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		onclick="handleTaskSelect(event)"
 		onpointerdown="handleTaskPointerDown(event)"
 	>
-		<label data-kanban-checkbox class="hidden absolute top-2 right-2 z-30" onclick="event.stopPropagation()">
+		<label data-kanban-checkbox class="hidden absolute top-2 right-2 z-30 flex items-center justify-center h-11 w-11 lg:h-6 lg:w-6" onclick="event.stopPropagation()">
 			<input type="checkbox" class="checkbox checkbox-sm" aria-label={ "Select " + task.Title } onchange="window.kanbanToggleCard(this)"/>
 		</label>
 		<!-- Kebab menu in top right corner -->

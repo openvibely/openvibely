@@ -516,8 +516,8 @@ func TestChatBubbleStreaming_ThreadCompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "stopThreadPolling()") {
 		t.Error("thread completion should stop thread polling dynamically when no pending rows exist")
 	}
-	if !strings.Contains(content, "restoreThreadPollingFallback()") {
-		t.Error("transport errors should restore polling as a fallback")
+	if strings.Contains(content, "eventSource.onerror") {
+		t.Error("transport errors must remain owned by the shared connection")
 	}
 }
 
@@ -678,8 +678,8 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "/thread/composer-action") {
 		t.Error("resume completion should refresh the primary composer action from the server")
 	}
-	if !strings.Contains(content, "restoreThreadPollingFallback()") {
-		t.Error("resume transport errors should restore polling as a fallback")
+	if strings.Contains(content, "eventSource.onerror") {
+		t.Error("resume transport errors must remain owned by the shared connection")
 	}
 	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
 		!strings.Contains(content, "var largeStreamRenderInterval = 50") {
@@ -688,8 +688,8 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "if (renderDelayTimer !== null)") {
 		t.Error("resume completion must cancel a pending delayed render before forcing the final render")
 	}
-	if strings.Count(content, "flushCumulativeContent();") != 2 {
-		t.Error("both resume-stream error paths must flush and cancel pending delayed output")
+	if strings.Count(content, "flushCumulativeContent();") != 1 {
+		t.Error("the resume-stream terminal error path must flush and cancel pending delayed output")
 	}
 	for _, snippet := range []string{
 		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
@@ -716,7 +716,7 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	content := buf.String()
 
 	// Verify EventSource is used for streaming
-	if !strings.Contains(content, "new EventSource") {
+	if !strings.Contains(content, "window.openVibelyLive.execution") {
 		t.Error("Missing EventSource for streaming")
 	}
 	if !strings.Contains(content, "window.registerChatStreamEventSource(execId, eventSource)") {
@@ -743,8 +743,8 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	if strings.Contains(content, "container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer)") {
 		t.Error("Streaming onmessage must not normalize and copy the entire accumulated response before the scheduled render")
 	}
-	if strings.Count(content, "flushBufferedOutput();") != 2 {
-		t.Error("both fresh-stream error paths must flush and cancel pending delayed output")
+	if strings.Count(content, "flushBufferedOutput();") != 1 {
+		t.Error("the fresh-stream terminal error path must flush and cancel pending delayed output")
 	}
 	for _, snippet := range []string{
 		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
@@ -828,6 +828,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  openVibelyLive: {execution: function() { return new FakeEventSource(); }},
   normalizeTranscriptMarkers: text => text.replace(/alias/g, 'normalized-alias'),
   renderStreamingContent(container, text) { renders++; container.rendered = text; },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
@@ -845,7 +846,7 @@ if (timers.size !== 1 || renders !== 1) process.exit(3);
 source.listeners.error({ data: 'boom' });
 if (renders !== 2 || timers.size !== 0 || cleared !== 1) process.exit(4);
 if (!appended.length || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(5);
-source.onerror({ data: 'boom' });
+source.listeners.error({ data: 'boom' });
 if (renders !== 2 || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(6);
 `
 	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
@@ -895,6 +896,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  openVibelyLive: {execution: function() { return new FakeEventSource(); }},
   renderStreamingContent() {},
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
   registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
@@ -905,7 +907,7 @@ global.window = {
 for (let attempt = 0; attempt < 5; attempt++) {
   const active = sources[sources.length - 1];
   active.listeners.error({ data: 'execution not found' });
-  active.onerror({ data: 'execution not found' });
+  active.listeners.error({ data: 'execution not found' });
   if (timers.size !== 1 || appended.length !== 0) process.exit(10 + attempt);
   const entry = timers.entries().next().value;
   timers.delete(entry[0]);
@@ -914,7 +916,7 @@ for (let attempt = 0; attempt < 5; attempt++) {
 if (sources.length !== 6 || appended.length !== 0) process.exit(20);
 const exhausted = sources[sources.length - 1];
 exhausted.listeners.error({ data: 'execution not found' });
-exhausted.onerror({ data: 'execution not found' });
+exhausted.listeners.error({ data: 'execution not found' });
 if (timers.size !== 0 || appended.length !== 1 || appended[0].textContent.indexOf('execution not found') === -1) process.exit(21);
 `
 	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
@@ -961,6 +963,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  openVibelyLive: {execution: function() { return new FakeEventSource(); }},
   normalizeTranscriptMarkers() { throw new Error('normalizer must not run in fallback'); },
   renderStreamingContent() { renders++; return Promise.reject(new Error('renderer failed')); },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
@@ -1278,6 +1281,7 @@ func TestBrowserFunctional_FailedAssistantTerminalErrorOrderingAndSmartScrollInC
 	window.EventSource = function(url) { this.url = url; this.listeners = {}; window.__eventSources.push(this); };
 	window.EventSource.prototype.addEventListener = function(type, callback) { this.listeners[type] = callback; };
 	window.EventSource.prototype.close = function() {};
+    window.openVibelyLive = {execution: function(id, offset) { return new window.EventSource("/events/chat/" + id + "?offset=" + offset); }};
 	window.renderChatMarkdown = function(text) { return '<div class="chat-markdown">' + String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</div>'; };
 	window.addCodeCopyButtons = function() {};
 	window.renderChatMarkdownLargeFallback = function(text) { var node = document.createElement('div'); node.innerHTML = window.renderChatMarkdown(text); return node; };
@@ -1685,7 +1689,8 @@ func TestChatInputForm_AutoFocusUsesSharedLifecycleContract(t *testing.T) {
 		`if (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return`,
 		`function _composerFocusNavigationTrigger(event)`,
 		`active.matches('[data-nav-base]')`,
-		`active.getAttribute('data-nav-base') === window.location.pathname`,
+		`active.getAttribute('data-nav-base') === displayedPath`,
+		`window.openVibelyDisplayedURL()`,
 		`function _rememberComposerFocusNavigationTrigger(event)`,
 		`_composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event)`,
 		`var allowedTrigger = trigger || _composerFocusState.navigationTrigger`,
@@ -1966,7 +1971,7 @@ func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
 	}
 
 	content := buf.String()
-	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`
+	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`
 	if !strings.Contains(content, gutterClass) {
 		t.Fatalf("chat composer should render inside a full-width shadow gutter with a persistent top gap and without artificial side padding or desktop caps; missing %q", gutterClass)
 	}
@@ -2335,6 +2340,16 @@ func TestTaskAttachmentListCarriesProjectContext(t *testing.T) {
 		t.Fatalf("render AttachmentList: %v", err)
 	}
 	content := buf.String()
+	if strings.Contains(content, "data-files-panel") {
+		t.Fatal("Files tab must not open a second file list")
+	}
+	if count := strings.Count(content, ">Attachments</h3>"); count != 1 {
+		t.Fatalf("Files tab must show exactly one Attachments heading, got %d", count)
+	}
+	if !strings.Contains(content, `id="add-attachment-btn"`) {
+		t.Fatal("Files tab must retain its upload control")
+	}
+
 	if !strings.Contains(content, `hx-post="/tasks/task-a/attachments?project_id=project-a"`) {
 		t.Fatalf("upload URL must carry project context, got: %s", content)
 	}
@@ -2574,7 +2589,7 @@ func TestUserScrollTracking(t *testing.T) {
 			}
 
 			// Verify EventSource connection setup
-			if !strings.Contains(content, "new EventSource") {
+			if !strings.Contains(content, "window.openVibelyLive.execution") {
 				t.Error("Missing EventSource setup")
 			}
 
@@ -4077,7 +4092,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024",
+		"var shouldYieldPreparation = yieldBetweenBatches !== false && (textBuffer.length >= 64 * 1024",
 		"window.codeRangesAsync(textBuffer, container, true)",
 		"targetProperty = 'thinkingRenderedContent'",
 		"pendingThinkingRenderedContent = seg.thinkingRenderedContent",
@@ -4417,7 +4432,7 @@ func TestChatBubbleStreaming_UsesUTF8ByteOffsetInEventSourceURL(t *testing.T) {
 	if !strings.Contains(html, "function utf8ByteLength") || !strings.Contains(html, "streamTextEncoder.encode(value || '').length") {
 		t.Fatal("fresh stream should compute offsets as UTF-8 byte lengths")
 	}
-	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
+	if !strings.Contains(html, "var streamOffset = utf8ByteLength(textBuffer);") || !strings.Contains(html, "window.openVibelyLive.execution(execId, streamOffset, streamProjectID)") {
 		t.Fatal("fresh stream EventSource URL should include current textBuffer byte offset")
 	}
 }
@@ -4440,7 +4455,7 @@ func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
 	for _, snippet := range []string{
 		"var cumulativeContent = container.getAttribute('data-raw-content') || '';",
 		"var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;",
-		"new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset))",
+		"window.openVibelyLive.execution(execId, streamOffset, streamProjectID)",
 		"function persistResumeStreamState(active)",
 		"streamOffset += utf8ByteLength(event.data);",
 		"container.setAttribute('data-initial-byte-length', String(streamOffset));",
@@ -4771,7 +4786,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"`) {
+	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0"`) {
 		t.Fatal("task thread messages shell should anchor the latest control without stacking an outer bottom margin above the composer")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
@@ -4783,7 +4798,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
 		t.Fatal("task thread messages must not use fixed right-margin scrollbar compensation because it leaves bubbles visually shorter than the input in real browsers")
 	}
-	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`) {
+	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`) {
 		t.Fatal("task thread composer must use a full-width shadow gutter with only the shared persistent top gap")
 	}
 	if strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4 px-3`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4`) {
@@ -5088,7 +5103,7 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errEndOffset := strings.Index(content[errIdx:], "eventSource.onerror")
+	errEndOffset := strings.Index(content[errIdx:], "connectExecutionStream();")
 	if errEndOffset <= 0 {
 		t.Fatal("ChatBubbleStreaming error handler boundary is missing")
 	}
@@ -5106,25 +5121,10 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		t.Error("error handler must expose its terminal render and transcript sync as an awaitable transition")
 	}
 
-	// onerror handler
-	oeIdx := strings.Index(content, "eventSource.onerror")
-	if oeIdx == -1 {
-		t.Fatal("ChatBubbleStreaming must have an onerror handler")
+	if strings.Contains(content, "eventSource.onerror") {
+		t.Error("network failures must not terminalize an execution subscription")
 	}
-	oeEnd := oeIdx + 2000
-	if oeEnd > len(content) {
-		oeEnd = len(content)
-	}
-	oeBody := content[oeIdx:oeEnd]
-	if !strings.Contains(oeBody, "scheduleExecutionStreamRetry()") {
-		t.Error("onerror handler must retry empty early stream failures before clearing chat streaming state")
-	}
-	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
-		t.Error("onerror handler must clear _chatStreamInProgress for chat (non-thread) context")
-	}
-	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
-		t.Error("onerror handler must re-evaluate plan prompt for chat (non-thread) context")
-	}
+
 }
 
 func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) {
@@ -5143,7 +5143,7 @@ func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) 
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errEnd := strings.Index(content[errIdx:], "eventSource.onerror = function")
+	errEnd := strings.Index(content[errIdx:], "connectExecutionStream();")
 	if errEnd == -1 {
 		t.Fatal("ChatBubbleStreaming must delimit its error event listener before onerror")
 	}
@@ -5225,8 +5225,8 @@ func TestChatScrollTracker_UsesInteractionSignalsForScrollIntent(t *testing.T) {
 		"addEventListener('keydown'",
 		// shouldAutoScroll relies on the persisted flag and never pins mid-interaction
 		"return !this.userScrolledUp && !(this._userInteracting && this._interactionUp === true);",
-		// Upward user input parks the reader, even within the near-bottom threshold
-		"self.userScrolledUp = self._interactionUp === true ? !atBottom : !isNear;",
+		// User input keeps the reader parked until they reach the actual bottom.
+		"self.userScrolledUp = !atBottom;",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {
@@ -5338,7 +5338,6 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 		"var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;",
 		"previous.userScrolledUp && !userScrolledUp && intentRevision <= (previous.intentRevision || 0)",
 		"if (typeof self.onIntentChange === 'function') self.onIntentChange();",
-		"messages.style.visibility = 'hidden';",
 		"Promise.resolve(options.renderPromise)",
 		"if (!options.waitForImages) return Promise.resolve();",
 		"img[data-chat-attachment-image=\"true\"]",
@@ -5361,7 +5360,7 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 	}
 }
 
-func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testing.T) {
+func TestTaskThreadView_StartsTranscriptUnderScrollCoordinator(t *testing.T) {
 	task := &models.Task{ID: "thread-stable-hydration", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 	var buf bytes.Buffer
 	if err := TaskThreadView(task, []models.Execution{{ID: "exec-1", Status: models.ExecCompleted, Output: "# rendered later"}}, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
@@ -5369,14 +5368,14 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
 		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
 	}
 	if !strings.Contains(content, "waitForImages: true,") {
-		t.Fatal("task thread initial reveal must wait for historical attachment image load and decode")
+		t.Fatal("task thread scroll stabilization must track historical attachment image load and decode")
 	}
 }
 
@@ -5465,7 +5464,7 @@ func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 	if !strings.Contains(content, "target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content'") {
 		t.Fatal("main-content navigation must synchronously identify the outgoing task thread")
 	}
-	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content')")
+	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh)")
 	if mainContentStart < 0 {
 		t.Fatal("task-detail navigation must release detached task-thread state")
 	}
@@ -5486,7 +5485,7 @@ func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"else if (target && target.id === 'main-content')",
+		"else if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh)",
 		"document.body.addEventListener('htmx:historyRestore'",
 		"_initializeFreshTaskThreadOpen();",
 	} {
@@ -5539,7 +5538,7 @@ func TestCleanAssistantMessagesReturnsQueuedRenderCompletion(t *testing.T) {
 		"var scheduledRender = window.scheduleChatElementRender(el, raw);",
 		"renderPromises.push(scheduledRender);",
 		"if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);",
-		"var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';",
+		"var renderedRevision = el._renderedRevision || '';",
 		"if (renderedRevision === revision && hasRenderedContent) return;",
 		"container.setAttribute('data-rendered-revision', renderRevision);",
 		"el.setAttribute('data-rendered-revision', revision);",
@@ -5614,7 +5613,7 @@ func TestTaskThreadView_WindowedTranscriptUsesContainerLoaderAndPruning(t *testi
 	if strings.Count(content, `data-execution-pair="true"`) < 2 {
 		t.Fatal("expected task thread executions to render as whole-turn pairs")
 	}
-	if strings.Count(content, `chat-execution-pair space-y-6`) < 2 {
+	if strings.Count(content, `chat-execution-pair space-y-4`) < 2 {
 		t.Fatal("expected task thread execution pairs to preserve equal vertical spacing between user and assistant bubbles")
 	}
 	if strings.Contains(content, `chat-execution-pair space-y-3`) {
@@ -5666,7 +5665,9 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		"else if (window.cleanAssistantMessages) hydrationPromise = window.cleanAssistantMessages(container)",
 		"container._chatEarlierHydrationPromise = Promise.resolve(hydrationPromise)",
 		"var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve()",
-		"Promise.resolve(hydrationPromise).then(function()",
+		"await hydrationPromise",
+		"await window.waitForChatTranscriptViewport(container)",
+		"await window.renderVisibleChatRows(container)",
 		"!event.detail.successful",
 		"loader.setAttribute('hx-swap', 'outerHTML show:none')",
 	}
@@ -5704,7 +5705,8 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 
 	html := `<!doctype html><html><head><meta charset="utf-8"><style>
 		#fixture-root { width: 480px; }
-		.transcript { height: 200px; overflow-y: auto; visibility: hidden; }
+		.transcript { height: 200px; overflow-y: auto; }
+        [data-transcript-hydrating="true"] { visibility: hidden; }
 		.pair { height: 120px; }
 	</style><script>window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); }; window.cancelAnimationFrame = clearTimeout;</script></head><body><main id="fixture-root"><div id="messages" class="transcript" data-transcript-hydrating="true"><div class="pair" data-execution-pair="true"></div><div class="pair" data-execution-pair="true"></div></div></main>` + chatScript.String() + `<script>
 	window.addEventListener('DOMContentLoaded', function() {
@@ -5977,7 +5979,7 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		var resolveHydration;
 		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
 		var restored = window.restoreChatTranscriptScroll({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
-		if (messages.style.visibility !== 'hidden') fail('initial transcript was revealed before hydration settled');
+		if (getComputedStyle(messages).visibility !== 'hidden') fail('cold transcript revealed partial history while hydration was pending');
 		pair(messages); pair(messages); pair(messages);
 		resolveHydration();
 		Promise.resolve(restored).then(async function() {
@@ -6495,5 +6497,17 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		if strings.Contains(content, fragment) {
 			t.Fatalf("render pass must not synchronously measure every tool scroller; found %q", fragment)
 		}
+	}
+}
+
+func TestTaskFilesListIncludesGeneratedOutputs(t *testing.T) {
+	var buf bytes.Buffer
+	err := TaskFilesList(nil, "project-a", nil, []models.GeneratedFile{{ID: "output-a", FileName: "report.docx", MediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", FileSize: 42}}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "/files/output-a?project_id=project-a") || !strings.Contains(content, "report.docx") || strings.Contains(content, "No files yet") {
+		t.Fatalf("missing generated output: %s", content)
 	}
 }

@@ -2,7 +2,6 @@ package prompt
 
 import (
 	"fmt"
-
 	"strings"
 	"testing"
 
@@ -60,7 +59,7 @@ func TestBuildAttachmentInstructions_WithFiles(t *testing.T) {
 	if !strings.Contains(result, "/tmp/image.png") {
 		t.Error("should contain absolute path for image.png")
 	}
-	if !strings.Contains(result, "absolute path") {
+	if !strings.Contains(result, "path:") {
 		t.Error("should mention absolute paths")
 	}
 }
@@ -172,5 +171,29 @@ func TestBuildChatHistoryText_LimitsHistory(t *testing.T) {
 	}
 	if !strings.Contains(result, "msg-24") {
 		t.Error("should contain most recent message")
+	}
+}
+
+func TestImageInstructionsDoNotRequestFileInspection(t *testing.T) {
+	for _, ext := range []string{"png", "jpeg", "jpg", "gif", "webp"} {
+		result := BuildAttachmentInstructions([]models.Attachment{{FileName: "screenshot." + ext, FilePath: "/tmp/screenshot." + ext}})
+		if !strings.Contains(result, "already included directly") || strings.Contains(result, "Use file tools") {
+			t.Fatal(result)
+		}
+	}
+	result := BuildAttachmentInstructions([]models.Attachment{{FileName: "report.pdf", FilePath: "/tmp/report.pdf"}})
+	if !strings.Contains(result, "Use file tools") || strings.Contains(result, "already included directly") {
+		t.Fatal(result)
+	}
+}
+
+func TestHistoricalImagesRemainFileReferences(t *testing.T) {
+	files := []models.Attachment{{FileName: "previous.png", FilePath: "/tmp/previous.png"}}
+	historical := BuildAttachmentReferences(files)
+	if strings.Contains(historical, "already included") || !strings.Contains(historical, "Use file tools") {
+		t.Fatalf("incorrect historical instructions: %s", historical)
+	}
+	if !strings.Contains(BuildAttachmentInstructions(files), "already included") {
+		t.Fatal("current images must still be identified as direct input")
 	}
 }

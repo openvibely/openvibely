@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 211
+const latestMigrationVersion = 215
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -2444,16 +2444,9 @@ func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
 	if tools != `["skill_view","skills_list","agent_list","agent_view","skill_manage","skill_import","agent_skill_manage"]` {
 		t.Fatalf("skill curator tools not normalized: %s", tools)
 	}
-	var routeContract string
-	var routeBlocking int
-	if err := db.QueryRow(`SELECT output_contract, blocking FROM agent_lifecycle_hooks WHERE id = 'hk_old_route'`).Scan(&routeContract, &routeBlocking); err != nil {
-		t.Fatalf("failed to load route hook: %v", err)
-	}
-	if routeContract != "selected_skills" {
-		t.Fatalf("route hook output contract = %q, want selected_skills", routeContract)
-	}
-	if routeBlocking != 0 {
-		t.Fatalf("route hook blocking = %d, want 0 for parallel routing", routeBlocking)
+	var routeCount int
+	if err := db.QueryRow(`SELECT count(*) FROM agent_lifecycle_hooks WHERE id = 'hk_old_route'`).Scan(&routeCount); err != nil || routeCount != 0 {
+		t.Fatalf("obsolete route remains: %d %v", routeCount, err)
 	}
 	var oldCount int
 	if err := db.QueryRow(`
@@ -2534,23 +2527,11 @@ func TestMigration082_AppliesAfterPublic074(t *testing.T) {
 			t.Fatalf("expected agents.%s after migration 082", column)
 		}
 	}
-	var contract string
-	var blocking int
-	if err := db.QueryRow(`
-		SELECT output_contract, blocking
-		FROM agent_lifecycle_hooks
-		WHERE agent_id = 'sys_skill_curator_00000000000000000001'
-		  AND when_slot = 'route_task'
-		  AND skill_key = 'route_task'
-	`).Scan(&contract, &blocking); err != nil {
-		t.Fatalf("failed to load seeded route hook: %v", err)
+	var routeCount int
+	if err := db.QueryRow(`SELECT count(*) FROM agent_lifecycle_hooks WHERE agent_id = 'sys_skill_curator_00000000000000000001' AND when_slot = 'route_task'`).Scan(&routeCount); err != nil || routeCount != 0 {
+		t.Fatalf("obsolete route remains: %d %v", routeCount, err)
 	}
-	if contract != "selected_skills" {
-		t.Fatalf("seeded route hook contract = %q, want selected_skills", contract)
-	}
-	if blocking != 0 {
-		t.Fatalf("seeded route hook blocking = %d, want 0 for parallel routing", blocking)
-	}
+
 }
 
 func applyUnreleasedLifecycleSchemaForTest(db *sql.DB) error {
@@ -4160,5 +4141,96 @@ func TestMigration210CalendarRoundTrip(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("rollback left %d calendar schema objects", count)
 		}
+	}
+}
+
+func TestMigration212GeneratedFilesAfterHistoryMetadataUpdate(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "generated-files.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 211); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"generated_files", "executions_history_metadata_task_update", "idx_generated_files_project_execution"} {
+		var count int
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name = ?", name).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("schema object %s count = %d, want 1", name, count)
+		}
+	}
+	version, err := goose.GetDBVersion(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != latestMigrationVersion {
+		t.Fatalf("migration version = %d, want %d", version, latestMigrationVersion)
+	}
+}
+
+func TestMigration212PreservesExistingGeneratedFiles(t *testing.T) {
+	for _, existingIndex := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_index_%t", existingIndex), func(t *testing.T) {
+			db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "existing-generated-files.db"))
+			goose.SetBaseFS(migrations.FS)
+			if err := goose.SetDialect("sqlite3"); err != nil {
+				t.Fatal(err)
+			}
+			if err := goose.UpTo(db, ".", 212); err != nil {
+				t.Fatal(err)
+			}
+			// Reproduce an existing table whose migration version is unrecorded.
+			if _, err := db.Exec(`
+				INSERT INTO projects (id, name) VALUES ('project-212', 'Generated files');
+				INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+					VALUES ('task-212', 'project-212', 'Generate file', 'backlog', 2, 'completed', 'generate');
+				INSERT INTO executions (id, task_id, status) VALUES ('execution-212', 'task-212', 'completed');
+				INSERT INTO generated_files (id, project_id, execution_id, file_name, file_path, media_type, file_size, display)
+					VALUES ('file-212', 'project-212', 'execution-212', 'report.html', '/files/report.html', 'text/html', 123, 'canvas');
+				DELETE FROM goose_db_version WHERE version_id = 212;
+			`); err != nil {
+				t.Fatal(err)
+			}
+			if !existingIndex {
+				if _, err := db.Exec(`DROP INDEX idx_generated_files_project_execution`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Exercise the startup migration path, including a subsequent restart.
+			for attempt := 0; attempt < 2; attempt++ {
+				if err := initializeSQLite(db); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var count int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM generated_files WHERE id = 'file-212'
+				AND project_id = 'project-212' AND execution_id = 'execution-212'
+				AND file_name = 'report.html' AND file_path = '/files/report.html'
+				AND media_type = 'text/html' AND file_size = 123 AND display = 'canvas'`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatal("existing generated file was not preserved")
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_generated_files_project_execution'`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatal("generated files index is missing")
+			}
+			version, err := goose.GetDBVersion(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if version != latestMigrationVersion {
+				t.Fatalf("migration version = %d, want %d", version, latestMigrationVersion)
+			}
+		})
 	}
 }

@@ -24,6 +24,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 )
 
@@ -141,6 +142,8 @@ type AgenticOptions struct {
 	// InitialInputCommit persists a prepared late steer before sampling and
 	// continues recording its tool/results history throughout this invocation.
 	InitialInputCommit func(context.Context, []any) error
+	// OnHistory persists conversation state independently of steering.
+	OnHistory func(context.Context, []any) error
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -413,6 +416,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if !opts.OmitExecutionEnvironment {
 			compactedItems = ensureExecutionEnvironment(compactedItems, opts.WorkDir)
 		}
+		compactedItems = ensureAttachmentContext(ctx, compactedItems)
 		// Explicit compaction retires prior configuration updates. Re-establish
 		// the selected effort after the compaction item so the request-level
 		// effort can remain pinned to the original cacheable baseline.
@@ -439,6 +443,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 	}
+	inputItems = ensureAttachmentContext(ctx, inputItems)
 	if astraConfigurationUpdateEffort != "" {
 		// The update must immediately precede the next user message. Waiting until
 		// after pre-turn compaction also avoids sending an update into compaction
@@ -477,17 +482,31 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	var allText strings.Builder
 	persistSteeringHistory := opts.InitialInputCommit
+	persistHistory := func(ctx context.Context, items []any) error {
+		if persistSteeringHistory != nil {
+			if err := persistSteeringHistory(ctx, items); err != nil {
+				return err
+			}
+		}
+		if opts.OnHistory != nil {
+			return opts.OnHistory(ctx, items)
+		}
+		return nil
+	}
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		inputItems = ensureAttachmentContext(ctx, inputItems)
 		if !opts.OmitExecutionEnvironment {
 			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 		}
-		if persistSteeringHistory != nil {
-			if err := persistSteeringHistory(ctx, inputItems); err != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil {
+			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
 		}
-		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
+		// Summary compaction sends first and trims only after provider overflow.
+		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil && !summarizing {
 			if turn == 0 || !opts.AutoCompaction {
 				return nil, err
 			}
@@ -503,6 +522,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		var turnResult *agenticTurnResult
 		localSteering := LocalSteeringInput{}
 		overflowRecovered := false
+		// Keep text actually delivered to the caller if this sampling attempt
+		// fails before it can publish a completed assistant message.
+		var partialText strings.Builder
+		streamOpts := *opts
+		streamOpts.OnText = func(text string) {
+			partialText.WriteString(text)
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+
 		turnResult, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 			RetryableError: func(err error) bool {
 				return isRetryableResponsesTransportError(err)
@@ -528,9 +558,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*agenticTurnResult, error) {
-			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
+			return c.sendAgenticTurn(attemptCtx, inputItems, tools, &streamOpts, isChatGPTOAuth)
 		})
 		if err != nil {
+			if text := partialText.String(); text != "" {
+				inputItems = append(inputItems, agenticInputItem{"type": "message", "role": "assistant", "content": text})
+				if saveErr := persistHistory(context.WithoutCancel(ctx), inputItems); saveErr != nil {
+					err = errors.Join(err, saveErr)
+				}
+			}
 			providerErr := CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 			for _, record := range pendingAsyncDeliveries {
 				if opts.OnAsyncToolRejected != nil {
@@ -576,8 +612,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
 		inputItems = append(inputItems, outputItems...)
-		if persistSteeringHistory != nil {
-			if err := persistSteeringHistory(ctx, inputItems); err != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil {
+			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
 		}
@@ -703,14 +739,22 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			inputItems = append(inputItems, toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
+			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
+				item := agenticInputItem{"type": "message", "role": "user", "content": []any{
+					map[string]any{"type": "input_text", "text": "Image returned by view_image: " + image.Name},
+					map[string]any{"type": "input_image", "detail": "auto", "image_url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)},
+				}}
+				inputItems = append(inputItems, item)
+				localItemsAfterResponse = append(localItemsAfterResponse, item)
+			}
 			if exec.record.ID != "" {
 				deliveryRecords = append(deliveryRecords, exec.record)
 			}
 		}
 		// Preserve completed tool results even when cancellation or compaction
 		// prevents the next model request from starting.
-		if persistSteeringHistory != nil {
-			if err := persistSteeringHistory(context.WithoutCancel(ctx), inputItems); err != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil {
+			if err := persistHistory(context.WithoutCancel(ctx), inputItems); err != nil {
 				return nil, err
 			}
 		}
@@ -757,8 +801,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 		}
 	}
-	if persistSteeringHistory != nil {
-		if err := persistSteeringHistory(ctx, inputItems); err != nil {
+	if persistSteeringHistory != nil || opts.OnHistory != nil {
+		if err := persistHistory(ctx, inputItems); err != nil {
 			return nil, err
 		}
 	}
@@ -2487,7 +2531,7 @@ func agenticToolDefinitions(opts *AgenticOptions, includeStandaloneWebSearch boo
 			tools = DefaultTools()
 		}
 		tools = append(tools, opts.ExtraTools...)
-		tools = filterToolDefinitions(tools, opts.ToolFilter)
+		// Retain candidates; filter immediately before each request.
 	}
 	if includeStandaloneWebSearch {
 		tools = append(tools, standaloneWebSearchTool())
@@ -2553,6 +2597,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
+	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,

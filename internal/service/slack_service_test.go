@@ -21,7 +21,9 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -138,24 +140,30 @@ func TestSlackService_ConnectURLStoresState(t *testing.T) {
 }
 
 func TestSlackService_HandleOAuthCallback(t *testing.T) {
+	attempts := 0
 	env := teststores.New(t)
 	settingsRepo := env.Settings
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotToken, "xoxb-old-oauth"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotTokenOverride, "xoxb-manual"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotTokenSource, SlackBotTokenSourceManual))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "U-old"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingTeamID, "T-old"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingTeamName, "Old Workspace"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingConnectedAt, "2024-01-02T03:04:05Z"))
-	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingOAuthState, "state-123"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingClientID, "cid"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingClientSecret, "secret"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingBotToken, "xoxb-old-oauth"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingBotTokenOverride, "xoxb-manual"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingBotTokenSource, SlackBotTokenSourceManual))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingBotUserID, "U-old"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingTeamID, "T-old"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingTeamName, "Old Workspace"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingConnectedAt, "2024-01-02T03:04:05Z"))
+	require.NoError(t, settingsRepo.Set(retrytest.Context(), SlackSettingOAuthState, "state-123"))
 
 	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/oauth.v2.access", r.URL.Path)
 		_ = r.ParseForm()
 		require.Equal(t, "cid", r.FormValue("client_id"))
 		require.Equal(t, "secret", r.FormValue("client_secret"))
+		attempts++
+		if attempts == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		fmt.Fprint(w, `{"ok":true,"access_token":"xoxb-123","bot_user_id":"U123","team":{"id":"T123","name":"OpenVibely"}}`)
 	}))
 	defer oauthSrv.Close()
@@ -163,17 +171,17 @@ func TestSlackService_HandleOAuthCallback(t *testing.T) {
 	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	svc.oauthBaseURL = oauthSrv.URL
 
-	err := svc.HandleOAuthCallback(context.Background(), "code-1", "state-123", "http://localhost:8080/channels/slack/callback")
+	err := svc.HandleOAuthCallback(retrytest.Context(), "code-1", "state-123", "http://localhost:8080/channels/slack/callback")
 	require.NoError(t, err)
 
-	botToken, _ := settingsRepo.Get(context.Background(), SlackSettingBotToken)
-	tokenSource, _ := settingsRepo.Get(context.Background(), SlackSettingBotTokenSource)
-	botUserID, _ := settingsRepo.Get(context.Background(), SlackSettingBotUserID)
-	teamID, _ := settingsRepo.Get(context.Background(), SlackSettingTeamID)
-	teamName, _ := settingsRepo.Get(context.Background(), SlackSettingTeamName)
-	connectedAt, _ := settingsRepo.Get(context.Background(), SlackSettingConnectedAt)
-	oauthState, _ := settingsRepo.Get(context.Background(), SlackSettingOAuthState)
-	sendResponses, _ := settingsRepo.Get(context.Background(), SlackSettingSendResponses)
+	botToken, _ := settingsRepo.Get(retrytest.Context(), SlackSettingBotToken)
+	tokenSource, _ := settingsRepo.Get(retrytest.Context(), SlackSettingBotTokenSource)
+	botUserID, _ := settingsRepo.Get(retrytest.Context(), SlackSettingBotUserID)
+	teamID, _ := settingsRepo.Get(retrytest.Context(), SlackSettingTeamID)
+	teamName, _ := settingsRepo.Get(retrytest.Context(), SlackSettingTeamName)
+	connectedAt, _ := settingsRepo.Get(retrytest.Context(), SlackSettingConnectedAt)
+	oauthState, _ := settingsRepo.Get(retrytest.Context(), SlackSettingOAuthState)
+	sendResponses, _ := settingsRepo.Get(retrytest.Context(), SlackSettingSendResponses)
 	require.Equal(t, "xoxb-123", botToken)
 	require.Equal(t, SlackBotTokenSourceOAuth, tokenSource)
 	require.Equal(t, "U123", botUserID)
@@ -183,8 +191,8 @@ func TestSlackService_HandleOAuthCallback(t *testing.T) {
 	require.NotEmpty(t, connectedAt)
 	require.Empty(t, oauthState)
 	require.Equal(t, "true", sendResponses)
-	require.Equal(t, "xoxb-123", svc.resolveBotToken(context.Background()))
-	status, err := svc.GetConnectionStatus(context.Background())
+	require.Equal(t, "xoxb-123", svc.resolveBotToken(retrytest.Context()))
+	status, err := svc.GetConnectionStatus(retrytest.Context())
 	require.NoError(t, err)
 	require.True(t, status.Connected)
 	require.Equal(t, SlackBotTokenSourceOAuth, status.BotTokenSource)
@@ -427,6 +435,21 @@ func TestSlackService_SocketEventAuthorizationFailureRedelivery(t *testing.T) {
 func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery(t *testing.T) {
 	svc, db, taskRepo, _, _, receiptRepo, projectID := newSlackSocketIngressTestService(t)
 	svc.SetUploadsDir(t.TempDir())
+	loads := 0
+	source := attachmentcontext.NewSource(func(ctx context.Context) (string, error) {
+		loads++
+		files, err := db.ChatAttachments.ListByProject(ctx, projectID)
+		if err != nil {
+			return "", err
+		}
+		var refs []string
+		for _, file := range files {
+			refs = append(refs, file.FileName)
+		}
+		return strings.Join(refs, "\n"), nil
+	}, attachmentcontext.ChatProjectKey(projectID))
+	require.NoError(t, source.Load(context.Background()))
+	require.Empty(t, source.References(context.Background()))
 	acks := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
 	downloads := 0
@@ -460,6 +483,9 @@ func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery
 	require.Len(t, downloadedPaths, 1)
 	require.NoFileExists(t, downloadedPaths[0], "failed atomic handoff must remove the published attachment")
 
+	require.Empty(t, source.References(context.Background()))
+	require.Equal(t, 1, loads, "failed handoff must not invalidate the source")
+
 	chatAttachmentRepo := db.ChatAttachments
 	svc.SetChatAttachmentRepo(chatAttachmentRepo)
 	svc.handleSocketEvent(context.Background(), nil, event)
@@ -475,6 +501,12 @@ func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery
 	require.NoError(t, err)
 	require.Len(t, attachments, 1)
 	require.FileExists(t, attachments[0].FilePath)
+	require.Contains(t, source.References(context.Background()), "evidence.txt")
+	require.Equal(t, 2, loads, "successful handoff must refresh the existing source")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 2, downloads, "duplicate events must not download again")
+	require.Contains(t, source.References(context.Background()), "evidence.txt")
+	require.Equal(t, 2, loads, "duplicate events must not invalidate the source")
 }
 
 func TestSlackService_SocketEventRepeatedAttachmentDownloadFailureRedelivery(t *testing.T) {

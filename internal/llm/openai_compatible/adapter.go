@@ -113,11 +113,17 @@ func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*openaicl
 	default:
 		return nil, nil, fmt.Errorf("OpenAI-compatible model %q uses unsupported auth_method=%q", agent.Name, agent.AuthMethod)
 	}
-	requestPrivate := cfg.AllowPrivateEndpoints || presetUsesPrivateEndpoints(agent.PresetSlug)
-	if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
-		return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
+	if agent.Provider == models.ProviderOllama {
+		// Saved Ollama endpoints have always supported local HTTP servers.
+		// Keep that connection policy without relaxing custom-provider policy.
+		client.SetHTTPClient(httpclient.NewModel(nil))
+	} else {
+		requestPrivate := cfg.AllowPrivateEndpoints || presetUsesPrivateEndpoints(agent.PresetSlug)
+		if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
+			return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
+		}
+		client.SetHTTPClient(llmcustomauth.NewModelHTTPClient(requestPrivate))
 	}
-	client.SetHTTPClient(llmcustomauth.NewModelHTTPClient(requestPrivate))
 	finalize := func(req *http.Request, body []byte) error {
 		if agent.AuthMethod == models.AuthMethodOAuth {
 			if err := a.verifyOAuthRevision(req.Context(), agent); err != nil {
@@ -271,12 +277,31 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
+	if llmcontracts.HistoryContinuationFromContext(ctx) {
+		history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
+		if err != nil {
+			return "", llmusage.FromTotal(0), err
+		}
+		client.SetCompletionsHistory(history)
+	}
+	if req.SummaryInput != nil {
+		var history []openaiclient.CompletionsHistoryMessage
+		for _, raw := range req.SummaryInput {
+			var message openaiclient.CompletionsHistoryMessage
+			if err := json.Unmarshal(raw, &message); err != nil {
+				return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
+			}
+			history = append(history, message)
+		}
+		client.SetCompletionsHistory(history)
+	}
+
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
 	prompt := appendAttachmentSummary(req.Message, req.Attachments)
-	attachments, err := convertAttachments(req.Attachments)
+	attachments, err := convertAttachmentsContext(ctx, req.Attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -293,8 +318,14 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	default:
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
+	if preserved, ok := llmcontracts.SummarySystemPromptFromContext(ctx); ok {
+		systemPrompt = preserved
+	}
+
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
+		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
+		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
 		MaxOutputTokens:          maxOutput,
@@ -324,6 +355,14 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
+	if llmcontracts.HistoryContinuationFromContext(ctx) {
+		history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
+		if err != nil {
+			return "", "", llmusage.FromTotal(0), err
+		}
+		client.SetCompletionsHistory(history)
+	}
+
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
@@ -333,7 +372,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		req.Message
 	fullPrompt += llmprompt.BuildTaskStatusInstructions()
 
-	attachments, err := convertAttachments(req.Attachments)
+	attachments, err := convertAttachmentsContext(ctx, req.Attachments)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
@@ -343,6 +382,8 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
+		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
+		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
 		ContextWindow:            contextWindow,
 		MaxOutputTokens:          maxOutput,
@@ -392,7 +433,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
 
-	attachments, err := convertAttachments(req.Attachments)
+	attachments, err := convertAttachmentsContext(ctx, req.Attachments)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -403,24 +444,26 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
-		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    contextWindow,
-		MaxOutputTokens:  maxOutput,
-		Temperature:      compatibleTemperature(req.Agent),
-		System:           systemPrompt,
-		WorkDir:          effectiveWorkDir(workDir),
-		DisableTools:     disableTools,
-		SkipDefaultTools: chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		Attachments:      attachments,
-		ExtraTools:       runtimeTools(ctx),
-		ExtraHeaders:     extraHeaders,
-		FinalizeRequest:  finalizeRequest,
-		ExtraBody:        extraBody,
-		ToolExecutor:     toolExecutor(ctx, workDir),
-		ToolFilter:       toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
-		OnText:           streamText(sw),
-		OnToolUse:        streamToolUse(sw),
-		OnToolResult:     streamToolResult(sw),
+		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		ContinueFromHistory:    llmcontracts.HistoryContinuationFromContext(ctx),
+		Model:                  strings.TrimSpace(req.Agent.Model),
+		ContextWindow:          contextWindow,
+		MaxOutputTokens:        maxOutput,
+		Temperature:            compatibleTemperature(req.Agent),
+		System:                 systemPrompt,
+		WorkDir:                effectiveWorkDir(workDir),
+		DisableTools:           disableTools,
+		SkipDefaultTools:       chatSkipDefaultTools(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		Attachments:            attachments,
+		ExtraTools:             runtimeTools(ctx),
+		ExtraHeaders:           extraHeaders,
+		FinalizeRequest:        finalizeRequest,
+		ExtraBody:              extraBody,
+		ToolExecutor:           toolExecutor(ctx, workDir),
+		ToolFilter:             toolFilter(ctx, req.Followup, req.ChatMode, req.AgentDefinition),
+		OnText:                 streamText(sw),
+		OnToolUse:              streamToolUse(sw),
+		OnToolResult:           streamToolResult(sw),
 	})
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
@@ -444,40 +487,22 @@ func isKimiModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "kimi-")
 }
 
-func supportsReasoningContentReplay(agent models.LLMConfig) bool {
-	switch strings.ToLower(strings.TrimSpace(agent.Model)) {
-	case "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed":
-		return true
-	case "kimi-k2.6":
-		body, err := parseObjectJSON(agent.ExtraBodyJSON)
-		if err != nil {
-			return false
-		}
-		thinking, _ := body["thinking"].(map[string]interface{})
-		if thinking == nil {
-			return true
-		}
-		thinkingType, _ := thinking["type"].(string)
-		if strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
-			return false
-		}
-		if keep, exists := thinking["keep"]; exists {
-			keepValue, ok := keep.(string)
-			return ok && strings.EqualFold(strings.TrimSpace(keepValue), "all")
-		}
-		return true
-	default:
-		return false
-	}
-}
-
 func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
-	if !supportsReasoningContentReplay(agent) || a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
+	if client != nil {
+		callErr = client.ConversationError(callErr)
+	}
+	if a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
 		return callErr
 	}
 	transcript := client.LastCompletionsTranscript()
 	if len(transcript) == 0 {
-		return callErr
+		if !llmcontracts.HistoryContinuationFromContext(ctx) {
+			return callErr
+		}
+		// A summary already replaced this execution's earlier exchanges.
+		// Persist an explicit empty continuation even if the first request
+		// failed, instead of leaving its pre-compaction replay in storage.
+		transcript = []openaiclient.CompletionsHistoryMessage{}
 	}
 	transcriptJSON, err := json.Marshal(transcript)
 	if err != nil {
@@ -691,28 +716,14 @@ func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMo
 	})
 }
 
-func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {
-	return buildClientHistoryWithReplay(chatHistory, preserveReasoningContent, nil)
-}
-
-func buildClientHistoryWithReplay(
-	chatHistory []models.Execution,
-	preserveReasoningContent bool,
-	replayByExecutionID map[string][]models.ExecutionReplayMessage,
-) []openaiclient.CompletionsHistoryMessage {
+func buildClientHistory(chatHistory []models.Execution) []openaiclient.CompletionsHistoryMessage {
 	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(chatHistory)*2)
 	for _, exec := range chatHistory {
-		replay := replayByExecutionID[exec.ID]
-		if len(replay) == 0 {
-			replay = exec.ReplayMessages
-		}
+		replay := exec.ReplayMessages
 		if len(replay) > 0 {
 			for _, turn := range replay {
 				if transcript, ok := decodeReplayTranscript(turn.TranscriptJSON); ok {
 					for _, message := range transcript {
-						if !preserveReasoningContent {
-							message.ReasoningContent = ""
-						}
 						messages = append(messages, message)
 					}
 					continue
@@ -720,11 +731,8 @@ func buildClientHistoryWithReplay(
 				if turn.UserContent != "" {
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: turn.UserContent})
 				}
-				if turn.AssistantContent != "" || (preserveReasoningContent && turn.ReasoningContent != "") {
-					reasoningContent := ""
-					if preserveReasoningContent {
-						reasoningContent = turn.ReasoningContent
-					}
+				if turn.AssistantContent != "" || turn.ReasoningContent != "" {
+					reasoningContent := turn.ReasoningContent
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{
 						Role:             "assistant",
 						Content:          turn.AssistantContent,
@@ -738,10 +746,7 @@ func buildClientHistoryWithReplay(
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
 		}
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
-			reasoningContent := ""
-			if preserveReasoningContent {
-				reasoningContent = exec.ReasoningContent
-			}
+			reasoningContent := exec.ReasoningContent
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{
 				Role:             "assistant",
 				Content:          replay,
@@ -750,6 +755,11 @@ func buildClientHistoryWithReplay(
 		}
 	}
 	return messages
+}
+
+// SummaryHistory uses the same structured replay as a continuing conversation.
+func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistoryMessage {
+	return buildClientHistory(history)
 }
 
 func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessage, bool) {
@@ -764,63 +774,24 @@ func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessag
 }
 
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
-	preserveReasoningContent := supportsReasoningContentReplay(agent)
-	if a.execRepo == nil {
-		return buildClientHistory(chatHistory, preserveReasoningContent), nil
-	}
-
-	history := append([]models.Execution(nil), chatHistory...)
-	ids := make([]string, 0, len(history))
-	for _, exec := range history {
-		if strings.TrimSpace(exec.ID) != "" {
-			ids = append(ids, exec.ID)
-		}
-	}
-	if preserveReasoningContent {
-		reasoningByID, err := a.execRepo.ReasoningContentByIDs(ctx, ids)
-		if err != nil {
-			return nil, fmt.Errorf("load Kimi reasoning history: %w", err)
-		}
-		for i := range history {
-			if reasoningContent, ok := reasoningByID[history[i].ID]; ok {
-				history[i].ReasoningContent = reasoningContent
-			}
-		}
-	}
-	replayByExecutionID, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("load execution replay history: %w", err)
-	}
-	return buildClientHistoryWithReplay(history, preserveReasoningContent, replayByExecutionID), nil
+	// The service hydrates history before budgeting and compaction. Never reload
+	// from storage here: that would restore content deliberately discarded there.
+	return buildClientHistory(chatHistory), nil
 }
 
-func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-	prepared, err := llmattachment.Preprocess(attachments)
+func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
+	inputs, err := llmattachment.ModelInputs(ctx, attachments)
 	if err != nil {
-		return nil, fmt.Errorf("preprocess attachments: %w", err)
+		return nil, err
 	}
-	out := make([]*openaiclient.FileAttachment, 0, len(prepared))
-	for _, att := range prepared {
-		oaAtt, err := openaiclient.NewFileAttachment(att.FilePath)
-		if err != nil {
-			if _, ok := err.(*openaiclient.UnsupportedFileTypeError); ok {
-				applog.Infof("[openai-compatible-adapter] skipping unsupported attachment %s: %v", att.FileName, err)
-				continue
-			}
-			return nil, fmt.Errorf("load attachment %s: %w", att.FileName, err)
-		}
-		if strings.TrimSpace(att.FileName) != "" {
-			oaAtt.FileName = att.FileName
-		}
-		if strings.TrimSpace(att.MediaType) != "" {
-			oaAtt.MediaType = strings.TrimSpace(att.MediaType)
-		}
-		out = append(out, oaAtt)
+	out := make([]*openaiclient.FileAttachment, 0, len(inputs))
+	for _, input := range inputs {
+		out = append(out, &openaiclient.FileAttachment{FileName: input.Name, MediaType: input.MediaType, Data: input.Data})
 	}
 	return out, nil
+}
+func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
+	return convertAttachmentsContext(context.Background(), attachments)
 }
 
 func appendAttachmentSummary(prompt string, attachments []models.Attachment) string {

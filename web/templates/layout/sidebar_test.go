@@ -540,7 +540,7 @@ func TestSidebar_MousedownEarlyNavigationSignal(t *testing.T) {
 	}
 
 	// mousedown handler must skip same-page navigation (consistent with beforeRequest)
-	if !strings.Contains(html, "window.location.pathname === navBase") {
+	if !strings.Contains(html, "displayedPath() === navBase") || !strings.Contains(html, "window.openVibelyDisplayedURL()") {
 		t.Fatal("mousedown handler must skip same-page navigation check")
 	}
 }
@@ -757,11 +757,11 @@ func TestSidebar_ScopesAndRetargetsLiveEvents(t *testing.T) {
 	html := buf.String()
 
 	for _, want := range []string{
-		"function liveEventsURL(projectID, taskID)",
-		"params.set('project_id', projectID);",
-		"if (taskID) params.set('task_id', taskID);",
+		"function retargetLiveEvents(projectID, taskID)",
+		"JSON.stringify([projectID || '', taskID || ''])",
+		"window.openVibelyLive.live(projectID, taskID, liveSSEHandlers)",
 		"function currentTaskID()",
-		"window._tabVisibility.retargetSSE('live-events', url);",
+		"if (scope === liveScope) return;",
 		"window.openVibelyRetargetLiveEvents(newProjectId, '');",
 		"if (target && target.id === 'main-content') retargetLiveEventsForCurrentLocation();",
 	} {

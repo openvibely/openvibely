@@ -119,3 +119,17 @@ func TestResolveCompatiblePreservesOutputForLargerWindows(t *testing.T) {
 		})
 	}
 }
+
+func TestOllamaBudgetsAreNotDetectedCapacity(t *testing.T) {
+	agent := models.LLMConfig{Provider: models.ProviderOllama, ContextWindow: 65536, DefaultMaxTokens: 10000, ProviderContextWindow: 8192, ProviderMaxOutputTokens: 4096}
+	got := Resolve(agent)
+	if got.EffectiveInputWindow != 65536 || got.EffectiveOutputCap != 10000 {
+		t.Fatalf("saved budgets silently reduced: %+v", got)
+	}
+	agent.ContextWindow = 0
+	agent.DefaultMaxTokens = 0
+	got = Resolve(agent)
+	if got.EffectiveInputWindow != DefaultOllamaContextWindow || got.EffectiveOutputCap != 2048 {
+		t.Fatalf("fallback budget: %+v", got)
+	}
+}

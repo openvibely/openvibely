@@ -23,6 +23,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
@@ -659,11 +660,15 @@ func (h *Handler) completeOAuthFlow(state, code string) oauthCompletionResult {
 }
 
 func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, state string) (int64, error) {
+	return h.exchangeOAuthCodeAndSaveTokensContext(context.Background(), flow, code, state)
+}
+
+func (h *Handler) exchangeOAuthCodeAndSaveTokensContext(ctx context.Context, flow *oauthPendingFlow, code, state string) (int64, error) {
 	if flow.Provider == models.ProviderOpenAICompatible {
 		return h.exchangeCustomOAuthCodeAndSaveTokens(flow, code)
 	}
 	tokenBody, contentType := buildTokenExchangeBody(flow, code, state)
-	tokenReq, err := http.NewRequest("POST", flow.TokenURL, bytes.NewReader(tokenBody))
+	tokenReq, err := http.NewRequestWithContext(ctx, "POST", flow.TokenURL, bytes.NewReader(tokenBody))
 	if err != nil {
 		return 0, err
 	}
@@ -672,7 +677,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 		tokenReq.Header.Set("anthropic-version", anthropicAPIVersion)
 	}
 
-	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	tokenResp, err := httpretry.DoRequest(httpclient.New(httpclient.OAuthTimeout), tokenReq)
 	if err != nil {
 		return 0, err
 	}
@@ -701,7 +706,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	profileDisplayName := ""
 	principalHash := ""
 	if flow.Provider == models.ProviderOpenAI {
-		identityCtx, cancelIdentity := context.WithTimeout(context.Background(), 10*time.Second)
+		identityCtx, cancelIdentity := context.WithTimeout(ctx, 10*time.Second)
 		identity, identityErr := h.resolveConsistentOpenAIOAuthIdentity(identityCtx, tokenResult.IDToken, tokenResult.AccessToken)
 		cancelIdentity()
 		if identityErr != nil {
@@ -711,7 +716,7 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 		profileDisplayName = identity.DisplayName
 		principalHash = identity.PrincipalHash
 	} else if flow.Provider == models.ProviderAnthropic && h.oauthIdentityResolver != nil {
-		profileCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		profileCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		profile, profileErr := h.oauthIdentityResolver(profileCtx, tokenResult.AccessToken)
 		cancel()
 		if profileErr != nil {
@@ -796,7 +801,7 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 		return 0, fmt.Errorf("invalid custom OAuth token URL: %w", err)
 	}
 	customHTTPClient := llmcustomauth.NewHTTPClient(httpclient.OAuthTimeout, cfg.AllowPrivateEndpoints)
-	resp, err := customHTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(customHTTPClient, req)
 	if err != nil {
 		return 0, err
 	}
@@ -828,7 +833,7 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 		if err := llmcustomauth.PrepareRequest(profileReq, nil, cfg, customState, tokens.AccessToken); err != nil {
 			return 0, err
 		}
-		profileResp, reqErr := customHTTPClient.Do(profileReq)
+		profileResp, reqErr := httpretry.DoRequest(customHTTPClient, profileReq)
 		if reqErr != nil {
 			return 0, reqErr
 		}

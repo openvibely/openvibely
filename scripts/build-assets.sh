@@ -94,10 +94,19 @@ daisyui=$(fetch "$DAISYUI_URL" "$DAISYUI_SHA256")
 rm -rf "$dist"
 mkdir -p "$dist/vendor"
 cp "$assets/kanban.js" "$dist/kanban.js"
+cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"
+cp "$assets/live-transport.js" "$dist/live-transport.js"
+cp "$assets/chat-virtual-list.js" "$dist/chat-virtual-list.js"
 for entry in "${FILES[@]}"; do
   IFS='|' read -r dest url sha <<<"$entry"
   cp "$(fetch "$url" "$sha")" "$dist/$dest"
 done
+
+# Pinned document/media libraries ported with their licenses from digital-agency.
+(cd "$assets/file-vendor" && shasum -a 256 -c SHA256SUMS >/dev/null)
+cp -R "$assets/file-vendor/." "$dist/vendor/"
+rm "$dist/vendor/SHA256SUMS"
+cp -R "$assets/files/." "$dist/"
 
 # Tailwind drops rules in @layer components whose classes never appear in the content
 # files, which removes the DaisyUI components the app does not use.

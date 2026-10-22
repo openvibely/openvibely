@@ -1084,15 +1084,46 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 	return r.listChatHistoryPage(ctx, projectID, "", limit)
 }
 
+// Checkpoint replay is private persistence data, excluded from public Execution JSON.
+type checkpointExecution struct {
+	models.Execution
+	Replay              []models.ExecutionReplayMessage `json:"replay_messages,omitempty"`
+	RetainedUserMessage json.RawMessage                 `json:"retained_user_message,omitempty"`
+}
+
 func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
 	if r == nil || r.db == nil {
 		return nil
 	}
-	historyJSON, err := json.Marshal(checkpoint.History)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return upsertChatCompactionCheckpoint(ctx, conn, checkpoint)
+	})
+}
+
+// SaveInTurnCompactionCheckpoint commits the summary and an explicitly empty
+// continuation together. UI output and reasoning are not changed.
+func (r *ExecutionRepo) SaveInTurnCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
+	if checkpoint.SourceExecutionID == "" || checkpoint.Strategy != "local_summary_inflight" {
+		return fmt.Errorf("in-turn compaction requires its source execution and strategy")
+	}
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		if err := upsertChatCompactionCheckpoint(ctx, tx, checkpoint); err != nil {
+			return err
+		}
+		return replaceExecutionReplayMessages(ctx, tx, checkpoint.SourceExecutionID, []models.ExecutionReplayMessage{{TranscriptJSON: "[]"}})
+	})
+}
+
+func upsertChatCompactionCheckpoint(ctx context.Context, executor sqlExecutor, checkpoint models.ChatCompactionCheckpoint) error {
+	history := make([]checkpointExecution, len(checkpoint.History))
+	for i, execution := range checkpoint.History {
+		history[i] = checkpointExecution{Execution: execution, Replay: execution.ReplayMessages, RetainedUserMessage: execution.RetainedUserMessage}
+	}
+	historyJSON, err := json.Marshal(history)
 	if err != nil {
 		return fmt.Errorf("marshal chat compaction checkpoint: %w", err)
 	}
-	_, err = execBoundSQLite(ctx, r.db, `
+	_, err = executor.ExecContext(ctx, `
 		INSERT INTO chat_compaction_checkpoints (
 			scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
@@ -1133,8 +1164,15 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 	if err != nil {
 		return nil, fmt.Errorf("getting chat compaction checkpoint: %w", err)
 	}
-	if err := json.Unmarshal([]byte(historyJSON), &checkpoint.History); err != nil {
+	var history []checkpointExecution
+	if err := json.Unmarshal([]byte(historyJSON), &history); err != nil {
 		return nil, fmt.Errorf("unmarshal chat compaction checkpoint: %w", err)
+	}
+	checkpoint.History = make([]models.Execution, len(history))
+	for i, execution := range history {
+		checkpoint.History[i] = execution.Execution
+		checkpoint.History[i].ReplayMessages = execution.Replay
+		checkpoint.History[i].RetainedUserMessage = execution.RetainedUserMessage
 	}
 	return &checkpoint, nil
 }
@@ -1151,20 +1189,24 @@ func (r *ExecutionRepo) UpsertChatProviderSessionState(ctx context.Context, chec
 		) VALUES (?, ?, ?, ?, '[]', ?, datetime('now'), datetime('now'))
 		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
 			source_execution_id = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.source_execution_id ELSE '' END,
 			history_json = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.history_json ELSE '[]' END,
 			summary = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.summary ELSE '' END,
 			strategy = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
+					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
 				THEN chat_compaction_checkpoints.strategy ELSE '' END,
 			provider_state_json = CASE
 				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key

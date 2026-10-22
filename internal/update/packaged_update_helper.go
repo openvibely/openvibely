@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/httpclient"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 type ExecutableUpdateHelperConfig struct {
@@ -1052,7 +1053,7 @@ func waitForExpectedHealth(ctx context.Context, endpoint, expected string, clien
 		if err != nil {
 			return err
 		}
-		resp, err := client.Do(req)
+		resp, err := httpretry.DoRequest(client, req)
 		if err == nil {
 			var body struct {
 				Ready   bool   `json:"ready"`

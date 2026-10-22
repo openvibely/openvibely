@@ -9,7 +9,11 @@
     const selection = () => window.kanbanSelection || new Set();
     const selectionModifier = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'Command' : 'Ctrl';
     function matches(data, filter) {
-        if (filter.status && data.taskStatus !== filter.status.value) return false;
+        if (filter.status) {
+            if (filter.status.value === 'goal-met') {
+                if (data.taskGoalMet !== 'true') return false;
+            } else if (data.taskStatus !== filter.status.value) return false;
+        }
         if (filter.priority && data.taskPriority !== filter.priority.value) return false;
         const merge = filter.merge && filter.merge.value;
         if (merge === 'none') return !data.taskBranch;
@@ -77,7 +81,7 @@
                 const chosen = selection().has(card.dataset.taskId);
                 card.classList.toggle('task-selected', chosen);
                 const label = card.querySelector('[data-kanban-checkbox]');
-                if (label) { label.classList.toggle('hidden', !selected.length); label.querySelector('input').checked = chosen; }
+                if (label) { label.classList.toggle('hidden', !chosen); label.querySelector('input').checked = chosen; }
             });
             col.querySelectorAll('[data-kanban-select]').forEach(button => { button.textContent = selected.length ? 'Clear selection' : 'Select all'; button.disabled = !visible.length; });
             const noResults = col.querySelector('[data-kanban-no-results]');

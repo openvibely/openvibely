@@ -64,7 +64,7 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 		</div>
 
 		<!-- Summary Stats -->
-		<div class="stats shadow w-full mb-6 bg-base-100">
+		<div class="stats shadow-sm border border-base-300 w-full mb-6 bg-base-100">
 			<div class="stat">
 				<div class="stat-title">Running</div>
 				<div class="stat-value text-xl">{ fmt.Sprintf("%d", len(upcoming.RunningTasks)) }</div>

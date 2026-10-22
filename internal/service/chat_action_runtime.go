@@ -27,6 +27,8 @@ func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
 		return agent.IsOpenAICompatibleAPIKey() || agent.IsOAuth()
 	case models.ProviderAnthropic:
 		return agent.IsAnthropicAPIKey() || agent.IsOAuth()
+	case models.ProviderOllama:
+		return true
 	default:
 		return false
 	}
@@ -95,6 +97,8 @@ func buildAutomationTaskCreationCallbacks(callerTaskID, projectID string, llmSvc
 }
 
 type channelTaskActionHandlerOptions struct {
+	AttachmentRepo      persistence.AttachmentStore
+	UploadsDir          string
 	ProjectID           string
 	TaskSvc             *TaskService
 	SwarmSvc            *SwarmService
@@ -595,7 +599,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if strings.TrimSpace(req.ID) == "" {
 				return "", fmt.Errorf("edit_task requires id")
 			}
-			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, opts.ProjectID, opts.TaskSvc, nil, "")
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, opts.ProjectID, opts.TaskSvc, opts.AttachmentRepo, opts.UploadsDir)
 			trimmedSummary := strings.TrimSpace(summary)
 			if strings.Contains(summary, "Failed to edit") && !strings.Contains(summary, "[TASK_EDITED:") {
 				return trimmedSummary, fmt.Errorf("edit_task: no tasks were updated")
@@ -805,6 +809,16 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
 		},
 		"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
+			if opts.CallerTaskID != "" {
+				var req ViewSwarmRequest
+				if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+					return "", err
+				}
+				if req.TaskID == "current" || (req.TaskID == "" && req.Title == "") {
+					req.TaskID = opts.CallerTaskID
+					input, _ = json.Marshal(req)
+				}
+			}
 			return ExecuteViewSwarmTool(ctx, opts.TaskRepo, opts.ProjectID, input)
 		},
 		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {

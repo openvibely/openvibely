@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -121,51 +122,35 @@ func BuildTaskStatusInstructions() string {
 		"Replace the angle-bracketed text with your actual description. This status line is mandatory and must be the very last line of your response."
 }
 
-// BuildAttachmentInstructions builds the text block that tells text-only model
+// BuildAttachmentInstructions builds the file-reference block for model
 // calls about attached files with their absolute paths. Returns an empty string
 // if there are no attachments.
 func BuildAttachmentInstructions(attachments []models.Attachment) string {
+	return buildAttachmentInstructions(attachments, true)
+}
+
+// BuildAttachmentReferences describes historical files without claiming their bytes are present.
+func BuildAttachmentReferences(attachments []models.Attachment) string {
+	return buildAttachmentInstructions(attachments, false)
+}
+
+func buildAttachmentInstructions(attachments []models.Attachment, imagesIncluded bool) string {
 	if len(attachments) == 0 {
 		return ""
 	}
 
-	var textFiles []models.Attachment
-	var imageFiles []models.Attachment
-
-	for _, att := range attachments {
-		if output.IsImageMediaType(att.MediaType) {
-			imageFiles = append(imageFiles, att)
-		} else {
-			textFiles = append(textFiles, att)
-		}
-	}
-
 	var sb strings.Builder
-
-	// List text files that can be read
-	if len(textFiles) > 0 {
-		sb.WriteString("You have been provided with the following attached files:\n")
-		for _, att := range textFiles {
-			absPath := AttachmentAbsPath(att)
-			sb.WriteString(fmt.Sprintf("- %s (absolute path: %s)\n", att.FileName, absPath))
+	sb.WriteString("Attached files:\n")
+	for _, att := range attachments {
+		if imagesIncluded && llmattachment.DirectImage(att) {
+			sb.WriteString(fmt.Sprintf("Attached image: %q (path: %q). Its image bytes are already included directly in this request; inspect the image input without reopening it with view_image.", att.FileName, AttachmentAbsPath(att)))
+		} else {
+			sb.WriteString(llmattachment.Reference(att))
 		}
-		sb.WriteString("\nPlease examine these files as part of your task. Use the absolute paths above to access them.\n\n")
+		sb.WriteByte('\n')
 	}
+	return sb.String() + "\n"
 
-	// Warn about image files that cannot be viewed.
-	if len(imageFiles) > 0 {
-		if len(textFiles) > 0 {
-			sb.WriteString("---\n\n")
-		}
-		sb.WriteString("NOTE: The following image files were attached, but this model call cannot view them directly because it does not have vision support:\n")
-		for _, att := range imageFiles {
-			absPath := AttachmentAbsPath(att)
-			sb.WriteString(fmt.Sprintf("- %s (path: %s)\n", att.FileName, absPath))
-		}
-		sb.WriteString("\nIf image analysis is required for this task, ask the user to reconfigure the task with a vision-capable model.\n\n")
-	}
-
-	return sb.String()
 }
 
 // BuildChatHistoryText formats chat history as a text block with "User:" and

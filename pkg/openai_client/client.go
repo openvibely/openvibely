@@ -156,11 +156,12 @@ type CompletionsToolCall struct {
 // CompletionsHistoryMessage is a conversation message for Chat Completions
 // providers that require reasoning content to be replayed verbatim.
 type CompletionsHistoryMessage struct {
-	Role             string                `json:"role"`
-	Content          string                `json:"content"`
-	ReasoningContent string                `json:"reasoning_content,omitempty"`
-	ToolCalls        []CompletionsToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string                `json:"tool_call_id,omitempty"`
+	ImageContent     []map[string]interface{} `json:"-"`
+	Role             string                   `json:"role"`
+	Content          string                   `json:"content"`
+	ReasoningContent string                   `json:"reasoning_content,omitempty"`
+	ToolCalls        []CompletionsToolCall    `json:"tool_calls,omitempty"`
+	ToolCallID       string                   `json:"tool_call_id,omitempty"`
 }
 
 // SendOptions configures a single Send call.
@@ -459,7 +460,7 @@ func RefreshTokenContext(ctx context.Context, refreshToken string) (*StoredAuth,
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := oauthHTTPClient.Do(req)
+	resp, err := httpretry.DoRequest(oauthHTTPClient, req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", wrapNetworkError(err))
 	}
@@ -538,6 +539,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	if opts.EnvironmentWorkDir != "" {
 		inputItems = ensureExecutionEnvironment(inputItems, opts.EnvironmentWorkDir)
 	}
+	inputItems = ensureAttachmentContext(ctx, inputItems)
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,

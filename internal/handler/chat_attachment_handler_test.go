@@ -179,7 +179,7 @@ func TestDownloadChatAttachmentServesSameProjectAttachment(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, string(fixture.fileContent), rec.Body.String())
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
-	assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"))
+	assert.Equal(t, "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:", rec.Header().Get("Content-Security-Policy"))
 }
 
 func TestDownloadChatAttachmentSandboxesActiveContent(t *testing.T) {
@@ -214,7 +214,16 @@ func TestDownloadChatAttachmentSandboxesActiveContent(t *testing.T) {
 			assert.Equal(t, http.StatusOK, rec.Code)
 			assert.Equal(t, string(tc.content), rec.Body.String())
 			assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
-			assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"))
+			policy := rec.Header().Get("Content-Security-Policy")
+			assert.Contains(t, policy, "sandbox")
+			assert.Contains(t, policy, "default-src 'none'")
+			assert.NotContains(t, policy, "allow-same-origin")
+			if tc.name == "html" {
+				assert.Contains(t, policy, "sandbox allow-scripts;")
+				assert.Contains(t, policy, "connect-src 'none'")
+			} else {
+				assert.Contains(t, policy, "sandbox;")
+			}
 
 			c, rec = newChatAttachmentContext(t, fixture.e, http.MethodGet, attachment.ID, fixture.foreignProject.ID)
 			err := fixture.h.DownloadChatAttachment(c)
@@ -555,7 +564,7 @@ func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCa
 	for _, filename := range []string{"first.bin", "second.bin"} {
 		part, err := writer.CreateFormFile("files", filename)
 		require.NoError(t, err)
-		_, err = io.Copy(part, bytes.NewReader(bytes.Repeat([]byte("x"), 6<<20)))
+		_, err = io.Copy(part, bytes.NewReader(bytes.Repeat([]byte("x"), 14<<20)))
 		require.NoError(t, err)
 	}
 	require.NoError(t, writer.Close())
@@ -579,7 +588,7 @@ func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCa
 	require.NotEmpty(t, response.SessionID)
 	require.Len(t, response.Attachments, 2)
 	for _, attachment := range response.Attachments {
-		assert.Equal(t, int64(6<<20), attachment.Size)
+		assert.Equal(t, int64(14<<20), attachment.Size)
 		assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", response.SessionID, attachment.Filename))
 	}
 }
@@ -594,8 +603,8 @@ func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing
 	}
 	e := echo.New()
 	files := []taskAttachmentTestFile{
-		{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
-		{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+		{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 14<<20)},
+		{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 14<<20)},
 	}
 	body, contentType := newPaddedDelimiterMultipartBody(t, nil, "files", files)
 	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
@@ -618,7 +627,7 @@ func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing
 	require.NotEmpty(t, response.SessionID)
 	require.Len(t, response.Attachments, 2)
 	for _, attachment := range response.Attachments {
-		assert.Equal(t, int64(6<<20), attachment.Size)
+		assert.Equal(t, int64(14<<20), attachment.Size)
 		assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", response.SessionID, attachment.Filename))
 	}
 }
@@ -635,7 +644,7 @@ func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSes
 	}
 	e := echo.New()
 	const sessionID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/chat/attachments", map[string]string{"attachment_session_id": sessionID}, "files", "too-large.bin", "application/octet-stream", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/chat/attachments", map[string]string{"attachment_session_id": sessionID}, "files", "too-large.bin", "application/octet-stream", 30<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	err := h.UploadChatAttachment(e.NewContext(req, rec))
@@ -665,7 +674,7 @@ func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	e := echo.New()
 
 	// Create a file larger than 10MB
-	largeContent := make([]byte, 11*1024*1024) // 11MB
+	largeContent := make([]byte, 26*1024*1024) // 11MB
 
 	// Create multipart form
 	body := &bytes.Buffer{}

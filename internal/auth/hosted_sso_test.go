@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 var hostedTestKey = []byte("0123456789abcdef0123456789abcdef")
@@ -240,6 +242,10 @@ func TestHostedTokenExchangeStrictValidationAndRetry(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if attempt == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if attempt == 2 {
 			w.Header().Set("Retry-After", "2")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = io.WriteString(w, `{"error":"slow_down"}`)
@@ -251,11 +257,11 @@ func TestHostedTokenExchangeStrictValidationAndRetry(t *testing.T) {
 	client := NewHostedSSOClient(server.URL, "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
 	var delays []time.Duration
 	client.Sleep = func(ctx context.Context, d time.Duration) error { delays = append(delays, d); return nil }
-	identity, err := client.Exchange(context.Background(), code, verifier)
+	identity, err := client.Exchange(retrytest.Context(), code, verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.Email != "user@example.com" || identity.InstanceID != "instance-1" || attempts.Load() != 2 || len(delays) != 1 || delays[0] != 2*time.Second {
+	if identity.Email != "user@example.com" || identity.InstanceID != "instance-1" || attempts.Load() != 3 || len(delays) != 1 || delays[0] != 2*time.Second {
 		t.Fatalf("identity=%#v attempts=%d delays=%v", identity, attempts.Load(), delays)
 	}
 }

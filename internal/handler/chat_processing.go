@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 )
 
 const (
@@ -50,9 +51,9 @@ var (
 //   - Agent: LLM configuration (model, provider, API key, etc.)
 //   - ChatHistory: Prior conversation turns for context (may be empty for first message)
 //   - ProjectID: Project ID for task creation/lookup
-//   - SystemContext: Request-scoped system prompt context (attachments, personality, etc.)
+//   - SystemContext: Request-scoped system prompt context (personality, task framing, etc.)
 //   - WorkDir: Working directory for CLI agents (project repo path)
-//   - ImageAttachments: Image files for vision-capable models
+//   - ImageAttachments: Attachments; supported images are inline, other files are references
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
@@ -92,9 +93,11 @@ type streamingResponseParams struct {
 	// TaskThreadSend so the HTTP handler can return immediately without blocking
 	// on a full execution-history scan when a task has many prior executions.
 	DeferHistoryLoad bool
-	// AttachmentContext is the pre-computed attachment description text to inject
-	// into the system context when DeferHistoryLoad is true.
-	AttachmentContext string
+	// AttachmentContext describes current non-image attachments or attachment errors.
+	// It is added only to the model-facing user message, never system context.
+	AttachmentContext           string
+	historicalAttachmentContext string
+	attachmentSource            *attachmentcontext.Source
 	// Task is the task record supplied for deferred context loading when
 	// DeferHistoryLoad is true.
 	Task *models.Task
@@ -223,8 +226,51 @@ func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, param
 	if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
 		hardenedAutomationGitHubRT = h.automationGitHubRuntimeTools(ctx, *params.Task, defs)
 	}
+	if params.IsTaskFollowup && params.Task == nil && params.TaskID != "" && h.taskRepo != nil {
+		params.Task, _ = h.taskRepo.GetByID(ctx, params.TaskID)
+	}
+
 	genericRT := h.buildChatActionToolRuntimeFromDefs(params, collector, defs, mode, surface)
 	runtime := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+	// Apply task policy after composition so channel/context bundles cannot restore
+	// tools excluded from the generic follow-up runtime.
+	if params.IsTaskFollowup && runtime != nil {
+		createdVia := ""
+		if params.Task != nil {
+			createdVia = params.Task.CreatedVia
+		}
+		policy := chatcontrol.TaskToolNames(createdVia)
+		// Channel-only tools and lifecycle grants retain their existing authorization.
+		defaults := chatcontrol.TaskToolNames("")
+		if automationBound {
+			delete(policy, "github_comment_on_issue")
+		}
+		definitions := make([]llmcontracts.RuntimeToolDefinition, 0, len(runtime.Definitions))
+		for _, def := range runtime.Definitions {
+			if !defaults[def.Name] || policy[def.Name] {
+				definitions = append(definitions, def)
+			}
+		}
+		runtime.Definitions = definitions
+		base := runtime.Executor
+		runtime.Executor = func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			normalized := strings.ToLower(strings.TrimSpace(name))
+			if defaults[normalized] && !policy[normalized] {
+				return "", false, false, nil
+			}
+			if normalized == "list_capabilities" && runtime.HasDefinition(normalized) {
+				var summaries []chatcontrol.ActionSummary
+				for _, summary := range chatcontrol.ListForContext(mode, surface) {
+					if runtime.HasDefinition(summary.Name) {
+						summaries = append(summaries, summary)
+					}
+				}
+				return formatCapabilities(summaries, service.SelectedMemoryHandlesFromContext(ctx)), true, false, nil
+			}
+			return base(ctx, name, input)
+		}
+	}
+
 	if automationBound && runtime != nil {
 		baseExecutor := runtime.Executor
 		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
@@ -458,13 +504,31 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if chatMode == "" {
 		chatMode = models.ChatModeOrchestrate
 	}
+	// Load deferred history before attachment recovery and lifecycle selection.
+	// Both need the same historical files that the model will receive.
+	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
+		priorExecs, err := h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
+		if err != nil {
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, "Load conversation history: "+err.Error(), 0, params.ChannelReply)
+			h.finalizeStreamingTurn(params, "")
+			return
+		}
+		params.ChatHistory = filterChatHistory(priorExecs, params.ExecID)
+	}
+	lifecycleFiles, attachmentErr := h.prepareChatAttachmentContext(ctx, &params)
+	if attachmentErr != nil {
+		h.completeWithFailure(ctx, params.ExecID, params.TaskID, attachmentErr.Error(), 0, params.ChannelReply)
+		h.finalizeStreamingTurn(params, "")
+		return
+	}
+	ctx = service.WithAttachedFiles(ctx, lifecycleFiles)
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, params.TaskID, params.AgentDefinition)
 	params.AgentDefinition = agentDef
 	ctx = llmcontracts.WithChatMode(ctx, chatMode)
 	// Lifecycle integration for task-thread followups: lifecycle hooks must run on
 	// every model turn including followups. Without this block, followups would
 	// never see selected skills, skill runtime tools, or the available-skills
-	// catalog. Interactive chat only runs memory recall before the model turn;
+	// catalog. Interactive chat runs recall and attached-file skill selection;
 	// it intentionally skips after_complete extraction so Chat prompts and mode
 	// control text are not written back to managed memory.
 	var lifecycleAfter func(err error, chatContext llmcontracts.ChatContext)
@@ -476,7 +540,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				ctx = turn.Ctx
 				lifecycleAfter = turn.AfterComplete
 			} else if !params.IsTaskFollowup {
-				ctx = h.prepareChatMemoryRecall(ctx, *task)
+				chatTask := *task
+				chatTask.Prompt = params.Message
+				ctx = h.prepareChatMemoryRecall(ctx, chatTask)
 			}
 		}
 	}
@@ -531,17 +597,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 	}
-	// Lazy-load chat history, system context, and work dir for task-thread
+	// Lazy-load system context and work dir for task-thread
 	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so
-	// the HTTP handler can return immediately without blocking on a full
-	// execution-history scan; the expensive DB/FS work runs here, after worker
-	// slots are acquired and lifecycle hooks have run.
+	// the HTTP handler can return immediately. History was loaded above before
+	// attachment recovery; the remaining DB/FS work runs after lifecycle hooks.
 	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
-		priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
-		params.ChatHistory = filterChatHistory(priorExecs, params.ExecID)
 		agentDefForSys := params.AgentDefinition // already resolved above
 		sysCtx := combineContexts(
-			buildThreadSystemContext(params.Task.Title, len(params.ChatHistory) > 0, params.AttachmentContext),
+			buildThreadSystemContext(params.Task.Title, len(params.ChatHistory) > 0, ""),
 			h.taskGoalContext(ctx, params.Task.ID, agentDefForSys),
 		)
 		personalityCtx := h.getPersonalityContext(ctx, params.ProjectID)
@@ -595,7 +658,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		for _, input := range batch.inputs {
 			var attachments []models.Attachment
 			if input.AttachmentSessionID != "" {
-				_, attachments, _ = h.previewPendingAttachments(input.AttachmentSessionID)
+				_, attachments, _ = h.previewSteeringAttachments(input.AttachmentSessionID, params.ExecID, params.Agent.Provider)
 			}
 			messages = append(messages, llmcontracts.LocalSteeringMessage{Text: input.Content, Attachments: attachments})
 		}
@@ -604,19 +667,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		text := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		steeringCallbackParams.lifecycleUserMessage = text
-		attachmentsCommitted := false
+		commit := h.preparedSteeringCommit(params, batch)
 		return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
-			if !attachmentsCommitted {
-				for _, input := range batch.inputs {
-					if input.AttachmentSessionID != "" {
-						if _, _, _, err := h.processAttachmentsWithReturn(commitCtx, input.AttachmentSessionID, params.ExecID); err != nil {
-							return err
-						}
-					}
-				}
-				attachmentsCommitted = true
-			}
-			if err := h.threadInputRepo.CommitLocalSteering(commitCtx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history}); err != nil {
+			if err := commit(commitCtx, history); err != nil {
 				return err
 			}
 			pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
@@ -685,10 +738,19 @@ modelLoop:
 			err = ctx.Err()
 			break
 		}
+		// Publish and refresh before any provider builds its attachment context.
+		if pendingSteering.count() > 0 {
+			if deliveryErr := h.prepareSteeringAttachmentDelivery(ctx, params, &pendingSteering); deliveryErr != nil {
+				h.requeueUncommittedSteering(ctx, params.ExecID, pendingSteering)
+				err = deliveryErr
+				break modelLoop
+			}
+		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx = params.withAttachmentContext(requestCtx)
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
-			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...)}
+			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...), attachmentFinishes: pendingSteering.attachmentFinishes}
 			commit := h.preparedSteeringCommit(params, batch)
 			requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, func(commitCtx context.Context, history []any) error {
 				if err := commit(commitCtx, history); err != nil {
@@ -715,6 +777,7 @@ modelLoop:
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
 		if err != nil || ctx.Err() != nil {
+			finishSteeringAttachments(pendingSteering, false)
 			if h.threadInputRepo != nil {
 				if markErr := h.threadInputRepo.MarkProviderSteeringAmbiguous(steeringCleanupContext(ctx), ambiguousSteeringIDs(err)); markErr != nil {
 					applog.Infof("[handler] processStreamingResponse exec=%s error preserving ambiguous OpenAI steering: %v", params.ExecID, markErr)
@@ -898,7 +961,8 @@ modelLoop:
 }
 
 type preparedSteeringBatch struct {
-	inputs []models.ThreadInput
+	inputs             []models.ThreadInput
+	attachmentFinishes map[string]func(bool)
 }
 
 type ambiguousSteeringError interface {
@@ -951,7 +1015,7 @@ func removePreparedSteeringInputs(batch, remove preparedSteeringBatch) preparedS
 			kept = append(kept, input)
 		}
 	}
-	return preparedSteeringBatch{inputs: kept}
+	return preparedSteeringBatch{inputs: kept, attachmentFinishes: batch.attachmentFinishes}
 }
 
 func (h *Handler) waitForFinalSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
@@ -1010,7 +1074,7 @@ func (h *Handler) claimPendingSteeringInputsWithOptions(ctx context.Context, par
 			continue
 		}
 		if input.AttachmentSessionID != "" {
-			attachmentContext, imageAttachments, attErr := h.previewPendingAttachments(input.AttachmentSessionID)
+			attachmentContext, imageAttachments, attErr := h.previewSteeringAttachments(input.AttachmentSessionID, params.ExecID, params.Agent.Provider)
 			if attErr != nil {
 				applog.Infof("[handler] claimPendingSteeringInputs exec=%s input=%s attachment preview error: %v", params.ExecID, input.ID, attErr)
 				attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
@@ -1337,20 +1401,54 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 	}
 }
 
-func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch preparedSteeringBatch) llmcontracts.InitialSteeringCommit {
-	attachmentsCommitted := false
-	return func(ctx context.Context, history []any) error {
-		if !attachmentsCommitted {
-			for _, input := range batch.inputs {
-				if input.AttachmentSessionID != "" {
-					if _, _, _, err := h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, params.ExecID); err != nil {
-						return err
-					}
-				}
-			}
-			attachmentsCommitted = true
+// prepareSteeringAttachmentDelivery validates the refreshed list before the
+// provider receives the steer. Pending uploads survive until delivery succeeds.
+func (h *Handler) prepareSteeringAttachmentDelivery(ctx context.Context, params streamingResponseParams, batch *preparedSteeringBatch) error {
+	if batch.attachmentFinishes == nil {
+		batch.attachmentFinishes = make(map[string]func(bool))
+	}
+	for _, input := range batch.inputs {
+		if input.AttachmentSessionID == "" || batch.attachmentFinishes[input.ID] != nil {
+			continue
 		}
-		return h.threadInputRepo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history})
+		_, _, _, finish, err := h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+		if err != nil {
+			finishSteeringAttachments(*batch, false)
+			return err
+		}
+		batch.attachmentFinishes[input.ID] = finish
+	}
+	if len(batch.attachmentFinishes) > 0 && params.attachmentSource != nil {
+		if err := params.attachmentSource.Load(ctx); err != nil {
+			finishSteeringAttachments(*batch, false)
+			return fmt.Errorf("couldn't refresh steering attachments; message was not sent: %w", err)
+		}
+	}
+	return nil
+}
+
+func finishSteeringAttachments(batch preparedSteeringBatch, committed bool) {
+	for id, finish := range batch.attachmentFinishes {
+		finish(committed)
+		delete(batch.attachmentFinishes, id)
+	}
+}
+
+func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch preparedSteeringBatch) llmcontracts.InitialSteeringCommit {
+	delivered := false
+	return func(ctx context.Context, history []any) error {
+		if !delivered {
+			if err := h.prepareSteeringAttachmentDelivery(ctx, params, &batch); err != nil {
+				return err
+			}
+		}
+		if err := h.threadInputRepo.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: params.ExecID, InputIDs: preparedSteeringInputIDs(batch), ResponsesHistory: history}); err != nil {
+			finishSteeringAttachments(batch, false)
+			return err
+		}
+		finishSteeringAttachments(batch, true)
+		delivered = true
+		return nil
 	}
 }
 
@@ -1358,13 +1456,24 @@ func (h *Handler) commitPreparedSteeringInputs(ctx context.Context, params strea
 	if h.threadInputRepo == nil || batch.count() == 0 {
 		return nil
 	}
+	// Any inputs not marked applied retain their uploads for retry.
+	defer finishSteeringAttachments(batch, false)
 	for _, input := range batch.inputs {
-		if input.AttachmentSessionID != "" {
-			if _, _, _, attErr := h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, params.ExecID); attErr != nil {
-				return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, attErr)
+		finish := batch.attachmentFinishes[input.ID]
+		if finish == nil {
+			finish = func(bool) {}
+			if input.AttachmentSessionID != "" {
+				var err error
+				_, _, _, finish, err = h.stageSteeringAttachments(ctx, input.AttachmentSessionID, params.ExecID)
+				if err != nil {
+					return fmt.Errorf("committing steering attachments for input %s: %w", input.ID, err)
+				}
 			}
 		}
-		if err := h.threadInputRepo.MarkApplied(ctx, input.ID, params.ExecID, params.ExecID); err != nil {
+		err := h.threadInputRepo.MarkApplied(ctx, input.ID, params.ExecID, params.ExecID)
+		finish(err == nil)
+		delete(batch.attachmentFinishes, input.ID)
+		if err != nil {
 			return err
 		}
 	}
@@ -1652,15 +1761,16 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		Message:     input.Content,
 		Agent:       *agent,
 		ChatHistory: history, ProjectID: input.ProjectID,
-		SystemContext:    combineContexts(attachmentContext, personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   false,
-		ChatMode:         chatMode,
-		Surface:          surfaceForThreadInput(input),
-		ChannelReply:     channelReplyFromThreadInput(input),
-		RuntimeTools:     h.xRuntimeToolsForThreadInput(task.ID, input),
-		updateWorkDone:   updateWorkDone,
+		SystemContext:     personalityContext,
+		AttachmentContext: attachmentContext,
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    false,
+		ChatMode:          chatMode,
+		Surface:           surfaceForThreadInput(input),
+		ChannelReply:      channelReplyFromThreadInput(input),
+		RuntimeTools:      h.xRuntimeToolsForThreadInput(task.ID, input),
+		updateWorkDone:    updateWorkDone,
 	})
 	updateWorkDone = nil
 }
@@ -2105,7 +2215,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			agentDef = ad
 		}
 	}
-	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(ctx, task.ID, agentDef))
+	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
 	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
@@ -2131,6 +2241,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		ChatHistory:                     priorHistory,
 		ProjectID:                       task.ProjectID,
 		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		AttachmentContext:               attachmentContext,
 		WorkDir:                         workDir,
 		RepublishOpenPRAfterStartupSync: republishOpenPR,
 		ImageAttachments:                imageAttachments,
@@ -3167,7 +3278,7 @@ func (h *Handler) executeChatTaskCreationRequests(ctx context.Context, execID, p
 
 	applog.Infof("[handler] executeChatTaskCreationRequests exec=%s found %d task creation requests", execID, len(taskRequests))
 
-	chatAtts, err := h.chatAttachmentRepo.ListByExecution(ctx, execID)
+	chatAtts, err := h.listMessageAttachments(ctx, execID)
 	if err != nil {
 		applog.Infof("[handler] attachment lifecycle stage=metadata-load execution=%s destination_task=uncreated error=%v", execID, err)
 		return fmt.Sprintf("Failed to create %d task(s): Chat attachments could not be loaded; no tasks were created.", len(taskRequests)), 0
@@ -3338,6 +3449,18 @@ func (h *Handler) executeChatTaskEditRequests(ctx context.Context, execID, proje
 	applog.Infof("[handler] executeChatTaskEditRequests exec=%s found %d task edit requests", execID, len(editRequests))
 	output := ""
 
+	// Authorize every target before attachment copying can mutate files or prompts.
+	var scopedEdits []service.TaskEditRequest
+	for _, req := range editRequests {
+		task, err := h.taskRepo.GetByID(ctx, req.ID)
+		if err != nil || task == nil || projectID == "" || task.ProjectID != projectID {
+			output += fmt.Sprintf("\nFailed to edit task %s: target unavailable in current project.\n", req.ID)
+			continue
+		}
+		scopedEdits = append(scopedEdits, req)
+	}
+	editRequests = scopedEdits
+
 	// Handle "chat" attachment keyword: copy chat attachments to target tasks
 	chatAttCopied, chatOnlyTaskIDs := h.processChatAttachmentsForEdits(ctx, execID, editRequests)
 
@@ -3412,7 +3535,8 @@ func hasOtherEditFields(req service.TaskEditRequest) bool {
 	return req.Title != "" || req.Prompt != "" || req.Category != "" ||
 		req.PrioritySet || req.Priority != 0 || req.Tag != "" || req.AgentID != "" ||
 		req.AgentConfigID != "" || req.AgentDefinitionID != "" || req.Agent != "" ||
-		req.ClearAgentDefinition || req.Chain != nil || len(req.Attachments) > 0
+		req.ClearAgentDefinition || req.Chain != nil || len(req.Attachments) > 0 ||
+		req.AutoMerge != nil || req.AutoMergeOnGoalAchieved != nil || req.MergeTargetBranch != nil
 }
 
 // executeChatTaskExecutionRequests executes tasks from typed runtime-tool requests.

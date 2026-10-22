@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/knowledgecache"
+	"os"
+	"path/filepath"
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -67,6 +70,14 @@ func agentSkillMutationTools(importer *Importer, recorder MutationRecorder, assi
 			return "", false, false, nil
 		}
 		res, err := runAgentSkillManage(ctx, importer, recorder, assignedAgentKey, scope, allowExplicitAgent, input)
+		if err == nil && importer != nil {
+			if importer.roots.Global != "" {
+				knowledgecache.Invalidate(importer.roots.Global)
+			}
+			if importer.roots.Project != "" {
+				knowledgecache.Invalidate(importer.roots.Project)
+			}
+		}
 		return marshalToolResult(res, err)
 	}
 	description := agentSkillManageDescription(assignedAgentKey)
@@ -102,9 +113,25 @@ func SkillMutationTools(importer *Importer, recorder MutationRecorder) *llmcontr
 		switch strings.ToLower(strings.TrimSpace(name)) {
 		case "skill_manage":
 			res, err := runSkillManage(ctx, importer, recorder, input)
+			if err == nil && importer != nil {
+				if importer.roots.Global != "" {
+					knowledgecache.Invalidate(importer.roots.Global)
+				}
+				if importer.roots.Project != "" {
+					knowledgecache.Invalidate(importer.roots.Project)
+				}
+			}
 			return marshalToolResult(res, err)
 		case "skill_import":
 			res, err := runSkillImport(ctx, importer, recorder, input)
+			if err == nil && importer != nil {
+				if importer.roots.Global != "" {
+					knowledgecache.Invalidate(importer.roots.Global)
+				}
+				if importer.roots.Project != "" {
+					knowledgecache.Invalidate(importer.roots.Project)
+				}
+			}
 			return marshalToolResult(res, err)
 		default:
 			return "", false, false, nil
@@ -164,13 +191,13 @@ const skillImportDescription = "Import a standalone skill package into the proje
 	"The importer normalizes or generates OpenVibely YAML frontmatter with kind, version, skill.key/name/scope/description/enabled, writes skills/<skill>/SKILL.md, copies allowed support files, and updates skills/SKILLS.md."
 
 func agentSkillManageDescription(agentKey string) string {
-	return "Create, patch, or manage support files for skills owned by the task's assigned agent `" + agentKey + "`. " +
+	return "Create, patch, archive, or manage support files for skills owned by the task's assigned agent `" + agentKey + "`. " +
 		"Use this only for learning specific to that assigned agent's role, workflow, or selected agent-owned skills. " +
 		"Use skill_manage instead for reusable standalone/project/global skill learning. The backend scopes all writes to agents/" + agentKey + "/skills; do not pass agent paths."
 }
 
-const libraryAgentSkillManageDescription = "Create, patch, or manage support files for skills owned by user-managed agents. " +
-	"Use this for skill library maintenance that consolidates or updates agent-specific skills. " +
+const libraryAgentSkillManageDescription = "Create, patch, archive, or manage support files for skills owned by user-managed agents. " +
+	"Use this to maintain agent-specific instructions and support files. " +
 	"Pass the target agent key in 'agent' and the bare skill key in 'handle'; protected agents are rejected by the backend. " +
 	"Use skill_manage instead for standalone project/global skills."
 
@@ -179,17 +206,17 @@ var agentSkillManageSchema = &toolschema.Schema{
 	Properties: map[string]*toolschema.Schema{
 		"action": {
 			Type:        "string",
-			Enum:        []any{"create", "patch", "write_file", "remove_file"},
+			Enum:        []any{"create", "patch", "write_file", "remove_file", "archive"},
 			Description: "What to do. 'create' and 'patch' require 'declaration'. 'write_file' and 'remove_file' require 'handle' and 'support'.",
 		},
 		"agent": {
 			Type:        "string",
-			Description: "Target agent key for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend scopes this tool to the assigned agent.",
+			Description: "Target agent key. Only permitted agents in the current project or global library can be targeted. Omit only when the backend has fixed the owning agent.",
 		},
 		"scope": {
 			Type:        "string",
 			Enum:        []any{"global", "project"},
-			Description: "Target root for explicit library maintenance mode. Omit in assigned-agent learning mode, where the backend supplies the assigned agent scope.",
+			Description: "Target root: project for current-project skills or overrides, global for shared skills. Global writes require authorization. Omit only when the backend has fixed the scope.",
 		},
 		"handle": {
 			Type:        "string",
@@ -422,6 +449,39 @@ func runAgentSkillManage(ctx context.Context, importer *Importer, recorder Mutat
 		res, err := importer.WriteAgentOwnedSkill(ctx, targetScope, targetAgentKey, decl, body)
 		recordMutation(ctx, recorder, action, "agent_skill", targetAgentKey+"/"+decl.Handle(), []byte(p.Declaration), res, err)
 		return res, err
+	case "archive":
+		root := importer.roots.ExactRootForScope(targetScope)
+		if root == "" {
+			return nil, fmt.Errorf("no root for scope %q", targetScope)
+		}
+		dir, err := AgentSkillDir(root, targetAgentKey, p.Handle)
+		if err != nil {
+			return nil, err
+		}
+		path := filepath.Join(dir, "SKILL.md")
+		if err := safeMutationPath(root, path); err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		decl, body, err := ParseDeclaration(string(data))
+		if err != nil {
+			return nil, err
+		}
+		disabled := false
+		decl.Skill.Enabled = &disabled
+		decl.Skill.Archived = true
+		decl.Skill.ArchiveReason = p.Reason
+		res, err := importer.WriteAgentOwnedSkill(ctx, targetScope, targetAgentKey, decl, body)
+		if err == nil && res.Applied {
+			index := filepath.Join(root, "agents", targetAgentKey, "SKILLS.md")
+			_, err = RemoveSkillIndexEntry(index, p.Handle)
+			res.ChangedPaths = append(res.ChangedPaths, index)
+		}
+		recordMutation(ctx, recorder, action, "agent_skill", targetAgentKey+"/"+p.Handle, input, res, err)
+		return res, err
 	case "write_file", "remove_file":
 		if p.Handle == "" {
 			return nil, fmt.Errorf("agent_skill_manage: handle is required for %s", action)
@@ -586,7 +646,22 @@ func runSkillManage(ctx context.Context, importer *Importer, recorder MutationRe
 		if p.Handle == "" {
 			return nil, errors.New("skill_manage: handle is required for archive")
 		}
-		res, err := importer.ArchiveSkill(ctx, p.Handle, p.AbsorbedInto, p.Reason)
+		scope := p.Scope
+		if scope == "" {
+			scope = "project"
+		}
+		root := importer.roots.ExactRootForScope(scope)
+		if root == "" {
+			return nil, fmt.Errorf("no root for scope %q", scope)
+		}
+		scoped := *importer
+		scoped.roots = SkillRoots{}
+		if scope == "global" {
+			scoped.roots.Global = root
+		} else {
+			scoped.roots.Project = root
+		}
+		res, err := scoped.ArchiveSkill(ctx, p.Handle, p.AbsorbedInto, p.Reason)
 		payload, _ := json.Marshal(struct {
 			Handle       string `json:"handle"`
 			AbsorbedInto string `json:"absorbed_into,omitempty"`

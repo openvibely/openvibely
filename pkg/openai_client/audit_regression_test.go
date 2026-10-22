@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/testutil/retrytest"
 )
 
 func TestStandaloneWebSearchRespectsRuntimeFilter(t *testing.T) {
@@ -112,7 +113,7 @@ func TestResponsesWebsocketRecoverableProviderErrors(t *testing.T) {
 				OpenAIAPIBaseURL = srv.URL
 				defer func() { OpenAIAPIBaseURL = original }()
 				client := NewWithAPIKey("test")
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				ctx, cancel := context.WithTimeout(retrytest.Context(), 10*time.Second)
 				defer cancel()
 				for _, prompt := range []string{"original message", "next message"} {
 					var err error

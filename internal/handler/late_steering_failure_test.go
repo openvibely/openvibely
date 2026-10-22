@@ -2,10 +2,21 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,4 +98,318 @@ func TestSteeringPreparationFailureStopsHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputPending, queued.InputStatus)
 	require.Equal(t, models.ThreadInputModeQueued, queued.InputMode)
+}
+
+func TestSteeringAttachmentCommitRetriesAfterFailure(t *testing.T) {
+	for _, failure := range []string{"delivery", "second-upload"} {
+		t.Run(failure, func(t *testing.T) {
+			h, _, configs := setupTestHandler(t)
+			useTempUploadsDir(t)
+			ctx := context.Background()
+			agent := createAgent(t, configs)
+			project := createProject(t, h, "Attachment retry")
+			task := createTask(t, h, project.ID, "steering", func(task *models.Task) {
+				task.Category, task.Status, task.AgentID = models.CategoryActive, models.StatusRunning, &agent.ID
+			})
+			exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+			writeUpload := func(session string) {
+				dir := filepath.Join(uploadsDir, "chat", "pending", session)
+				require.NoError(t, os.MkdirAll(dir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "doc.pdf"), []byte(session), 0o644))
+			}
+			for _, session := range []string{"first", "second"} {
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: session, AttachmentSessionID: session}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+			}
+			writeUpload("first")
+			if failure == "delivery" {
+				writeUpload("second")
+			}
+			params := streamingResponseParams{ExecID: exec.ID}
+			batch, err := h.claimPendingSteeringInputs(ctx, &params)
+			require.NoError(t, err)
+			require.Equal(t, 2, batch.count())
+			commit := h.preparedSteeringCommit(params, batch)
+			// An unserializable checkpoint fails delivery after attachments are staged.
+			require.Error(t, commit(ctx, []any{make(chan int)}))
+			require.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", "first", "doc.pdf"))
+			rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, rows)
+			require.NoError(t, filepath.WalkDir(filepath.Join(uploadsDir, "chat", exec.ID), func(path string, entry os.DirEntry, err error) error {
+				require.NoError(t, err)
+				require.True(t, entry.IsDir(), "rollback left a file: %s", path)
+				return nil
+			}))
+			writeUpload("second")
+			require.NoError(t, commit(ctx, nil))
+			require.NoError(t, commit(ctx, nil), "successful commits may be called again")
+			rows, err = h.attachmentRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, rows, 2)
+			require.NotEqual(t, rows[0].FilePath, rows[1].FilePath)
+			for _, session := range []string{"first", "second"} {
+				require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", session))
+			}
+		})
+	}
+}
+
+func TestSteeringDuplicateFilenamesKeepPreviewPaths(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryChat} {
+		t.Run(string(category), func(t *testing.T) {
+			h, _, configs := setupTestHandler(t)
+			useTempUploadsDir(t)
+			ctx := context.Background()
+			agent := createAgent(t, configs)
+			agent.Provider = models.ProviderOpenAI
+			project := createProject(t, h, "Steering paths")
+			task := createTask(t, h, project.ID, "steering", func(task *models.Task) {
+				task.Category, task.Status, task.AgentID = category, models.StatusRunning, &agent.ID
+			})
+			exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+			// A prior upload already occupies the original filename.
+			original := filepath.Join(uploadsDir, "chat", exec.ID, "report.pdf")
+			require.NoError(t, os.MkdirAll(filepath.Dir(original), 0o755))
+			require.NoError(t, os.WriteFile(original, []byte("original"), 0o644))
+			paths := make(map[string]string)
+			for _, session := range []string{"first", "second"} {
+				source := filepath.Join(uploadsDir, "chat", "pending", session, "report.pdf")
+				require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o755))
+				require.NoError(t, os.WriteFile(source, []byte(session), 0o644))
+				text, files, err := h.previewSteeringAttachments(session, exec.ID, agent.Provider)
+				require.NoError(t, err)
+				require.Len(t, files, 1)
+				paths[session] = files[0].ReferencePath
+				require.Contains(t, text, paths[session])
+				require.NotEqual(t, original, paths[session])
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: session}
+				if category == models.CategoryChat {
+					input.Scope = models.ThreadInputScopeChat
+				}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+			}
+			require.NotEqual(t, paths["first"], paths["second"])
+			params := streamingResponseParams{ExecID: exec.ID, Agent: *agent}
+			batch, err := h.claimPendingSteeringInputs(ctx, &params)
+			require.NoError(t, err)
+			require.Len(t, batch.inputs, 2)
+			for _, input := range batch.inputs {
+				require.Contains(t, input.Content, paths[input.AttachmentSessionID])
+			}
+			commit := h.preparedSteeringCommit(params, batch)
+			require.Error(t, commit(ctx, []any{make(chan int)}))
+			for session, path := range paths {
+				_, files, err := h.previewSteeringAttachments(session, exec.ID, agent.Provider)
+				require.NoError(t, err)
+				require.Len(t, files, 1)
+				require.Equal(t, path, files[0].ReferencePath, "retry must retain the original reference")
+			}
+			require.NoError(t, commit(ctx, nil))
+			require.NoError(t, commit(ctx, nil))
+			for session, path := range paths {
+				data, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, session, string(data))
+			}
+			data, err := os.ReadFile(original)
+			require.NoError(t, err)
+			require.Equal(t, "original", string(data))
+			var savedPaths []string
+			if category == models.CategoryChat {
+				rows, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+				require.NoError(t, err)
+				for _, row := range rows {
+					savedPaths = append(savedPaths, row.FilePath)
+				}
+			} else {
+				rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+				require.NoError(t, err)
+				for _, row := range rows {
+					savedPaths = append(savedPaths, row.FilePath)
+				}
+			}
+			require.ElementsMatch(t, []string{paths["first"], paths["second"]}, savedPaths)
+		})
+	}
+}
+
+func TestSteeringAttachmentRefreshFailureKeepsUploadForRetry(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryChat, models.CategoryActive} {
+		for _, native := range []bool{true, false} {
+			name := string(category) + "/continuation"
+			if native {
+				name = string(category) + "/native"
+			}
+			t.Run(name, func(t *testing.T) {
+				h, _, configs := setupTestHandler(t)
+				useTempUploadsDir(t)
+				ctx := context.Background()
+				agent := createAgent(t, configs)
+				project := createProject(t, h, "Refresh failure")
+				task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Category = category; task.Status = models.StatusRunning })
+				exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+				pending := filepath.Join(uploadsDir, "chat", "pending", "refresh-test")
+				require.NoError(t, os.MkdirAll(pending, 0755))
+				require.NoError(t, os.WriteFile(filepath.Join(pending, "report.pdf"), []byte("report"), 0600))
+				input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "refresh-test"}
+				if category == models.CategoryChat {
+					input.Scope = models.ThreadInputScopeChat
+				}
+				require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+				params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, ProjectID: project.ID, Agent: *agent}
+				key := task.ID
+				if category == models.CategoryChat {
+					key = attachmentcontext.ChatProjectKey(project.ID)
+				}
+				failRead := false
+				loads := 0
+				params.attachmentSource = attachmentcontext.NewSource(func(context.Context) (string, error) {
+					loads++
+					if failRead {
+						return "", errors.New("injected database read failure")
+					}
+					return "references", nil
+				}, key)
+				require.NoError(t, params.attachmentSource.Load(ctx))
+				batch, err := h.claimPendingSteeringInputs(ctx, &params)
+				require.NoError(t, err)
+				require.Len(t, batch.inputs, 1)
+				commit := h.preparedSteeringCommit(params, batch)
+				failRead = true
+				if native {
+					err = commit(ctx, nil)
+				} else {
+					err = h.prepareSteeringAttachmentDelivery(ctx, params, &batch)
+				}
+				require.ErrorContains(t, err, "couldn't refresh steering attachments; message was not sent")
+				require.Equal(t, 2, loads)
+				require.FileExists(t, filepath.Join(pending, "report.pdf"))
+				taskFiles, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+				require.NoError(t, err)
+				require.Empty(t, taskFiles)
+				chatFiles, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+				require.NoError(t, err)
+				require.Empty(t, chatFiles)
+				stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+				replay, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+				require.NoError(t, err)
+				require.Empty(t, replay[exec.ID])
+				failRead = false
+				if native {
+					require.NoError(t, commit(ctx, nil))
+					require.NoError(t, commit(ctx, nil))
+				} else {
+					require.NoError(t, h.prepareSteeringAttachmentDelivery(ctx, params, &batch))
+					require.NoError(t, h.commitPreparedSteeringInputs(ctx, params, batch))
+				}
+				require.Equal(t, 3, loads)
+				require.NoDirExists(t, pending)
+				stored, err = h.threadInputRepo.GetByID(ctx, input.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+			})
+		}
+	}
+}
+
+type failSteeringAttachmentRefreshStore struct{ persistence.AttachmentStore }
+
+func (s failSteeringAttachmentRefreshStore) ListByTask(ctx context.Context, taskID string) ([]models.Attachment, error) {
+	files, err := s.AttachmentStore.ListByTask(ctx, taskID)
+	if err == nil && len(files) > 0 {
+		return nil, errors.New("injected attachment refresh failure")
+	}
+	return files, err
+}
+
+func TestSteeringAttachmentRefreshFailurePreventsModelCall(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	h.workerSvc = nil
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	project := createProject(t, h, "Before send")
+	task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Status = models.StatusRunning })
+	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+	pending := filepath.Join(uploadsDir, "chat", "pending", "before-send")
+	require.NoError(t, os.MkdirAll(pending, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "report.pdf"), []byte("report"), 0600))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "before-send"}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+	originalStore := h.attachmentRepo
+	h.attachmentRepo = failSteeringAttachmentRefreshStore{originalStore}
+	mock := testutil.NewMockLLMCaller()
+	h.llmSvc.SetLLMCaller(mock)
+	h.processStreamingResponse(streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, Task: task, ProjectID: project.ID, Agent: *agent, Message: "go", IsTaskFollowup: true, suppressQueuedTurnPromotion: true})
+	require.Zero(t, mock.CallCount(), "do not send the steer if its attachment list cannot be loaded")
+	stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, stored.InputMode)
+	savedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Contains(t, savedExec.ErrorMessage, "couldn't refresh steering attachments")
+	require.FileExists(t, filepath.Join(pending, "report.pdf"))
+	files, err := originalStore.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
+
+func TestOpenAISteeringAttachmentsRefreshBeforeProviderBuildsContext(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	h.workerSvc = nil
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	agent.Provider = models.ProviderOpenAI
+	agent.Model = "gpt-5.4"
+	agent.APIKey = "test-key"
+	agent.AuthMethod = models.AuthMethodAPIKey
+	project := createProject(t, h, "OpenAI steering context")
+	task := createTask(t, h, project.ID, "steering", func(task *models.Task) { task.Status = models.StatusRunning })
+	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) { exec.Status = models.ExecRunning })
+	pending := filepath.Join(uploadsDir, "chat", "pending", "before-context")
+	require.NoError(t, os.MkdirAll(pending, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pending, "new.pdf"), []byte("new report"), 0600))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: exec.ID, Content: "read this", AttachmentSessionID: "before-context"}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, exec.ID))
+	params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, Task: task, ProjectID: project.ID, Agent: *agent, Message: "go", IsTaskFollowup: true}
+	_, err := h.prepareChatAttachmentContext(ctx, &params)
+	require.NoError(t, err)
+	batch, err := h.claimPendingSteeringInputs(ctx, &params)
+	require.NoError(t, err)
+	require.NoError(t, h.prepareSteeringAttachmentDelivery(ctx, params, &batch))
+	commit := h.preparedSteeringCommit(params, batch)
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "no websocket", 426)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"done\",\"status\":\"completed\",\"output\":[]}}\n\n")
+	}))
+	defer server.Close()
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = server.URL + "/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+	client := openaiclient.NewWithAPIKey("test-key")
+	_, err = client.SendAgentic(params.withAttachmentContext(ctx), "read the new upload", &openaiclient.AgenticOptions{Model: "gpt-5.4", DisableTools: true, InitialInputCommit: commit})
+	require.NoError(t, err)
+	wire, err := json.Marshal(received)
+	require.NoError(t, err)
+	require.Contains(t, string(wire), "new.pdf", "first request must include the refreshed attachment context")
+	require.NoError(t, commit(ctx, nil))
+	rows, err := h.attachmentRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1, "checkpoint must not publish a second copy")
+	require.NoDirExists(t, pending)
 }

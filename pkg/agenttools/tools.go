@@ -1,15 +1,11 @@
 package agenttools
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -18,6 +14,14 @@ const (
 	DefaultBashTimeoutSeconds = 120
 	MaxBashTimeoutSeconds     = 600
 )
+
+type fileReadAuthorizationKey struct{}
+
+// WithFileReadAuthorization applies the caller's access policy to files discovered
+// by recursive searches, in addition to authorization of the requested directory.
+func WithFileReadAuthorization(ctx context.Context, allow func(context.Context, string) bool) context.Context {
+	return context.WithValue(ctx, fileReadAuthorizationKey{}, allow)
+}
 
 // Execute runs a local built-in coding tool and returns the output string.
 // It resolves relative paths against workDir.
@@ -449,196 +453,25 @@ func execGrepSearch(ctx context.Context, workDir string, input json.RawMessage) 
 		searchDir = resolvePath(workDir, params.Path)
 	}
 
-	re, err := regexp.Compile(params.Pattern)
-	if err != nil {
-		return "", fmt.Errorf("invalid pattern %q: %w", params.Pattern, err)
-	}
-
-	var results strings.Builder
-	count := 0
-	const maxResults = 100
-	reader := bufio.NewReaderSize(nil, 32*1024)
-	lineBuffer := make([]byte, 0, 128)
-	binarySample := make([]byte, binaryTailCheckSize)
-
-	err = filepath.WalkDir(searchDir, func(path string, entry os.DirEntry, walkErr error) error {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if walkErr != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			name := entry.Name()
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if count >= maxResults {
-			return filepath.SkipAll
-		}
-
-		if params.Include != "" {
-			matched, _ := filepath.Match(params.Include, entry.Name())
-			if !matched {
-				return nil
-			}
-		}
-
-		ext := strings.ToLower(filepath.Ext(path))
-		if _, skip := binaryExtensions[ext]; skip {
-			return nil
-		}
-
-		file, err := os.Open(path)
-		if err != nil {
-			return nil
-		}
-		fileInfo, err := file.Stat()
-		if err != nil {
-			_ = file.Close()
-			return nil
-		}
-		containsNUL, err := containsNULInFileSamples(file, fileInfo.Size(), binarySample)
-		if err != nil || containsNUL {
-			_ = file.Close()
-			return nil
-		}
-		reader.Reset(file)
-
-		rel, _ := filepath.Rel(workDir, path)
-		lineBuffer = lineBuffer[:0]
-		lineNumber := 0
-		lastWasNewline := true // strings.Split treats an empty file as one empty line.
-		var fileResults strings.Builder
-		fileMatches := 0
-		remainingMatches := maxResults - count
-		for {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				_ = file.Close()
-				return ctxErr
-			}
-
-			fragment, readErr := reader.ReadSlice('\n')
-			if bytes.IndexByte(fragment, 0) >= 0 {
-				_ = file.Close()
-				return nil
-			}
-			switch readErr {
-			case nil:
-				line := fragment[:len(fragment)-1]
-				if len(lineBuffer) > 0 {
-					lineBuffer = append(lineBuffer, line...)
-					line = lineBuffer
-				}
-				lineNumber++
-				if fileMatches < remainingMatches && re.Match(line) {
-					fmt.Fprintf(&fileResults, "%s:%d: %s\n", rel, lineNumber, truncateLine(string(line), 200))
-					fileMatches++
-				}
-				lineBuffer = lineBuffer[:0]
-				lastWasNewline = true
-			case bufio.ErrBufferFull:
-				lineBuffer = append(lineBuffer, fragment...)
-				lastWasNewline = false
-				continue
-			case io.EOF:
-				if len(lineBuffer) > 0 {
-					lineBuffer = append(lineBuffer, fragment...)
-				}
-				if len(lineBuffer) > 0 || len(fragment) > 0 || lastWasNewline {
-					line := lineBuffer
-					if len(line) == 0 {
-						line = fragment
-					}
-					lineNumber++
-					if fileMatches < remainingMatches && re.Match(line) {
-						fmt.Fprintf(&fileResults, "%s:%d: %s\n", rel, lineNumber, truncateLine(string(line), 200))
-						fileMatches++
-					}
-				}
-				_ = file.Close()
-				if fileMatches > 0 {
-					results.WriteString(fileResults.String())
-					count += fileMatches
-				}
-				if count >= maxResults {
-					return filepath.SkipAll
-				}
-				return nil
-			default:
-				_ = file.Close()
-				return nil
-			}
-		}
+	matches, err := SearchFiles(ctx, searchDir, params.Pattern, SearchOptions{
+		Include: params.Include, MaxResults: 100, MaxLineLength: 200,
+		SkipDirectory: func(path string) bool {
+			name := filepath.Base(path)
+			return strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor"
+		},
+		AllowFile:        func(path string) bool { return !searchBinaryExtensions[strings.ToLower(filepath.Ext(path))] },
+		DisplayPath:      func(path string) string { rel, _ := filepath.Rel(workDir, path); return rel },
+		IgnoreWalkErrors: true,
 	})
-
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return "", ctxErr
+	if err != nil {
+		return "", err
 	}
-	if count == 0 {
+	if len(matches) == 0 {
 		return fmt.Sprintf("No matches found for pattern %q", params.Pattern), nil
 	}
-	if count >= maxResults {
-		results.WriteString(fmt.Sprintf("\n... (showing first %d matches)", maxResults))
+	output := strings.Join(matches, "\n") + "\n"
+	if len(matches) >= 100 {
+		output += "\n... (showing first 100 matches)"
 	}
-	return results.String(), err
-}
-
-const (
-	binaryCheckSize     = 8 * 1024
-	binaryTailCheckSize = 32 * 1024
-)
-
-func containsNULInFileSamples(file io.ReaderAt, size int64, buffer []byte) (bool, error) {
-	if size <= 0 || len(buffer) == 0 {
-		return false, nil
-	}
-
-	prefixSize := int64(binaryCheckSize)
-	if prefixSize > size {
-		prefixSize = size
-	}
-	if prefixSize > int64(len(buffer)) {
-		prefixSize = int64(len(buffer))
-	}
-	read, err := file.ReadAt(buffer[:int(prefixSize)], 0)
-	if bytes.IndexByte(buffer[:read], 0) >= 0 {
-		return true, nil
-	}
-	if err != nil && err != io.EOF {
-		return false, err
-	}
-
-	tailStart := size - int64(len(buffer))
-	if tailStart < prefixSize {
-		tailStart = prefixSize
-	}
-	if tailStart >= size {
-		return false, nil
-	}
-	tailSize := size - tailStart
-	read, err = file.ReadAt(buffer[:int(tailSize)], tailStart)
-	if bytes.IndexByte(buffer[:read], 0) >= 0 {
-		return true, nil
-	}
-	if err != nil && err != io.EOF {
-		return false, err
-	}
-	return false, nil
-}
-
-var binaryExtensions = map[string]struct{}{
-	".exe": {}, ".bin": {}, ".so": {}, ".dylib": {},
-	".png": {}, ".jpg": {}, ".jpeg": {}, ".gif": {},
-	".zip": {}, ".tar": {}, ".gz": {}, ".pdf": {},
-	".wasm": {}, ".o": {}, ".a": {},
-}
-
-func truncateLine(line string, maxLen int) string {
-	if len(line) <= maxLen {
-		return line
-	}
-	return line[:maxLen] + "..."
+	return output, nil
 }

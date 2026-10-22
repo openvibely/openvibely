@@ -58,10 +58,11 @@ templ TaskWorkspaceScript() {
 			thread.inert = overlay && !panel.hidden;
 			changes.inert = overlay && !panel.hidden;
 		}
+		function displayedURL() { return new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href); }
 		function historyView(tab) {
-			var url = new URL(window.location.href);
+			var url = displayedURL();
 			url.searchParams.set('tab', tab);
-			if (url.href !== window.location.href) history.pushState(Object.assign({}, history.state, {taskWorkspace: taskID}), '', url);
+			if (!(window.updateCachedThreadNavigationURL && window.updateCachedThreadNavigationURL(url.href)) && url.href !== window.location.href) history.pushState(Object.assign({}, history.state, {taskWorkspace: taskID}), '', url);
 			var context = root.querySelector('[data-breadcrumb-selector-context][name="tab"]');
 			if (context) context.value = tab;
 		}
@@ -106,9 +107,11 @@ templ TaskWorkspaceScript() {
 			var wasDiff = !changes.classList.contains('hidden');
 			var messages = root.querySelector('#task-thread-messages');
 			if (diff && !wasDiff) {
+				if (messages && window.compensateChatEarlierLayout) window.compensateChatEarlierLayout(messages);
 				var tracker = window._taskThreadPageTracker;
 				scrollState = messages ? {
 					scrollTop: messages.scrollTop,
+					restoreAnchor: window.captureChatVirtualScroll ? window.captureChatVirtualScroll(messages) : null,
 					userScrolledUp: tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp
 				} : null;
 				returnFocus = composerFocus || document.activeElement;
@@ -142,6 +145,10 @@ templ TaskWorkspaceScript() {
 					if (tracker) tracker.userScrolledUp = scrollState.userScrolledUp;
 					window._taskThreadUserScrolledUp = scrollState.userScrolledUp;
 					messages.scrollTop = scrollState.userScrolledUp ? scrollState.scrollTop : messages.scrollHeight;
+					if (scrollState.userScrolledUp && scrollState.restoreAnchor) scrollState.restoreAnchor();
+					// History may have been prepended while this workspace was hidden.
+					// Restore its logical anchor before the first visible frame.
+					if (window.compensateChatEarlierLayout) window.compensateChatEarlierLayout(messages);
 				}
 				if (wasDiff && returnFocus && returnFocus.isConnected && push !== false) returnFocus.focus({preventScroll:true});
 				else if (wasDiff && push !== false) _focusTaskThreadComposer(back);
@@ -149,7 +156,7 @@ templ TaskWorkspaceScript() {
 			if (push !== false) historyView(diff ? 'changes' : (panel.hidden ? 'chat' : selected));
 		}
 		function applyURL() {
-			var tab = new URLSearchParams(location.search).get('tab') || root.dataset.initialTab || 'chat';
+			var tab = displayedURL().searchParams.get('tab') || root.dataset.initialTab || 'chat';
 			if (taskID) workspace(tab === 'changes', false);
 			if (tabNames.indexOf(tab) >= 0) openPanel(tab, false, false);
 			else if (read('task-inspector-open') === 'true') openPanel(selected, false, false);
@@ -166,7 +173,7 @@ templ TaskWorkspaceScript() {
 			if (visits.expected !== taskID) visits.items = null;
 			visits.current = taskID;
 		}
-		if (taskID) visits.currentURL = location.href;
+		if (taskID) visits.currentURL = displayedURL().href;
 		delete visits.expected;
 		saveVisits();
 		var navigating = false;
@@ -200,7 +207,7 @@ templ TaskWorkspaceScript() {
 					var parsed = new DOMParser().parseFromString(html, 'text/html');
 					visits.items = Array.from(parsed.querySelectorAll('[data-breadcrumb-selector-option]')).map(function(link) { return link.getAttribute('href'); });
 				}
-				var index = visits.items.findIndex(function(url) { return new URL(url, location.href).pathname === location.pathname; });
+				var index = visits.items.findIndex(function(url) { return new URL(url, location.href).pathname === '/tasks/' + taskID; });
 				var next = index + direction;
 				if (index >= 0 && next >= 0 && next < visits.items.length) await navigateTask(visits.items[next], true);
 			} catch (error) {

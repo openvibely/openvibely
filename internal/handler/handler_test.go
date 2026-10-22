@@ -1393,7 +1393,7 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 		wantTexts  []string
 		wantAbsent []string
 	}{
-		{"completed_shows_success", models.StatusCompleted, models.CategoryCompleted, models.ExecCompleted, "Done!", "", true, []string{"Task completed", "text-success"}, nil},
+		{"completed_no_indicator", models.StatusCompleted, models.CategoryCompleted, models.ExecCompleted, "Done!", "", true, nil, []string{"Task completed"}},
 		{"failed_shows_error", models.StatusFailed, models.CategoryCompleted, models.ExecFailed, strings.Repeat("partial generated output\n", 80), "something went wrong", true, []string{"Task failed", "text-error"}, nil},
 		{"running_no_indicator", models.StatusRunning, models.CategoryActive, models.ExecRunning, "", "", false, nil, []string{"Task completed", "Task failed"}},
 	}
@@ -2245,14 +2245,17 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	if !strings.Contains(body, `id="delete_model_confirm_modal" class="modal" data-destructive-confirm-dialog`) {
 		t.Errorf("expected model delete confirmation modal to use shared modal close handling")
 	}
-	if !strings.Contains(body, "document.addEventListener('close', function(event)") || !strings.Contains(body, "event.target.matches('dialog.modal')") {
-		t.Errorf("expected modal close events to resync the toast host")
+	if !strings.Contains(body, "document.querySelectorAll('dialog:modal')") {
+		t.Errorf("expected toast hosting to include native modal dialogs without the modal CSS class")
+	}
+	if !strings.Contains(body, "document.addEventListener('close', function(event)") || !strings.Contains(body, "event.target.matches('dialog')") {
+		t.Errorf("expected all dialog close events to resync the toast host")
 	}
 	if !strings.Contains(body, "dialog.modal > .modal-box") {
 		t.Errorf("expected modal z-index layering rules for modal box")
 	}
-	if !strings.Contains(body, "dialog.modal #toast-container") {
-		t.Errorf("expected modal-scoped toast container z-index override")
+	if !strings.Contains(body, "dialog #toast-container") {
+		t.Errorf("expected toast container z-index override for all dialogs")
 	}
 }
 
@@ -4367,6 +4370,26 @@ func TestHandler_ViewSchedule_TimelineTracerUsesAccentColor(t *testing.T) {
 	}
 }
 
+func TestHandler_ViewSchedule_DragFeedbackUsesThemeTokens(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Test Project")
+
+	rec := htmxGet(e, "/schedule?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	for _, snippet := range []string{
+		`var(--ov-schedule-drop-valid-bg, rgba(99, 102, 241, 0.2))`,
+		`var(--ov-schedule-drop-valid-outline, rgba(99, 102, 241, 0.5))`,
+		`var(--ov-schedule-drop-invalid-bg, rgba(239, 68, 68, 0.15))`,
+		`var(--ov-schedule-drop-invalid-outline, rgba(239, 68, 68, 0.6))`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("schedule drag feedback missing theme token: %s", snippet)
+		}
+	}
+}
+
 func TestHandler_ViewSchedule_NoFlickerOnHTMXNav(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
@@ -5545,7 +5568,7 @@ func TestSidebar_SamePageNavPrevention(t *testing.T) {
 	if !strings.Contains(body, "htmx:beforeRequest") {
 		t.Error("sidebar must contain htmx:beforeRequest handler for same-page nav prevention")
 	}
-	if !strings.Contains(body, "window.location.pathname === navBase") {
+	if !strings.Contains(body, "displayedPath() === navBase") || !strings.Contains(body, "window.openVibelyDisplayedURL()") {
 		t.Error("sidebar must check current pathname against nav link base to prevent re-navigation")
 	}
 
@@ -5577,7 +5600,7 @@ func TestSidebar_AutomationInvocationStartedShowsToast(t *testing.T) {
 	}
 }
 
-func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
+func TestSidebar_SyncsActiveNavigationMetadata(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
@@ -5586,14 +5609,16 @@ func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
 	body := rec.Body.String()
 
 	for _, snippet := range []string{
-		`setSidebarActiveNav`,
-		`_sidebarPendingActiveBase`,
-		`aria-current`,
-		`:focus:not(:focus-visible):not(.active)`,
+		`function syncSidebarActiveNavigation()`,
+		`link.setAttribute('aria-current', 'page');`,
+		`data-nav-base="/themes"`,
 	} {
-		if strings.Contains(body, snippet) {
-			t.Fatalf("sidebar should not persist selected nav highlight, found snippet: %s", snippet)
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("sidebar active navigation metadata missing snippet: %s", snippet)
 		}
+	}
+	if strings.Contains(body, `link.classList.toggle('active', active);`) {
+		t.Fatal("sidebar navigation metadata must not apply DaisyUI's visual active class")
 	}
 }
 
@@ -6987,14 +7012,14 @@ func TestHandler_TaskThreadSend_DoesNotResumeExplicitlyPausedGoal(t *testing.T) 
 	assert.Equal(t, "paused by user", paused.Reason)
 }
 
-func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T) {
+func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsSharedTools(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
 
 	providerRequests := make(chan map[string]any, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/v1/chat/completions" {
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 			return
 		}
@@ -7004,15 +7029,15 @@ func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T)
 			return
 		}
 		providerRequests <- body
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"Runtime actions are unavailable."},"done":false}`)
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":8}`)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `data: {"choices":[{"delta":{"content":"Runtime actions are unavailable."}}]}`+"\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer providerServer.Close()
 
 	aggregator := &models.LLMConfig{
 		Name: "Task Followup Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
-		OllamaBaseURL: providerServer.URL,
+		OllamaBaseURL: providerServer.URL, ContextWindow: 65536,
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
@@ -7040,14 +7065,14 @@ func TestHandler_TaskThreadSend_MixtureOllamaAggregatorGetsNoTools(t *testing.T)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for task-followup Ollama mixture aggregator request")
 	}
-	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable follow-up aggregator must not receive tools")
+	require.Contains(t, providerRequest, "tools", "Ollama follow-up must receive shared tools")
 	messages, _ := providerRequest["messages"].([]any)
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
 		return message["role"] == "system" &&
 			!strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable follow-up aggregator must not receive marker guidance")
+	}), "follow-up aggregator must not receive marker guidance")
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 		return err == nil && len(execs) == 1 && execs[0].Status == models.ExecCompleted
@@ -7894,10 +7919,10 @@ func TestHandler_GetTaskThread_LoadsAttachments(t *testing.T) {
 		ex.IsFollowup = true
 	})
 	h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "I see a screenshot", "", 10, 100)
-	h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
-		ExecutionID: exec.ID, FileName: "screenshot.png",
+	require.NoError(t, h.attachmentRepo.Create(ctx, &models.Attachment{
+		TaskID: task.ID, ExecutionID: exec.ID, FileName: "screenshot.png",
 		FilePath: "/tmp/fake/screenshot.png", MediaType: "image/png", FileSize: 12345,
-	})
+	}))
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)

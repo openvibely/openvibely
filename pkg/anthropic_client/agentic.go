@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,9 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/pkg/attachment"
+	"github.com/openvibely/openvibely/pkg/attachmentcontext"
+	"github.com/openvibely/openvibely/pkg/managedcontext"
 )
 
 const (
@@ -137,6 +141,7 @@ type AgenticOptions struct {
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
 	// RecoveryMessages replaces history and prompt after service-side compaction.
 	RecoveryMessages     []Message
+	OnReplay             func([]Message)
 	OnCompactionProgress func(llmcontracts.CompactionProgress)
 	OnCompaction         func(summary string) // called when context is compacted
 }
@@ -319,6 +324,27 @@ func hasLeadingCompactionMessage(messages []agenticMessage) bool {
 	return hasLeadingCompactionMessageWithRole(messages, "assistant")
 }
 
+// EstimateNativeCompactionTokens budgets the decoded continuation, including
+// images acquired after compaction, using the same image cost as live requests.
+func EstimateNativeCompactionTokens(raw string) int {
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	messages, err := decodeNativeCompactionState(raw)
+	if err != nil {
+		return tokenestimate.FromText(raw)
+	}
+	encoded, err := json.Marshal(map[string]any{"messages": messages})
+	if err != nil {
+		return tokenestimate.FromText(raw)
+	}
+	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+	if err != nil {
+		return tokenestimate.FromText(raw)
+	}
+	return tokens
+}
+
 func hasLeadingCompactionMessageWithRole(messages []agenticMessage, role string) bool {
 	if len(messages) == 0 || messages[0].Role != role {
 		return false
@@ -432,7 +458,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}
-		tools = prepareStrictTools(filterToolDefinitions(tools, opts.ToolFilter))
+		tools = prepareStrictTools(tools)
 	}
 
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.
@@ -451,17 +477,28 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 	}
-	// If attachments are present, build multimodal content blocks for the prompt
+	replayPrompt := Message{Role: "user", Content: prompt}
+	// If attachments are present, preserve the same multimodal prompt for replay.
 	if len(opts.Attachments) > 0 {
 		contentBlocks, blockErr := buildContentBlocks(prompt, opts.Attachments)
 		if blockErr != nil {
 			return nil, fmt.Errorf("build content blocks: %w", blockErr)
 		}
 		messages = append(messages, agenticMessage{Role: "user", Content: contentBlocks})
+		replayPrompt.ContentBlocks, blockErr = json.Marshal(contentBlocks)
+		if blockErr != nil {
+			return nil, fmt.Errorf("encode prompt replay content blocks: %w", blockErr)
+		}
 	} else {
 		messages = append(messages, agenticMessage{Role: "user", Content: prompt})
 	}
 
+	replay := []Message{replayPrompt}
+	defer func() {
+		if opts.OnReplay != nil {
+			opts.OnReplay(replay)
+		}
+	}()
 	result := &AgenticResponse{Model: opts.Model}
 	if opts.RecoveryMessages != nil {
 		messages = nil
@@ -469,14 +506,36 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			messages = appendHistoryMessage(messages, msg)
 		}
 	}
+
 	var allText strings.Builder
 	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		readContext := func(m agenticMessage) (string, string) {
+			text, _ := m.Content.(string)
+			return m.Role, text
+		}
+		makeReplayContext := func(text string) Message { return Message{Role: "user", Content: text} }
+		makeWireContext := func(text string) agenticMessage { return agenticMessage{Role: "user", Content: text} }
+		replay = managedcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
+		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		replay = attachmentcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
+		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 		}
 		// Send request (streaming)
+		// Keep text actually delivered to the caller if this sampling attempt
+		// fails before it can publish a completed assistant message.
+		var partialText strings.Builder
+		streamOpts := *opts
+		streamOpts.OnText = func(text string) {
+			partialText.WriteString(text)
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+
 		resp, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
@@ -487,9 +546,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*turnResult, error) {
-			return c.sendAgenticTurn(attemptCtx, messages, tools, opts)
+			return c.sendAgenticTurn(attemptCtx, messages, tools, &streamOpts)
 		})
 		if err != nil {
+			if text := partialText.String(); text != "" {
+				replay = append(replay, Message{Role: "assistant", Content: text})
+			}
 			return nil, conversationError(categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err)), messages)
 		}
 
@@ -518,7 +580,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					opts.OnCompaction(*resp.compaction.content)
 				}
 			} else {
-				hasDurableCompactionState = false
 				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
 		}
@@ -537,7 +598,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			for _, block := range resp.contentBlocks {
 				blocks = append(blocks, block)
 			}
-			messages = []agenticMessage{{Role: "assistant", Content: blocks}}
+			if resp.compaction.content != nil {
+				messages = []agenticMessage{{Role: "assistant", Content: blocks}}
+			} else {
+				messages = append(messages, agenticMessage{Role: "assistant", Content: blocks})
+			}
 		} else {
 			messages = append(messages, agenticMessage{
 				Role:    "assistant",
@@ -545,6 +610,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			})
 		}
 
+		replayBlocks, _ := json.Marshal(resp.contentBlocks)
+		replay = append(replay, Message{Role: "assistant", ContentBlocks: replayBlocks})
 		// Collect text blocks for this turn.
 		turnText := ""
 		for _, block := range resp.contentBlocks {
@@ -603,10 +670,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				Error:  exec.isError,
 			})
 
+			content := anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit))
+			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
+				content, _ = json.Marshal([]any{
+					map[string]any{"type": "text", "text": "Image returned by view_image: " + image.Name},
+					map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": image.MediaType, "data": base64.StdEncoding.EncodeToString(image.Data)}},
+				})
+			}
 			toolResults = append(toolResults, agenticBlock{
 				Type:      "tool_result",
 				ToolUseID: exec.block.ID,
-				Content:   anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit)),
+				Content:   content,
 				IsError:   exec.isError,
 			})
 		}
@@ -634,6 +708,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			continue
 		}
 
+		// Persist the exact model-visible results, including resolved tool images.
+		replayResults := append([]agenticBlock(nil), toolResults...)
+		replayJSON, _ := json.Marshal(replayResults)
+		replay = append(replay, Message{Role: "user", ContentBlocks: replayJSON})
 		// Add tool results as user message.
 		userBlocks := append([]agenticBlock(nil), toolResults...)
 		if opts.OnToolBoundarySteering != nil {
@@ -643,6 +721,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			if steering = strings.TrimSpace(steering); steering != "" {
 				userBlocks = append(userBlocks, agenticBlock{Type: "text", Text: steering})
+				replayResults = append(replayResults, agenticBlock{Type: "text", Text: steering})
+				replayJSON, _ = json.Marshal(replayResults)
+				replay[len(replay)-1].ContentBlocks = replayJSON
 			}
 		}
 		messages = append(messages, agenticMessage{
@@ -665,8 +746,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		c.History = ensureHistoryEnvironment(c.History, opts.WorkDir)
 	}
-	c.History = append(c.History, Message{Role: "user", Content: prompt})
-	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
+	c.History = append(c.History, replay...)
 
 	return result, nil
 }
@@ -1165,7 +1245,9 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 }
 
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
-	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil {
+	// Summary compaction sends first and trims only after provider overflow.
+	_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
+	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil && !summarizing {
 		return nil, err
 	}
 	policy := httpretry.DefaultPolicy()
@@ -1208,6 +1290,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
 	compactionStrategy, nativeCompactionEnabled := NativeCompactionStrategy(opts.Model)
 	nativeCompactionEnabled = opts.AutoCompaction && nativeCompactionEnabled
 

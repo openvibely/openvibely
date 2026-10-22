@@ -32,7 +32,7 @@ func TestCompactionRetainsNativeUserInstructionsSeparately(t *testing.T) {
 		require.Empty(t, compacted[i].ReplayMessages)
 		require.Empty(t, compacted[i].Output)
 	}
-	require.Contains(t, compacted[4].Output, "work completed")
+	require.Contains(t, compacted[4].PromptSent, "work completed")
 	require.Len(t, history[1].ReplayMessages, 3, "do not mutate original replay")
 }
 
@@ -50,8 +50,22 @@ func TestNativeUserRetentionAppliesNewestFirstBudget(t *testing.T) {
 	require.Empty(t, retainedUserMessageHistory(history, 0))
 }
 
-func TestNonNativeRetentionRemainsUnchanged(t *testing.T) {
+func TestAnthropicRetentionUsesSavedMessages(t *testing.T) {
 	history := []models.Execution{{ID: "old", PromptSent: "original", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"messages":[{"role":"user","content":"provider-specific replay"}]}`}}}}
 	retained := retainedUserMessageHistory(history, 100)
-	require.Equal(t, []models.Execution{{PromptSent: "original", Status: models.ExecCompleted}}, retained)
+	require.Len(t, retained, 1)
+	require.Equal(t, "provider-specific replay", retained[0].PromptSent)
+	require.Equal(t, "user", retained[0].ContextKind)
+	require.Equal(t, models.ExecCompleted, retained[0].Status)
+	require.Empty(t, retained[0].ID)
+	require.Empty(t, retained[0].ReplayMessages)
+	require.JSONEq(t, `{"type":"message","role":"user","content":"provider-specific replay"}`, string(retained[0].RetainedUserMessage))
+	require.Equal(t, "original", history[0].PromptSent)
+	require.Len(t, history[0].ReplayMessages, 1)
+}
+
+func TestRetentionWithoutReplayUsesOriginalPrompt(t *testing.T) {
+	history := []models.Execution{{ID: "old", PromptSent: "original"}}
+	retained := retainedUserMessageHistory(history, 100)
+	require.Equal(t, []models.Execution{{ID: "old", ContextKind: "user", PromptSent: "original", Status: models.ExecCompleted}}, retained)
 }

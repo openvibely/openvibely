@@ -866,6 +866,13 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 		taskPrompt = turn.TurnPrompt
 		baseExtras = withHookExtra(baseExtras, "original_task_prompt", task.Prompt)
 	}
+	if references := attachedFileReferences(ctx); references != "" {
+		taskPrompt += "\n" + references
+	} else if !turn.TaskThreadTurn && w.llmSvc != nil && w.llmSvc.attachmentRepo != nil {
+		if attachments, err := w.llmSvc.attachmentRepo.ListByTask(ctx, task.ID); err == nil {
+			taskPrompt += "\n" + TaskAttachmentReferences(attachments)
+		}
+	}
 	in := lifecycle.HookInput{
 		When:       when,
 		TaskID:     task.ID,
@@ -896,6 +903,26 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 		if goal := w.evaluableTaskGoal(ctx, task.ID); goal != nil {
 			in.Extras[lifecycle.TaskGoalKey] = goal
 		}
+	}
+	originalInclude := include
+	include = func(h models.AgentLifecycleHook) bool {
+		if w.agentRepo != nil {
+			agent, err := w.agentRepo.GetByID(ctx, h.AgentID)
+			if err != nil {
+				return false
+			}
+			if agent != nil && obsoleteCuratorHook(agent.SystemKind, h) {
+				return false
+			}
+			if agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && h.When == models.LifecycleAfterComplete {
+				permissions := projectManagedPermissions(ctx, w.projectRepo, task.ProjectID)
+				if !permissions.ReadSkills || !permissions.WriteSkills {
+					return false
+				}
+			}
+
+		}
+		return originalInclude == nil || originalInclude(h)
 	}
 	result, err := w.lifecycleRunner.RunSlotFiltered(ctx, when, in, include)
 	if err != nil {

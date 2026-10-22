@@ -69,6 +69,10 @@ type AlertStore interface {
 
 // AttachmentStore persists task attachments.
 type AttachmentStore interface {
+	CreateGeneratedFile(context.Context, *models.GeneratedFile) error
+	GeneratedFile(context.Context, string, string) (*models.GeneratedFile, error)
+	ListGeneratedFiles(context.Context, string, string) ([]models.GeneratedFile, error)
+	ListUploadedFiles(context.Context, string, string) ([]models.FileListItem, error)
 	CleanupOrphanedFiles(ctx context.Context, uploadsDir string) (int, error)
 	Create(ctx context.Context, att *models.Attachment) error
 	Delete(ctx context.Context, id string) error
@@ -76,6 +80,7 @@ type AttachmentStore interface {
 	GetByID(ctx context.Context, id string) (*models.Attachment, error)
 	GetByIDForProject(ctx context.Context, id string, projectID string) (*models.Attachment, error)
 	ListByTask(ctx context.Context, taskID string) ([]models.Attachment, error)
+	ListByExecutionIDs(ctx context.Context, execIDs []string) (map[string][]models.Attachment, error)
 }
 
 // AutomationStore persists automations, their bindings, dispatches, history, and health.
@@ -190,6 +195,7 @@ type ChatAttachmentStore interface {
 	ListByExecution(ctx context.Context, executionID string) ([]models.ChatAttachment, error)
 	ListByExecutionIDs(ctx context.Context, execIDs []string) (map[string][]models.ChatAttachment, error)
 	ListByTask(ctx context.Context, taskID string) ([]models.ChatAttachment, error)
+	ListByProject(ctx context.Context, projectID string) ([]models.ChatAttachment, error)
 }
 
 // ChatInputRequestStore persists pending chat input requests.
@@ -330,6 +336,7 @@ type ExecutionStore interface {
 	TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error)
 	UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error
 	UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
+	SaveInTurnCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
 	UpsertChatProviderSessionState(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error
 	UpsertSwarmParentResult(ctx context.Context, parentTaskID string, mergerExecutionID string, output string, diffOutput string, durationMs int64) error
 }
@@ -731,6 +738,7 @@ type TelegramUserProjectStore interface {
 
 // ThreadInputStore persists queued task thread and chat inputs.
 type ThreadInputStore interface {
+	ListAppliedSteeringByExecution(ctx context.Context, executionID string) ([]models.ThreadInput, error)
 	BindPreExecutionQueuedTaskInputs(ctx context.Context, taskID string, executionID string) error
 	CancelPending(ctx context.Context, id string) (*models.ThreadInput, error)
 	CancelPendingForChat(ctx context.Context, projectID string) error

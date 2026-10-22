@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -22,7 +23,7 @@ func NewProjectRepo(db *sql.DB) *ProjectRepo {
 
 func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, created_at, updated_at
+		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, skill_memory_permissions, created_at, updated_at
 			 FROM projects ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)
@@ -32,7 +33,7 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 	var projects []models.Project
 	for rows.Next() {
 		var p models.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, projectPermissionScanner{&p}, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning project: %w", err)
 		}
 		projects = append(projects, p)
@@ -192,9 +193,9 @@ func (r *ProjectRepo) GetIdentityByID(ctx context.Context, id string) (*models.P
 func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, error) {
 	var p models.Project
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, created_at, updated_at
+		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, skill_memory_permissions, created_at, updated_at
 			 FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, projectPermissionScanner{&p}, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -221,14 +222,18 @@ func (r *ProjectRepo) GetDefaultAgentConfigID(ctx context.Context, id string) (*
 }
 
 func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
+	if p.SkillMemoryPermissions == nil {
+		permissions := models.NewProjectPermissions()
+		p.SkillMemoryPermissions = &permissions
+	}
 	if err := models.ValidateProjectWorkerLimit(p.MaxWorkers, 0); err != nil {
 		return err
 	}
 	return queryRowBoundSQLite(ctx, r.db,
-		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers)
-			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
+		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers, skill_memory_permissions)
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, COALESCE(?, '{"read_skills":true,"write_skills":false,"read_memories":true,"write_memories":true}'))
 			 RETURNING id, repo_path, repo_url, created_at, updated_at`,
-		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers).
+		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p)).
 		Scan(&p.ID, &p.RepoPath, &p.RepoURL, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -237,9 +242,9 @@ func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
 		return err
 	}
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, updated_at = datetime('now')
+		`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, skill_memory_permissions = COALESCE(?, skill_memory_permissions), updated_at = datetime('now')
 			 WHERE id = ?`,
-		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, p.ID)
+		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, projectPermissionJSON(p), p.ID)
 	if err != nil {
 		return fmt.Errorf("updating project: %w", err)
 	}
@@ -396,4 +401,33 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 		return manifest, false, fmt.Errorf("committing project deletion: %w", err)
 	}
 	return manifest, true, nil
+}
+
+type projectPermissionScanner struct{ project *models.Project }
+
+func (s projectPermissionScanner) Scan(value any) error {
+	var data []byte
+	switch v := value.(type) {
+	case string:
+		data = []byte(v)
+	case []byte:
+		data = v
+	case nil:
+		return nil
+	default:
+		return fmt.Errorf("invalid managed permissions")
+	}
+	var permissions models.SkillMemoryPermissions
+	if err := json.Unmarshal(data, &permissions); err != nil {
+		return err
+	}
+	s.project.SkillMemoryPermissions = &permissions
+	return nil
+}
+func projectPermissionJSON(p *models.Project) any {
+	if p.SkillMemoryPermissions == nil {
+		return nil
+	}
+	data, _ := json.Marshal(p.SkillMemoryPermissions)
+	return string(data)
 }

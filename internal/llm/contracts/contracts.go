@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -86,14 +87,21 @@ type AgentRequest struct {
 	ProjectID              string // Authoritative project scope for provider-side live events and attribution
 	TransportScope         string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
 	ChatHistory            []models.Execution
-	ChatMode               models.ChatMode
-	ChatSystemContext      string
-	WorkDir                string
-	Followup               bool
-	ProjectInstructions    string
-	AgentDefinition        *models.Agent // Optional agent definition (system prompt, skills, MCP)
-	DisableTools           bool          // Optional: suppress tool/plugin execution for this request
-	RawDirectPrompt        bool          // Optional: direct request message is already fully composed; skip OpenVibely task/system prompt wrapping
+	// RestoredCompactionSourceExecutionID is the covered execution boundary of
+	// the checkpoint restored into this request. Preserve it when recompaction
+	// contains only synthetic summary/context messages with no execution IDs.
+	RestoredCompactionSourceExecutionID string
+	// SummaryInput contains provider-formatted history for a tools-disabled
+	// summary request. Message is the separate, final summarization instruction.
+	SummaryInput        []json.RawMessage
+	ChatMode            models.ChatMode
+	ChatSystemContext   string
+	WorkDir             string
+	Followup            bool
+	ProjectInstructions string
+	AgentDefinition     *models.Agent // Optional agent definition (system prompt, skills, MCP)
+	DisableTools        bool          // Optional: suppress tool/plugin execution for this request
+	RawDirectPrompt     bool          // Optional: direct request message is already fully composed; skip OpenVibely task/system prompt wrapping
 	// LifecycleHookCall marks a direct call made on behalf of a lifecycle hook.
 	// Hooks are structured JSON steps, not coding turns: they keep their own
 	// agent prompt but skip the shared coding-agent system prompt, the

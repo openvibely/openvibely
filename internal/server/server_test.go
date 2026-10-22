@@ -178,6 +178,102 @@ func TestDesktopUpdateProtectedPathsIncludeIndependentStorageOverrides(t *testin
 	}
 }
 
+func TestRequestLoggerFailuresAndSlowResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path string
+		contentType        string
+		status             int
+		latency            time.Duration
+		err                error
+		wantLog            bool
+	}{
+		{"fast poll", "GET", "/tasks/abc/detail-status", "", 200, time.Millisecond, nil, false},
+		{"slow poll", "GET", "/tasks/abc/detail-status", "", 200, time.Second, nil, true},
+		{"missing task", "GET", "/tasks/abc/detail-status", "", 404, time.Millisecond, nil, true},
+		{"server failure", "GET", "/tasks/abc/detail-status", "", 500, time.Millisecond, nil, true},
+		{"handler error", "GET", "/tasks/abc/detail-status", "", 200, time.Millisecond, errors.New("failed"), true},
+		{"other endpoint", "GET", "/tasks/abc", "", 200, time.Millisecond, nil, false},
+		{"other method", "POST", "/tasks/abc/detail-status", "", 200, time.Millisecond, nil, false},
+		{"nested path", "GET", "/tasks/abc/other/detail-status", "", 200, time.Millisecond, nil, false},
+		{"slow stream", "GET", "/events/live", "text/event-stream; charset=utf-8", 200, time.Hour, nil, false},
+		{"failed stream", "GET", "/events/live", "text/event-stream", 500, time.Millisecond, nil, true},
+		{"stream error", "GET", "/events/live", "text/event-stream", 200, time.Hour, errors.New("broken stream"), true},
+		{"slow ordinary request", "POST", "/tasks", "text/html", 200, time.Second, nil, true},
+		{"redirect", "GET", "/login", "", 302, time.Millisecond, nil, false},
+		{"websocket", "GET", "/socket", "", 101, time.Hour, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			cfg := requestLoggerConfig(&output)
+			c := echo.New().NewContext(httptest.NewRequest(tc.method, tc.path, nil), httptest.NewRecorder())
+			c.Response().Header().Set(echo.HeaderContentType, tc.contentType)
+			err := cfg.LogValuesFunc(c, middleware.RequestLoggerValues{
+				Method: tc.method, URIPath: tc.path, Status: tc.status, Latency: tc.latency, Error: tc.err,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := output.Len() > 0; got != tc.wantLog {
+				t.Fatalf("logged = %v, want %v; output: %s", got, tc.wantLog, output.String())
+			}
+		})
+	}
+}
+
+func TestRequestLoggerMiddleware(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		stream       bool
+		handlerError bool
+		status       int
+		wantLog      bool
+	}{
+		{"successful request", false, false, http.StatusOK, false},
+		{"HTTP failure", false, false, http.StatusBadRequest, true},
+		{"uncommitted handler error", false, true, http.StatusInternalServerError, true},
+		{"successful stream", true, false, http.StatusOK, false},
+		{"error after stream headers", true, true, http.StatusOK, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			e := echo.New()
+			e.Use(middleware.RequestLoggerWithConfig(requestLoggerConfig(&output)))
+			e.GET("/probe", func(c echo.Context) error {
+				if tc.stream {
+					c.Response().Header().Set(echo.HeaderContentType, "text/event-stream; charset=utf-8")
+					c.Response().WriteHeader(http.StatusOK)
+					c.Response().Flush()
+				}
+				if tc.handlerError {
+					return errors.New("private-error-secret")
+				}
+				if tc.stream {
+					return nil
+				}
+				return c.NoContent(tc.status)
+			})
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/probe", nil))
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.status)
+			}
+			logged := output.String()
+			if (logged != "") != tc.wantLog {
+				t.Fatalf("unexpected log output: %q", logged)
+			}
+			if tc.wantLog && !strings.Contains(logged, "failed=true") {
+				t.Fatalf("missing failure flag: %s", logged)
+			}
+			if tc.stream && tc.handlerError && !strings.Contains(logged, "status=200 failed=true") {
+				t.Fatalf("committed stream failure not identified: %s", logged)
+			}
+			if strings.Contains(logged, "private-error-secret") {
+				t.Fatalf("error details leaked: %s", logged)
+			}
+		})
+	}
+}
+
 func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
 
 	var output bytes.Buffer
@@ -186,7 +282,7 @@ func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
 	for _, path := range []string{"/login", "/auth/sso/start", "/auth/sso/callback"} {
 		e.GET(path, func(c echo.Context) error {
 			c.Response().Header().Set("Location", "https://secret.example/token-value")
-			return c.NoContent(http.StatusFound)
+			return c.NoContent(http.StatusBadRequest)
 		})
 	}
 	requests := []string{

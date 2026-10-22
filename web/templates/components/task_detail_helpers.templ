@@ -270,22 +270,9 @@ func TaskLatestDuration(executions []models.Execution) string {
 	return ""
 }
 
-// TaskThreadStatusIndicator renders a success/failure status indicator at the bottom of thread messages.
-// Shows only when the task is completed or failed, providing clear visual feedback.
+// TaskThreadStatusIndicator renders a failure indicator at the bottom of thread messages.
 templ TaskThreadStatusIndicator(task *models.Task, executions []models.Execution) {
-	if task.Status == models.StatusCompleted {
-		<div data-task-terminal-status class="flex items-center justify-center gap-2 py-2">
-			<div class="flex items-center gap-2 text-success text-sm opacity-70">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-				</svg>
-				<span>Task completed</span>
-				if dur := TaskLatestDuration(executions); dur != "" {
-					<span class="opacity-60">({ dur })</span>
-				}
-			</div>
-		</div>
-	} else if task.Status == models.StatusFailed {
+	if task.Status == models.StatusFailed {
 		<div data-task-terminal-status class="flex items-center justify-center gap-2 py-2">
 			<div class="flex items-center gap-2 text-error text-sm opacity-70">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -354,9 +341,8 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		<div class="relative flex-1 min-h-0 min-w-0">
 			<div
 				id="task-thread-messages"
-				class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"
+				class="h-full overflow-y-auto pt-4 pb-2 space-y-4 min-h-0"
 				if preservedExecIDs == nil {
-					style="visibility: hidden;"
 					data-transcript-hydrating="true"
 				}
 				data-window-limit={ fmt.Sprintf("%d", windowLimit) }
@@ -812,7 +798,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 							// Release detached task-thread runtime owners when navigating away.
 							// A later open is a fresh reading session and must settle at the true
 							// bottom instead of restoring an old upward position from this task.
-							if (target && target.id === 'main-content') {
+							if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {
 								var outgoingTaskId = _taskThreadTaskId();
 								window._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};
 								if (outgoingTaskId) window._taskThreadFreshOpenTasks[outgoingTaskId] = true;
@@ -899,7 +885,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 							}
 						}
-							else if (target && target.id === 'main-content') {
+							else if (target && target.id === 'main-content' && !event.detail._ovThreadRefresh) {
 								_initializeFreshTaskThreadOpen();
 							}
 							// Restore textarea value after morph polling or full page refresh
@@ -923,6 +909,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var threadView = document.getElementById('task-thread-view');
 					var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
 					if (!taskId) return;
+					var disposed = false;
 						var queuedSteerInFlight = {};
 						var queuedSteerClearTimers = {};
 						var directSteerInFlight = false;
@@ -979,6 +966,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						delete window._taskThreadQueuedSteerRequestHandlers[taskId];
 					}
 						function currentTaskThreadView() {
+							if (disposed) return null;
 							var view = document.getElementById('task-thread-view');
 							return view && view.getAttribute('data-task-id') === taskId ? view : null;
 						}
@@ -1041,6 +1029,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById('task-thread-messages');
+							if (status !== 'failed' && status !== 'cancelled') return;
 							if (!messages || document.getElementById('task-thread-terminal-status')) return;
 							var wrap = document.createElement('div');
 							wrap.id = 'task-thread-terminal-status';
@@ -1236,7 +1225,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								swap: 'beforeend'
 							}).then(function() {
 								delete pendingFragmentExecs[data.exec_id];
-								var view = document.getElementById('task-thread-view');
+								if (!currentTaskThreadView() || !messages.isConnected) return;
+								var view = currentTaskThreadView();
 								if (view) view.setAttribute('data-task-active', 'true');
 								if (window._initThreadStreaming) window._initThreadStreaming();
 								refreshThreadComposerAction();
@@ -1328,6 +1318,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var cleanupTaskThreadLiveHandlers = function(event) {
 						var target = event.detail && event.detail.target;
 						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {
+							disposed = true;
 							window.removeEventListener('sse-task-event', handler);
 							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
