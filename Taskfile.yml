@@ -4,6 +4,7 @@ vars:
   APP_NAME: openvibely-desktop
   BIN_DIR: bin
   DESKTOP_PACKAGE: ./cmd/desktop
+  DESKTOP_GO_BUILD_OPTIONS: -trimpath -buildvcs=false
   CROSS_IMAGE: '{{.CROSS_IMAGE | default "wails-cross-amd64"}}'
   CROSS_PLATFORM: '{{.CROSS_PLATFORM | default "linux/amd64"}}'
 
@@ -40,7 +41,7 @@ tasks:
     summary: Builds the macOS desktop binary.
     cmds:
       - mkdir -p "$(dirname "{{.OUTPUT}}")"
-      - go build -trimpath -buildvcs=false -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
+      - go build {{.DESKTOP_GO_BUILD_OPTIONS}} -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{.OUTPUT | default .DEFAULT_OUTPUT}}'
@@ -56,7 +57,7 @@ tasks:
     summary: Builds the Windows desktop executable.
     cmds:
       - mkdir -p "$(dirname "{{.OUTPUT}}")"
-      - go build -trimpath -buildvcs=false -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w -H windowsgui}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
+      - go build {{.DESKTOP_GO_BUILD_OPTIONS}} -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w -H windowsgui}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}.exe'
       OUTPUT: '{{.OUTPUT | default .DEFAULT_OUTPUT}}'
@@ -82,7 +83,7 @@ tasks:
     summary: Builds the Linux desktop binary on a Linux host.
     cmds:
       - mkdir -p "$(dirname "{{.OUTPUT}}")"
-      - go build -tags gtk3 -trimpath -buildvcs=false -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
+      - go build -tags gtk3 {{.DESKTOP_GO_BUILD_OPTIONS}} -ldflags="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{.OUTPUT | default .DEFAULT_OUTPUT}}'
@@ -112,7 +113,7 @@ tasks:
           -e OPENVIBELY_DESKTOP_LDFLAGS="${OPENVIBELY_DESKTOP_LDFLAGS:--s -w}" \
           --entrypoint /bin/sh \
           "{{.CROSS_IMAGE}}" \
-          -lc 'cd /app && /usr/local/go/bin/go build -tags gtk3 -trimpath -buildvcs=false -ldflags="$OPENVIBELY_DESKTOP_LDFLAGS" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}'
+          -lc 'cd /app && /usr/local/go/bin/go build -tags gtk3 {{.DESKTOP_GO_BUILD_OPTIONS}} -ldflags="$OPENVIBELY_DESKTOP_LDFLAGS" -o "{{.OUTPUT}}" {{.DESKTOP_PACKAGE}}'
       - cmd: docker run --rm -v "{{.ROOT_DIR}}:/app" alpine chown -R $(id -u):$(id -g) "/app/$(dirname "{{.OUTPUT}}")"
         platforms: [linux, darwin]
     vars:
