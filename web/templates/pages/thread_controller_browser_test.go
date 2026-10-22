@@ -54,6 +54,10 @@ func TestBrowserFunctional_ChatLiveCreatedViewCleanupInChrome(t *testing.T) {
 			t.Fatalf("remove live-created bubble: %s", got)
 		}
 		browser.waitFor("removed view released", `String(window.__cleanupView.closed)+':'+window.__cleanupRun.views.size`, "true:0")
+		if got := browser.evaluate(`String(window._chatEventSources.length)+':'+Object.keys(window._chatEventSourceByExec).length`); got != "0:0" {
+			t.Fatalf("closed views retained by legacy registries: %s", got)
+		}
+
 		if got := browser.evaluate(`(function(){
 			var stream=window.__terminalStreamFor('live-created');
 			if(!stream)return 'background stream closed';

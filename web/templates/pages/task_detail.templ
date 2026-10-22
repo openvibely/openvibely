@@ -1655,7 +1655,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 
 						function _closeTaskThreadEventSourcesForRefresh() {
 							if (!window._threadEventSources) return;
-							window._threadEventSources.forEach(function(es) {
+							window._threadEventSources.slice().forEach(function(es) {
 								try { es.close(); } catch(e) {}
 							});
 							window._threadEventSources = [];

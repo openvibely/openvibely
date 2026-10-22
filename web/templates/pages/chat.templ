@@ -344,7 +344,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				};
 				window.closeAllChatStreamEventSources = function() {
 					if (!window._chatEventSources) return;
-					window._chatEventSources.forEach(function(es) {
+					window._chatEventSources.slice().forEach(function(es) {
 						try { es.close(); } catch (e) {}
 					});
 					window._chatEventSources = [];
