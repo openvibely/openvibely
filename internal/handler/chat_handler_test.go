@@ -823,9 +823,13 @@ func TestHandler_ChatMessageWithExec_GeneratesCorrectHTML(t *testing.T) {
 		t.Error("expected data-exec-id attribute in streaming message div")
 	}
 
-	// Should subscribe through the document-wide transport.
-	if !strings.Contains(body, "window.openVibelyLive.execution") {
-		t.Error("expected shared execution subscription")
+	// The view attaches through the controller; the snapshot cache owns the
+	// shared transport subscription so output continues across navigation.
+	if !strings.Contains(body, "window.openVibelyThreadController.attach(execId, streamProjectID, textBuffer, container, streamOffset)") {
+		t.Error("expected controller-managed execution subscription")
+	}
+	if strings.Contains(body, "window.openVibelyLive.execution") {
+		t.Error("streaming view must not bypass the thread controller")
 	}
 
 	// Per-execution HTTP streaming has been removed.
