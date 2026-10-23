@@ -19,6 +19,60 @@ Use `word-edit` with the operations below. `paragraph`, `run`, `table`, `row`, `
 | `header-footer-link` | `section`, `kind:header/footer`, optional `type:default/first/even`, boolean `linked`; see linkage below. |
 | `batch` | `edits` array of these general operations. Indices reflect earlier edits. No nested batches or specialized review operations inside a batch. |
 
+### Find the paragraph before editing
+
+`inspect` has no `.paragraphs` field. For a document with no table or nested paragraphs, read the reported IDs and text rather than using JSON array positions:
+
+```sh
+"$PAPERWORKS" inspect input.docx > inspection.json
+jq '.direct_formatting[] | {part, paragraph, text}' inspection.json
+```
+
+`direct_formatting` only includes paragraphs with direct formatting, so it is not a complete paragraph inventory. `/direct_formatting/16/text` means array entry 16, not paragraph 16; read that entry's `paragraph` field. `stories[].content` contains text fragments, not editable paragraph IDs.
+
+Inspection numbers all descendant paragraphs in each part, including table paragraphs. General edits instead count direct `w:p` children of `w:body` (or of the selected header/footer root). If the part contains tables/nested paragraphs, or the target is absent from `direct_formatting`, inspect the DOCX ZIP's XML and enumerate those direct children from zero, including empty paragraphs. Select `run` by counting the target paragraph's direct `w:r` children. Do not derive edit IDs from search-result positions.
+
+### Replace repeated matches in a batch
+
+Each edit sees the result of earlier edits. For an inspected paragraph 1 containing exactly two ordinary-text matches of `Paver`, both edits below use occurrence 0: after the first replacement, the remaining match becomes the first match.
+
+```json
+{"operation":"batch","edits":[
+ {"operation":"replace-text","paragraph":1,"old":"Paver","new":"Finn","occurrence":0},
+ {"operation":"replace-text","paragraph":1,"old":"Paver","new":"Finn","occurrence":0}
+]}
+```
+
+Run the spec with `word-edit INPUT --spec SPEC.json --output OUTPUT.docx`. Use the actual paragraph and match count. This repeated-zero pattern assumes `new` does not contain `old`; otherwise inspect between edits or replace matches from highest occurrence to lowest. Search the output for remaining old text and verify the new text before rendering.
+
+### Change a run's font
+
+For an inspected paragraph 1, run 0:
+
+```json
+{"operation":"run-format","paragraph":1,"run":0,"font":"Arial","font_size":11}
+```
+
+Run with `word-edit` as above. `font_size` is in points. Paperworks sets the XML font attributes and removes conflicting theme-font bindings; no separate XML patch is needed. This changes only the selected direct run, not the entire paragraph or its style. Use an available font and render to check substitution and reflow.
+
+### Replace or clear header text
+
+To replace the entire default header for section 0:
+
+```json
+{"operation":"header-footer","section":0,"kind":"header","type":"default","text":"Updated report title"}
+```
+
+Set `text` to `""` to replace it with an empty header. This replaces all content in that header, including tables and images; it does not clear just one paragraph. Later sections that inherit it can change too (see linkage below).
+
+For a narrow text edit, preserve the header's other content by targeting its inspected part and direct paragraph instead:
+
+```json
+{"operation":"replace-text","part":"word/header1.xml","paragraph":0,"old":"Draft","new":"Final","occurrence":0}
+```
+
+Use the actual part path and indices. An empty `new` removes only that match and retains the paragraph. Do not delete/recreate a whole header for a narrow replacement; check which sections share the edited part.
+
 ### General editing example
 
 After the small authoring example creates `example.docx`, change one phrase without tracking or accepting existing revisions, and format that paragraph:
