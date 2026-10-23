@@ -319,3 +319,23 @@ fill and optional dash; width zero removes the axis line.
 Example: `{"id":"INSPECTED_VALUE_AXIS_ID","crosses_at":25,"outline":{"width":1,"fill":{"fill":"17324D"}}}`.
 Omitted settings remain unchanged. These are post-RC4 fields; check the local
 schema and render to verify crossing, tick labels and line placement.
+
+
+## Additional chart label controls (after RC4)
+
+Series `labels` accepts `separator`, `show_legend_key`, `show_leader_lines`
+and `show_bubble_size`, alongside the existing value/category/series/percent
+flags. Each `label_overrides` entry accepts `separator`, `show_value`,
+`show_category`, `show_series`, `show_percent`, `show_legend_key` and
+`show_bubble_size`. For example, inside a selected series:
+`{"labels":{"separator":" / ","show_legend_key":true},"label_overrides":[{"index":1,"show_value":false,"show_category":true,"separator":""}]}`.
+Booleans accept explicit false; an empty separator clears it. Omission preserves
+existing settings/inheritance. Percent=true requires pie/doughnut, and bubble
+size/leader-line display depends on the chart family and application. Existing
+hidden-label settings remain unchanged. Leader lines are a series-label
+setting, not a per-point field. Check the newer local schema, then render to
+verify the resulting labels; native flags do not guarantee visible leader lines.
+
+The tested LibreOffice preview retained a separator for an individual label
+even when its native separator was saved as empty. Verify exact point-label
+separator behavior in the intended PowerPoint application.
