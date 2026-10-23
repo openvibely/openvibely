@@ -4535,6 +4535,20 @@ templ ChatAutoScrollScript() {
 			// Persistent stores survive streaming rerenders and HTMX morph replacement.
 			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
 			if (!window._toolOutputRowStates) window._toolOutputRowStates = {};
+			if (!window._toolOutputStateOwners) window._toolOutputStateOwners = new Map();
+			window.releaseToolOutputState = function(executionID) {
+				if (executionID == null) {
+					window._toolOutputRowStates = {};
+					window._toolOutputStateOwners.clear();
+					return;
+				}
+				var prefixes = window._toolOutputStateOwners.get(executionID);
+				if (!prefixes) return;
+				Object.keys(window._toolOutputRowStates).forEach(function(key) {
+					for (var prefix of prefixes) if (key.startsWith(prefix + ':')) { delete window._toolOutputRowStates[key]; break; }
+				});
+				window._toolOutputStateOwners.delete(executionID);
+			};
 			window.invalidateToolOutputLineCapacity = function() {
 				window._toolOutputCapacityCache = null;
 			};
@@ -5348,6 +5362,13 @@ templ ChatAutoScrollScript() {
 			// persistent window._thinkingOpenStates map (survives morph:outerHTML DOM replacement).
 			var containerKey = _thinkingStateKey(container);
 			var toolContainerKey = container._chatToolStateKey || containerKey;
+			var toolExecution = container.closest('[data-exec-id]');
+			if (toolExecution && toolContainerKey) {
+				var toolExecutionID = toolExecution.getAttribute('data-exec-id');
+				var prefixes = window._toolOutputStateOwners.get(toolExecutionID);
+				if (!prefixes) window._toolOutputStateOwners.set(toolExecutionID, prefixes = new Set());
+				prefixes.add(toolContainerKey);
+			}
 			// Tail-local indexes support incremental rerenders. Also keep the complete
 			// bubble snapshot for server-markup hydration after a morph.
 			function persistThinkingStates() {
@@ -5534,6 +5555,22 @@ templ ChatAutoScrollScript() {
 					}, { passive: true });
 				}
 
+				function addToolCopy(parent, text, label) {
+					var button = document.createElement('button');
+					button.type = 'button';
+					button.className = 'stream-tool-copy';
+					button.textContent = 'Copy';
+					button.setAttribute('aria-label', 'Copy full tool ' + label);
+					button.addEventListener('click', async function(event) {
+						event.preventDefault(); event.stopPropagation();
+						try {
+							await navigator.clipboard.writeText(text);
+							button.textContent = 'Copied';
+						} catch (_) { button.textContent = 'Copy failed'; }
+					});
+					parent.appendChild(button);
+				}
+
 				// Extract IN content based on tool type
 				if ((dn === 'Bash' || dn === 'Shell') && seg.secondary) {
 					hasIn = true;
@@ -5587,15 +5624,15 @@ templ ChatAutoScrollScript() {
 					var inVal = document.createElement('div');
 					inVal.className = 'stream-tool-body-content';
 					var inScroll = document.createElement('div');
-					inScroll.className = 'stream-tool-body-scroll';
+					inScroll.className = 'stream-tool-body-static';
 					inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 					inScroll.setAttribute('data-tool-row', 'in');
-					trackScrollPin(inScroll, rowStateKey('in'));
 					var inPre = document.createElement('pre');
 					inPre.className = 'stream-tool-output-text';
 					inPre.textContent = inContent;
 					inScroll.appendChild(inPre);
 					inVal.appendChild(inScroll);
+					addToolCopy(inVal, inContent, 'input');
 					inRow.appendChild(inLbl);
 					inRow.appendChild(inVal);
 					grid.appendChild(inRow);
@@ -5624,7 +5661,7 @@ templ ChatAutoScrollScript() {
 						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(outVal);
 					}
 					function restoreOutputScroll() {
-						if (!outScroll) return;
+						if (!outScroll || !shouldCollapse) return;
 						if (rowState.pinned === false) {
 							outScroll.scrollTop = rowState.scrollTop || 0;
 							outScroll.setAttribute('data-scroll-pinned', 'false');
@@ -5637,10 +5674,10 @@ templ ChatAutoScrollScript() {
 						if (outScroll) return;
 						var version = ++materializationVersion;
 						outScroll = document.createElement('div');
-						outScroll.className = 'stream-tool-body-scroll';
+						outScroll.className = shouldCollapse ? 'stream-tool-body-scroll' : 'stream-tool-body-static';
 						outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 						outScroll.setAttribute('data-tool-row', 'out');
-						trackScrollPin(outScroll, stateKey);
+						if (shouldCollapse) trackScrollPin(outScroll, stateKey);
 						var outPre = document.createElement('pre');
 						outPre.className = 'stream-tool-output-text';
 						outScroll.appendChild(outPre);
@@ -5703,6 +5740,7 @@ templ ChatAutoScrollScript() {
 					}
 					if (expanded && outputText) materializeOutput(true);
 					appendWebSearchSources(outVal, webSearchSources);
+					if (outputText) addToolCopy(outVal, outputText, 'output');
 
 					outRow.appendChild(outLbl);
 					outRow.appendChild(outVal);

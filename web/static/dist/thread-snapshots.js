@@ -49,6 +49,7 @@
         return a.id === b.id ? 0 : a.id > b.id ? -1 : 1;
     }
     function discard(run) {
+        window.releaseToolOutputState?.(run.id);
         if (run.live) suppressedExecutions.add(run.key);
         runs.delete(run.key);
         run.stream?.close();
@@ -133,6 +134,7 @@
                 return;
             }
             if (type === 'error' && /^(execution not found|subscription denied)$/.test(event.data)) {
+                window.releaseToolOutputState?.(run.id);
                 run.output = ''; run.offset = 0; run.version++;
                 pages.forEach((page, id) => { if (page.runKeys?.includes(run.key)) pages.delete(id); });
                 runs.delete(run.key);
@@ -255,7 +257,10 @@
         idle.forEach(g => {
             if (Date.now()-g.time <= ttl && bytes <= maxBytes && count <= maxThreads) return;
             if (g.runs.some(key => runs.get(key)?.live)) suppressedThreads.add(g.key);
-            g.pages.forEach(id => pages.delete(id));
+            g.pages.forEach(id => {
+                pages.get(id)?.executionIDs?.forEach(execID => window.releaseToolOutputState?.(execID));
+                pages.delete(id);
+            });
             g.runs.forEach(key => { const run = runs.get(key); if (run) discard(run); });
             bytes -= g.bytes; count--;
         });
@@ -306,6 +311,7 @@
         discovery?.abort(); discovery = null;
         runs.forEach(run => { run.stream?.close(); run.views.forEach(view => { view.closed = true; view.readyState = 2; }); });
         runs.clear(); pages.clear();
+        window.releaseToolOutputState?.();
         suppressedThreads.clear(); suppressedExecutions.clear();
         clearTimeout(sweepTimer); sweepTimer = null;
     }

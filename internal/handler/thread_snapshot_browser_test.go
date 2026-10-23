@@ -29,7 +29,8 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
 	}
 	result := make(chan string, 1)
 	doc := `<!doctype html><html><head><script>
- const streams=[];
+ const streams=[], releasedToolStates=[];
+ window.releaseToolOutputState=id=>releasedToolStates.push(id);
  let active=[], now=Date.now();
  Date.now=()=>now;
  const bytes=s=>new TextEncoder().encode(s).length;
@@ -102,7 +103,7 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   // Revoked/deleted executions must not retain output for future cached opens.
   let denied=view('denied','private');await tick();const deniedStream=streams.at(-1);
   deniedStream.emit('error','subscription denied');
-  assert(!record('denied')&&denied.output==='','denied execution retained private output');denied.listener.close();
+  assert(!record('denied')&&denied.output==='','denied execution retained private output');assert(releasedToolStates.includes('denied'),'denied execution retained tool state');denied.listener.close();
   // A reset received while the HTTP seed is ahead must replace that seed.
   let reset=view('reset');await tick();const resetStream=streams.at(-1);reset.listener.close();
   reset=view('reset','long stale seed');await tick();resetStream.emit('reset','new');
@@ -243,6 +244,7 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   const evicted=active.find(item=>!record(item.id));
   const evictedStream=streams.find(s=>s.id===evicted.id);
   assert(evictedStream.closed,'count eviction kept its subscription');
+  assert(releasedToolStates.includes(evicted.id),'count eviction retained tool state');
   await cache.discover();await cache.discover();
   assert(streams.length===discoveredCount,'discovery immediately reloaded evicted output');
   const owner={closest(selector){return selector==='[data-task-id]'?{getAttribute:()=>evicted.task_id}:null},setAttribute(){}};
@@ -251,6 +253,7 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   reopened.close();const afterReopen=streams.length;
   await cache.discover();assert(cache.runs.size===20&&streams.length===afterReopen,'reopened admission caused discovery churn');
   cache.clear();
+  assert(releasedToolStates.includes(undefined),'clear retained tool state');
   // Background growth is enforced without waiting for terminal output or the
   // five-second discovery interval; completed and running data share one budget.
   active=[{id:'growing',project_id:'p',task_id:'growing-task',category:'active'}];
