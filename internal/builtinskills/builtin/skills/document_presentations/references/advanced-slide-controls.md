@@ -470,7 +470,9 @@ Use `paragraphs` instead of `text`. For creation or `table-format`, put the same
 all text paragraphs in that cell; an empty array clears it. Omission preserves
 text during table formatting. Use merged-cell origins. Borders, margins, body
 properties and unrelated cells remain unchanged.
-Runs accept bold, italic, underline, font size and color. Paragraphs accept
+Runs accept bold, italic, underline, font size and color. Set `font` on each
+run for mixed typefaces, for example `{"text":"Code","font":"Courier New"}`;
+omitting it uses the default font. Paragraphs accept
 bullet/level and `format`; named run styles are not supported in this path.
 Unspecified authored text defaults to Arial 12pt and the helper's text color;
 specify intended sizes/colors when matching existing content. Render and inspect
