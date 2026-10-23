@@ -1,7 +1,6 @@
 package pages
 
 import (
-	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -140,58 +139,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 		</script>
 	}
 
-	<!-- New Task Dialog -->
 	if project != nil {
-			<dialog id="new_task_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("new_task_modal", "Close new task dialog")
-					<h3 class="font-bold text-lg mb-4 pr-10">New Task</h3>
-					<form
-						data-new-task-form
-						method="post"
-						hx-post={ fmt.Sprintf("/tasks?project_id=%s", project.ID) }
-						hx-target="#kanban-board"
-						hx-swap="outerHTML"
-						hx-encoding="multipart/form-data"
-					>
-						<div class="form-control mb-3">
-							<label class="label"><span class="label-text">Title</span></label>
-							<input type="text" name="title" id="task-title-input" class="input input-bordered" required placeholder="Task title"/>
-							<div id="title-error" class="hidden mt-2 flex items-center gap-2 text-error text-sm">
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-								</svg>
-								<span id="title-error-message"></span>
-							</div>
-						</div>
-							<div class="form-control mb-3">
-								<label class="label"><span class="label-text">Prompt</span></label>
-								<textarea name="prompt" class="textarea textarea-bordered h-32" required placeholder="The prompt/instruction for the model to execute"></textarea>
-							</div>
-							@NewTaskOptions(agents, agentDefs)
-						<!-- Attachment field -->
-								<div class="form-control mt-3">
-							<label class="label">
-								<span class="label-text">Attachments (optional)</span>
-								<span class="label-text-alt text-xs opacity-60">25 MiB per file; 200 MiB video; 256 KiB text</span>
-							</label>
-							<input type="file" id="create-task-file-input" multiple class="file-input file-input-bordered file-input-sm"/>
-							<input type="file" name="files" multiple class="hidden" id="create-task-files-hidden"/>
-							<div id="create-task-file-list" class="mt-2 space-y-1"></div>
-						</div>
-						<div class="modal-action">
-							<button type="button" class="btn" onclick="new_task_modal.close()">Cancel</button>
-							<button type="submit" class="btn btn-primary">Create Task</button>
-						</div>
-					</form>
-				</div>
-				<form method="dialog" class="modal-backdrop">
-					<button>close</button>
-				</form>
-			</dialog>
-
-			
-
 			<script type="text/javascript">
 				// Auto-load task dialog if task_id is in URL (e.g., from alert navigation)
 				(function() {
@@ -201,119 +149,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						// Navigate to the task detail page
 						window.openVibelyNavigate('/tasks/' + taskId);
 					}
-				})();
-
-				// File accumulator for create task dialog
-				(function() {
-					const fileInput = document.getElementById('create-task-file-input');
-					const hiddenInput = document.getElementById('create-task-files-hidden');
-					const fileListDiv = document.getElementById('create-task-file-list');
-					if (!fileInput || !hiddenInput || !fileListDiv) return;
-
-					let accumulatedFiles = [];
-
-					function formatSize(bytes) {
-						if (bytes < 1024) return bytes + ' B';
-						if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-						return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-					}
-
-					function syncHiddenInput() {
-						const dt = new DataTransfer();
-						accumulatedFiles.forEach(function(f) { dt.items.add(f); });
-						hiddenInput.files = dt.files;
-					}
-
-					function renderFileList() {
-						fileListDiv.innerHTML = '';
-						accumulatedFiles.forEach(function(file, idx) {
-							var div = document.createElement('div');
-							div.className = 'flex items-center justify-between p-1.5 bg-base-200 rounded text-sm';
-							div.innerHTML = '<span class="truncate mr-2">' + file.name + ' <span class="opacity-60">(' + formatSize(file.size) + ')</span></span>';
-							var btn = document.createElement('button');
-							btn.type = 'button';
-							btn.className = 'btn btn-ghost btn-xs text-error';
-							btn.textContent = '\u2715';
-							btn.onclick = function() {
-								accumulatedFiles.splice(idx, 1);
-								syncHiddenInput();
-								renderFileList();
-							};
-							div.appendChild(btn);
-							fileListDiv.appendChild(div);
-						});
-					}
-
-					fileInput.addEventListener('change', function() {
-						for (var i = 0; i < this.files.length; i++) {
-							// Skip duplicates by name+size
-							var f = this.files[i];
-							var isDupe = accumulatedFiles.some(function(af) {
-								return af.name === f.name && af.size === f.size;
-							});
-							if (!isDupe) {
-								accumulatedFiles.push(f);
-							}
-						}
-						syncHiddenInput();
-						renderFileList();
-						this.value = '';
-					});
-
-					// Reset accumulated files when modal closes
-					var modal = document.getElementById('new_task_modal');
-					if (modal) {
-						modal.addEventListener('close', function() {
-							accumulatedFiles = [];
-							syncHiddenInput();
-							renderFileList();
-						});
-					}
-				})();
-
-					// Show swarm sub-options only when swarm mode is enabled.
-					(function() {
-						var toggle = document.getElementById('create-task-swarm-mode-toggle');
-						var options = document.getElementById('create-task-swarm-options');
-						if (!toggle || !options) return;
-
-						function syncSwarmOptionsVisibility() {
-							options.classList.toggle('hidden', !toggle.checked);
-						}
-
-						toggle.addEventListener('change', syncSwarmOptionsVisibility);
-						toggle.form?.addEventListener('reset', function() {
-							setTimeout(syncSwarmOptionsVisibility, 0);
-						});
-						syncSwarmOptionsVisibility();
-					})();
-
-					// Track unsaved changes in the new task modal
-					(function() {
-						const modal = document.getElementById('new_task_modal');
-						if (!modal) return;
-					let hasChanges = false;
-					const form = modal.querySelector('form');
-
-					if (form) {
-						form.addEventListener('input', function() {
-							hasChanges = true;
-						});
-
-						modal.addEventListener('close', function() {
-							hasChanges = false;
-						});
-					}
-
-					// Warn before navigating away with unsaved changes
-					window.addEventListener('beforeunload', function(event) {
-						if (modal.open && hasChanges) {
-							const message = 'You have unsaved changes in the task form. Are you sure you want to leave?';
-							event.preventDefault();
-							event.returnValue = message;
-							return message;
-						}
-					});
 				})();
 
 				// Listen to real-time task events from sidebar's shared SSE connection.
@@ -527,91 +362,6 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					});
 				})();
 
-				// Reset and open the new task modal
-				function openNewTaskModal() {
-					const modal = document.getElementById('new_task_modal');
-					const form = modal.querySelector('form');
-					const titleInput = document.getElementById('task-title-input');
-					const titleError = document.getElementById('title-error');
-
-						// Reset the form
-						form.reset();
-						setTimeout(function() {
-							const swarmToggle = document.getElementById('create-task-swarm-mode-toggle');
-							const swarmOptions = document.getElementById('create-task-swarm-options');
-							if (swarmToggle && swarmOptions) {
-								swarmOptions.classList.toggle('hidden', !swarmToggle.checked);
-							}
-						}, 0);
-
-						// Clear any previous errors
-						if (titleError) {
-							titleError.classList.add('hidden');
-						}
-						if (titleInput) {
-							titleInput.classList.remove('input-error');
-						}
-					// Open the modal
-					modal.showModal();
-				}
-
-
-					// Handle HTMX response errors for duplicate task titles.
-					document.body.addEventListener('htmx:responseError', function(event) {
-						var source = event.detail && event.detail.elt;
-						if (!source || !source.closest('form[data-new-task-form]')) return;
-						const xhr = event.detail.xhr;
-
-						// Check for 409 Conflict (duplicate task)
-						if (xhr.status === 409) {
-							event.preventDefault(); // Prevent default HTMX error handling
-
-							const titleInput = document.getElementById('task-title-input');
-							const titleError = document.getElementById('title-error');
-							const titleErrorMessage = document.getElementById('title-error-message');
-
-							if (titleInput && titleError && titleErrorMessage) {
-								// Add error styling to input
-								titleInput.classList.add('input-error');
-
-								// Show error message
-								titleErrorMessage.textContent = xhr.responseText || 'A task with this name already exists in this project';
-								titleError.classList.remove('hidden');
-
-								// Don't close the modal - keep it open so user can fix the error
-								const modal = document.getElementById('new_task_modal');
-								if (modal && !modal.open) {
-									modal.showModal();
-								}
-							}
-						}
-					});
-
-				// Clear error when user starts typing in the title field
-				document.getElementById('task-title-input')?.addEventListener('input', function() {
-					const titleError = document.getElementById('title-error');
-					if (titleError && !titleError.classList.contains('hidden')) {
-						titleError.classList.add('hidden');
-						this.classList.remove('input-error');
-					}
-				});
-
-				// Guard against duplicate handler registration from repeated HTMX navigation
-				if (!window._tasksDialogHandlersAttached) {
-					window._tasksDialogHandlersAttached = true;
-
-					// Close modal on successful task creation
-					document.body.addEventListener('htmx:afterSwap', function(event) {
-						// Check if this was a successful task creation (kanban board updated)
-						if (event.detail.target && event.detail.target.id === 'kanban-board') {
-							const modal = document.getElementById('new_task_modal');
-							if (modal && modal.open) {
-								modal.close();
-							}
-						}
-					});
-
-					}
 			</script>
 		}
 }
