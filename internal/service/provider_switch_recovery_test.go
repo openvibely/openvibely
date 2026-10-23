@@ -184,13 +184,7 @@ func TestProviderSwitchPreservesReadableMessagesBeforeCompaction(t *testing.T) {
 			calls := 0
 			_, err := (&LLMService{}).callProviderWithCompaction(providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				calls++
-				if len(req.SummaryInput) > 0 {
-					raw, err := json.Marshal(req.SummaryInput)
-					require.NoError(t, err)
-					require.NotContains(t, string(raw), "PREFIX_MESSAGE")
-					require.NotContains(t, string(raw), "aW1hZ2U=")
-					return llmcontracts.AgentResult{Output: "RECOVERED_SUMMARY"}, nil
-				}
+				require.Empty(t, req.SummaryInput)
 				input, err := summaryHistoryInput(provider, req.ChatHistory)
 				require.NoError(t, err)
 				raw, err := json.Marshal(input)
@@ -198,15 +192,15 @@ func TestProviderSwitchPreservesReadableMessagesBeforeCompaction(t *testing.T) {
 				text := string(raw)
 				require.Contains(t, text, "PREFIX_MESSAGE")
 				require.Contains(t, text, "aW1hZ2U=")
-				require.Contains(t, text, "RECOVERED_SUMMARY")
+				require.Contains(t, text, "older output")
 				require.Contains(t, text, "SUFFIX_MESSAGE")
 				require.NotContains(t, text, "encrypted_content")
-				require.Less(t, strings.Index(text, "PREFIX_MESSAGE"), strings.Index(text, "RECOVERED_SUMMARY"))
-				require.Less(t, strings.Index(text, "RECOVERED_SUMMARY"), strings.Index(text, "SUFFIX_MESSAGE"))
+				require.Less(t, strings.Index(text, "older output"), strings.Index(text, "PREFIX_MESSAGE"))
+				require.Less(t, strings.Index(text, "PREFIX_MESSAGE"), strings.Index(text, "SUFFIX_MESSAGE"))
 				return llmcontracts.AgentResult{Output: "done"}, nil
 			}), llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider, Model: "test", ContextWindow: 200000}, ChatHistory: history, Message: "continue"})
 			require.NoError(t, err)
-			require.Equal(t, 2, calls)
+			require.Equal(t, 1, calls)
 			require.Equal(t, transcript, history[0].ReplayMessages[0].TranscriptJSON)
 		})
 	}
@@ -240,13 +234,17 @@ func TestProviderSwitchReusesRecoveryCheckpoint(t *testing.T) {
 					}
 					checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 					require.NoError(t, err)
-					require.NotNil(t, checkpoint, "checkpoint must be saved before dispatch")
-					require.Equal(t, source.ID, checkpoint.SourceExecutionID)
+					if turn == 0 {
+						require.Nil(t, checkpoint, "candidate window must not be saved before success")
+					} else {
+						require.NotNil(t, checkpoint)
+						require.Equal(t, source.ID, checkpoint.SourceExecutionID)
+					}
 					input, err := summaryHistoryInput(provider, req.ChatHistory)
 					require.NoError(t, err)
 					raw, err := json.Marshal(input)
 					require.NoError(t, err)
-					for _, value := range []string{"BEFORE", "RECOVERED", "AFTER"} {
+					for _, value := range []string{"BEFORE", "old answer", "AFTER"} {
 						require.Equal(t, 1, strings.Count(string(raw), value), "recovered context must occur once")
 					}
 					require.NotContains(t, string(raw), "encrypted_content")
@@ -261,7 +259,7 @@ func TestProviderSwitchReusesRecoveryCheckpoint(t *testing.T) {
 				current.Output = "FIRST_REPLY"
 				history = append(history, *current)
 			}
-			require.Equal(t, 1, summaries)
+			require.Zero(t, summaries)
 		})
 	}
 }

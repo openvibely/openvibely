@@ -935,7 +935,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					}
 					if sourceSummary {
 						require.Equal(t, 1, summaries, "switch must reuse the source summary")
-					} else if mode == "summary" || (mode == "native_source" && from == models.ProviderOpenAI && to != models.ProviderOpenAI) {
+					} else if mode == "summary" {
 						require.Positive(t, summaries)
 					} else {
 						require.Zero(t, summaries)

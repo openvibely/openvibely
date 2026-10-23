@@ -98,36 +98,6 @@ func readableCompactedHistory(history []models.Execution) ([]models.Execution, e
 	return append(out, tail...), nil
 }
 
-// Summarize background separately so readable steering, images and tool exchanges
-// are not passed through summary replacement-history construction.
-func (s *LLMService) summarizeProviderRecovery(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
-	var background, prefix, tail []models.Execution
-	for _, exec := range req.ChatHistory {
-		if exec.ContextKind == recoveryBackgroundKind {
-			background = append(background, exec)
-		} else if exec.ContextKind == "provider_recovery_prefix" {
-			prefix = append(prefix, exec)
-		} else {
-			tail = append(tail, exec)
-		}
-	}
-	if len(background) == 0 {
-		return req, nil
-	}
-	summaryReq := req
-	summaryReq.TransportScope = "provider-recovery:" + req.ExecID
-	summary, err := s.localSummaryCompaction(adapter, summaryReq, background)
-	if err != nil {
-		return req, err
-	}
-	req.ChatHistory = append(prefix, buildCompactedReplacementHistory(nil, summary)...)
-	req.ChatHistory = append(req.ChatHistory, tail...)
-	req.NativeCompactionStateJSON = ""
-	req.ProviderSessionStateJSON = ""
-	req.ContextTokenEstimate = 0
-	return req, nil
-}
-
 // Load older execution text only for opaque OpenAI history. Stop at an explicit
 // new-context boundary; never create another durable copy of this history.
 func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {

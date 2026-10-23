@@ -827,7 +827,6 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 	return a.newOAuthClient(ctx, agent), nil
 }
 
-// buildClientHistory converts chat execution history to anthropicclient.Message slices.
 func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.Usage {
 	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
 	usage.LastContextTokens = resp.LastContextTokens
@@ -836,14 +835,11 @@ func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.U
 }
 
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
-	messages := buildRecoveryHistory(chatHistory)
-	if len(messages) > 0 && messages[len(messages)-1].Role == "user" && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content) {
-		messages = messages[:len(messages)-1]
-	}
-	return messages
+	// Callers exclude the current execution; a trailing user message belongs to
+	// prior history and must survive when the new prompt is appended.
+	return buildRecoveryHistory(chatHistory)
 }
 
-// Recovery has no new prompt to replace a trailing user message.
 type anthropicEnvironmentReplay struct {
 	Environment string                    `json:"anthropic_execution_environment"`
 	Messages    []anthropicclient.Message `json:"messages,omitempty"`

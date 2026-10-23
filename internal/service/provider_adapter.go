@@ -979,20 +979,8 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
 		}
-		req, replayErr = s.summarizeProviderRecovery(adapter, req)
-		if replayErr != nil {
-			return llmcontracts.AgentResult{}, replayErr
-		}
 		if needsRecovery {
-			// Keep the covered execution boundary for any further compaction on
-			// this turn, including when recovery ends with a synthetic message.
-			if n := len(req.ChatHistory); n > 0 && len(recoverySource.ChatHistory) > 0 {
-				req.ChatHistory[n-1].ID = recoverySource.ChatHistory[len(recoverySource.ChatHistory)-1].ID
-			}
-			if err := s.persistCompactionCheckpoint(recoverySource, req, historyCompactionSummary(req.ChatHistory), "provider_recovery"); err != nil {
-				return llmcontracts.AgentResult{}, err
-			}
-			uncompactedReq = req
+			return s.callProviderWithTruncatedRecovery(adapter, recoverySource, req)
 		}
 	}
 	// Budget and send the destination provider's actual history format, rather
