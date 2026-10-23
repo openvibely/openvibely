@@ -2511,10 +2511,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					max-height: min(26rem, 52vh);
 					min-width: 0;
 				}
+				.stream-tool-has-copy {
+					position: relative;
+					box-sizing: border-box;
+				}
+				.stream-tool-has-copy .stream-tool-output-text {
+					padding-right: 2rem;
+					min-height: 2rem;
+				}
 				.stream-tool-copy {
-					font-size: 0.75rem;
-					padding: 0.125rem 0.375rem;
-					border-radius: 0.25rem;
+					position: absolute;
+					top: 0.5rem;
+					right: 0.5rem;
 				}
 				.stream-tool-copy:focus-visible { outline: 1px solid currentColor; }
 				.stream-tool-body-scroll::-webkit-scrollbar {
