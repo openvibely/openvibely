@@ -45,3 +45,17 @@ The only routes are GET `/stats`, `/heap`, and `/allocs`. No command-line, CPU, 
 ```sh
 go test -race -tags openvibely_memory_diagnostics ./cmd/desktop -run '^TestDesktopMemoryDiagnostics' -count=1
 ```
+
+For direct allocations made by modernc's libc allocator (including SQLite),
+add `memory.counters` to the diagnostic build tags:
+
+```sh
+go build -tags 'openvibely_memory_diagnostics,memory.counters' -o /tmp/openvibely-memory-diagnostic ./cmd/desktop
+```
+
+`/stats` then includes `ModerncAllocator` with allocation count, mapped bytes,
+and mapping count. These allocations are outside Go heap profiles. Mapped bytes
+include retained allocator regions, not just live SQLite objects, and are not a
+physical-footprint measurement. Without this build tag the field is omitted.
+A previously running diagnostic binary must be restarted into the new build to
+expose these counters.
