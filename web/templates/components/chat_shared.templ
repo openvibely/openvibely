@@ -3247,7 +3247,8 @@ templ ChatAutoScrollScript() {
 					? 'pre'
 					: '.stream-tool-body-content pre';
 				messageElement.querySelectorAll(selector).forEach(function(pre) {
-					if (pre.childNodes && pre.childNodes.length > 1 && pre.normalize) pre.normalize();
+					var text = pre.querySelector ? (pre.querySelector('.stream-tool-text-clip') || pre) : pre;
+					if (text.childNodes && text.childNodes.length > 1 && text.normalize) text.normalize();
 				});
 			};
 
@@ -5580,6 +5581,13 @@ templ ChatAutoScrollScript() {
 					parent.appendChild(button);
 				}
 
+				function toolTextClip(pre) {
+					var text = document.createElement('span');
+					text.className = 'stream-tool-text-clip';
+					pre.appendChild(text);
+					return text;
+				}
+
 				// Extract IN content based on tool type
 				if ((dn === 'Bash' || dn === 'Shell') && seg.secondary) {
 					hasIn = true;
@@ -5638,7 +5646,7 @@ templ ChatAutoScrollScript() {
 					inScroll.setAttribute('data-tool-row', 'in');
 					var inPre = document.createElement('pre');
 					inPre.className = 'stream-tool-output-text';
-					inPre.textContent = inContent;
+					toolTextClip(inPre).textContent = inContent;
 					inScroll.appendChild(inPre);
 					inVal.appendChild(inScroll);
 					addToolCopy(inVal, inContent, 'input');
@@ -5689,14 +5697,15 @@ templ ChatAutoScrollScript() {
 						if (shouldCollapse) trackScrollPin(outScroll, stateKey);
 						var outPre = document.createElement('pre');
 						outPre.className = 'stream-tool-output-text';
+						var outText = toolTextClip(outPre);
 						outScroll.appendChild(outPre);
 						if (toggle && toggle.parentNode === outVal) outVal.insertBefore(outScroll, toggle); else outVal.appendChild(outScroll);
 						if (useInitialChunkQueue && shouldYieldPreparation && outputText.length > 64 * 1024) {
-							pendingLargeToolOutputs.push({ node: outPre, text: outputText, offset: 0 });
+							pendingLargeToolOutputs.push({ node: outText, text: outputText, offset: 0 });
 							return;
 						}
 						if (outputText.length <= 64 * 1024) {
-							outPre.textContent = outputText;
+							outText.textContent = outputText;
 							restoreOutputScroll();
 							hydrateOutputLinks();
 							return;
@@ -5705,7 +5714,7 @@ templ ChatAutoScrollScript() {
 						function appendOutputChunk() {
 							if (!outScroll || version !== materializationVersion) return;
 							var end = Math.min(offset + 64 * 1024, outputText.length);
-							outPre.appendChild(document.createTextNode(outputText.substring(offset, end)));
+							outText.appendChild(document.createTextNode(outputText.substring(offset, end)));
 							offset = end;
 							if (offset < outputText.length) {
 								setTimeout(appendOutputChunk, 0);
@@ -5731,7 +5740,7 @@ templ ChatAutoScrollScript() {
 					if (shouldCollapse) {
 						preview = document.createElement('pre');
 						preview.className = 'stream-tool-output-preview stream-tool-output-text';
-						preview.textContent = toolOutputPreview(outputText);
+						toolTextClip(preview).textContent = toolOutputPreview(outputText);
 						outVal.appendChild(preview);
 						toggle = document.createElement('button');
 						toggle.type = 'button';

@@ -2519,6 +2519,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding-right: 2rem;
 					min-height: 2rem;
 				}
+				.stream-tool-text-clip {
+					display: block;
+					min-width: 0;
+					overflow: clip;
+				}
 				.stream-tool-copy {
 					position: absolute;
 					top: 0.5rem;
