@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"syscall"
 	"unsafe"
 )
@@ -13,13 +14,18 @@ var sendMessage = user32.NewProc("SendMessageW")
 
 type point struct{ X, Y int32 }
 
-func nativeWheel(window unsafe.Pointer, e wheel) {
+func nativeWheel(window unsafe.Pointer, e wheel) error {
+	if window == nil {
+		return fmt.Errorf("native wheel routing failed: window missing")
+	}
 	scale := e.Scale
 	if scale <= 0 {
 		scale = 1
 	}
 	p := point{int32(e.X * scale), int32(e.Y * scale)}
-	clientToScreen.Call(uintptr(window), uintptr(unsafe.Pointer(&p)))
+	if ok, _, err := clientToScreen.Call(uintptr(window), uintptr(unsafe.Pointer(&p))); ok == 0 {
+		return fmt.Errorf("native wheel coordinate conversion failed: %v", err)
+	}
 	// Composition-hosted WebView2 receives input through the Wails HWND.
 	// Do not depend on whichever window happens to be under a screen point.
 	target := uintptr(window)
@@ -32,4 +38,5 @@ func nativeWheel(window unsafe.Pointer, e wheel) {
 	if e.DX != 0 {
 		sendMessage.Call(target, 0x020E, uintptr(uint16(int16(e.DX)))<<16, coords)
 	}
+	return nil
 }

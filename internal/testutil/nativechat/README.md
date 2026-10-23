@@ -46,7 +46,12 @@ reproduce every physical trackpad gesture or hardware-specific momentum profile.
 The fixture installs the native-input bridge in its HTML before page scripts run;
 this does not rely on Wails' platform-dependent `WebviewWindowOptions.JS` handling
 for URL-backed windows. Gesture setup waits for virtual layout to settle and
-calibrates pixel wheel units from a trusted event. Assertions follow visible text
+calibrates pixel wheel units from a trusted event. Calibration awaits native
+routing success as well as browser receipt; an HTTP acknowledgement alone is not
+proof of delivery. Missing native targets return an error instead of silently
+dropping input. macOS gestures include began, changed, and ended phases, with no
+additional movement on end. The burst's 8ms spacing generates sustained input;
+it is not a readiness delay. Assertions follow visible text
 across late height corrections rather than assuming absolute scroll offsets are
 constant. Event coalescing is allowed, but actual input, paging, and text tracking
 must all be observed for the test to pass.

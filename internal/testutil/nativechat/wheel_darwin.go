@@ -13,12 +13,13 @@ static NSView* findWebView(NSView* view) {
  for(NSView* child in view.subviews) { NSView* result=findWebView(child);if(result)return result; }
  return nil;
 }
-static void sendWheel(void* pointer, double x,double y,double dx,double dy) {
+static int sendWheel(void* pointer, double x,double y,double dx,double dy,int phase) {
  NSWindow* window=(NSWindow*)pointer;
- NSView* view=findWebView(window.contentView);if(!view)return;
+ if(!window || !window.isVisible)return 1;
+ NSView* view=findWebView(window.contentView);if(!view)return 2;
  CGEventRef cg=CGEventCreateScrollWheelEvent(NULL,kCGScrollEventUnitPixel,2,(int)-dy,(int)-dx);
  CGEventSetIntegerValueField(cg,kCGScrollWheelEventIsContinuous,1);
- CGEventSetIntegerValueField(cg,kCGScrollWheelEventScrollPhase,2);
+ CGEventSetIntegerValueField(cg,kCGScrollWheelEventScrollPhase,phase);
  NSEvent* event=[NSEvent eventWithCGEvent:cg];
  // Preserve NSEvent's internal wheel payload; only replace local routing.
  NSPoint point=[view convertPoint:NSMakePoint(x,view.isFlipped?y:view.bounds.size.height-y) toView:nil];
@@ -27,13 +28,23 @@ static void sendWheel(void* pointer, double x,double y,double dx,double dy) {
  class_addMethod(cls,@selector(window),imp_implementationWithBlock(^(id unused){return window;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(window))));
  objc_registerClassPair(cls);object_setClass(event,cls);
  NSPoint local=[view convertPoint:point fromView:nil];
- [[view hitTest:local] scrollWheel:event];
+ NSView* target=[view hitTest:local];
+ if(!target){CFRelease(cg);return 3;}
+ [target scrollWheel:event];
  CFRelease(cg);
+ return 0;
 }
 */
 import "C"
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
-func nativeWheel(window unsafe.Pointer, e wheel) {
-	C.sendWheel(window, C.double(e.X), C.double(e.Y), C.double(e.DX), C.double(e.DY))
+func nativeWheel(window unsafe.Pointer, e wheel) error {
+	code := C.sendWheel(window, C.double(e.X), C.double(e.Y), C.double(e.DX), C.double(e.DY), C.int(e.phase))
+	if code != 0 {
+		return fmt.Errorf("native wheel routing failed: %s", map[int]string{1: "window not visible", 2: "webview missing", 3: "no hit-test target"}[int(code)])
+	}
+	return nil
 }
