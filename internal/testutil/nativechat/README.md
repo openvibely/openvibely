@@ -37,6 +37,10 @@ The only platform-specific pieces are native input delivery:
   converts the window point into the webview's **superview** coordinates, as
   required by [NSView.hitTest](https://developer.apple.com/documentation/appkit/nsview/hittest(_:)).
   A native regression checks this with an offset, flipped view hierarchy.
+  The underlying CoreGraphics event also receives the intended screen position
+  before conversion to NSEvent; its location must agree with local window
+  routing rather than retaining the physical cursor position. A regression
+  checks the AppKit-to-Quartz conversion, including secondary-screen positions.
 - Linux: GDK smooth scroll events routed to the Wails WebKitGTK view.
 - Windows: wheel messages delivered to the WebView2 child window.
 
