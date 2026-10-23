@@ -350,3 +350,16 @@ cannot be styled. Existing rich-text runs receive supplied style properties;
 omitted properties and manual layout are retained. Formula-backed title text is
 not replaced by style-only edits. Verify these fields in the newer local schema
 and render to check title placement, especially with an existing manual layout.
+
+## Chart text underline and alignment (after RC4)
+
+All chart `text_style` objects and `title_style` accept `alignment`
+(`left`, `center`, `right`, `justify`) and native `underline` tokens.
+Use `sng` for single, `dbl` for double and `none` to remove underline.
+Other tokens are `words`, `heavy`, `dotted`, `dottedHeavy`, `dash`,
+`dashHeavy`, `dashLong`, `dashLongHeavy`, `dotDash`, `dotDashHeavy`,
+`dotDotDash`, `dotDotDashHeavy`, `wavy`, `wavyHeavy`, `wavyDbl`.
+Example: `{"legend":{"text_style":{"alignment":"right","underline":"sng"}}}`
+inside `chart_format`. Alignment applies to paragraphs; underline applies to
+run/default properties. Omission preserves existing settings. Check the local
+schema and render to verify the intended application displays the style.
