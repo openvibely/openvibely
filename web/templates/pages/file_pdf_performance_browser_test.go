@@ -141,6 +141,13 @@ func TestBrowserPerformance_LongPDFWindowMeasurements(t *testing.T) {
 				b.waitFor("closing a rendering PDF removes page surfaces", `String(!document.getElementById('image-gallery').open&&!document.querySelector('.pdf-page-surface'))`, "true")
 			}
 		}
+		b.evaluate(`window.OVFileViewer.open('/fixture/perf-2000.pdf');'opened'`)
+		b.waitFor("PDF opens before pending-render cancellation", `document.querySelector('[data-pdf-page-number]')?.textContent||''`, "1 / 2000")
+		b.waitFor("PDF has a rendered page before pending-render cancellation", `String(!!document.querySelector('[data-pdf-slot=\"1\"] canvas'))`, "true")
+		b.evaluate(`(()=>{const input=document.querySelector('[data-pdf-page-input]');input.value='2000';input.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-gallery-close]').click();return 'closed during final-page load'})()`)
+		b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),150))`)
+		b.waitFor("closing during final-page load prevents page content from returning", `String(!document.getElementById('image-gallery').open&&!document.querySelector('.pdf-page-surface'))`, "true")
+
 		b.evaluate(`window.OVFileViewer.open('/fixture/perf-mixed-200.pdf');'opened'`)
 		b.waitFor("mixed-size PDF opens", `document.querySelector('[data-pdf-page-number]')?.textContent||''`, "1 / 200")
 		b.waitFor("mixed-size PDF paints only its visible page", `String(!!document.querySelector('[data-pdf-slot="1"] canvas'))`, "true")
