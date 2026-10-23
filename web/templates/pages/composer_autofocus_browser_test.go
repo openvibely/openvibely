@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -24,12 +25,13 @@ import (
 )
 
 type composerFocusCDP struct {
-	t      *testing.T
-	ctx    context.Context
-	conn   *websocket.Conn
-	nextID int
-	events []string
-	loads  int
+	t           *testing.T
+	ctx         context.Context
+	conn        *websocket.Conn
+	nextID      int
+	events      []string
+	loads       int
+	traceStream string
 }
 
 func (c *composerFocusCDP) captureEvent(message []byte) {
@@ -43,6 +45,13 @@ func (c *composerFocusCDP) captureEvent(message []byte) {
 	switch event.Method {
 	case "Page.loadEventFired":
 		c.loads++
+	case "Tracing.tracingComplete":
+		var payload struct {
+			Stream string `json:"stream"`
+		}
+		if json.Unmarshal(event.Params, &payload) == nil {
+			c.traceStream = payload.Stream
+		}
 	case "Runtime.exceptionThrown", "Runtime.consoleAPICalled", "Log.entryAdded":
 		entry := event.Method + ": " + string(event.Params)
 		if len(entry) > 1500 {
@@ -154,6 +163,46 @@ func (c *composerFocusCDP) waitForTimeout(label, expression, want string, timeou
 	}
 	diagnostic := c.evaluate(`JSON.stringify({ready:document.readyState,active:document.activeElement&&{name:document.activeElement.id||document.activeElement.tagName,html:document.activeElement.outerHTML.slice(0,180),dialog:document.activeElement.closest('dialog')&&document.activeElement.closest('dialog').id},input:!!document.getElementById('message-input'),taskInput:!!document.getElementById('task-message-input'),thread:document.getElementById('thread-content')&&{loaded:document.getElementById('thread-content').dataset.loaded,loading:document.getElementById('thread-content').dataset.loading,text:document.getElementById('thread-content').textContent.slice(0,100)},manager:typeof window.openVibelyRequestComposerFocus,state:window._openVibelyComposerFocusState&&Object.fromEntries(Object.entries(window._openVibelyComposerFocusState).map(function(entry){return [entry[0],entry[1] instanceof Element?{tag:entry[1].tagName,id:entry[1].id,connected:entry[1].isConnected}:entry[1]]})),historyRequests:window._historyRestoreFocusRequests,terminal:{started:window.__terminalRenderStarted,settled:window.__terminalRenderSettled,queued:window.__terminalRenderQueue&&window.__terminalRenderQueue.length,syncCalls:window.__terminalSyncCalls},overlays:Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]:not(dialog), [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"]')).filter(function(el){var style=getComputedStyle(el);return style.display!=='none'&&style.visibility!=='hidden'}).map(function(el){return el.id||el.outerHTML.slice(0,120)})})`)
 	c.t.Fatalf("timed out waiting for %s: got %q, want %q; state=%s; browserEvents=%s", label, got, want, diagnostic, c.eventDiagnostic())
+}
+
+func (c *composerFocusCDP) saveChromeTrace(path string) {
+	c.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for c.traceStream == "" && time.Now().Before(deadline) {
+		var response struct{}
+		c.call("Runtime.evaluate", map[string]any{"expression": "1"}, &response)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if c.traceStream == "" {
+		c.t.Fatal("Chrome trace completed without a readable stream")
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		c.t.Fatalf("create Chrome trace %s: %v", path, err)
+	}
+	defer file.Close()
+	for {
+		var chunk struct {
+			Data          string `json:"data"`
+			EOF           bool   `json:"eof"`
+			Base64Encoded bool   `json:"base64Encoded"`
+		}
+		c.call("IO.read", map[string]any{"handle": c.traceStream, "size": 16 << 10}, &chunk)
+		data := []byte(chunk.Data)
+		if chunk.Base64Encoded {
+			data, err = base64.StdEncoding.DecodeString(chunk.Data)
+			if err != nil {
+				c.t.Fatalf("decode Chrome trace chunk: %v", err)
+			}
+		}
+		if _, err := file.Write(data); err != nil {
+			c.t.Fatalf("write Chrome trace %s: %v", path, err)
+		}
+		if chunk.EOF {
+			break
+		}
+	}
+	c.call("IO.close", map[string]any{"handle": c.traceStream}, nil)
 }
 
 func (c *composerFocusCDP) click(selector string) {
