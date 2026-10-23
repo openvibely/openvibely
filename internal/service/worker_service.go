@@ -837,6 +837,8 @@ func (w *WorkerService) failRunningExecutionsAfterPanic(ctx context.Context, tas
 		}
 		if completeErr := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, exec.TokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[worker] task=%s execution=%s failed completion after panic failed: %v", taskID, exec.ID, completeErr)
+		} else {
+			w.llmSvc.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 		}
 	}
 }
