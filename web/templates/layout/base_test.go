@@ -1721,12 +1721,15 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		"[data-theme=\"light\"] .stream-tool-body-content {",
 		".stream-tool-body-scroll + .stream-tool-output-toggle {",
 		".stream-tool-body-scroll {",
-		"overflow-x: auto;",
+		"overflow-x: hidden;",
 		"overflow-y: auto;",
 		"max-height: min(26rem, 52vh);",
 		"max-width: 100%;",
-		"width: max-content;",
-		"min-width: 100%;",
+		"width: 100%;",
+		"box-sizing: border-box;",
+		".stream-tool-body-static {",
+		"overflow: clip;",
+		"min-width: 0;",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {

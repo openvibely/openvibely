@@ -6219,6 +6219,9 @@ window.addEventListener('DOMContentLoaded', function() {
       observer.observe({ entryTypes: ['longtask'] });
     } catch (_) {}
   }
+  container.setAttribute('data-exec-id', 'tool-copy-fixture');
+  var copiedText = null;
+  Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:async function(text){copiedText=text;}}});
   var started = performance.now();
   Promise.resolve(window.renderStreamingContent(container, transcript, true)).then(async function(committed) {
     if (!committed) fail('large hydration did not commit');
@@ -6239,11 +6242,26 @@ window.addEventListener('DOMContentLoaded', function() {
       if (preview.textContent.length > 4100) fail('collapsed output preview was not bounded');
       if (preview.nextElementSibling !== button) fail('collapsed output toggle must follow the visible output');
     });
-    if (container.querySelectorAll('.stream-tool-body-scroll[data-tool-row="out"] > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
+    if (container.querySelector('.stream-tool-body-scroll')) fail('initial tool rows must not create scroll surfaces');
+    if (container.querySelectorAll('.stream-tool-body-static[data-tool-row="out"] > pre').length !== 2) fail('short outputs must be static');
     if (container.querySelector('[data-tool-output]')) fail('tool output must not be duplicated in data attributes');
-    var shortPre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent === 'short output'; });
-    var widePre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent.length === wideOutput.length; });
+    var shortPre = Array.from(container.querySelectorAll('.stream-tool-body-static > pre')).find(function(pre) { return pre.textContent === 'short output'; });
+    var widePre = Array.from(container.querySelectorAll('.stream-tool-body-static > pre')).find(function(pre) { return pre.textContent.length === wideOutput.length; });
     if (!shortPre || !widePre) fail('short or horizontally wide one-line output was collapsed');
+    var wideBox = widePre.parentElement;
+    if (getComputedStyle(wideBox).overflowX !== 'clip') fail('wide output created a horizontal scroller');
+    wideBox.scrollLeft = 500;
+    if (wideBox.scrollLeft !== 0 || widePre.getBoundingClientRect().width > wideBox.clientWidth + 1) fail('wide output is not clipped to its container '+JSON.stringify({left:wideBox.scrollLeft,pre:widePre.getBoundingClientRect().width,box:wideBox.clientWidth,css:getComputedStyle(widePre).cssText,width:getComputedStyle(widePre).width,min:getComputedStyle(widePre).minWidth}));
+    wideBox.parentElement.querySelector('.stream-tool-copy').click();
+    await Promise.resolve();
+    if (copiedText !== wideOutput) fail('copy truncated the wide output');
+    var collapsedCopy = collapsed[0].closest('.stream-tool-body-content').querySelector('.stream-tool-copy');
+    collapsedCopy.click(); await Promise.resolve();
+    if (copiedText !== largeOutput.trim()) fail('copy used the collapsed preview instead of full output');
+    var inputCopy = container.querySelector('[data-tool-row="in"]').parentElement.querySelector('.stream-tool-copy');
+    inputCopy.click(); await Promise.resolve();
+    if (copiedText !== 'printf short-output') fail('input copy did not preserve the command');
+
     var bareCRTool = tools[116];
     var bareCRToggle = bareCRTool && bareCRTool.querySelector('.stream-tool-output-toggle');
     var bareCRPreview = bareCRTool && bareCRTool.querySelector('pre.stream-tool-output-preview');
@@ -6279,10 +6297,14 @@ window.addEventListener('DOMContentLoaded', function() {
     var expandedSurface = expandedContent.querySelector('.stream-tool-body-scroll');
     if (!expandedSurface || expandedSurface.nextElementSibling !== largeToggle) fail('expanded output toggle moved above the visible output');
     var expandedPre = expandedSurface.querySelector('pre');
+    if (expandedSurface.scrollHeight <= expandedSurface.clientHeight) fail('expanded output must scroll vertically');
+    expandedSurface.scrollLeft = 500;
+    if (expandedSurface.scrollLeft !== 0) fail('expanded output scrolls horizontally');
+
     var expandedStyle = window.getComputedStyle(expandedPre);
     var expandedFontSignature = [expandedStyle.fontFamily, expandedStyle.fontSize, expandedStyle.fontWeight, expandedStyle.fontStyle, expandedStyle.lineHeight, expandedStyle.letterSpacing].join('|');
     if (expandedFontSignature !== previewFontSignature) fail('collapsed and expanded output font styling differs: ' + previewFontSignature + ' vs ' + expandedFontSignature);
-    var inputPre = container.querySelector('.stream-tool-body-scroll[data-tool-row="in"] > pre');
+    var inputPre = container.querySelector('.stream-tool-body-static[data-tool-row="in"] > pre');
     if (!inputPre) fail('Bash tool input did not render an IN text surface');
     var inputStyle = window.getComputedStyle(inputPre);
     var inputFontSignature = [inputStyle.fontFamily, inputStyle.fontSize, inputStyle.fontWeight, inputStyle.fontStyle, inputStyle.lineHeight, inputStyle.letterSpacing].join('|');
@@ -6317,7 +6339,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (previewStyle.borderTopStyle !== 'none' || parseFloat(previewStyle.borderTopWidth) !== 0) fail('light collapsed OUT preview retained border emphasis');
     var lightOutputContent = largeToggle.closest('.stream-tool-body-content');
     var lightOutputContentStyle = window.getComputedStyle(lightOutputContent);
-    var lightInputPre = container.querySelector('.stream-tool-body-scroll[data-tool-row="in"] > pre');
+    var lightInputPre = container.querySelector('.stream-tool-body-static[data-tool-row="in"] > pre');
     var lightInputStyle = window.getComputedStyle(lightInputPre);
     var lightToggleStyle = window.getComputedStyle(largeToggle);
     if (lightOutputContentStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') fail('light OUT content cell still paints a shared background behind preview and toggle: ' + lightOutputContentStyle.backgroundColor);
@@ -6334,6 +6356,11 @@ window.addEventListener('DOMContentLoaded', function() {
     if (window.getComputedStyle(lightThinkingSummary).color !== 'rgb(31, 31, 31)') fail('expanded light Thinking label is not readable strong text: ' + window.getComputedStyle(lightThinkingSummary).color);
     if (window.getComputedStyle(lightThinkingBody).color !== 'rgb(59, 59, 59)') fail('expanded light Thinking content is not readable: ' + window.getComputedStyle(lightThinkingBody).color);
 
+    if (!window._toolOutputStateOwners.has('tool-copy-fixture')) fail('tool state lacks an execution owner');
+    window._toolOutputRowStates['unrelated:out'] = {expanded:true};
+    window.releaseToolOutputState('tool-copy-fixture');
+    if (window._toolOutputStateOwners.has('tool-copy-fixture') || Object.keys(window._toolOutputRowStates).some(key => key !== 'unrelated:out')) fail('release retained tool state');
+    if (!window._toolOutputRowStates['unrelated:out']) fail('release erased another execution');
     result.setAttribute('data-test-result', 'pass');
     result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));
     result.setAttribute('data-max-long-task-ms', initialMaxLongTask.toFixed(1));
@@ -6451,7 +6478,7 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"function trackScrollPin(el, stateKey)",
 		"el.addEventListener('scroll'",
 		"el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false')",
-		"inScroll.className = 'stream-tool-body-scroll'",
+		"inScroll.className = 'stream-tool-body-static'",
 		"inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"inPre.className = 'stream-tool-output-text'",
 		"el.scrollTop = Number.MAX_SAFE_INTEGER",

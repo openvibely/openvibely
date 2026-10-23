@@ -112,7 +112,7 @@ window.addEventListener('DOMContentLoaded', function() {
     for (var i = 0; i < count; i++) {
       var expectedID = 'tool-' + transcript.callIndexes[i] + '-' + i;
       assert(cards[i].getAttribute('data-tool-render-id') === expectedID, 'large stream tool ID changed at call ' + i);
-      var output = cards[i].querySelector('.stream-tool-body-scroll[data-tool-row="out"] > pre');
+      var output = cards[i].querySelector('[data-tool-row="out"] > pre');
       assert(output && output.textContent === 'large-output-' + i, 'large stream output was misplaced at call ' + i);
       var icon = cards[i].querySelector('.stream-tool-summary svg');
       var expectedStatus = i % 2 === 0 ? 'tool-status-done' : 'tool-status-error';
@@ -222,8 +222,8 @@ window.addEventListener('DOMContentLoaded', function() {
     var secondCallIndex = transcript.indexOf('[Using tool: bash | echo two]');
     assert(cards[0].getAttribute('data-tool-render-id') === 'tool-' + firstCallIndex + '-0', 'first rendered tool ID changed');
     assert(cards[1].getAttribute('data-tool-render-id') === 'tool-' + secondCallIndex + '-1', 'second rendered tool ID changed');
-    var firstOutput = cards[0].querySelector('.stream-tool-body-scroll[data-tool-row="out"] > pre');
-    var secondOutput = cards[1].querySelector('.stream-tool-body-scroll[data-tool-row="out"] > pre');
+    var firstOutput = cards[0].querySelector('[data-tool-row="out"] > pre');
+    var secondOutput = cards[1].querySelector('[data-tool-row="out"] > pre');
     assert(firstOutput && firstOutput.textContent === 'first-result', 'first result output mismatch: selector=' + JSON.stringify(firstOutput && firstOutput.textContent) + ' card=' + cards[0].outerHTML);
     assert(secondOutput && secondOutput.textContent === 'second-error', 'second result output mismatch: ' + cards[1].outerHTML);
     var firstIcon = cards[0].querySelector('.stream-tool-summary svg');
