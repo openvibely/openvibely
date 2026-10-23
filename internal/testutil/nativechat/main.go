@@ -21,6 +21,7 @@ import (
 type wheel struct {
 	X, Y, DX, DY, Scale float64
 	Count               int
+	phase               int
 }
 
 func main() {
@@ -35,7 +36,7 @@ func main() {
 	defer listener.Close()
 	app := application.New(application.Options{Name: "Native chat regression", Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true}})
 	endpoint := "http://" + listener.Addr().String() + "/wheel"
-	bridge := fmt.Sprintf(`window.nativeTestInput={postMessage(data){fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(r=>{if(!r.ok)throw Error('Native input failed: '+r.status);if(data.count)window._nativeBurstDone=true}).catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e))))}};`, endpoint)
+	bridge := fmt.Sprintf(`window.nativeTestInput={postMessage(data){return fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(r=>{if(!r.ok)return r.text().then(message=>{throw Error('Native input failed: '+r.status+' '+message)});if(data.count)window._nativeBurstDone=true}).catch(e=>{fetch('/browser-result?status='+encodeURIComponent(String(e)));throw e})}};`, endpoint)
 	// URL-backed Wails windows do not consistently apply Options.JS (WebView2
 	// only uses it for HTML-backed windows). Register it with the fixture before
 	// navigating, so every engine receives the identical script in its document.
@@ -81,10 +82,28 @@ func main() {
 			if r.Context().Err() != nil {
 				return
 			}
-			application.InvokeSync(func() { nativeWheel(window.NativeWindow(), event) })
+			event.phase = 2 // changed
+			if i == 0 {
+				event.phase = 1 // began
+			}
+			var dispatchErr error
+			application.InvokeSync(func() { dispatchErr = nativeWheel(window.NativeWindow(), event) })
+			if dispatchErr != nil {
+				http.Error(w, dispatchErr.Error(), http.StatusServiceUnavailable)
+				return
+			}
 			if event.Count > 0 {
 				time.Sleep(8 * time.Millisecond)
 			}
+		}
+		// End the gesture without adding movement. Platforms without gesture
+		// phases treat this zero-delta dispatch as a no-op.
+		event.DX, event.DY, event.phase = 0, 0, 4
+		var dispatchErr error
+		application.InvokeSync(func() { dispatchErr = nativeWheel(window.NativeWindow(), event) })
+		if dispatchErr != nil {
+			http.Error(w, dispatchErr.Error(), http.StatusServiceUnavailable)
+			return
 		}
 		w.WriteHeader(204)
 	})}

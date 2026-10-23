@@ -2,7 +2,7 @@
     await until(() => window.nativeTestInput, 'native input bridge');
     let wheelScale = 1;
     const nativeInput = {postMessage(data) {
-        window.nativeTestInput.postMessage({...data,dy:(data.dy||0)*wheelScale});
+        return window.nativeTestInput.postMessage({...data,dy:(data.dy||0)*wheelScale});
     }};
     const webkit = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
     async function stableLayout(m) {
@@ -42,10 +42,10 @@
     // Measure one trusted event rather than assuming the driver produces pixels
     // at the same scale on every runner. Use downward input away from the loader.
     let probe;
-    const probeListener = event => { if(event.isTrusted) probe=event; };
+    const probeListener = event => { if(event.isTrusted && event.deltaY && !probe) probe=event; };
     m.addEventListener('wheel',probeListener);
     const probeBounds=m.getBoundingClientRect();
-    nativeInput.postMessage({dy:40,x:probeBounds.left+6,y:probeBounds.top+75});
+    await nativeInput.postMessage({dy:40,x:probeBounds.left+6,y:probeBounds.top+75});
     await until(()=>probe,'native calibration wheel');
     m.removeEventListener('wheel',probeListener);
     if(probe.deltaMode!==0 || !probe.deltaY) throw Error('Unsupported native wheel units: '+JSON.stringify({mode:probe.deltaMode,dy:probe.deltaY}));

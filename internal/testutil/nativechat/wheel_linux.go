@@ -13,8 +13,9 @@ static GtkWidget* findWebView(GtkWidget* node) {
  for(GList* it=children;it && !result;it=it->next)result=findWebView(GTK_WIDGET(it->data));
  g_list_free(children);return result;
 }
-static void sendWheel(void* pointer,double x,double y,double dx,double dy) {
- GtkWidget* view=findWebView(GTK_WIDGET(pointer));if(!view)return;
+static int sendWheel(void* pointer,double x,double y,double dx,double dy) {
+ GtkWidget* view=findWebView(GTK_WIDGET(pointer));if(!view || !gtk_widget_get_realized(view) || !gtk_widget_get_window(view))return 0;
+ if(dx==0 && dy==0)return 1;
  GdkEvent* event=gdk_event_new(GDK_SCROLL);
  event->scroll.window=g_object_ref(gtk_widget_get_window(view));
  event->scroll.time=GDK_CURRENT_TIME;event->scroll.x=x;event->scroll.y=y;
@@ -23,11 +24,21 @@ static void sendWheel(void* pointer,double x,double y,double dx,double dy) {
  GdkSeat* seat=gdk_display_get_default_seat(gtk_widget_get_display(view));
  gdk_event_set_device(event,gdk_seat_get_pointer(seat));
  gtk_widget_event(view,event);gdk_event_free(event);
+ return 1;
 }
 */
 import "C"
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
-func nativeWheel(window unsafe.Pointer, e wheel) {
-	C.sendWheel(window, C.double(e.X), C.double(e.Y), C.double(e.DX), C.double(e.DY))
+func nativeWheel(window unsafe.Pointer, e wheel) error {
+	if window == nil {
+		return fmt.Errorf("native wheel routing failed: window missing")
+	}
+	if C.sendWheel(window, C.double(e.X), C.double(e.Y), C.double(e.DX), C.double(e.DY)) == 0 {
+		return fmt.Errorf("native wheel routing failed: webview not realized")
+	}
+	return nil
 }
