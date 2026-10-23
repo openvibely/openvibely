@@ -520,7 +520,12 @@
             (event.key.toLowerCase() === 'a' && !event.target.closest?.('input, textarea, [contenteditable="true"]')))) {
             // Find/Select All in Changes must neither expand hidden chat nor
             // suspend windowing when the reader returns to it.
-            suspended = Array.from(lists.values()).some(list => hasVisibleArea(list.messages));
+            // Select All is retained by selectionchange only while text is
+            // selected. Find needs independent suspension until Escape/navigation.
+            // Do not clear an existing Find suspension when Select All is used.
+            if (event.key.toLowerCase() === 'f') {
+                suspended = Array.from(lists.values()).some(list => hasVisibleArea(list.messages));
+            }
             window.materializeVirtualChatRows(document.body, {visibleOnly:true});
         } else if (event.key === 'Escape') {
             suspended = false;
