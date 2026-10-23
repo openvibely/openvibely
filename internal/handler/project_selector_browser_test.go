@@ -63,6 +63,7 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 			var close = dialog.querySelector('.ov-modal-close') || dialog.querySelector('.modal-action .btn[type="button"]');
 			if (!close) fail(name + ' modal missing close control');
 			close.click();
+			if (dialog.open || getComputedStyle(dialog).display !== 'none') fail(name + ' closed modal still renders');
 			var sampled = [];
 			for (var i = 0; i < 12; i++) {
 				await nextFrame();
@@ -90,11 +91,7 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 				return waitFor('#edit_project_modal', function(node) { return node.open; });
 			}, '#edit_project_modal'));
 			if (path === '/tasks') {
-				checks.push(await assertStationaryClose('create task', function() {
-					if (typeof openNewTaskModal !== 'function') fail('openNewTaskModal is unavailable');
-					openNewTaskModal();
-					return waitFor('#new_task_modal', function(node) { return node.open; });
-				}, '#new_task_modal'));
+				if(document.getElementById('new_task_modal')) fail('obsolete task dialog remains');
 			} else if (path === '/schedule') {
 				checks.push(await assertStationaryClose('schedule create task', function() {
 					if (typeof openNewScheduledTaskModal !== 'function') fail('openNewScheduledTaskModal is unavailable');

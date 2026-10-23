@@ -684,11 +684,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						pointer-events: none;
 						z-index: 1;
 					}
+				/* Closed dialogs must not retain transparent composited surfaces. */
+				dialog.modal:not([open]) { display: none; }
+				/* Clip the shell without creating a second scrolling container. */
+				.drawer-content { overflow: clip; }
+				/* Only transcript views need the shell to shrink to the viewport. */
+				.drawer-content:has(#task-detail-content),
+				.drawer-content:has(#chat-messages) { min-height: 0; min-width: 0; }
 				/* Modal layering */
 				dialog.modal {
-					/* DaisyUI uses width: 100%, whose containing block changes when
-					   close() removes a native dialog from Chrome's top layer. Keep the
-					   fading close frame in the same viewport coordinate space. */
+					/* Size open dialogs in viewport coordinates. */
 					width: 100vw;
 					z-index: 1200;
 				}
@@ -5109,7 +5114,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			@DesktopProjectTabs(projects, currentProjectID)
 			<div class={ "drawer lg:drawer-open h-full", templ.KV("drawer-open", serverRuntimeMode(ctx) == "desktop") }>
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
-				<div class="drawer-content flex flex-col h-full overflow-hidden">
+				<div class="drawer-content flex flex-col h-full">
 					<!-- Navbar (mobile only) -->
 					<div class="navbar bg-base-100 shadow-sm flex-shrink-0 lg:hidden">
 						<div class="flex-none lg:hidden">

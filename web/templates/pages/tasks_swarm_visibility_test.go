@@ -10,19 +10,18 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func renderTasksContentForSwarmTest(t *testing.T) string {
+func renderNewTaskOptionsForSwarmTest(t *testing.T) string {
 	t.Helper()
 
-	project := &models.Project{ID: "project-1", Name: "Project"}
 	var buf bytes.Buffer
-	if err := TasksContent(project, nil, nil, nil, "", "").Render(context.Background(), &buf); err != nil {
+	if err := NewTaskOptions(nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render tasks content: %v", err)
 	}
 	return buf.String()
 }
 
-func TestTasksContent_SwarmOptionsHiddenByDefault(t *testing.T) {
-	body := renderTasksContentForSwarmTest(t)
+func TestNewTaskOptions_SwarmOptionsHiddenByDefault(t *testing.T) {
+	body := renderNewTaskOptionsForSwarmTest(t)
 
 	if !strings.Contains(body, `name="swarm_mode" id="create-task-swarm-mode-toggle"`) {
 		t.Fatal("expected swarm mode toggle to expose the create-task visibility binding id")
@@ -52,47 +51,23 @@ func TestTasksContent_SwarmOptionsHiddenByDefault(t *testing.T) {
 	}
 }
 
-func TestTasksContent_SwarmOptionsScriptTogglesVisibilityAndResyncsReset(t *testing.T) {
-	body := renderTasksContentForSwarmTest(t)
-
-	for _, want := range []string{
-		`var toggle = document.getElementById('create-task-swarm-mode-toggle');`,
-		`var options = document.getElementById('create-task-swarm-options');`,
-		`function syncSwarmOptionsVisibility()`,
-		`options.classList.toggle('hidden', !toggle.checked);`,
-		`toggle.addEventListener('change', syncSwarmOptionsVisibility);`,
-		`toggle.form?.addEventListener('reset', function()`,
-		`setTimeout(syncSwarmOptionsVisibility, 0);`,
-		`syncSwarmOptionsVisibility();`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected create-task swarm visibility script to contain %q", want)
+func TestTasksContentOmitsObsoleteCreationDialog(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TasksContent(&models.Project{ID: "project-1"}, nil, nil, nil, "", "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, old := range []string{"new_task_modal", "openNewTaskModal", "data-new-task-form", "create-task-files-hidden"} {
+		if strings.Contains(buf.String(), old) {
+			t.Fatalf("obsolete task dialog retained: %s", old)
 		}
 	}
-
-	if strings.Contains(body, `swarmOptions.innerHTML = ''`) || strings.Contains(body, `swarmOptions.remove()`) {
-		t.Fatal("swarm options should be hidden, not removed or emptied")
+	if !strings.Contains(buf.String(), "/tasks/new?project_id=project-1") {
+		t.Fatal("missing dedicated task creation link")
 	}
 }
 
-func TestTasksContent_OpenNewTaskModalResyncsSwarmOptionsAfterFormReset(t *testing.T) {
-	body := renderTasksContentForSwarmTest(t)
-
-	resetIndex := strings.Index(body, `form.reset();`)
-	if resetIndex == -1 {
-		t.Fatal("expected openNewTaskModal to reset the create-task form")
-	}
-	resyncIndex := strings.Index(body[resetIndex:], `swarmOptions.classList.toggle('hidden', !swarmToggle.checked);`)
-	if resyncIndex == -1 {
-		t.Fatal("expected openNewTaskModal to resync swarm option visibility after reset")
-	}
-	if !strings.Contains(body[resetIndex:], `setTimeout(function()`) {
-		t.Fatal("expected reset resync to run after native form.reset() has restored defaults")
-	}
-}
-
-func TestTasksContent_HiddenSwarmOptionsPreserveSubmittedFieldValues(t *testing.T) {
-	body := renderTasksContentForSwarmTest(t)
+func TestNewTaskOptions_HiddenSwarmOptionsPreserveSubmittedFieldValues(t *testing.T) {
+	body := renderNewTaskOptionsForSwarmTest(t)
 
 	if !strings.Contains(body, "Swarm planning starts when the parent task becomes Active") || !strings.Contains(body, "Choose Backlog to defer the planner") {
 		t.Fatal("expected swarm options to explain category-driven planner start semantics")
