@@ -21,18 +21,30 @@
     event.preventDefault();if(key==='+'||key==='=')state.zoom=Math.min(4,state.zoom+.25);else if(key==='-')state.zoom=Math.max(.5,state.zoom-.25);else state.page=Math.max(1,Math.min(state.document.numPages,state.page+(['PageDown','ArrowDown'].includes(key)?1:-1)));renderPDFPage(state);
    };state.keyTarget=viewer.closest('#image-gallery')||viewer;state.keyTarget.addEventListener('keydown',state.keyHandler);
   }
-  const PDF_WINDOW_OVERSCAN=10,PDF_WINDOW_MAX=40;
+  const PDF_WINDOW_OVERSCAN=10,PDF_WINDOW_MAX=40,PDF_GEOMETRY_BATCH=16;
   function cancelPDFSlot(slot){slot.revision=(slot.revision||0)+1;slot.task?.cancel?.();slot.textLayer?.cancel();slot.task=null;slot.textLayer=null;slot.loading=false;slot.rendered=false;slot.node.replaceChildren()}
   function pdfHeightDeltaBefore(state,number){let delta=0;for(let index=number;index>0;index-=index&-index)delta+=state.heightTree.get(index)||0;return delta}
   function pdfPageTop(state,number){return 12+(number-1)*(state.base.height*state.scale+40)+pdfHeightDeltaBefore(state,number-1)*state.scale}
   function pdfPageAtOffset(state,offset){let low=1,high=state.document.numPages,found=1;while(low<=high){const middle=(low+high)>>1;if(pdfPageTop(state,middle)<=offset){found=middle;low=middle+1}else high=middle-1}return found}
   function syncPDFLayout(state){const count=state.document.numPages,delta=pdfHeightDeltaBefore(state,count);state.pages.style.height=Math.max(0,count*(state.base.height*state.scale+40)-16+delta*state.scale)+'px';for(const slot of state.slots.values())sizePDFSlot(state,slot)}
   function sizePDFSlot(state,slot){const base=slot.base||state.base,delta=state.pageHeightDeltas.get(slot.number)||0;slot.node.style.position='absolute';slot.node.style.left='0';slot.node.style.right='0';slot.node.style.top=pdfPageTop(state,slot.number)+'px';slot.node.style.margin='0 auto';slot.node.style.width=(base.width*state.scale)+'px';slot.node.style.height=((slot.base?base.height:base.height+delta)*state.scale)+'px'}
-  function updatePDFPageGeometry(state,slot,base){
-   const previous=state.pageHeightDeltas.get(slot.number)||0,next=base.height-state.base.height,difference=next-previous;if(!difference)return;
-   const anchor=pdfPageAtOffset(state,state.viewer.scrollTop+80);if(next)state.pageHeightDeltas.set(slot.number,next);else state.pageHeightDeltas.delete(slot.number);
-   for(let index=slot.number;index<=state.document.numPages;index+=index&-index)state.heightTree.set(index,(state.heightTree.get(index)||0)+difference);
-   syncPDFLayout(state);if(slot.number<anchor)state.viewer.scrollTop+=difference*state.scale;
+  function updatePDFPageGeometry(state,number,base){
+   const previous=state.pageHeightDeltas.get(number)||0,next=base.height-state.base.height,difference=next-previous;if(!difference)return;
+   const anchor=pdfPageAtOffset(state,state.viewer.scrollTop+80);if(next)state.pageHeightDeltas.set(number,next);else state.pageHeightDeltas.delete(number);
+   for(let index=number;index<=state.document.numPages;index+=index&-index)state.heightTree.set(index,(state.heightTree.get(index)||0)+difference);
+   syncPDFLayout(state);if(number<anchor)state.viewer.scrollTop+=difference*state.scale;
+  }
+  async function indexPDFPageGeometry(state){
+   const count=state.document.numPages;
+   for(let first=2;first<=count;first+=PDF_GEOMETRY_BATCH){
+    if(!pdfActive(state)||state.geometryCancelled)return;
+    const pages=await Promise.all(Array.from({length:Math.min(PDF_GEOMETRY_BATCH,count-first+1)},(_,offset)=>{
+     const number=first+offset;return state.document.getPage(number).then(page=>{try{return{number,page,base:page.getViewport({scale:1})}}catch{return null}},()=>null)
+    }));
+    if(!pdfActive(state)||state.geometryCancelled)return;
+    for(const entry of pages){if(!entry)continue;updatePDFPageGeometry(state,entry.number,entry.base);const slot=state.slots.get(entry.number);if(slot){slot.pdfPage=entry.page;slot.base=entry.base;sizePDFSlot(state,slot)}else entry.page.cleanup?.()}
+    if(first+PDF_GEOMETRY_BATCH<=count)await new Promise(resolve=>{if(window.requestIdleCallback)window.requestIdleCallback(()=>resolve(),{timeout:100});else window.setTimeout(resolve,0)})
+   }
   }
   function removePDFSlot(state,slot){state.pageObserver.unobserve(slot.node);cancelPDFSlot(slot);slot.node.remove();state.slots.delete(slot.number)}
   function updatePDFWindow(state,scrollTop=state.viewer.scrollTop){
@@ -46,7 +58,7 @@
    if(!slot||!pdfActive(state)||slot.loading||slot.rendered)return;
    slot.loading=true;const revision=slot.revision=(slot.revision||0)+1,current=()=>pdfActive(state)&&slot.revision===revision&&state.slots.get(slot.number)===slot;
    try{
-    const page=slot.pdfPage||await state.document.getPage(slot.number);if(!current())return;slot.pdfPage=page;slot.base=page.getViewport({scale:1});updatePDFPageGeometry(state,slot,slot.base);sizePDFSlot(state,slot);
+    const page=slot.pdfPage||await state.document.getPage(slot.number);if(!current())return;slot.pdfPage=page;slot.base=page.getViewport({scale:1});updatePDFPageGeometry(state,slot.number,slot.base);sizePDFSlot(state,slot);
     const viewport=page.getViewport({scale:state.scale}),ratio=pdfRasterRatio(viewport,state.viewer),canvas=document.createElement('canvas');
     canvas.width=Math.max(1,Math.floor(viewport.width*ratio));canvas.height=Math.max(1,Math.floor(viewport.height*ratio));canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';slot.node.replaceChildren(canvas);const badge=document.createElement('span');badge.className='pdf-page-number-badge';const badgeText=document.createElement('span');badgeText.textContent=String(slot.number);badge.append(badgeText);badge.setAttribute('aria-hidden','true');slot.node.append(badge);
     const task=page.render({canvasContext:canvas.getContext('2d'),viewport,transform:ratio===1?null:[ratio,0,0,ratio,0,0]});slot.task=task;await task.promise;if(!current())return;slot.task=null;
@@ -62,7 +74,7 @@
     state.scrollHandler=()=>{if(!pdfActive(state))return;const number=pdfPageAtOffset(state,state.viewer.scrollTop+80);if(number!==state.page){state.page=number;updatePDFControls(state);setPDFStatus(pdfParts(state.viewer),`Page ${number} of ${state.document.numPages}`)}updatePDFWindow(state)};state.viewer.addEventListener('scroll',state.scrollHandler,{passive:true});
    }
    const key=[state.viewer.clientWidth,state.zoom,window.devicePixelRatio].join('|');if(state.layoutKey!==key){state.layoutKey=key;state.scale=Math.max(.25,Math.min(4,Math.max(1,(state.viewer.clientWidth||720)-32)/state.base.width))*state.zoom;for(const slot of state.slots.values())cancelPDFSlot(slot)}
-   syncPDFLayout(state);pdfScrollTo(state,state.page);updatePDFWindow(state);const target=state.slots.get(state.page);updatePDFControls(state);setPDFStatus(pdfParts(state.viewer),`Page ${state.page} of ${state.document.numPages}`);await paintPDFSlot(state,target);
+   syncPDFLayout(state);pdfScrollTo(state,state.page);updatePDFWindow(state);const target=state.slots.get(state.page);updatePDFControls(state);setPDFStatus(pdfParts(state.viewer),`Page ${state.page} of ${state.document.numPages}`);if(!state.geometryScanStarted&&state.document.numPages>1){state.geometryScanStarted=true;indexPDFPageGeometry(state).catch(()=>{})}await paintPDFSlot(state,target);
   }
   function pdfPageInputChanged(input){const root=input.closest('[data-result-content]'),viewer=root?.querySelector('[data-pdf-viewer]'),state=viewer&&pdfStates.get(viewer);if(!state?.document)return;const requested=Number.parseInt(input.value,10),page=Number.isFinite(requested)?Math.max(1,Math.min(state.document.numPages,requested)):state.page;input.value=String(page);if(page===state.page){updatePDFControls(state);return}state.page=page;renderPDFPage(state).catch(()=>pdfFailure(state))}
   function pdfControls(root,disabled){const controls=root?.querySelector('[data-pdf-controls]');if(controls)controls.hidden=disabled;root?.querySelectorAll('[data-pdf-page],[data-pdf-page-input],[data-pdf-zoom],[data-pdf-print]').forEach(button=>{button.disabled=disabled})}
@@ -70,7 +82,7 @@
 		 function showPDFPassword(state,callback,reason,pdfjs){const parts=pdfParts(state.viewer),form=parts.root?.querySelector('[data-pdf-password]');if(!form){callback('');return}state.passwordCallback=callback;const input=form.querySelector('[data-pdf-password-input]'),status=form.querySelector('[data-pdf-password-status]'),incorrect=reason===2||reason===pdfjs?.PasswordResponses?.INCORRECT_PASSWORD;form.hidden=false;if(input)input.value='';if(status)status.textContent=incorrect?'Incorrect password. Try again.':'This PDF is password-protected. Enter the password to continue.';setPDFStatus(parts,incorrect?'Incorrect password. Enter it again.':'Password required to open this PDF.');pdfControls(parts.root,true);input?.focus()}
   function pdfFailure(state){
    const parts=pdfParts(state.viewer),fileViewer=state.viewer.closest('[data-file-viewer]');
-   hidePDFPassword(state.viewer);state.pageObserver?.disconnect();state.slots?.forEach(cancelPDFSlot);state.slots?.clear();parts.pages?.replaceChildren();
+   state.geometryCancelled=true;hidePDFPassword(state.viewer);state.pageObserver?.disconnect();state.slots?.forEach(cancelPDFSlot);state.slots?.clear();parts.pages?.replaceChildren();
    setPDFStatus(parts,"Couldn't render this PDF");
    if(fileViewer&&parts.status){
     const label=document.createElement('span');label.textContent=parts.status.textContent;
@@ -83,7 +95,7 @@
    const retry=parts.root?.querySelector('[data-pdf-retry]');if(retry){retry.hidden=!!fileViewer;retry.disabled=false}
    pdfControls(parts.root,true);
   }
-		 function stopPDF(viewer){const state=pdfStates.get(viewer);if(!state||state.closed)return;state.closed=true;state.pageObserver?.disconnect();state.viewer.removeEventListener('scroll',state.scrollHandler);state.slots?.forEach(cancelPDFSlot);state.slots?.clear();state.pages?.replaceChildren();state.resizeObserver?.disconnect();state.removeResize?.();(state.keyTarget||viewer).removeEventListener('keydown',state.keyHandler);state.passwordCallback=null;hidePDFPassword(viewer);state.textLayer?.cancel();state.renderTask?.cancel?.();state.loadingTask?.destroy?.();state.document?.destroy?.();pdfStates.delete(viewer)}
+		 function stopPDF(viewer){const state=pdfStates.get(viewer);if(!state||state.closed)return;state.closed=true;state.geometryCancelled=true;state.pageObserver?.disconnect();state.viewer.removeEventListener('scroll',state.scrollHandler);state.slots?.forEach(cancelPDFSlot);state.slots?.clear();state.pages?.replaceChildren();state.resizeObserver?.disconnect();state.removeResize?.();(state.keyTarget||viewer).removeEventListener('keydown',state.keyHandler);state.passwordCallback=null;hidePDFPassword(viewer);state.textLayer?.cancel();state.renderTask?.cancel?.();state.loadingTask?.destroy?.();state.document?.destroy?.();pdfStates.delete(viewer)}
 		 function bindPDFClose(viewer){const dialog=viewer.closest('dialog');if(!dialog||dialog.dataset.pdfCloseBound==='true')return;dialog.dataset.pdfCloseBound='true';dialog.addEventListener('close',()=>{if(!dialog.open)dialog.querySelectorAll('[data-pdf-viewer]').forEach(stopPDF)})}
 		 document.addEventListener('ov:file-replace',event=>{const root=event.target;root?.querySelectorAll?.('[data-pdf-viewer]').forEach(stopPDF)})
 		 function startPDF(viewer){if(viewer.dataset.pdfReady==='true')return;viewer.dataset.pdfReady='true';bindPDFClose(viewer);const parts=pdfParts(viewer),retry=parts.root?.querySelector('[data-pdf-retry]'),input=parts.root?.querySelector('[data-pdf-page-input]');hidePDFPassword(viewer);if(retry){retry.hidden=true;retry.disabled=false}if(input){input.disabled=true;input.value='1';input.removeAttribute('max')}pdfControls(parts.root,true);if(parts.status&&viewer.closest('[data-file-viewer]')){parts.status.classList.remove('v-muted');parts.status.classList.add('pdf-viewer-status');viewer.prepend(parts.status)}const source=viewer.dataset.pdfSource;if(!source){pdfFailure({viewer});return}const state={viewer,page:1,zoom:1,closed:false,passwordCallback:null};pdfStates.set(viewer,state);setPDFStatus(parts,'Loading PDF…');loadPDFJS().then(pdfjs=>{if(!pdfActive(state))throw Error('Preview closed');state.pdfjs=pdfjs;const loading=pdfjs.getDocument({url:source,isEvalSupported:false,disableAutoFetch:true});state.loadingTask=loading;loading.onPassword=(callback,reason)=>showPDFPassword(state,callback,reason,pdfjs);return loading.promise}).then(document=>{if(!pdfActive(state)){document.destroy?.();return}state.document=document;bindPDFViewport(state);hidePDFPassword(viewer);return renderPDFPage(state)}).catch(()=>{if(!state.closed)pdfFailure(state)})} function retryPDF(viewer){const state=pdfStates.get(viewer);if(state)stopPDF(viewer);delete viewer.dataset.pdfReady;viewer.querySelector('[data-pdf-pages]')?.replaceChildren();hidePDFPassword(viewer);viewer.closest('[data-result-content]')?.querySelectorAll('[data-pdf-page],[data-pdf-zoom],[data-pdf-print]').forEach(button=>{button.disabled=false});startPDF(viewer)}	 document.addEventListener('submit',event=>{const form=event.target.closest?.('[data-pdf-password]');if(!form)return;event.preventDefault();const root=form.closest('[data-result-content]'),viewer=root?.querySelector('[data-pdf-viewer]'),state=viewer&&pdfStates.get(viewer),input=form.querySelector('[data-pdf-password-input]'),password=input?.value||'';if(!state?.passwordCallback){form.hidden=true;return}if(!password){form.querySelector('[data-pdf-password-status]').textContent='Enter the PDF password to continue.';input?.focus();return}const callback=state.passwordCallback;state.passwordCallback=null;form.hidden=true;if(input)input.value='';setPDFStatus(pdfParts(viewer),'Loading PDF…');callback(password)});

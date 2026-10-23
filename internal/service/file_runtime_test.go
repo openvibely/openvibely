@@ -1,6 +1,7 @@
 package service
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -105,6 +106,65 @@ func TestPublishFileDurabilityOwnershipAndExplicitContext(t *testing.T) {
 	}
 	req.AgentDefinition = &models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}
 	require.Nil(t, svc.fileRuntime(req))
+}
+
+func TestPublishFilePersistsOfficeDocumentMediaTypes(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t)
+	project := &models.Project{Name: "Office files"}
+	require.NoError(t, stores.Projects.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Office files", Category: models.CategoryActive, Status: models.StatusPending}
+	require.NoError(t, stores.Tasks.Create(ctx, task))
+	execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+	require.NoError(t, stores.Executions.Create(ctx, execution))
+
+	var fixture bytes.Buffer
+	zipWriter := zip.NewWriter(&fixture)
+	fixtureFile, err := zipWriter.Create("document.xml")
+	require.NoError(t, err)
+	_, err = fixtureFile.Write([]byte("office fixture"))
+	require.NoError(t, err)
+	require.NoError(t, zipWriter.Close())
+
+	work := t.TempDir()
+	svc := &LLMService{attachmentRepo: stores.Attachments, taskSvc: &TaskService{uploadsDir: t.TempDir()}}
+	runtime := svc.fileRuntime(llmcontracts.AgentRequest{
+		Agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey},
+		Ctx:   ctx, ExecID: execution.ID, ProjectID: project.ID, WorkDir: work,
+	})
+	require.NotNil(t, runtime)
+
+	for _, tc := range []struct {
+		name string
+		mime string
+	}{
+		{"report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+		{"REPORT.DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+		{"sheet.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+		{"SHEET.XLSX", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+		{"slides.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+		{"SLIDES.PPTX", "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+		{"archive.zip", "application/zip"},
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(work, tc.name), fixture.Bytes(), 0600))
+		input, err := json.Marshal(map[string]string{"file_path": tc.name})
+		require.NoError(t, err)
+		out, handled, failed, err := runtime.Executor(ctx, "publish_file", input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, failed)
+
+		var result struct {
+			ID string `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &result))
+		require.NotEmpty(t, result.ID)
+		generated, err := stores.Attachments.GeneratedFile(ctx, result.ID, project.ID)
+		require.NoError(t, err)
+		require.NotNil(t, generated)
+		require.Equal(t, tc.name, generated.FileName)
+		require.Equal(t, tc.mime, generated.MediaType, tc.name)
+	}
 }
 
 func TestFileRuntimeHonorsAgentGrants(t *testing.T) {

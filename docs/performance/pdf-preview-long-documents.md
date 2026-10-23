@@ -1,6 +1,8 @@
 # Long PDF preview performance
 
-`TestBrowserPerformance_LongPDFWindowMeasurements` serves generated 100-, 1,000-, and 2,000-page PDFs, opens each in headless Chrome, scrolls to the end, and records a Chrome Performance trace. The fixture uses 400 × 600 point pages and checks page surfaces and canvas rendering near the final pages. The 2,000-page case also scrolls backward, jumps by page input, zooms, resizes, uses the next-page control, and closes while rendering.
+`TestBrowserPerformance_LongPDFWindowMeasurements` serves generated 100-, 1,000-, and 2,000-page PDFs, opens each in headless Chrome, scrolls to the end, and records a Chrome Performance trace. The fixture uses 400 × 600 point pages and checks page surfaces and canvas rendering near the final pages. The 2,000-page case also scrolls backward, jumps by page input, zooms, resizes, uses the next-page control, and closes while rendering. A separate 200-page mixed-size PDF checks geometry for unvisited pages, direct navigation alignment, and forward/backward scroll tracking.
+
+After the first page opens, the viewer reads remaining page dimensions in asynchronous batches of 16. It stores only page-height corrections in a sparse index, adjusts the scroll anchor as dimensions arrive, and continues to create canvases only for observed pages. This preserves exact scroll geometry when page sizes vary without mounting page surfaces for the whole document.
 
 ## Measurements
 
