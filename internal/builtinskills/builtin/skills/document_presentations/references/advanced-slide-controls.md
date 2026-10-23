@@ -1,10 +1,10 @@
 # Advanced slide controls
 
-These additions are implemented in Paperworks after RC4 (through commit
-`6afc225`). The skill still downloads **0.0.0-rc4**, which does not support them.
+These additions are implemented in Paperworks after RC4. The skill still downloads **0.0.0-rc4**, which does not support them.
 Use this reference only with a verified newer local build. Check `schema
 create-pptx` and `schema slide-edit` for `hidden`, `text_box`, `background_fill`,
-`svg` and `auto_layout` before using them. Otherwise use the pinned commands
+`svg`, `auto_layout`, `text_paint`, `table_format` and `chart_format` before using
+the corresponding feature. Otherwise use the pinned commands
 from the other references; do not send unsupported fields that may be ignored.
 
 All edit examples below go inside `{"edits":[...]}` and run with
@@ -92,3 +92,19 @@ an existing top-level shape's frame instead of coordinates. The frame cannot
 also be in `shape_ids`. Selected shapes need explicit geometry and must be
 top-level. Overflow fails rather than shrinking objects. This uses unrotated
 frames; inspect rotated objects and rerun after content or geometry changes.
+
+## Text glyph fills and outlines
+
+Use `text-paint` for a whole text shape or `run-format` with zero-based
+`paragraph` and `run` for a selected run. New text elements accept `text_paint`.
+This paints the letters; it does not change the box background or text.
+
+```json
+{"operation":"text-paint","slide":1,"shape_id":"2","text_paint":{"fill":{"gradient":{"angle":90,"stops":[{"position":0,"color":"17324D"},{"position":1,"color":"4488BB"}]}},"outline":{"width":0.5,"fill":{"fill":"FFFFFF"}}}}
+```
+
+Fills accept solid `fill`, `gradient`, or `pattern`, not images. Outline `width`
+is in points; zero removes it. Omitted paint settings remain unchanged. Gradient
+`path` can be `circle`, `rect`, or `shape` instead of `angle`; optional `focus`
+insets `left`, `top`, `right`, `bottom` are fractions in 0..1 (default center).
+Opposing focus insets must not sum above 1. Render and check letter readability.
