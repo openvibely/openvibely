@@ -1024,13 +1024,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.NativeCompactionTokenThreshold = limits.TriggerLimit
 		req.Agent.CompactionThreshold = limits.TriggerLimit
 	}
-	if !providerSupportsNativeCompaction(req.Agent) {
-		req.DisableNativeCompaction = true
-		req.Agent.DisableNativeCompaction = true
-	} else if knownNativeCompactionUnsupported(req.Agent) {
-		req.DisableNativeCompaction = true
-		req.Agent.DisableNativeCompaction = true
-	}
+	req = applyNativeCompactionSupport(req)
 	if triggered && providerSupportsNativeCompaction(req.Agent) && !req.DisableNativeCompaction && !req.Agent.DisableNativeCompaction {
 		req.ForceNativeCompaction = true
 		req.Agent.ForceNativeCompaction = true
@@ -1117,22 +1111,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return res, err
 	}
 	if providerSupportsNativeCompaction(req.Agent) && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) && len(req.ChatHistory) > 0 {
-		if nativeCompactionUnsupportedError(err) {
-			knownUnsupportedNativeCompaction.Store(nativeCompactionSessionKey(req.Agent), true)
-		}
-		compactedReq := req
-		compactedReq.DisableNativeCompaction = true
-		compactedReq.Agent.DisableNativeCompaction = true
-		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, compactedReq, err)
-		if compactErr != nil {
-			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
-			return llmcontracts.AgentResult{}, compactErr
-		}
-		if err := s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
-			return llmcontracts.AgentResult{}, err
-		}
-		applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
-		return s.callCompactedRetry(adapter, req, compacted, err)
+		return s.callNativeCompactionFallback(adapter, req, err)
 	}
 	if recognizedContextLengthError(err) && len(req.ChatHistory) > 0 {
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req, err)
@@ -1147,6 +1126,33 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return s.callCompactedRetry(adapter, req, compacted, err)
 	}
 	return res, err
+}
+
+func applyNativeCompactionSupport(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
+	if !providerSupportsNativeCompaction(req.Agent) || knownNativeCompactionUnsupported(req.Agent) {
+		req.DisableNativeCompaction = true
+		req.Agent.DisableNativeCompaction = true
+	}
+	return req
+}
+
+func (s *LLMService) callNativeCompactionFallback(adapter ProviderAdapter, req llmcontracts.AgentRequest, err error) (llmcontracts.AgentResult, error) {
+	if nativeCompactionUnsupportedError(err) {
+		knownUnsupportedNativeCompaction.Store(nativeCompactionSessionKey(req.Agent), true)
+	}
+	compactedReq := req
+	compactedReq.DisableNativeCompaction = true
+	compactedReq.Agent.DisableNativeCompaction = true
+	compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, compactedReq, err)
+	if compactErr != nil {
+		applog.Infof("[agent-svc] native-to-local context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
+		return llmcontracts.AgentResult{}, compactErr
+	}
+	if err := s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary"); err != nil {
+		return llmcontracts.AgentResult{}, err
+	}
+	applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
+	return s.callCompactedRetry(adapter, req, compacted, err)
 }
 
 func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
