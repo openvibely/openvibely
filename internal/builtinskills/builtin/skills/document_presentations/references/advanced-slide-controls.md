@@ -375,3 +375,15 @@ the render; label formatting alone does not enable an equation. The existing
 `trendlines` operation replaces the whole series trendline list, so include
 all trendlines/settings that should remain. Omit `trendlines` to preserve them.
 Use only with a newer local schema exposing `label`.
+
+## Series-label visibility, paint and source formats (after RC4)
+
+Series `labels` accepts `visible`, `fill`, `outline` and
+`number_format_source_linked`. Example:
+`{"visible":true,"fill":{"fill":"FFFFDD"},"outline":{"width":1,"fill":{"fill":"17324D"}},"number_format":"0.0","number_format_source_linked":true}`.
+Visibility controls the collection's native delete flag; explicit per-point
+settings remain unchanged. Fills/outlines use the existing chart paint format.
+To change source linkage, a number format must already exist or be supplied.
+Setting `number_format` alone retains the existing command behavior of disabling
+source linkage. Otherwise omitted properties remain unchanged. Inspect the newer
+local schema and the saved labels, then render to check the final appearance.
