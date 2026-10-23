@@ -59,3 +59,9 @@ it is not a readiness delay. Assertions follow visible text
 across late height corrections rather than assuming absolute scroll offsets are
 constant. Event coalescing is allowed, but actual input, paging, and text tracking
 must all be observed for the test to pass.
+
+On macOS the host logs the first native event of each gesture (decoded deltas,
+phase, hit-test target, coordinates, and window activation/visibility). These
+lines are included in the native process output when a scenario fails. This
+separates a missing DOM event from malformed native input or inactive routing;
+a successful HTTP response alone still does not prove browser delivery.

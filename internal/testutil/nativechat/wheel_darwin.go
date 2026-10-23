@@ -56,6 +56,22 @@ static int sendWheel(void* pointer, double x,double y,double dx,double dy,int ph
  objc_registerClassPair(cls);object_setClass(event,cls);
  NSView* target=wheelTarget(view,point);
  if(!target){CFRelease(cg);return 3;}
+ // Browser-side capture cannot distinguish an invalid native payload from
+ // AppKit dropping/rerouting it. Log each gesture's first event in the test
+ // process output, which the harness includes on failure. Do not log every
+ // frame of the burst or modify focus/input state to hide the failure.
+ if(phase==1) {
+  NSPoint local=[view convertPoint:event.locationInWindow fromView:nil];
+  CGPoint cgPoint=CGEventGetLocation(cg);
+  NSLog(@"[native-wheel] requested=(%.2f,%.2f) delta=(%.2f,%.2f) type=%lu precise=%d phase=%lu momentum=%lu window=%ld key=%d main=%d appActive=%d occlusion=%lu viewHidden=%d viewFrame=%@ windowFrame=%@ local=%@ cg=(%.2f,%.2f) target=%@ responder=%@ macOS=%@",
+   dx,dy,event.scrollingDeltaX,event.scrollingDeltaY,(unsigned long)event.type,
+   event.hasPreciseScrollingDeltas,(unsigned long)event.phase,(unsigned long)event.momentumPhase,
+   (long)event.windowNumber,window.isKeyWindow,window.isMainWindow,NSApp.isActive,
+   (unsigned long)window.occlusionState,view.isHiddenOrHasHiddenAncestor,
+   NSStringFromRect(view.frame),NSStringFromRect(window.frame),NSStringFromPoint(local),
+   cgPoint.x,cgPoint.y,NSStringFromClass(target.class),NSStringFromClass(window.firstResponder.class),
+   NSProcessInfo.processInfo.operatingSystemVersionString);
+ }
  // Enter AppKit through the window so its gesture routing and event context
  // are established. Directly calling a hit-tested private WebKit subview
  // bypasses that path and can acknowledge input without a DOM wheel event.
