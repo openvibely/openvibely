@@ -43,11 +43,28 @@
     // at the same scale on every runner. Use downward input away from the loader.
     let probe;
     const probeListener = event => { if(event.isTrusted && event.deltaY && !probe) probe=event; };
+    const routedEvents = [];
+    const recordRoute = event => {
+        if (!event.isTrusted || routedEvents.length >= 8) return;
+        routedEvents.push({target:event.target?.id || event.target?.className,
+            inTranscript:m.contains(event.target),dy:event.deltaY,dx:event.deltaX});
+    };
     m.addEventListener('wheel',probeListener);
+    document.addEventListener('wheel',recordRoute,true);
     const probeBounds=m.getBoundingClientRect();
-    await nativeInput.postMessage({dy:40,x:probeBounds.left+6,y:probeBounds.top+75});
-    await until(()=>probe,'native calibration wheel');
-    m.removeEventListener('wheel',probeListener);
+    const probePoint={x:probeBounds.left+6,y:probeBounds.top+75};
+    try {
+        const hit=document.elementFromPoint(probePoint.x,probePoint.y);
+        if(!hit || !m.contains(hit)) throw Error('Calibration point is outside transcript');
+        await nativeInput.postMessage({dy:40,...probePoint});
+        await until(()=>probe,'native calibration wheel');
+    } catch(error) {
+        throw Error(String(error)+' route='+JSON.stringify({routedEvents,probePoint,
+            connected:m.isConnected,current:messages()===m,visibility:document.visibilityState}));
+    } finally {
+        m.removeEventListener('wheel',probeListener);
+        document.removeEventListener('wheel',recordRoute,true);
+    }
     if(probe.deltaMode!==0 || !probe.deltaY) throw Error('Unsupported native wheel units: '+JSON.stringify({mode:probe.deltaMode,dy:probe.deltaY}));
     wheelScale=40/Math.abs(probe.deltaY);
     if(wheelScale<0.01 || wheelScale>256) throw Error('Invalid native wheel scale: '+wheelScale);

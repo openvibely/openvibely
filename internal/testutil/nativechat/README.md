@@ -32,7 +32,10 @@ process cleanup even on failure.
 
 The only platform-specific pieces are native input delivery:
 
-- macOS: AppKit wheel events routed to the Wails WKWebView.
+- macOS: AppKit wheel events routed to the Wails WKWebView. Native hit testing
+  converts the window point into the webview's **superview** coordinates, as
+  required by [NSView.hitTest](https://developer.apple.com/documentation/appkit/nsview/hittest(_:)).
+  A native regression checks this with an offset, flipped view hierarchy.
 - Linux: GDK smooth scroll events routed to the Wails WebKitGTK view.
 - Windows: wheel messages delivered to the WebView2 child window.
 
