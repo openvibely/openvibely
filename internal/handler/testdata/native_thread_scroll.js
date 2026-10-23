@@ -162,19 +162,26 @@
     const outerTop = m.scrollTop;
     async function wheel(delta) {
         let delivered;
-        await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(Error('Native nested wheel not delivered')), 1500);
-            tool.addEventListener('wheel', function received(event) {
-                if (!event.isTrusted) return;
-                tool.removeEventListener('wheel', received);
-                clearTimeout(timer);
-                delivered = event;
-                resolve();
-            });
-            nativeInput.postMessage({...delta, x: bounds.left + 50, y: bounds.top + 150});
-        });
-        await wait(100);
-        if (delivered.defaultPrevented) throw Error('Nested tool wheel was intercepted');
+        const axis = delta.dx ? 'scrollLeft' : 'scrollTop';
+        const initialOffset = tool[axis];
+        const received = event => {
+            // Gesture-end events can be trusted but carry no movement.
+            if (!event.isTrusted || !(delta.dx ? event.deltaX : event.deltaY)) return;
+            delivered = event;
+        };
+        tool.addEventListener('wheel', received);
+        try {
+            const box = tool.getBoundingClientRect();
+            await nativeInput.postMessage({...delta, x: box.left + 30, y: box.top + 30});
+            await until(() => delivered, 'native nested wheel delivered');
+            if (delivered.defaultPrevented) throw Error('Nested tool wheel was intercepted');
+            // Dispatch precedes WebKit's asynchronous native scroll. Wait for
+            // the effect under test, not a fixed delay after event receipt.
+            await until(() => tool[axis] > initialOffset, 'native nested ' + axis + ' movement');
+            await stableLayout(m);
+        } finally {
+            tool.removeEventListener('wheel', received);
+        }
     }
     await wheel({dy: 40});
     if (tool.scrollTop <= 0 || Math.abs(m.scrollTop - outerTop) > 2) throw Error('Nested vertical scroll: tool=' + tool.scrollTop + ', outer=' + outerTop + '->' + m.scrollTop);
