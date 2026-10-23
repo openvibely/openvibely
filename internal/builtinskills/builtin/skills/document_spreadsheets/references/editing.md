@@ -89,3 +89,11 @@ Use a `tab-color` operation with a six-digit RGB `color`; an empty string clears
 ```
 
 Run with `paperworks workbook-edit input.xlsx --spec edits.json --output updated.xlsx`. This requires the updated Paperworks build; the currently pinned RC4 does not provide this operation.
+
+## Add a sensitivity table to an existing workbook (after RC4)
+
+Use `workbook-edit` with `add-data-table`. Set up the model inputs, output formula and trial headers first, either in earlier edits or in the existing workbook.
+```json
+{"edits":[{"operation":"add-data-table","sheet":"Model","data_table":{"range":"E3:F4","input1":"B1","input2":"B2"}}]}
+```
+Here `E3:F4` is the result body, `D2` holds the output formula, `E2:F2` holds row trials, and `D3:D4` holds column trials. `input1` is the row-input cell and `input2` the column-input cell on the same sheet. The command rejects occupied result cells, merges, structured tables and existing formula-range overlaps. It writes a native definition, not calculated results: recalculate the output, inspect the table values, and verify selected scenarios independently. Use a newer local build; RC4 lacks this edit operation.
