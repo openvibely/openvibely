@@ -475,3 +475,13 @@ bullet/level and `format`; named run styles are not supported in this path.
 Unspecified authored text defaults to Arial 12pt and the helper's text color;
 specify intended sizes/colors when matching existing content. Render and inspect
 wrapping and row height; writing rich text does not automatically expand the row.
+
+## Arrowhead sizing (after RC4)
+
+In a newer build, `drawing_style.outline` accepts `head_width`, `head_length`,
+`tail_width`, `tail_length`, each `sm`, `med` or `lg`. Example outline:
+`{"color":"17324D","width":2,"tail":"arrow","tail_width":"lg","tail_length":"sm"}`.
+Supply the corresponding head/tail type. Use this on created drawing elements or
+in `slide-edit` operation `drawing-style`. An outline replaces existing line
+formatting, so supply all properties you want retained. Omitted sizes use viewer
+defaults. Attachments remain unchanged. Render and check arrow direction and size.
