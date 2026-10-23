@@ -3586,6 +3586,17 @@ func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, s
 	}
 
 	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
+	if targetID := strings.TrimSpace(c.QueryParam("approval_execution_id")); targetID != "" && beforeExecID == "" && !isPoll {
+		target, targetErr := h.execRepo.GetByID(ctx, targetID)
+		if targetErr == nil && target != nil && target.TaskID == taskID {
+			older, more, loadErr := h.loadTaskThreadExecutionWindow(ctx, taskID, target.ID, limit)
+			if loadErr == nil {
+				executions = append(older, *target)
+				hasEarlier = more
+				err = nil
+			}
+		}
+	}
 	if err != nil {
 		applog.Infof("[handler] GetTaskThread error loading executions: %v", err)
 		executions = []models.Execution{}

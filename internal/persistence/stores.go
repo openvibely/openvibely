@@ -200,6 +200,13 @@ type ChatAttachmentStore interface {
 
 // ChatInputRequestStore persists pending chat input requests.
 type ChatInputRequestStore interface {
+	ListReadyInstallationAnswers(ctx context.Context, projectID, taskID string) ([]ChatInputRequestRecord, error)
+	ListInstallationAnswersAwaitingChatRecovery(ctx context.Context, expiresBefore time.Time) ([]ChatInputRequestRecord, error)
+	ListByExecutions(ctx context.Context, projectID string, executionIDs []string) ([]ChatInputRequestRecord, error)
+	ClaimInstallationAnswer(ctx context.Context, id, projectID string, continuation bool) (*ChatInputRequestRecord, error)
+	LoadInstallationContinuation(ctx context.Context, projectID, executionID, agentID string) (*ChatInputRequestRecord, error)
+	SaveInstallationContinuationResult(ctx context.Context, questionID, executionID, content string) error
+
 	Create(ctx context.Context, rec ChatInputRequestRecord) error
 	Get(ctx context.Context, id string) (*ChatInputRequestRecord, error)
 	ListActiveByProject(ctx context.Context, projectID string, now time.Time) ([]ChatInputRequestRecord, error)

@@ -42,12 +42,14 @@ type ChatEvent struct {
 }
 
 type ChatInputRequestEvent struct {
-	ID        string                     `json:"id"`
-	ExecID    string                     `json:"exec_id,omitempty"`
-	ExpiresAt string                     `json:"expires_at,omitempty"`
-	Questions []ChatInputRequestQuestion `json:"questions"`
-	Answers   []ChatInputRequestAnswer   `json:"answers,omitempty"`
-	Completed bool                       `json:"completed"`
+	ProjectID    string                     `json:"project_id,omitempty"`
+	Installation json.RawMessage            `json:"installation,omitempty"`
+	ID           string                     `json:"id"`
+	ExecID       string                     `json:"exec_id,omitempty"`
+	ExpiresAt    string                     `json:"expires_at,omitempty"`
+	Questions    []ChatInputRequestQuestion `json:"questions"`
+	Answers      []ChatInputRequestAnswer   `json:"answers,omitempty"`
+	Completed    bool                       `json:"completed"`
 }
 
 type ChatInputRequestAnswer struct {

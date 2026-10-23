@@ -682,7 +682,10 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, state CardLis
 					if alert.ProcessingError != "" {
 						<p class="mt-2 text-sm text-error break-words">{ alert.ProcessingError }</p>
 					}
-					if alert.ImplementationTaskID != nil {
+					if alert.Source == "skill_dependency_approval" && strings.HasPrefix(alert.IdempotencyKey,"skill-dependency:") {
+ <a class="btn btn-link btn-xs mt-2 px-0" href={ templ.SafeURL("/chat/input-requests/"+strings.TrimPrefix(alert.IdempotencyKey,"skill-dependency:")+"/open?project_id="+alert.ProjectID) }>Review external tools</a>
+ }
+ if alert.ImplementationTaskID != nil {
 						<button class="btn btn-link btn-xs mt-2 px-0" data-task-id={ *alert.ImplementationTaskID } onclick="event.stopPropagation(); openAlertTaskDialog(this.dataset.taskId)">View implementation task</button>
 					}
 					if alert.DecisionState == models.AlertDecisionPending {

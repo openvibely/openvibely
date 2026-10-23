@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -2126,4 +2127,216 @@ func TestEditHoldOwnership(t *testing.T) {
 	updated, err := repo.EditPending(ctx, input.ID, "revised", "second")
 	require.NoError(t, err)
 	require.Equal(t, "revised", updated.Content)
+}
+
+// Installation answers must have a durable queue fallback before HTTP delivery
+// touches the in-memory broker. Ordinary questions retain their existing behavior.
+func TestInstallationAnswerAtomicDelivery(t *testing.T) {
+	for _, label := range []string{"Install dependencies", "Not now"} {
+		t.Run(label, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			project := createThreadInputProject(t, ctx, db)
+			task := createThreadInputTask(t, ctx, db, project.ID)
+			model := createThreadInputLLMConfig(t, ctx, db)
+			execution := &models.Execution{TaskID: task.ID, AgentConfigID: model.ID, Status: models.ExecRunning}
+			require.NoError(t, NewExecutionRepo(db).Create(ctx, execution))
+			repo := NewChatInputRequestRepo(db)
+			question := persistence.ChatInputRequestRecord{ID: "installation", ProjectID: project.ID, ExecutionID: execution.ID, ExpiresAt: time.Now().Add(time.Hour), QuestionsJSON: `{"kind":"skill_installation","questions":[],"installation":{"manifest":{"identity":{"skill":"fixture"}}}}`}
+			require.NoError(t, repo.Create(ctx, question))
+			answer := fmt.Sprintf(`[{"question_id":"install","label":%q}]`, label)
+			_, err := repo.Resolve(ctx, question.ID, project.ID, answer)
+			require.NoError(t, err)
+			restarted := NewChatInputRequestRepo(db)
+			ready, err := restarted.ListReadyInstallationAnswers(ctx, project.ID, task.ID)
+			require.NoError(t, err)
+			require.Len(t, ready, 1)
+			// Repeated answers remain one durable question, never a queue item.
+			_, err = restarted.Resolve(ctx, question.ID, project.ID, answer)
+			require.NoError(t, err)
+			var count int
+			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM thread_inputs`).Scan(&count))
+			require.Zero(t, count)
+
+			// If the live tool is still present, it consumes the fallback atomically.
+			claimed, err := restarted.ClaimInstallationAnswer(ctx, question.ID, project.ID, false)
+			require.NoError(t, err)
+			require.NotNil(t, claimed)
+			require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM thread_inputs`).Scan(&count))
+			require.Zero(t, count)
+			claimed, err = restarted.ClaimInstallationAnswer(ctx, question.ID, project.ID, false)
+			require.NoError(t, err)
+			require.Nil(t, claimed)
+		})
+	}
+}
+
+func TestInstallationDirectExecutionClaimIsAtomic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	model := createThreadInputLLMConfig(t, ctx, db)
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: model.ID, Status: models.ExecFailed}
+	require.NoError(t, NewExecutionRepo(db).Create(ctx, execution))
+	repo := NewChatInputRequestRepo(db)
+	question := persistence.ChatInputRequestRecord{ID: "installation", ProjectID: project.ID, ExecutionID: execution.ID, ExpiresAt: time.Now().Add(time.Hour), QuestionsJSON: `{"kind":"skill_installation","questions":[],"installation":{"manifest":{"identity":{"skill":"fixture"}}}}`}
+	require.NoError(t, repo.Create(ctx, question))
+	_, err := repo.Resolve(ctx, question.ID, project.ID, `[{"question_id":"install","label":"Install dependencies"}]`)
+	require.NoError(t, err)
+	// A failed execution insert must roll back the claim, leaving the answer available.
+	_, err = db.Exec(`CREATE TRIGGER reject_continuation BEFORE INSERT ON executions BEGIN SELECT RAISE(ABORT,'injected execution failure'); END`)
+	require.NoError(t, err)
+	_, err = repo.ClaimInstallationAnswer(ctx, question.ID, project.ID, true)
+	require.ErrorContains(t, err, "injected execution failure")
+	ready, err := repo.ListReadyInstallationAnswers(ctx, project.ID, task.ID)
+	require.NoError(t, err)
+	require.Len(t, ready, 1)
+	_, err = db.Exec(`DROP TRIGGER reject_continuation`)
+	require.NoError(t, err)
+	saved, err := repo.ClaimInstallationAnswer(ctx, question.ID, project.ID, true)
+	require.NoError(t, err)
+	require.NotNil(t, saved)
+	_, meta, err := saved.DecodeQuestions()
+	require.NoError(t, err)
+	require.NotEmpty(t, meta.ContinuationExecutionID)
+	claimed, err := repo.ClaimInstallationAnswer(ctx, question.ID, project.ID, false)
+	require.NoError(t, err)
+	require.Nil(t, claimed)
+	claimed, err = repo.ClaimInstallationAnswer(ctx, question.ID, project.ID, true)
+	require.NoError(t, err)
+	require.Nil(t, claimed)
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM thread_inputs`).Scan(&count))
+	require.Zero(t, count)
+
+}
+
+func TestInstallationResultSavedAtomicallyWithCompletion(t *testing.T) {
+	for _, label := range []string{"Install dependencies", "Not now"} {
+		t.Run(label, func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			project := createThreadInputProject(t, ctx, db)
+			task := createThreadInputTask(t, ctx, db, project.ID)
+			model := createThreadInputLLMConfig(t, ctx, db)
+			executions := NewExecutionRepo(db)
+			original := &models.Execution{TaskID: task.ID, AgentConfigID: model.ID, Status: models.ExecFailed}
+			require.NoError(t, executions.Create(ctx, original))
+			repo := NewChatInputRequestRepo(db)
+			question := persistence.ChatInputRequestRecord{ID: "result-question", ProjectID: project.ID, ExecutionID: original.ID, ExpiresAt: time.Now().Add(time.Hour), QuestionsJSON: `{"kind":"skill_installation","questions":[],"installation":{"manifest":{"identity":{"skill":"fixture"}}}}`}
+			require.NoError(t, repo.Create(ctx, question))
+			saved, err := repo.Resolve(ctx, question.ID, project.ID, fmt.Sprintf(`[{"question_id":"install","label":%q}]`, label))
+			require.NoError(t, err)
+			saved, err = repo.ClaimInstallationAnswer(ctx, question.ID, project.ID, true)
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+			_, meta, err := saved.DecodeQuestions()
+			require.NoError(t, err)
+			followup, err := executions.GetByID(ctx, meta.ContinuationExecutionID)
+			require.NoError(t, err)
+			require.NoError(t, executions.MarkRunning(ctx, followup.ID))
+
+			record, err := repo.LoadInstallationContinuation(ctx, project.ID, followup.ID, "")
+			require.NoError(t, err)
+			require.NotNil(t, record)
+			_, loadedMeta, err := record.DecodeQuestions()
+			require.NoError(t, err)
+			require.False(t, loadedMeta.Handled)
+			// A failed result/completion write must leave the question incomplete.
+			_, err = db.Exec(`CREATE TRIGGER fail_installation_completion BEFORE UPDATE OF questions_json ON chat_input_requests WHEN json_extract(NEW.questions_json,'$.installation.handled')=1 BEGIN SELECT RAISE(ABORT,'injected completion failure'); END`)
+			require.NoError(t, err)
+			result := "actual skill_view result: " + label
+			require.ErrorContains(t, repo.SaveInstallationContinuationResult(ctx, question.ID, followup.ID, result), "injected completion failure")
+			persisted, err := executions.GetByID(ctx, followup.ID)
+			require.NoError(t, err)
+			require.Equal(t, original.PromptSent, persisted.PromptSent)
+			saved, err = repo.Get(ctx, question.ID)
+			require.NoError(t, err)
+			_, loadedMeta, err = saved.DecodeQuestions()
+			require.NoError(t, err)
+			require.False(t, loadedMeta.Handled)
+			// A new execution is an ordinary retry, not another delivery of
+			// this installation answer. It must not claim or rebind the question.
+			retry := &models.Execution{TaskID: task.ID, AgentConfigID: model.ID, Status: models.ExecRunning, PromptSent: "original user request"}
+			require.NoError(t, executions.Create(ctx, retry))
+			record, err = repo.LoadInstallationContinuation(ctx, project.ID, retry.ID, "")
+			require.NoError(t, err)
+			require.Nil(t, record)
+			var bound string
+			require.NoError(t, db.QueryRow(`SELECT json_extract(questions_json,'$.installation.continuation_execution_id') FROM chat_input_requests WHERE id=?`, question.ID).Scan(&bound))
+			require.Equal(t, followup.ID, bound)
+			_, err = db.Exec(`DROP TRIGGER fail_installation_completion`)
+			require.NoError(t, err)
+			require.NoError(t, repo.SaveInstallationContinuationResult(ctx, question.ID, followup.ID, result))
+			saved, err = repo.Get(ctx, question.ID)
+			require.NoError(t, err)
+			_, loadedMeta, err = saved.DecodeQuestions()
+			require.NoError(t, err)
+			require.True(t, loadedMeta.Handled)
+			persisted, err = executions.GetByID(ctx, followup.ID)
+			require.NoError(t, err)
+			require.Equal(t, original.PromptSent, persisted.PromptSent)
+			require.Equal(t, result, loadedMeta.Result)
+			var content string
+			require.NoError(t, db.QueryRow(`SELECT prompt_sent FROM executions WHERE id=?`, meta.ContinuationExecutionID).Scan(&content))
+			require.Equal(t, original.PromptSent, content)
+			record, err = repo.LoadInstallationContinuation(ctx, project.ID, followup.ID, "")
+			require.NoError(t, err)
+			require.NotNil(t, record) // retries load the saved result, never re-execute the tool
+			_, resultMeta, err := record.DecodeQuestions()
+			require.NoError(t, err)
+			require.True(t, resultMeta.Handled)
+		})
+	}
+}
+
+func TestInstallationActiveQuestionsExcludeAnsweredHistory(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	project := createThreadInputProject(t, ctx, db)
+	other := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	model := createThreadInputLLMConfig(t, ctx, db)
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: model.ID, Status: models.ExecFailed}
+	require.NoError(t, NewExecutionRepo(db).Create(ctx, execution))
+	repo := NewChatInputRequestRepo(db)
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		id, project, status   string
+		installation, expired bool
+	}{
+		{"pending-installation", project.ID, "pending", true, false},
+		{"expired-installation", project.ID, "pending", true, true},
+		{"answered-installation", project.ID, "resolved", true, false},
+		{"old-answered-installation", project.ID, "resolved", true, true},
+		{"other-project-installation", other.ID, "pending", true, true},
+		{"pending-chat", project.ID, "pending", false, false},
+		{"resolved-chat", project.ID, "resolved", false, false},
+		{"expired-chat", project.ID, "pending", false, true},
+	} {
+		payload := `[]`
+		if tc.installation {
+			payload = `{"kind":"skill_installation","questions":[],"installation":{"manifest":{"identity":{"skill":"fixture"}}}}`
+		}
+		expires := now.Add(time.Hour)
+		if tc.expired {
+			expires = now.Add(-time.Hour)
+		}
+		require.NoError(t, repo.Create(ctx, persistence.ChatInputRequestRecord{ID: tc.id, ProjectID: tc.project, ExecutionID: execution.ID, QuestionsJSON: payload, ExpiresAt: expires}))
+		_, err := db.Exec(`UPDATE chat_input_requests SET status=? WHERE id=?`, tc.status, tc.id)
+		require.NoError(t, err)
+	}
+	records, err := repo.ListActiveByProject(ctx, project.ID, now)
+	require.NoError(t, err)
+	var ids []string
+	for _, record := range records {
+		ids = append(ids, record.ID)
+	}
+	// Ordinary Chat expiry semantics stay unchanged. Installation cards remain
+	// answerable after expiry, but answered cards no longer load their history.
+	require.ElementsMatch(t, []string{"pending-installation", "expired-installation", "pending-chat", "resolved-chat"}, ids)
+	old, err := repo.Get(ctx, "old-answered-installation")
+	require.NoError(t, err)
+	require.NotNil(t, old, "filtering active cards must not delete history")
 }

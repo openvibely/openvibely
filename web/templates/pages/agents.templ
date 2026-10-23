@@ -345,6 +345,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<div id="agent_skills_list" class="space-y-2"></div>
 									</div>
 									<div id="agent_skill_editor" class="hidden border border-base-300 rounded-lg p-3 bg-base-100">
+<section id="agent_skill_dependency_details" hidden></section>
 										<div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
 											<label class="form-control"><span class="label-text text-xs">Skill key</span><input id="agent_skill_handle" class="input input-bordered input-sm" placeholder="review_migrations"/></label>
 											<label class="form-control"><span class="label-text text-xs">Name</span><input id="agent_skill_name" class="input input-bordered input-sm" placeholder="Review migrations"/></label>
@@ -1836,6 +1837,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								list.innerHTML = '<p class="text-sm opacity-50">No indexed skills yet.</p>';
 							} else {
 								list.innerHTML = routed.map(skill => renderAgentOwnedSkillCard(skill, canManage)).join('');
+list.querySelectorAll('[data-agent-dependency-handle]').forEach(root=>{const skill=routed.find(item=>item.handle===root.dataset.agentDependencyHandle);if(skill)window.renderSkillDependencyDetails?.(root,skill);});
 							}
 						}
 					}
@@ -1849,6 +1851,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							'<p class="text-xs opacity-60">' + escapeHtml(handle) + ' · ' + escapeHtml(skill.scope || skill.source || 'project') + '</p></div>' + manageButtons + '</div>' +
 							(skill.description ? '<p class="text-xs opacity-70 mt-1">' + escapeHtml(skill.description) + '</p>' : '') +
 							(skill.path ? '<p class="text-[11px] opacity-50 mt-1 break-all">' + escapeHtml(skill.path) + '</p>' : '') +
+ '<section data-agent-dependency-handle="' + escapeHtml(handle) + '" hidden></section>' +
 						'</div>';
 					}
 
@@ -1862,6 +1865,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							const preferredScope = ((agentOwnedSkillsState || {}).agent_scope === 'global' || !(agentOwnedSkillsState || {}).project_root_set) ? 'global' : 'project';
 							document.getElementById('agent_skill_scope').value = preferredScope;
 						document.getElementById('agent_skill_body').value = '';
+document.getElementById('agent_skill_dependency_details').replaceChildren();document.getElementById('agent_skill_dependency_details').hidden=true;
 						document.getElementById('agent_skill_editor').classList.remove('hidden');
 					}
 
@@ -1876,6 +1880,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						document.getElementById('agent_skill_description').value = skill.description || '';
 						document.getElementById('agent_skill_scope').value = skill.scope === 'global' ? 'global' : 'project';
 						document.getElementById('agent_skill_body').value = skill.content || '';
+window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_dependency_details'),skill);
 						document.getElementById('agent_skill_editor').classList.remove('hidden');
 					}
 

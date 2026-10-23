@@ -344,6 +344,12 @@ func anthropicAgentResult(output, textOnly string, usage llmcontracts.Usage, err
 }
 
 type conversationReplayKey struct{}
+type replaySaverKey struct{}
+
+func replaySaver(ctx context.Context) func(context.Context, []anthropicclient.Message) error {
+	saver, _ := ctx.Value(replaySaverKey{}).(func(context.Context, []anthropicclient.Message) error)
+	return saver
+}
 
 func recordConversationReplay(ctx context.Context) func([]anthropicclient.Message) {
 	return func(messages []anthropicclient.Message) {
@@ -416,6 +422,14 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		// Store the actual environment for this execution, not the environment
 		// of a future client rebuilding its history.
 		environment := executionenv.Context(workDir)
+		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message) error {
+			replayMessages = messages
+			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: messages})
+			if err != nil {
+				return err
+			}
+			return a.execRepo.ReplaceReasoningReplay(saveCtx, req.ExecID, "", []models.ExecutionReplayMessage{{UserContent: req.Message, TranscriptJSON: string(saved)}})
+		})
 		defer func() {
 			if len(replayMessages) == 0 {
 				replayMessages = []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}
@@ -519,6 +533,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		ToolExecutor:              toolExecutor,
 		ToolFilter:                toolFilter,
 		OnToolBoundarySteering:    llmcontracts.SteeringCallbackFromContext(ctx),
+		OnReplaySave:              replaySaver(ctx),
 		OnReplay:                  recordConversationReplay(ctx),
 		RecoveryMessages:          recoveryMessages(ctx),
 		OnCompaction: func(summary string) {
@@ -597,6 +612,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		OnReplaySave:           replaySaver(ctx),
 		OnReplay:               recordConversationReplay(ctx),
 		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
@@ -702,6 +718,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		OnReplaySave:           replaySaver(ctx),
 		OnReplay:               recordConversationReplay(ctx),
 		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {

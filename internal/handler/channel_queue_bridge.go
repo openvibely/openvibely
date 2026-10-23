@@ -70,6 +70,22 @@ func recoverQueuedInputIDs(
 }
 
 func (h *Handler) RecoverQueuedInputs(ctx context.Context) {
+	if h.chatInputRequestRepo != nil && h.chatInputRequests != nil {
+		// Use the normal recovered-question handler for answers committed before
+		// a restart but never delivered to the old broker. The fixed TTL gives
+		// the original creation time without SQLite timestamp precision loss.
+		records, err := h.chatInputRequestRepo.ListInstallationAnswersAwaitingChatRecovery(ctx, h.chatInputRequests.startedAt.Add(chatInputRequestTTL))
+		if err != nil {
+			applog.Infof("[handler] RecoverQueuedInputs answered question recovery: %v", err)
+		} else {
+			for _, record := range records {
+				if request, err := chatInputRequestFromRecord(record); err == nil {
+					h.completeRecoveredChatInputExecution(ctx, request)
+				}
+			}
+		}
+	}
+	h.startInstallationContinuations(ctx, "", "")
 	if h.threadInputRepo == nil {
 		return
 	}

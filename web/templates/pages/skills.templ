@@ -2,6 +2,7 @@ package pages
 
 import (
 	"strings"
+"strconv"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -19,6 +20,7 @@ type SkillCard struct {
 	Archived  bool
 	Enabled   bool
 	AlwaysUse bool
+RequiresExternalTools bool
 }
 
 templ Skills(projects []models.Project, currentProjectID string, skills []SkillCard, canManage bool) {
@@ -133,6 +135,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 							data-skill-description={ skill.Description }
 							data-skill-scope={ skill.Scope }
 							data-skill-source={ skill.Source }
+ data-requires-external-tools={ strconv.FormatBool(skill.RequiresExternalTools) }
 							data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
 							data-skill-always-use={ func() string { if skill.AlwaysUse { return "true" } else { return "false" } }() }
 							data-search-card
@@ -183,7 +186,10 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 								}
 								<div class="flex flex-wrap gap-2 mt-2">
 									<span class="badge badge-outline badge-sm">{ skill.Scope }</span>
-									if skill.AlwaysUse {
+									if skill.RequiresExternalTools {
+ <span class="badge badge-warning badge-sm">Requires external tools</span>
+ }
+                                    if skill.AlwaysUse {
 										<span class="badge badge-primary badge-sm">Always use</span>
 									}
 									if !skill.Enabled {
@@ -208,6 +214,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				@ModalCloseButton("skill_modal", "Close skill dialog")
 				<h3 id="skill_modal_title" class="font-bold text-lg mb-4 pr-10">New Skill</h3>
 				<form id="skill_form" onsubmit="submitSkillForm(event)">
+ <section id="skill_dependency_details" hidden></section>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
 						<label class="form-control">
 							<span class="label-text mb-1">Skill key</span>
@@ -273,10 +280,11 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 					</label>
 					<label class="form-control mt-3">
 						<span class="label-text mb-1">Skill package files</span>
-						<input id="skill_import_files" name="files" type="file" class="file-input file-input-bordered" multiple webkitdirectory required/>
+						<input id="skill_import_files" name="files" type="file" class="file-input file-input-bordered" multiple webkitdirectory required onchange="window.previewImportedSkillDependencies(this)"/>
 						<span class="label-text-alt mt-1 opacity-70">Select a skill package folder containing SKILL.md. Support files under references, templates, scripts, and assets will be imported.</span>
 					</label>
-					<p id="skill_import_error" class="hidden text-error text-sm mt-3"></p>
+					<section id="skill_import_dependency_details" hidden></section>
+ <p id="skill_import_error" class="hidden text-error text-sm mt-3"></p>
 					<div class="modal-action">
 						<button type="button" class="btn" onclick="skill_import_modal.close()">Cancel</button>
 						<button id="skill_import_submit_btn" type="submit" class="btn btn-primary">Import</button>
@@ -534,6 +542,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				skillDetailRequestGeneration++;
 				var form = document.getElementById('skill_form');
 				form.dataset.mode = 'create';
+ document.getElementById('skill_dependency_details').replaceChildren();
+ document.getElementById('skill_dependency_details').hidden=true;
 				form.dataset.originalHandle = '';
 				form.dataset.templateEdited = '';
 				form.dataset.originalAlwaysUse = 'false';
@@ -555,6 +565,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 			}
 
 			function openImportSkillModal() {
+ document.getElementById('skill_import_dependency_details').replaceChildren();
+ document.getElementById('skill_import_dependency_details').hidden=true;
 				var form = document.getElementById('skill_import_form');
 				if (form) form.reset();
 				document.getElementById('skill_import_scope').value = 'project';
@@ -582,6 +594,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				document.getElementById('skill_description').value = card.dataset.skillDescription || '';
 				document.getElementById('skill_body').disabled = true;
 				document.getElementById('skill_body').value = 'Loading skill body...';
+ document.getElementById('skill_dependency_details').replaceChildren();
+ document.getElementById('skill_dependency_details').hidden=true;
 				document.getElementById('skill_enabled').checked = card.dataset.skillEnabled !== 'false';
 				document.getElementById('skill_always_use').checked = alwaysUse;
 				document.getElementById('skill_submit_btn').disabled = true;
@@ -607,6 +621,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 					document.getElementById('skill_always_use').checked = detail.always_use === true;
 					form.dataset.originalAlwaysUse = detail.always_use === true ? 'true' : 'false';
 					renderSkillPackageFiles((detail.files || []).join('\n'));
+ window.renderSkillDependencyDetails?.(document.getElementById('skill_dependency_details'), detail);
 					document.getElementById('skill_submit_btn').disabled = false;
 				}).catch(function(err) {
 					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle) return;
@@ -646,7 +661,9 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				var handle = button.dataset.skillHandle || '';
 				var scope = button.dataset.skillScope || 'project';
 				if (!handle) return;
-				var action = enable ? 'Enable' : 'Disable';
+				var card = button.closest('.card[data-skill-handle]');
+if (enable && card?.dataset.requiresExternalTools === 'true') { editSkillFromData(card); return; }
+var action = enable ? 'Enable' : 'Disable';
 				if (!await window.openVibelyConfirm(action + ' skill "' + handle + '"?')) return;
 				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery()), {
 					method: 'POST',

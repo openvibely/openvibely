@@ -121,3 +121,14 @@ func RuntimeToolsFromContext(ctx context.Context) *RuntimeTools {
 func (d RuntimeToolDefinition) ParameterSchema() json.RawMessage {
 	return toolschema.JSON(d.Schema, d.Parameters)
 }
+
+// ToolCallID is supplied by the provider loop, never by tool arguments.
+type toolCallIDKey struct{}
+
+func WithToolCallID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, toolCallIDKey{}, id)
+}
+func ToolCallIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(toolCallIDKey{}).(string)
+	return id
+}

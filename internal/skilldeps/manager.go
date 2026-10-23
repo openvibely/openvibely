@@ -111,15 +111,11 @@ func (m *Manager) resolve(ctx context.Context, d Dependency) (string, string, er
 	if m.CacheDir == "" {
 		return "", "failed", errors.New("dependency cache directory is not configured")
 	}
-	manifest, _ := json.Marshal(struct {
-		Package Package
-		Check   []string
-	}{p, d.HealthCheck})
-	digest := sha256.Sum256(manifest)
-	root, err := filepath.Abs(filepath.Join(m.CacheDir, d.Name, d.Version, platform, hex.EncodeToString(digest[:])))
+	root, err := m.cacheRoot(d, p, platform)
 	if err != nil {
 		return "", "failed", err
 	}
+
 	entry, _ := installs.LoadOrStore(root, make(chan struct{}, 1))
 	gate := entry.(chan struct{})
 	select {
@@ -348,4 +344,14 @@ func (r *downloadReader) Read(p []byte) (int, error) {
 		r.notify()
 	}
 	return n, err
+}
+
+// cacheRoot identifies installed package contents, not a remembered permission.
+func (m *Manager) cacheRoot(d Dependency, p Package, platform string) (string, error) {
+	manifest, _ := json.Marshal(struct {
+		Package Package
+		Check   []string
+	}{p, d.HealthCheck})
+	digest := sha256.Sum256(manifest)
+	return filepath.Abs(filepath.Join(m.CacheDir, d.Name, d.Version, platform, hex.EncodeToString(digest[:])))
 }

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/skilldeps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -19,14 +21,16 @@ import (
 )
 
 type agentSkillView struct {
-	Handle      string `json:"handle"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Scope       string `json:"scope,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Content     string `json:"content,omitempty"`
-	Archived    bool   `json:"archived,omitempty"`
+	Dependencies []skilldeps.Dependency `json:"dependencies"`
+	Platform     string                 `json:"platform"`
+	Handle       string                 `json:"handle"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description,omitempty"`
+	Scope        string                 `json:"scope,omitempty"`
+	Source       string                 `json:"source,omitempty"`
+	Path         string                 `json:"path,omitempty"`
+	Content      string                 `json:"content,omitempty"`
+	Archived     bool                   `json:"archived,omitempty"`
 }
 
 type agentSkillsResponse struct {
@@ -89,11 +93,12 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 	}
 	for _, entry := range catalog.Entries() {
 		view := agentSkillView{
-			Handle: entry.Handle,
-			Name:   entry.Skill,
-			Scope:  h.scopeForAgentSkillPathWithProjectRoot(entry.AbsolutePath, projectRoot),
-			Source: string(entry.Source),
-			Path:   entry.AbsolutePath,
+			Handle:   entry.Handle,
+			Platform: runtime.GOOS + "/" + runtime.GOARCH,
+			Name:     entry.Skill,
+			Scope:    h.scopeForAgentSkillPathWithProjectRoot(entry.AbsolutePath, projectRoot),
+			Source:   string(entry.Source),
+			Path:     entry.AbsolutePath,
 		}
 		if data, readErr := os.ReadFile(entry.AbsolutePath); readErr == nil {
 			view.Content = string(data)
@@ -101,6 +106,7 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 				view.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
 				view.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
 				view.Archived = decl.Skill.Archived
+				view.Dependencies = decl.Dependencies
 				view.Content, _ = agentlibrary.RenderSkillMarkdown(decl, body)
 			}
 		}
