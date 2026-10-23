@@ -148,3 +148,27 @@ so provide new categories when changing the count. Linked workbook data still
 uses `chart-inputs`. Histogram bin settings and hierarchy paths do not apply.
 Do not infer map, combo, box-and-whisker or a cumulative Pareto curve from this
 list. Speaker notes visibility is not a native PPTX edit command.
+
+## Edit existing chart formatting
+
+Use `chart-format` to retain the data/workbook while changing selected settings:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"legend":{"position":"b"},"series":[{"index":0,"fill":{"fill":"336699"},"labels":{"show_value":true}}]}}
+```
+
+- `axes`: existing native `id`, with optional `visible`, `title` (empty removes),
+  `minimum`, `maximum`, `major_unit`, `number_format`. Read IDs from `c:axId` in
+  the inspected chart part's XML; do not guess. Bounds require a value/date axis.
+- `legend`: `visible`, `position` (`b`, `t`, `l`, `r`, `tr`), `overlay`.
+- `series`: zero-based document-order `index`; optional `fill`, `outline`,
+  `labels`. Outline uses the text-paint definition above. Labels accept
+  `show_value`, `show_category`, `show_series`, `show_percent`, `position`,
+  `number_format`. Percent labels require pie/doughnut; surface/stock labels
+  are rejected. Position values are `bestFit`, `b`, `ctr`, `inBase`, `inEnd`,
+  `l`, `outEnd`, `r`, `t`; choose a position appropriate to the chart family.
+
+Omitted properties and per-point overrides remain intact. This edits the native
+chart part, including any objects sharing it. It does not style ChartEx charts
+or reconstruct charts stored only as images. Verify data, legend, axis labels
+and layout after saving; this is not a replacement for the chart-data checks.
