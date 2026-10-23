@@ -27,7 +27,7 @@ Use `slide-edit` for changes inside existing slides. Geometry is in inches; rota
 | `fill` | `fill` as six hex digits; empty clears. |
 | `replace-image` | Local PNG/JPEG `path`; creates a private media relationship. |
 | `crop` | `crop:{"left":0.1,"right":0,"top":0,"bottom":0}`; fractions in [0,1), with each pair summing to less than 1. |
-| `image-mask` | `mask:rect/roundRect/ellipse`. |
+| `image-mask` | RC4: `mask:rect/roundRect/ellipse`. Newer builds add preset shapes and `corner_radius_points`; see [advanced controls](advanced-slide-controls.md#additional-picture-mask-shapes-after-rc4). |
 | `table-row-insert/delete` / `table-column-insert/delete` | `row` or `column`; requires an unmerged table. |
 | `table-cell-format` | `row`, `column`, optional `fill`, `font_size`, `bold`, `color`. |
 | `layout` | `layout:{"shape_ids":["2","4"],"mode":"row","x":1,"y":1,"width":10,"height":3,"gap":0.2}`; modes row/column/grid, `columns` for grid. Positions **and resizes** objects into equal cells. |

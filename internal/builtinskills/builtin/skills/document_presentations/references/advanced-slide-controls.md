@@ -408,3 +408,11 @@ Gradient stop positions are ascending fractions from 0 to 1; angles are degrees.
 {"edits":[{"operation":"image-mask","slide":1,"shape_id":"INSPECTED_ID","mask":"roundRect","corner_radius_points":18}]}
 ```
 Radius is in points, from zero to half the shorter picture side; picture dimensions must be explicit. Setting a radius on `rect` converts it to `roundRect`. Omit `mask` to adjust the current rectangular mask. Omitted radius retains adjustments when the mask type stays the same; a different mask uses its defaults. Crop, placement and image bytes remain unchanged. Use a newer local build and render the result.
+
+## Additional picture mask shapes (after RC4)
+
+`image-mask` accepts native DrawingML preset shape names, including `hexagon`, `triangle`, `diamond`, `star5`, `heart` and `rightArrow`, as well as `rect`, `roundRect` and `ellipse`. These change the picture's clipping geometry without replacing its image data, crop or placement.
+```json
+{"edits":[{"operation":"image-mask","slide":1,"shape_id":"INSPECTED_ID","mask":"hexagon"}]}
+```
+Names are case-sensitive. Unknown names, `textbox` and `custom` are rejected. A new mask uses the preset's default adjustments; keeping the same mask preserves existing adjustments. `corner_radius_points` remains restricted to rectangular masks. Use a newer local build and render the result; RC4 supports only the original three mask shapes.
