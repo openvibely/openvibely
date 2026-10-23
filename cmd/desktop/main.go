@@ -60,12 +60,6 @@ func main() {
 	config.EnsureDesktopPATH()
 	applog.Infof("[desktop] initialized task PATH from user shell")
 
-	stopMemoryDiagnostics, err := startDesktopMemoryDiagnostics()
-	if err != nil {
-		log.Fatalf("[desktop] memory diagnostics: %v", err)
-	}
-	defer stopMemoryDiagnostics()
-
 	cfg := config.LoadWithMode(config.ModeDesktop)
 
 	applog.Infof("[desktop] starting OpenVibely desktop app...")
