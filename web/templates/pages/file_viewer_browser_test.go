@@ -18,17 +18,28 @@ import (
 )
 
 func fileViewerPDF(pageCounts ...int) string {
-	stream := "BT /F1 18 Tf 72 120 Td (Offline PDF) Tj ET"
-	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>", fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream), "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"}
-	if len(pageCounts) > 0 && pageCounts[0] == 2 {
-		objects[1] = "<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>"
-		objects = append(objects, objects[2])
+	pageCount := 1
+	if len(pageCounts) > 0 && pageCounts[0] > 0 {
+		pageCount = pageCounts[0]
 	}
+	stream := "BT /F1 18 Tf 72 120 Td (Offline PDF) Tj ET"
+	contentObject := pageCount + 3
+	fontObject := pageCount + 4
+	kids := make([]string, pageCount)
+	objects := make([]string, 0, pageCount+4)
+	objects = append(objects, "<< /Type /Catalog /Pages 2 0 R >>", "")
+	for index := 0; index < pageCount; index++ {
+		pageObject := index + 3
+		kids[index] = fmt.Sprintf("%d 0 R", pageObject)
+		objects = append(objects, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>", fontObject, contentObject))
+	}
+	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pageCount)
+	objects = append(objects, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream), "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
 	pdf := "%PDF-1.4\n"
-	offsets := []int{}
-	for i, object := range objects {
+	offsets := make([]int, 0, len(objects))
+	for index, object := range objects {
 		offsets = append(offsets, len(pdf))
-		pdf += fmt.Sprintf("%d 0 obj\n%s\nendobj\n", i+1, object)
+		pdf += fmt.Sprintf("%d 0 obj\n%s\nendobj\n", index+1, object)
 	}
 	xref := len(pdf)
 	pdf += fmt.Sprintf("xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
