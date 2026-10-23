@@ -251,3 +251,22 @@ Check the newer build's schema, then use inspected axis IDs:
 `position` is `bottom`, `left`, `right` or `top`; `tick_label_position` is
 `nextTo`, `high`, `low` or `none`. Unspecified settings and axis-crossing values
 remain unchanged. Render to check the final placement.
+
+## Chart markers and creation formatting
+
+With a newer build exposing series `marker`, use:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"series":[{"index":0,"marker":{"symbol":"diamond","size":12,"fill":{"fill":"FF0000"}}}]}}
+```
+
+Symbols: `auto`, `circle`, `diamond`, `dot`, `none`, `plus`, `square`, `star`,
+`triangle`, `x`. Sizes are 2..72 points; `outline` uses the text outline format.
+Supported families are line, scatter and radar. Existing point-specific marker
+overrides remain unchanged.
+
+Standard chart creation now preserves `chart.options.Series` formatting by index,
+including `Marker`, `Line` and `DataLabel` (Excelize field names). Paperworks still
+generates all `Name`, `Categories`, `Values`, `Sizes` references from `chart.series`;
+do not supply external workbook references. More option entries than data series
+is rejected. Check the build before relying on this post-RC4 behavior.
