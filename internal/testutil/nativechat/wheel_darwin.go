@@ -39,16 +39,43 @@ static int checkWheelTargetCoordinates(void) {
   return correct && oldWrong;
  }
 }
+// AppKit screen points have a bottom-left origin; Quartz uses the top-left
+// of the primary screen. Both are in points, including on Retina displays.
+static CGEventRef createWheelEvent(NSPoint screenPoint, CGFloat primaryTop, double dx, double dy, int phase) {
+ CGEventRef cg=CGEventCreateScrollWheelEvent(NULL,kCGScrollEventUnitPixel,2,(int)-dy,(int)-dx);
+ CGEventSetLocation(cg,CGPointMake(screenPoint.x,primaryTop-screenPoint.y));
+ CGEventSetIntegerValueField(cg,kCGScrollWheelEventIsContinuous,1);
+ CGEventSetIntegerValueField(cg,kCGScrollWheelEventScrollPhase,phase);
+ return cg;
+}
+static int checkWheelScreenCoordinates(void) {
+ @autoreleasepool {
+  // Include secondary-screen coordinates outside the primary display.
+  NSPoint inputs[]={NSMakePoint(590,787),NSMakePoint(-400,1200),NSMakePoint(2100,-50)};
+  CGPoint expected[]={CGPointMake(590,113),CGPointMake(-400,-300),CGPointMake(2100,950)};
+  for(int i=0;i<3;i++) {
+   CGEventRef cg=createWheelEvent(inputs[i],900,0,40,1);
+   NSEvent* event=[NSEvent eventWithCGEvent:cg];
+   BOOL correct=CGPointEqualToPoint(CGEventGetLocation(cg),expected[i]) &&
+    CGPointEqualToPoint(CGEventGetLocation(event.CGEvent),expected[i]) &&
+    event.scrollingDeltaY==-40 && event.phase==NSEventPhaseBegan;
+   CFRelease(cg);
+   if(!correct)return 0;
+  }
+  return 1;
+ }
+}
 static int sendWheel(void* pointer, double x,double y,double dx,double dy,int phase) {
  NSWindow* window=(NSWindow*)pointer;
  if(!window || !window.isVisible)return 1;
  NSView* view=findWebView(window.contentView);if(!view)return 2;
- CGEventRef cg=CGEventCreateScrollWheelEvent(NULL,kCGScrollEventUnitPixel,2,(int)-dy,(int)-dx);
- CGEventSetIntegerValueField(cg,kCGScrollWheelEventIsContinuous,1);
- CGEventSetIntegerValueField(cg,kCGScrollWheelEventScrollPhase,phase);
- NSEvent* event=[NSEvent eventWithCGEvent:cg];
- // Preserve NSEvent's internal wheel payload; only replace local routing.
  NSPoint point=[view convertPoint:NSMakePoint(x,view.isFlipped?y:view.bounds.size.height-y) toView:nil];
+ NSPoint screenPoint=[window convertPointToScreen:point];
+ CGEventRef cg=createWheelEvent(screenPoint,NSMaxY(NSScreen.screens.firstObject.frame),dx,dy,phase);
+ NSEvent* event=[NSEvent eventWithCGEvent:cg];
+ // Preserve the wheel payload and make local routing agree with its Quartz
+ // location. Overriding only locationInWindow leaves the original cursor
+ // position in CGEvent, which native consumers can also consult.
  Class cls=objc_allocateClassPair(object_getClass(event),[[NSUUID UUID].UUIDString UTF8String],0);
  class_addMethod(cls,@selector(locationInWindow),imp_implementationWithBlock(^(id unused){return point;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(locationInWindow))));
  class_addMethod(cls,@selector(windowNumber),imp_implementationWithBlock(^NSInteger(id unused){return window.windowNumber;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(windowNumber))));
@@ -95,3 +122,5 @@ func nativeWheel(window unsafe.Pointer, e wheel) error {
 }
 
 func checkNativeWheelCoordinates() bool { return C.checkWheelTargetCoordinates() != 0 }
+
+func checkNativeWheelScreenCoordinates() bool { return C.checkWheelScreenCoordinates() != 0 }
