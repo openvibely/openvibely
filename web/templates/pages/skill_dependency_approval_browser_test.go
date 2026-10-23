@@ -74,8 +74,10 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 				t.Fatalf("card missing %q: %s", want, text)
 			}
 		}
-		browser.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_approval',exec_id:'execution',project_id:'project',pending_input_id:'request',status:'pending'}})); 'sent'`)
+		browser.evaluate(`document.getElementById('chat-input-request-request').dataset.beforeRefresh='true';window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_approval',exec_id:'execution',project_id:'project',pending_input_id:'request',status:'pending'}})); 'sent'`)
 		browser.waitFor("navigable toast", `window.approvalToast?.clickURL || ''`, "/chat/input-requests/request/open?project_id=project")
+		// Clicking while the refresh swaps the card splits press and release across nodes.
+		browser.waitFor("refreshed card", `document.getElementById('chat-input-request-request')?.dataset.beforeRefresh === undefined ? 'ready' : 'waiting'`, "ready")
 		browser.click(`#chat-input-request-request [data-option-label="Not now"]`)
 		browser.waitFor("answered card removed", `document.getElementById('chat-input-request-request') ? 'waiting' : 'removed'`, "removed")
 		browser.evaluate(`location.reload(); 'reload'`)
