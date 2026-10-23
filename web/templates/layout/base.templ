@@ -600,6 +600,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						scrollbar-gutter: auto;
 						overflow: hidden;
 					}
+					/* Overflow alone does not stop WKWebView rubber-banding when a
+					   wheel gesture reaches the viewport. Keep the desktop title bar
+					   aligned with native window controls while panels scroll normally. */
+					html[data-openvibely-runtime="desktop"],
+					html[data-openvibely-runtime="desktop"] body {
+						overscroll-behavior: none;
+					}
 					body {
 						overflow: hidden;
 					height: 100vh;
