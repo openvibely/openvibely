@@ -2,7 +2,7 @@
 
 `TestBrowserPerformance_LongPDFWindowMeasurements` serves generated 100-, 1,000-, and 2,000-page PDFs, opens each in headless Chrome, scrolls to the end, and records a Chrome Performance trace. The fixture uses 400 × 600 point pages and checks page surfaces and canvas rendering near the final pages. The 2,000-page case also scrolls backward, jumps by page input, zooms, resizes, uses the next-page control, and closes while rendering. A separate 200-page mixed-size PDF checks geometry for unvisited pages, direct navigation alignment, and forward/backward scroll tracking.
 
-After the first page opens, the viewer reads remaining page dimensions in asynchronous batches of 16. It stores only page-height corrections in a sparse index, adjusts the scroll anchor as dimensions arrive, and continues to create canvases only for observed pages. This preserves exact scroll geometry when page sizes vary without mounting page surfaces for the whole document.
+The viewer reads page dimensions only through the current page window and its overscan. Scrolling or direct navigation requests the newly needed prefix in asynchronous batches of 16; each batch applies its height corrections with one layout synchronization and adjusts the scroll anchor. This keeps initial page setup bounded while preserving exact geometry for reached or directly selected pages, without canvases for unobserved pages.
 
 ## Measurements
 
@@ -11,8 +11,8 @@ Captured on the same Apple Silicon Mac with Headless Chrome 156.0.0.0 at 1280 ×
 | PDF pages | Page surfaces before (open / end) | Page surfaces after (open / end) | Canvas nodes near end | Scroll p95 before | Scroll p95 after | p95 reduction |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 100 | 100 / 100 | 11 / 11 | 1 | 0.041 ms | 0.011 ms | 73.2% |
-| 1,000 | 1,000 / 1,000 | 11 / 11 | 1 | 0.299 ms | 0.004 ms | 98.7% |
-| 2,000 | 2,000 / 2,000 | 11 / 11 | 1 | 0.867 ms | 0.007 ms | 99.2% |
+| 1,000 | 1,000 / 1,000 | 11 / 11 | 1 | 0.299 ms | 0.006 ms | 98.0% |
+| 2,000 | 2,000 / 2,000 | 11 / 11 | 1 | 0.867 ms | 0.006 ms | 99.3% |
 
 The after surface count stayed at 11 at all three document lengths, and the trace p95 did not increase with page count. In this viewport, only the one canvas in or near the visible window was painted.
 

@@ -28,23 +28,32 @@
   function pdfPageAtOffset(state,offset){let low=1,high=state.document.numPages,found=1;while(low<=high){const middle=(low+high)>>1;if(pdfPageTop(state,middle)<=offset){found=middle;low=middle+1}else high=middle-1}return found}
   function syncPDFLayout(state){const count=state.document.numPages,delta=pdfHeightDeltaBefore(state,count);state.pages.style.height=Math.max(0,count*(state.base.height*state.scale+40)-16+delta*state.scale)+'px';for(const slot of state.slots.values())sizePDFSlot(state,slot)}
   function sizePDFSlot(state,slot){const base=slot.base||state.base,delta=state.pageHeightDeltas.get(slot.number)||0;slot.node.style.position='absolute';slot.node.style.left='0';slot.node.style.right='0';slot.node.style.top=pdfPageTop(state,slot.number)+'px';slot.node.style.margin='0 auto';slot.node.style.width=(base.width*state.scale)+'px';slot.node.style.height=((slot.base?base.height:base.height+delta)*state.scale)+'px'}
-  function updatePDFPageGeometry(state,number,base){
-   const previous=state.pageHeightDeltas.get(number)||0,next=base.height-state.base.height,difference=next-previous;if(!difference)return;
-   const anchor=pdfPageAtOffset(state,state.viewer.scrollTop+80);if(next)state.pageHeightDeltas.set(number,next);else state.pageHeightDeltas.delete(number);
-   for(let index=number;index<=state.document.numPages;index+=index&-index)state.heightTree.set(index,(state.heightTree.get(index)||0)+difference);
-   syncPDFLayout(state);if(number<anchor)state.viewer.scrollTop+=difference*state.scale;
-  }
-  async function indexPDFPageGeometry(state){
-   const count=state.document.numPages;
-   for(let first=2;first<=count;first+=PDF_GEOMETRY_BATCH){
-    if(!pdfActive(state)||state.geometryCancelled)return;
-    const pages=await Promise.all(Array.from({length:Math.min(PDF_GEOMETRY_BATCH,count-first+1)},(_,offset)=>{
-     const number=first+offset;return state.document.getPage(number).then(page=>{try{return{number,page,base:page.getViewport({scale:1})}}catch{return null}},()=>null)
-    }));
-    if(!pdfActive(state)||state.geometryCancelled)return;
-    for(const entry of pages){if(!entry)continue;updatePDFPageGeometry(state,entry.number,entry.base);const slot=state.slots.get(entry.number);if(slot){slot.pdfPage=entry.page;slot.base=entry.base;sizePDFSlot(state,slot)}else entry.page.cleanup?.()}
-    if(first+PDF_GEOMETRY_BATCH<=count)await new Promise(resolve=>{if(window.requestIdleCallback)window.requestIdleCallback(()=>resolve(),{timeout:100});else window.setTimeout(resolve,0)})
+  function applyPDFGeometryEntries(state,entries){
+   const anchor=pdfPageAtOffset(state,state.viewer.scrollTop+80);let changed=false,anchorDelta=0;
+   for(const entry of entries){
+    const {number,base,page}=entry,previous=state.pageHeightDeltas.get(number)||0,next=base.height-state.base.height,difference=next-previous;
+    if(difference){if(next)state.pageHeightDeltas.set(number,next);else state.pageHeightDeltas.delete(number);for(let index=number;index<=state.document.numPages;index+=index&-index)state.heightTree.set(index,(state.heightTree.get(index)||0)+difference);if(number<anchor)anchorDelta+=difference;changed=true}
+    const slot=state.slots.get(number);if(slot){if(page)slot.pdfPage=page;slot.base=base;sizePDFSlot(state,slot)}else page?.cleanup?.();
    }
+   if(changed)syncPDFLayout(state);if(anchorDelta)state.viewer.scrollTop+=anchorDelta*state.scale;
+  }
+  function updatePDFPageGeometry(state,number,base,page){applyPDFGeometryEntries(state,[{number,base,page}])}
+  function pdfIdle(){return new Promise(resolve=>{if(window.requestIdleCallback)window.requestIdleCallback(()=>resolve(),{timeout:100});else window.setTimeout(resolve,0)})}
+  async function indexPDFPageGeometry(state){
+   while(pdfActive(state)&&!state.geometryCancelled&&state.geometryIndexedThrough<state.geometryRequestedThrough){
+    const first=state.geometryIndexedThrough+1,last=Math.min(state.geometryRequestedThrough,first+PDF_GEOMETRY_BATCH-1);
+    const entries=await Promise.all(Array.from({length:last-first+1},(_,offset)=>{const number=first+offset;return state.document.getPage(number).then(page=>{try{return{number,page,base:page.getViewport({scale:1})}}catch{return null}},()=>null)}));
+    if(!pdfActive(state)||state.geometryCancelled)return;
+    applyPDFGeometryEntries(state,entries.filter(Boolean));state.geometryIndexedThrough=last;
+    if(state.geometryIndexedThrough<state.geometryRequestedThrough)await pdfIdle();
+   }
+  }
+  function requestPDFGeometry(state,through){
+   state.geometryRequestedThrough=Math.max(state.geometryRequestedThrough||1,Math.min(state.document.numPages,through));
+   if(state.geometryScanRunning||state.geometryScanScheduled||state.geometryCancelled||state.geometryIndexedThrough>=state.geometryRequestedThrough)return;
+   state.geometryScanScheduled=true;
+   const start=()=>{state.geometryScanScheduled=false;if(!pdfActive(state)||state.geometryCancelled)return;state.geometryScanRunning=true;indexPDFPageGeometry(state).catch(()=>{state.geometryScanFailed=true}).finally(()=>{state.geometryScanRunning=false;if(!state.geometryScanFailed&&pdfActive(state)&&!state.geometryCancelled&&state.geometryIndexedThrough<state.geometryRequestedThrough)requestPDFGeometry(state,state.geometryRequestedThrough)})};
+   if(window.requestIdleCallback)window.requestIdleCallback(start,{timeout:100});else window.setTimeout(start,0);
   }
   function removePDFSlot(state,slot){state.pageObserver.unobserve(slot.node);cancelPDFSlot(slot);slot.node.remove();state.slots.delete(slot.number)}
   function updatePDFWindow(state,scrollTop=state.viewer.scrollTop){
@@ -52,13 +61,13 @@
    if(end-start+1>PDF_WINDOW_MAX){end=Math.min(state.document.numPages,start+PDF_WINDOW_MAX-1);if(end<last)start=Math.max(1,last-PDF_WINDOW_MAX+1)}
    for(const slot of Array.from(state.slots.values()))if(slot.number<start||slot.number>end)removePDFSlot(state,slot);
    for(let number=start;number<=end;number++)if(!state.slots.has(number)){const node=document.createElement('div');node.className='pdf-page-surface';node.dataset.pdfSlot=String(number);node.setAttribute('aria-label',`Page ${number}`);const slot={number,node,pdfPage:number===1?state.firstPage:null};state.slots.set(number,slot);sizePDFSlot(state,slot);const next=state.slots.get(number+1);state.pages.insertBefore(node,next?.node||null);state.pageObserver.observe(node)}
-   state.windowStart=start;state.windowEnd=end;
+   state.windowStart=start;state.windowEnd=end;requestPDFGeometry(state,end);
   }
   async function paintPDFSlot(state,slot){
    if(!slot||!pdfActive(state)||slot.loading||slot.rendered)return;
    slot.loading=true;const revision=slot.revision=(slot.revision||0)+1,current=()=>pdfActive(state)&&slot.revision===revision&&state.slots.get(slot.number)===slot;
    try{
-    const page=slot.pdfPage||await state.document.getPage(slot.number);if(!current())return;slot.pdfPage=page;slot.base=page.getViewport({scale:1});updatePDFPageGeometry(state,slot.number,slot.base);sizePDFSlot(state,slot);
+    const page=slot.pdfPage||await state.document.getPage(slot.number);if(!current())return;slot.pdfPage=page;slot.base=page.getViewport({scale:1});updatePDFPageGeometry(state,slot.number,slot.base,page);sizePDFSlot(state,slot);
     const viewport=page.getViewport({scale:state.scale}),ratio=pdfRasterRatio(viewport,state.viewer),canvas=document.createElement('canvas');
     canvas.width=Math.max(1,Math.floor(viewport.width*ratio));canvas.height=Math.max(1,Math.floor(viewport.height*ratio));canvas.style.width=viewport.width+'px';canvas.style.height=viewport.height+'px';slot.node.replaceChildren(canvas);const badge=document.createElement('span');badge.className='pdf-page-number-badge';const badgeText=document.createElement('span');badgeText.textContent=String(slot.number);badge.append(badgeText);badge.setAttribute('aria-hidden','true');slot.node.append(badge);
     const task=page.render({canvasContext:canvas.getContext('2d'),viewport,transform:ratio===1?null:[ratio,0,0,ratio,0,0]});slot.task=task;await task.promise;if(!current())return;slot.task=null;
@@ -69,12 +78,12 @@
   function pdfScrollTo(state,number){state.viewer.scrollTop=Math.max(0,pdfPageTop(state,number)-16)}
   async function renderPDFPage(state){
    const revision=state.renderRevision=(state.renderRevision||0)+1;
-   if(!state.slots){const page=await state.document.getPage(1);if(!pdfActive(state)||state.renderRevision!==revision)return;state.firstPage=page;state.base=page.getViewport({scale:1});state.pages=pdfParts(state.viewer).pages;state.slots=new Map();state.pageHeightDeltas=new Map();state.heightTree=new Map();state.pages.style.position='relative';state.pages.style.display='block';
+   if(!state.slots){const page=await state.document.getPage(1);if(!pdfActive(state)||state.renderRevision!==revision)return;state.firstPage=page;state.base=page.getViewport({scale:1});state.pages=pdfParts(state.viewer).pages;state.slots=new Map();state.pageHeightDeltas=new Map();state.heightTree=new Map();state.geometryIndexedThrough=1;state.geometryRequestedThrough=1;state.pages.style.position='relative';state.pages.style.display='block';
     state.pageObserver=new IntersectionObserver(entries=>{for(const entry of entries){const slot=state.slots.get(Number(entry.target.dataset.pdfSlot));if(!slot||slot.node!==entry.target)continue;if(entry.isIntersecting)paintPDFSlot(state,slot);else cancelPDFSlot(slot)}},{root:state.viewer,rootMargin:'400px 0px'});
     state.scrollHandler=()=>{if(!pdfActive(state))return;const number=pdfPageAtOffset(state,state.viewer.scrollTop+80);if(number!==state.page){state.page=number;updatePDFControls(state);setPDFStatus(pdfParts(state.viewer),`Page ${number} of ${state.document.numPages}`)}updatePDFWindow(state)};state.viewer.addEventListener('scroll',state.scrollHandler,{passive:true});
    }
    const key=[state.viewer.clientWidth,state.zoom,window.devicePixelRatio].join('|');if(state.layoutKey!==key){state.layoutKey=key;state.scale=Math.max(.25,Math.min(4,Math.max(1,(state.viewer.clientWidth||720)-32)/state.base.width))*state.zoom;for(const slot of state.slots.values())cancelPDFSlot(slot)}
-   syncPDFLayout(state);pdfScrollTo(state,state.page);updatePDFWindow(state);const target=state.slots.get(state.page);updatePDFControls(state);setPDFStatus(pdfParts(state.viewer),`Page ${state.page} of ${state.document.numPages}`);if(!state.geometryScanStarted&&state.document.numPages>1){state.geometryScanStarted=true;indexPDFPageGeometry(state).catch(()=>{})}await paintPDFSlot(state,target);
+   syncPDFLayout(state);pdfScrollTo(state,state.page);updatePDFWindow(state);const target=state.slots.get(state.page);updatePDFControls(state);setPDFStatus(pdfParts(state.viewer),`Page ${state.page} of ${state.document.numPages}`);await paintPDFSlot(state,target);
   }
   function pdfPageInputChanged(input){const root=input.closest('[data-result-content]'),viewer=root?.querySelector('[data-pdf-viewer]'),state=viewer&&pdfStates.get(viewer);if(!state?.document)return;const requested=Number.parseInt(input.value,10),page=Number.isFinite(requested)?Math.max(1,Math.min(state.document.numPages,requested)):state.page;input.value=String(page);if(page===state.page){updatePDFControls(state);return}state.page=page;renderPDFPage(state).catch(()=>pdfFailure(state))}
   function pdfControls(root,disabled){const controls=root?.querySelector('[data-pdf-controls]');if(controls)controls.hidden=disabled;root?.querySelectorAll('[data-pdf-page],[data-pdf-page-input],[data-pdf-zoom],[data-pdf-print]').forEach(button=>{button.disabled=disabled})}
