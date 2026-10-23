@@ -713,18 +713,12 @@ func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, 
 	return nil
 }
 
-// CancelDispatchesForTask atomically cancels all not-yet-finished Automation
+// CancelDispatchesForTaskReturningIDs atomically cancels all not-yet-finished Automation
 // dispatches for a task. It covers both capacity-queued dispatches without an
 // execution and restart-recovered prepared executions waiting for worker
 // capacity. The task lifecycle caller remains responsible for its requested
 // category; this method only releases Automation runtime state and any running
-// prepared execution.
-func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, message string) error {
-	_, err := r.CancelDispatchesForTaskReturningIDs(ctx, taskID, message)
-	return err
-}
-
-// CancelDispatchesForTaskReturningIDs reports cancelled executions only after commit.
+// prepared execution. It returns cancelled execution IDs only after commit.
 func (r *AutomationRepo) CancelDispatchesForTaskReturningIDs(ctx context.Context, taskID, message string) ([]string, error) {
 	if r == nil || strings.TrimSpace(taskID) == "" {
 		return nil, errors.New("task is required")

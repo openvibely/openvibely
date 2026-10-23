@@ -886,8 +886,12 @@ func TestAutomationRepoCancelsQueuedDispatchAndPreparedExecution(t *testing.T) {
 		if projected == nil || !projected.AutomationCapacityQueued {
 			t.Fatalf("board projection did not mark durable capacity queue: %#v", projected)
 		}
-		if err := repo.CancelDispatchesForTask(ctx, task.ID, "cancelled while waiting for capacity"); err != nil {
-			t.Fatalf("CancelDispatchesForTask: %v", err)
+		cancelledIDs, err := repo.CancelDispatchesForTaskReturningIDs(ctx, task.ID, "cancelled while waiting for capacity")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cancelledIDs) != 0 {
+			t.Fatalf("capacity-queued dispatch has no execution to cancel, got %v", cancelledIDs)
 		}
 
 		var dispatchStatus, invocationStatus string
