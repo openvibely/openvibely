@@ -89,7 +89,7 @@ Read the references relevant to the current operation before running its command
 | Edit chart inputs/series or create hierarchical charts and histograms | [references/charts.md](references/charts.md) |
 | List, add, reply to or resolve native review comments | [references/comments.md](references/comments.md) |
 | Validate any created or edited deck before delivery | [references/validation.md](references/validation.md) |
-| Newer local builds: slide visibility, text boxes, backgrounds, SVG, stacking and auto layout | [references/advanced-slide-controls.md](references/advanced-slide-controls.md) |
+| Newer local builds: slide controls, text paint, table sizing and chart formatting | [references/advanced-slide-controls.md](references/advanced-slide-controls.md) |
 
 References inherit the working-file and verification rules in this skill. Examples that start from `example.*` use the fixture in `references/creation.md`; for real edits, use the actual input and inspected identifiers. Do not create the example fixture during an ordinary user edit.
 
