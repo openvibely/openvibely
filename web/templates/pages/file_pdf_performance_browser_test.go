@@ -27,6 +27,24 @@ func TestBrowserPerformance_LongPDFWindowMeasurements(t *testing.T) {
 		if static.ServeAsset(w, r) {
 			return
 		}
+		if r.URL.Path == "/fixture/perf-mixed-200.pdf" {
+			if r.URL.Query().Get("view") == "1" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_ = components.FilePreview("perf-mixed-200.pdf", "pdf", "", r.URL.String()).Render(r.Context(), w)
+				return
+			}
+			heights := make([]int, 200)
+			heights[0] = 600
+			for index := 1; index < len(heights); index++ {
+				heights[index] = 300
+				if index >= 150 {
+					heights[index] = 900
+				}
+			}
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = io.WriteString(w, fileViewerPDFWithPageHeights(heights))
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/fixture/perf-") && strings.HasSuffix(r.URL.Path, ".pdf") {
 			var pageCount int
 			if _, err := fmt.Sscanf(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/fixture/perf-"), ".pdf"), "%d", &pageCount); err != nil || pageCount < 1 || pageCount > 2000 {
@@ -123,6 +141,21 @@ func TestBrowserPerformance_LongPDFWindowMeasurements(t *testing.T) {
 				b.waitFor("closing a rendering PDF removes page surfaces", `String(!document.getElementById('image-gallery').open&&!document.querySelector('.pdf-page-surface'))`, "true")
 			}
 		}
+		b.evaluate(`window.OVFileViewer.open('/fixture/perf-mixed-200.pdf');'opened'`)
+		b.waitFor("mixed-size PDF opens", `document.querySelector('[data-pdf-page-number]')?.textContent||''`, "1 / 200")
+		b.waitFor("mixed-size PDF paints only its visible page", `String(!!document.querySelector('[data-pdf-slot="1"] canvas'))`, "true")
+		b.waitFor("mixed-size PDF indexes unvisited page geometry", `(()=>{const viewer=document.querySelector('[data-pdf-viewer]'),pages=viewer.querySelector('[data-pdf-pages]'),canvas=viewer.querySelector('[data-pdf-slot="1"] canvas');if(!canvas)return 'false';const scale=parseFloat(canvas.style.height)/600,expected=90300*scale+200*40-16;return String(Math.abs(parseFloat(pages.style.height)-expected)<2)})()`, "true")
+		b.evaluate(`(()=>{const viewer=document.querySelector('[data-pdf-viewer]'),scale=parseFloat(viewer.querySelector('[data-pdf-slot="1"] canvas').style.height)/600;window.pdfMixedTop=number=>{let height=0;for(let page=1;page<number;page++)height+=(page===1?600:page<=150?300:900)*scale+40;return 12+height};return 'geometry ready'})()`)
+		b.evaluate(`(()=>{const input=document.querySelector('[data-pdf-page-input]');input.value='180';input.dispatchEvent(new Event('change',{bubbles:true}));return 'jump'})()`)
+		b.waitFor("mixed-size PDF direct navigation uses indexed geometry", `String(document.querySelector('[data-pdf-page-input]').value==='180'&&!!document.querySelector('[data-pdf-slot="180"]')&&document.querySelectorAll('.pdf-page-surface').length<=40&&document.querySelectorAll('[data-pdf-viewer] canvas').length<=4)`, "true")
+		b.waitFor("mixed-size PDF direct navigation aligns page 180", `(()=>{const viewer=document.querySelector('[data-pdf-viewer]'),surface=viewer.querySelector('[data-pdf-slot="180"]'),offset=surface.getBoundingClientRect().top-viewer.getBoundingClientRect().top;return String(offset>=-10&&offset<=40)})()`, "true")
+		b.evaluate(`(()=>{const viewer=document.querySelector('[data-pdf-viewer]');viewer.scrollTop=window.pdfMixedTop(100)+50;viewer.dispatchEvent(new Event('scroll'));return 'backward'})()`)
+		b.waitFor("mixed-size PDF backward scroll tracks page 100", `String(document.querySelector('[data-pdf-page-input]').value==='100'&&document.querySelectorAll('.pdf-page-surface').length<=40)`, "true")
+		b.evaluate(`(()=>{const viewer=document.querySelector('[data-pdf-viewer]');viewer.scrollTop=window.pdfMixedTop(180)+50;viewer.dispatchEvent(new Event('scroll'));return 'forward'})()`)
+		b.waitFor("mixed-size PDF forward scroll tracks page 180", `String(document.querySelector('[data-pdf-page-input]').value==='180'&&document.querySelectorAll('.pdf-page-surface').length<=40)`, "true")
+		b.evaluate(`(()=>{document.querySelector('[data-gallery-close]').click();return 'closed'})()`)
+		b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),150))`)
+		b.waitFor("closing mixed-size PDF removes page surfaces", `String(!document.getElementById('image-gallery').open&&!document.querySelector('.pdf-page-surface'))`, "true")
 	})
 }
 
