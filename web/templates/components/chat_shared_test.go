@@ -3431,7 +3431,8 @@ func TestSharedTaskResultLinkConversionGeneratedParity(t *testing.T) {
 		"window.normalizeTaskResultToolOutputTextNodes = function(messageElement)",
 		"var selector = messageElement.matches && messageElement.matches('.stream-tool-body-content')",
 		"messageElement.querySelectorAll(selector).forEach(function(pre)",
-		"if (pre.childNodes && pre.childNodes.length > 1 && pre.normalize) pre.normalize()",
+		"pre.querySelector('.stream-tool-text-clip') || pre",
+		"if (text.childNodes && text.childNodes.length > 1 && text.normalize) text.normalize()",
 		"window.convertTaskLinksInMessage = function(messageElement)",
 		"window.convertTaskEditLinksInMessage = function(messageElement)",
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
@@ -6257,6 +6258,8 @@ window.addEventListener('DOMContentLoaded', function() {
       var surface = cell.querySelector('pre');
       var box = surface.getBoundingClientRect(), rect = button.getBoundingClientRect();
       if (!button.querySelector('svg') || !button.classList.contains('btn-square')) fail('tool copy must use the inset alert icon style');
+      var clip = surface.querySelector('.stream-tool-text-clip');
+      if (!clip || getComputedStyle(clip).overflowX !== 'clip' || clip.getBoundingClientRect().right > rect.left) fail('tool text can paint beneath the copy icon');
       if (rect.left < box.left || rect.right > box.right + 1 || rect.top < box.top || rect.bottom > box.bottom + 1) fail('copy button is outside the input/output surface '+JSON.stringify({box:box,button:rect,text:surface.textContent.slice(0,30)}));
     });
     wideBox.parentElement.querySelector('.stream-tool-copy').click();
