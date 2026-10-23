@@ -267,10 +267,11 @@
         const deadline = setTimeout(() => controller.abort(), 10000);
         try {
             const response = await fetch('/events/running-executions', {signal: controller.signal, cache: 'no-store'});
+            if (discovery !== controller || stopped) return;
             if (response.status === 401 || response.status === 403) { clear(); return; }
             if (!response.ok) return;
             const active = await response.json();
-            if (stopped || !Array.isArray(active)) return;
+            if (discovery !== controller || stopped || !Array.isArray(active)) return;
             const keys = new Set(), threads = new Set();
             active.forEach(item => {
                 if (!item.id || !item.project_id || !item.task_id) return;
@@ -297,9 +298,12 @@
             // Absence is not completion: final bytes arrive on the execution stream.
             runs.forEach(run => { if (run.live && !run.stream) start(run); });
         } catch (_) { /* Reconcile on the next tick or reconnect. */ }
-        finally { clearTimeout(deadline); discovery = null; }
+        finally { clearTimeout(deadline); if (discovery === controller) discovery = null; }
     }
     function clear() {
+        // Ignore late responses as well as aborting fetch: a response body may
+        // already be buffered, and a new discovery may start before it settles.
+        discovery?.abort(); discovery = null;
         runs.forEach(run => { run.stream?.close(); run.views.forEach(view => { view.closed = true; view.readyState = 2; }); });
         runs.clear(); pages.clear();
         suppressedThreads.clear(); suppressedExecutions.clear();

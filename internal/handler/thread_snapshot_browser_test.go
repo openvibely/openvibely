@@ -299,6 +299,98 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   await cache.discover();assert(cache.runs.size===5&&!record('parallel0')&&record('parallel7'),'running execution window was not bounded');
   const parallelCount=streams.length;await cache.discover();assert(streams.length===parallelCount,'pruned executions were rediscovered');
   cache.clear();
+  // Revisiting an old thread changes LRU order; it is not FIFO admission.
+  active=[];
+  for(let i=0;i<20;i++){
+   now++;active.push({id:'lru'+i,project_id:'p',task_id:'lru-task'+i,category:'active'});
+   await cache.discover();
+  }
+  now++;
+  const lruOwner={closest:selector=>selector==='[data-task-id]'?{getAttribute:()=> 'lru-task0'}:null,setAttribute(){}};
+  const revisited=cache.execution('lru0','p','',lruOwner);await tick();revisited.close();
+  now++;active.push({id:'lru20',project_id:'p',task_id:'lru-task20',category:'active'});
+  const lruVictim=streams.find(s=>s.id==='lru1');
+  await cache.discover();
+  assert(record('lru0')&&!record('lru1')&&record('lru20')&&lruVictim.closed,'revisit did not change eviction order');
+  cache.clear();active=[];
+
+  // Four projects share the budget. Chat is one thread per project, even when
+  // its executions have different backend task IDs.
+  for(let project=0;project<4;project++){
+   for(let index=0;index<5;index++){
+    now++;active.push({id:'mixed'+project+'-'+index,project_id:'project'+project,task_id:'task'+index,category:index===4?'chat':'active'});
+    await cache.discover();
+   }
+  }
+  now++;active.push({id:'chat-second',project_id:'project3',task_id:'another-chat-task',category:'chat'});
+  await cache.discover();
+  assert(cache.runs.size===21&&record('mixed0-0','project0'),'Chat executions counted as separate threads');
+  assert(record('mixed3-4','project3').task==='chat'&&record('chat-second','project3').task==='chat','Chat grouping lost');
+  const mixedVictim=streams.find(s=>s.id==='mixed0-0'&&s.project==='project0');
+  now++;active.push({id:'mixed-new',project_id:'project3',task_id:'new-task',category:'active'});
+  await cache.discover();
+  assert(!record('mixed0-0','project0')&&mixedVictim.closed&&record('mixed-new','project3'),'global limit did not evict across projects');
+  assert(record('mixed0-1','project0')&&record('mixed3-4','project3')&&record('chat-second','project3'),'global eviction removed unrelated task or Chat');
+  const mixedSubscriptions=streams.length;await cache.discover();
+  assert(streams.length===mixedSubscriptions,'cross-project victim rediscovered');
+  cache.clear();active=[];
+
+  // Network, server and malformed-response failures preserve retained output.
+  const normalFetch=window.fetch;
+  const preserved=view('preserved','saved output');await tick();preserved.listener.close();
+  const preservedStream=streams.at(-1);
+  const failures=[async()=>{throw Error('offline')},async()=>({ok:false,status:500}),
+   async()=>({ok:true,json:async()=>{throw Error('invalid JSON')}}),async()=>({ok:true,json:async()=>({unexpected:true})})];
+  for(const failure of failures){
+   window.fetch=failure;await cache.discover();
+   assert(record('preserved')?.output==='saved output'&&!preservedStream.closed,'discovery failure discarded retained data');
+  }
+  for(const status of [401,403]){
+   const authorized=view('authorized'+status,'private output');await tick();
+   const privateStream=streams.at(-1);
+   cache.pages.set('private-page',{threadKey:cache.threadKey('p','authorized'+status),time:now,html:'private',sources:[]});
+   window.fetch=async()=>({ok:false,status});await cache.discover();
+   assert(cache.runs.size===0&&cache.pages.size===0&&privateStream.closed&&authorized.listener.closed,'authorization failure retained data or listeners');
+  }
+  window.fetch=normalFetch;
+
+  // Explicit cleanup invalidates an in-flight discovery, even if its fetch
+  // implementation delivers an already-buffered body after abort.
+  let resolveBody, requestedSignal;
+  window.fetch=async(_,options)=>{
+   requestedSignal=options.signal;
+   return {ok:true,json:()=>new Promise(resolve=>{resolveBody=resolve})};
+  };
+  const pendingDiscovery=cache.discover();await tick();
+  assert(resolveBody,'discovery has not reached response body');
+  cache.clear();const beforeLateDiscovery=streams.length;
+  resolveBody([{id:'late-discovery',project_id:'p',task_id:'late-task',category:'active'}]);
+  await pendingDiscovery;
+  assert(cache.runs.size===0&&streams.length===beforeLateDiscovery,'late discovery recreated subscriptions after cleanup');
+  assert(requestedSignal.aborted,'cleanup did not abort discovery');
+  window.fetch=normalFetch;active=[{id:'after-clear',project_id:'p',task_id:'after-clear',category:'active'}];
+  await cache.discover();assert(record('after-clear'),'cleanup prevented subsequent discovery');
+  cache.clear();
+
+  // An old request's finally block must not clear a newer in-flight request.
+  let finishOld, finishNew, requests=0;
+  window.fetch=async()=>{requests++;return {ok:true,json:()=>new Promise(resolve=>{if(requests===1)finishOld=resolve;else finishNew=resolve})}};
+  const oldRequest=cache.discover();await tick();cache.clear();
+  const newRequest=cache.discover();await tick();
+  finishOld([]);await oldRequest;
+  await cache.discover();assert(requests===2,'old discovery completion unlocked an active newer request');
+  finishNew([{id:'new-request',project_id:'p',task_id:'new-task',category:'active'}]);await newRequest;
+  assert(record('new-request'),'new discovery was discarded after old request cleanup');
+  cache.clear();
+
+  // Leaving the document stops discovery permanently. A late response cannot
+  // repopulate the cache; ordinary in-app navigation still keeps subscriptions.
+  window.fetch=async()=>({ok:true,json:()=>new Promise(resolve=>{resolveBody=resolve})});
+  const leavingDiscovery=cache.discover();await tick();
+  const beforeLeave=streams.length;
+  window.dispatchEvent(new Event('pagehide'));
+  resolveBody(active);await leavingDiscovery;
+  assert(cache.runs.size===0&&streams.length===beforeLeave,'pagehide allowed late discovery');
   navigator.sendBeacon('/result?value=pass');
  }catch(error){navigator.sendBeacon('/result?value='+encodeURIComponent(error.stack||error));}
  })();</script></body></html>`
