@@ -516,3 +516,37 @@ for creation and `table-format`. Links accept HTTP, HTTPS and mailto URLs.
 The link is attached only to that run; set its color and underline explicitly
 if desired. Replacing the paragraphs without a hyperlink removes the link from
 the replacement text. This does not change the other cells.
+
+## Different text fills within a table cell (after RC4)
+
+Set `text_paint` on an individual run to give it a solid, gradient or pattern
+fill, or a text outline. For example, this `table-cell` edit makes only the
+first word a red-to-blue gradient and keeps the following text black:
+
+```json
+{
+  "operation": "table-cell",
+  "slide": 1,
+  "shape_id": "INSPECTED_TABLE_ID",
+  "row": 0,
+  "column": 0,
+  "paragraphs": [{"runs": [
+    {"text": "Gradient", "text_paint": {"fill": {"gradient": {
+      "angle": 0,
+      "stops": [
+        {"position": 0, "color": "FF0000"},
+        {"position": 1, "color": "0000FF"}
+      ]
+    }}}},
+    {"text": " plain", "color": "000000"}
+  ]}]
+}
+```
+
+Save the edit inside `{"edits":[...]}` and use `"$PAPERWORKS" slide-edit INPUT.pptx --spec SPEC.json --output OUTPUT.pptx`. Inspect the real table ID first. The same run
+fields work in `table_format.cells[].paragraphs` during creation or a
+`table-format` edit. Gradient stop positions are 0–1, and colors omit `#`.
+Run fill overrides that run's `color`; a supplied whole-cell `text_paint` is
+applied afterward and overrides the corresponding run paint properties.
+Omit whole-cell paint when retaining different fills between runs. Images are
+not supported as text fills. Render and inspect the resulting text.
