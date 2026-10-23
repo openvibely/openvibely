@@ -449,3 +449,14 @@ apply regions of the existing native table style without changing its ID, cells
 or direct formatting. Direct cell formatting may override the visual effect.
 Total-row styling does not add a row or calculate totals. Reopen and render to
 check the requested appearance before delivery.
+
+## Select a native table style (after RC4)
+
+With a newer build exposing `table_format.style_id`, set a known built-in or
+existing deck style GUID:
+`{"operation":"table-format","slide":1,"shape_id":"INSPECTED_TABLE_ID","table_format":{"style_id":"{5940675A-B579-460E-94D1-54222C63F5DA}"}}`.
+New table elements accept the same `table_format`. This replaces an inline style
+if present and retains region flags and direct formatting. It does not import
+custom style definitions; use the existing style resources mechanism for those.
+Omitting `style_id` preserves the current style. Direct cell formatting can mask
+the style's appearance, so render and inspect the result.
