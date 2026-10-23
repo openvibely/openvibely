@@ -174,3 +174,54 @@ Omitted properties and per-point overrides remain intact. This edits the native
 chart part, including any objects sharing it. It does not style ChartEx charts
 or reconstruct charts stored only as images. Verify data, legend, axis labels
 and layout after saving; this is not a replacement for the chart-data checks.
+
+## Detailed chart styling (newer local build)
+
+Check `schema slide-edit` for these fields before use. Existing standard charts
+accept `chart-format` with axis `minor_unit`, `text_style`, `major_gridline` and
+`minor_gridline`; legend `text_style`, `fill`, `outline`; and series label
+`text_style`. Text style uses `font`, `font_size` in points, hex `color`, `bold`,
+and `italic`. Gridlines/outlines use the text outline format above.
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"series":[{"index":0,"points":[{"index":1,"fill":{"fill":"FF0000"}}],"trendlines":[{"type":"linear","display_equation":true}],"error_bars":{"type":"percentage","value":5}}]}}
+```
+
+Point indices are zero-based cached value positions. `trendlines` replaces the
+series' trendlines (`[]` clears); types are `linear`, `exponential`,
+`logarithmic`, `polynomial`, `power`, `movingAverage`. Use `order` (2..6) for
+polynomial or `period` (2..255) for moving average. Forecast `forward`/`backward`,
+`intercept`, `display_equation`, `display_r_squared`, `name` and `outline` are
+available where applicable; moving averages reject forecast/intercept/equation.
+Error bars support `standardError`, `percentage`, `standardDeviation`, `none`,
+optional `value` (not standardError), `direction` (`y` default; `x` only for
+scatter/bubble), `end_style` (`cap`/`noCap`), and `outline`. `none` removes bars
+in that direction. Trendlines/bars require non-stacked 2D bar, line, area,
+scatter or bubble charts. ChartEx is not supported by this editing action.
+Preserve data, render, and check labels/legend for overlap.
+
+The tested LibreOffice preview ignores individual line-chart marker colors even
+when their native point/marker fills are stored. Verify those colors in the
+intended PowerPoint application; do not claim the preview confirms them.
+
+## Reusable named text styles (newer local build)
+
+Check `schema create-pptx` / `schema slide-edit` for `named_styles`. Define text
+formatting once and reuse it across shapes:
+
+```json
+{"named_styles":{"Heading":{"font_size":28,"bold":true,"color":"17324D","align":"ctr"}},"edits":[{"operation":"apply-style","slide":1,"shape_id":"2","style":"Heading"}]}
+```
+
+Definitions accept `description`, `font`, `font_size` (points), hex `color`,
+`bold`, `italic`, `underline`, `align` (`l`, `r`, `ctr`, `just`). Omitted properties
+stay unchanged. `scope` defaults to `shape`; `paragraph` and `run` scopes use
+zero-based `paragraph` and `run` selectors. Run styles cannot set alignment.
+
+For creation, put `style` on a text/shape element or one of its paragraph runs.
+The named style wins over conflicting authored text properties; run styles apply
+after the element style. Explicit paragraph `format` and element `text_paint`
+apply afterward. Notes do not accept named styles. The PPTX stores the resolved
+formatting, not live named-style bindings: retain the definitions in your JSON
+and supply them again when editing later. Inspect the rendered layout after
+changing font sizes or alignment.
