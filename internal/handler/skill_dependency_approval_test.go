@@ -1112,3 +1112,64 @@ func TestInstallationRestartRequeuesUndeliveredSteering(t *testing.T) {
 		})
 	}
 }
+
+func TestInstallationDecisionDesktopOrigins(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithStores(t)
+	h.SetAuthConfig(auth.Config{Enabled: true, Username: "admin", Password: "secret", SessionSecret: "desktop-install-test", SessionTTL: time.Hour})
+	token, err := h.authCfg.SignToken(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, host, origin           string
+		desktop, native, ui, session bool
+		want                         int
+	}{
+		{"macOS Wails", "localhost", "wails://localhost", true, true, true, true, 0},
+		{"opaque WebKit origin", "localhost", "null", true, true, true, true, 0},
+		{"omitted WebKit origin", "localhost", "", true, true, true, true, 0},
+		{"Windows Wails", "wails.localhost", "http://wails.localhost", true, true, true, true, 0},
+		{"external origin", "localhost", "https://attacker.test", true, true, true, true, 403},
+		{"wrong host", "attacker.test", "wails://localhost", true, true, true, true, 403},
+		{"not native proxy", "localhost", "wails://localhost", true, false, true, true, 403},
+		{"server mode", "localhost", "wails://localhost", false, true, true, true, 403},
+		{"missing UI header", "localhost", "wails://localhost", true, true, false, true, 403},
+		{"missing session", "localhost", "wails://localhost", true, true, true, false, 401},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.SetDesktopMode(tc.desktop)
+			req := httptest.NewRequest(http.MethodPost, "http://"+tc.host+"/chat/input-requests/question/answer", strings.NewReader(`{}`))
+			req.Header.Set("Origin", tc.origin)
+			if tc.native {
+				req.Header.Set("X-OpenVibely-Native-Window", "1")
+			}
+			if tc.ui {
+				req.Header.Set("X-OpenVibely-UI", "chat-input-answer")
+			}
+			if tc.session {
+				req.AddCookie(&http.Cookie{Name: h.authCfg.CookieName, Value: token})
+			}
+			err := h.requireDependencyHuman(e.NewContext(req, httptest.NewRecorder()))
+			if tc.want == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			he, ok := err.(*echo.HTTPError)
+			if !ok || he.Code != tc.want {
+				t.Fatalf("got %v want %d", err, tc.want)
+			}
+		})
+	}
+	// Desktop defaults to auth disabled; native decisions must also work there.
+	h.SetAuthConfig(auth.Config{Enabled: false})
+	h.SetDesktopMode(true)
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/chat/input-requests/question/answer", strings.NewReader(`{}`))
+	req.Header.Set("Origin", "null")
+	req.Header.Set("X-OpenVibely-Native-Window", "1")
+	req.Header.Set("X-OpenVibely-UI", "chat-input-answer")
+	if err := h.requireDependencyHuman(e.NewContext(req, httptest.NewRecorder())); err != nil {
+		t.Fatal(err)
+	}
+}
