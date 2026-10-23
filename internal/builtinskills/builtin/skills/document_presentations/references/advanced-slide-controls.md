@@ -200,8 +200,8 @@ in that direction. Trendlines/bars require non-stacked 2D bar, line, area,
 scatter or bubble charts. ChartEx is not supported by this editing action.
 Preserve data, render, and check labels/legend for overlap.
 
-The tested LibreOffice preview ignores individual line-chart marker colors even
-when their native point/marker fills are stored. Verify those colors in the
+The tested LibreOffice preview ignores line-chart marker colors, including
+series-level colors, even when native marker fills are stored. Verify those colors in the
 intended PowerPoint application; do not claim the preview confirms them.
 
 ## Reusable named text styles (newer local build)
@@ -225,3 +225,61 @@ apply afterward. Notes do not accept named styles. The PPTX stores the resolved
 formatting, not live named-style bindings: retain the definitions in your JSON
 and supply them again when editing later. Inspect the rendered layout after
 changing font sizes or alignment.
+
+## Individual chart labels
+
+With a newer build exposing `label_overrides` in `schema slide-edit`, select a
+series and cached point index to change one label without changing its data:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"series":[{"index":0,"label_overrides":[{"index":1,"text":"Priority","text_style":{"font_size":18,"bold":true},"position":"outEnd"}]}]}}
+```
+
+Overrides accept `text`, `text_style`, `fill`, `outline`, `position`; indices are
+zero-based. Omitted fields/other labels remain unchanged. Custom text replaces
+the label's existing text formula/runs; chart data is preserved. Hidden-label
+settings remain unchanged. Render and inspect the label placement.
+
+## Axis placement
+
+Check the newer build's schema, then use inspected axis IDs:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"axes":[{"id":"INSPECTED_AXIS_ID","position":"right","tick_label_position":"high"}]}}
+```
+
+`position` is `bottom`, `left`, `right` or `top`; `tick_label_position` is
+`nextTo`, `high`, `low` or `none`. Unspecified settings and axis-crossing values
+remain unchanged. Render to check the final placement.
+
+## Chart markers and creation formatting
+
+With a newer build exposing series `marker`, use:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"series":[{"index":0,"marker":{"symbol":"diamond","size":12,"fill":{"fill":"FF0000"}}}]}}
+```
+
+Symbols: `auto`, `circle`, `diamond`, `dot`, `none`, `plus`, `square`, `star`,
+`triangle`, `x`. Sizes are 2..72 points; `outline` uses the text outline format.
+Supported families are line, scatter and radar. Existing point-specific marker
+overrides remain unchanged.
+
+Standard chart creation now preserves `chart.options.Series` formatting by index,
+including `Marker`, `Line` and `DataLabel` (Excelize field names). Paperworks still
+generates all `Name`, `Categories`, `Values`, `Sizes` references from `chart.series`;
+do not supply external workbook references. More option entries than data series
+is rejected. Check the build before relying on this post-RC4 behavior.
+
+## Existing chart backgrounds
+
+Check for `chart_fill` / `plot_area_fill` in the newer build's schema:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"chart_fill":{"fill":"FFFFFF"},"plot_area_fill":{"fill":"F2F5F9"}}}
+```
+
+These change the outer chart background and plot interior independently. Solid,
+gradient and pattern fills use the existing drawing-fill format; image fills,
+shadows and embedded outlines are not accepted. Borders, data, axes and labels
+are preserved. Inspect contrast in the final render.
