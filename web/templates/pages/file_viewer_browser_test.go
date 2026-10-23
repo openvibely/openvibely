@@ -22,16 +22,29 @@ func fileViewerPDF(pageCounts ...int) string {
 	if len(pageCounts) > 0 && pageCounts[0] > 0 {
 		pageCount = pageCounts[0]
 	}
+	pageHeights := make([]int, pageCount)
+	for index := range pageHeights {
+		pageHeights[index] = 600
+	}
+	return fileViewerPDFWithPageHeights(pageHeights)
+}
+
+func fileViewerPDFWithPageHeights(pageHeights []int) string {
+	pageCount := len(pageHeights)
+	if pageCount == 0 {
+		pageHeights = []int{600}
+		pageCount = 1
+	}
 	stream := "BT /F1 18 Tf 72 120 Td (Offline PDF) Tj ET"
 	contentObject := pageCount + 3
 	fontObject := pageCount + 4
 	kids := make([]string, pageCount)
 	objects := make([]string, 0, pageCount+4)
 	objects = append(objects, "<< /Type /Catalog /Pages 2 0 R >>", "")
-	for index := 0; index < pageCount; index++ {
+	for index, height := range pageHeights {
 		pageObject := index + 3
 		kids[index] = fmt.Sprintf("%d 0 R", pageObject)
-		objects = append(objects, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 600] /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>", fontObject, contentObject))
+		objects = append(objects, fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 %d] /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>", height, fontObject, contentObject))
 	}
 	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pageCount)
 	objects = append(objects, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream), "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
