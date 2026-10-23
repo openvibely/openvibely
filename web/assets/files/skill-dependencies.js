@@ -93,8 +93,11 @@
   card.dataset.submitted='true';
   const status=card.querySelector('[role="status"]');status.hidden=false;status.classList.remove('hidden');status.textContent='Submitting answer…';
   try {
+   const root=card.closest('[data-execution-pair][data-exec-id]');
    await window.submitChatInputAnswers(card,[{question_id:option.dataset.questionId,label:option.dataset.optionLabel}]);
    card.remove();
+   // A load started before the answer would re-add the answered card.
+   if(root)load(root,true);
   } catch(error) {delete card.dataset.submitted;status.textContent=error.message;}
  },true);
  document.addEventListener('keydown',event=>{
