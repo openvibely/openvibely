@@ -294,3 +294,14 @@ preserves it. Replacement uses plain text instead of the previous title's
 formula/runs; title layout and other title properties remain. Chart data and
 the embedded workbook are unchanged. Verify a newer local build exposes
 `title` in `schema slide-edit`; render and inspect the result.
+
+
+## Chart and plot borders (after RC4)
+
+`chart_format.chart_outline` and `plot_area_outline` independently set
+the outer chart and plot-interior borders. For example:
+`{"chart_outline":{"width":2,"fill":{"fill":"17324D"}},"plot_area_outline":{"width":0}}`
+inside `chart_format`. Widths are points; zero removes the border.
+Use the same solid/gradient/pattern fill and dash options as other outlines.
+Omitted outlines and existing backgrounds remain unchanged. Check the newer
+local schema before use, then render and inspect border placement.
