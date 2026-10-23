@@ -89,7 +89,6 @@ type AutomationStore interface {
 	AutomationExternalState(ctx context.Context, projectID string, automationID string, staleBefore time.Time) (models.AutomationExternalState, error)
 	BindingsForActivityResource(ctx context.Context, projectID string, automationID string, resourceType string, resourceID string) (models.AutomationContext, error)
 	BindingsForExecutionResource(ctx context.Context, projectID string, executionID string, resourceType string, resourceID string) (models.AutomationContext, error)
-	CancelDispatchesForTask(ctx context.Context, taskID string, message string) error
 	CancelDispatchesForTaskReturningIDs(ctx context.Context, taskID string, message string) ([]string, error)
 	ClaimManualAutomationRun(ctx context.Context, projectID string, automationID string, now time.Time) ([]models.AutomationInvocation, []models.AutomationDispatch, error)
 	ClaimScheduledOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, nextRun *time.Time) (*models.AutomationInvocation, *models.AutomationDispatch, error)
@@ -304,7 +303,6 @@ type ExecutionStore interface {
 	GetExecutionTaskID(ctx context.Context, id string) (string, error)
 
 	CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx context.Context, taskID string, cutoff int64) ([]string, error)
-	CancelQueuedOrdinaryByTask(ctx context.Context, taskID string, message string) error
 	CancelQueuedOrdinaryByTaskReturningIDs(ctx context.Context, taskID string, message string) ([]string, error)
 	Complete(ctx context.Context, id string, status models.ExecutionStatus, output string, errMsg string, tokensUsed int, durationMs int64) error
 	CountByTask(ctx context.Context, taskID string) (int, error)

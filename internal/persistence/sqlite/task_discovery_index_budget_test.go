@@ -946,7 +946,8 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				automationRepo := sqlite.NewStores(db, nil).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
-						return automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "task discovery write budget")
+						_, err := automationRepo.CancelDispatchesForTaskReturningIDs(ctx, dispatch.TaskID, "task discovery write budget")
+						return err
 					},
 					cleanup: func(tb testing.TB) {
 						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)
@@ -969,7 +970,8 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 				automationRepo := sqlite.NewStores(db, nil).Automations
 				return taskDiscoveryWriteRun{
 					write: func(ctx context.Context, _ int) error {
-						return automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "task discovery write budget")
+						_, err := automationRepo.CancelDispatchesForTaskReturningIDs(ctx, dispatch.TaskID, "task discovery write budget")
+						return err
 					},
 					cleanup: func(tb testing.TB) {
 						cleanupTaskDiscoveryAutomationFixture(tb, db, fixture)

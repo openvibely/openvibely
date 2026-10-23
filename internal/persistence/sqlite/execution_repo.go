@@ -312,11 +312,6 @@ func createExecutionWithExecutor(ctx context.Context, exec sqlExecutor, e *model
 	return nil
 }
 
-func (r *ExecutionRepo) CancelQueuedOrdinaryByTask(ctx context.Context, taskID, message string) error {
-	_, err := r.CancelQueuedOrdinaryByTaskReturningIDs(ctx, taskID, message)
-	return err
-}
-
 // CancelQueuedOrdinaryByTaskReturningIDs reports only executions changed by this write.
 func (r *ExecutionRepo) CancelQueuedOrdinaryByTaskReturningIDs(ctx context.Context, taskID, message string) ([]string, error) {
 	var ids []string
