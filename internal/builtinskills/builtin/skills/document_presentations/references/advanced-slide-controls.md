@@ -108,3 +108,17 @@ is in points; zero removes it. Omitted paint settings remain unchanged. Gradient
 `path` can be `circle`, `rect`, or `shape` instead of `angle`; optional `focus`
 insets `left`, `top`, `right`, `bottom` are fractions in 0..1 (default center).
 Opposing focus insets must not sum above 1. Render and check letter readability.
+
+## Table cell styling and individual sizes
+
+```json
+{"operation":"table-format","slide":1,"shape_id":"2","table_format":{"column_widths":[180,240],"row_heights":[36,48],"cells":[{"row":0,"column":0,"margins":{"left":8,"right":8},"vertical_align":"middle","borders":{"bottom":{"width":1,"fill":{"fill":"17324D"}}}}]}}
+```
+
+New table elements also accept `table_format`. Rows and columns are zero-based;
+all sizes, margins and border widths are points. Size arrays must cover the
+entire corresponding axis; omit either array to retain it. Cell targets must be
+merged-cell origins, not continuation cells. Cells also accept `fill` and
+`text_paint`. Borders use `left`, `right`, `top`, `bottom`; width zero removes a
+border. The table frame resizes to the total row/column sizes. Check that it
+still fits on the slide and that text fits inside the adjusted cells.
