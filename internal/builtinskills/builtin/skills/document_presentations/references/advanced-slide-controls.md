@@ -363,3 +363,15 @@ Example: `{"legend":{"text_style":{"alignment":"right","underline":"sng"}}}`
 inside `chart_format`. Alignment applies to paragraphs; underline applies to
 run/default properties. Omission preserves existing settings. Check the local
 schema and render to verify the intended application displays the style.
+
+## Trendline label formatting (after RC4)
+
+A `chart_format.series[].trendlines[]` entry accepts `label` with `text`,
+`text_style`, `fill` and `outline`. Example:
+`{"type":"linear","display_equation":true,"label":{"text":"Trend","text_style":{"font_size":18},"fill":{"fill":"EEEEEE"},"outline":{"width":1,"fill":{"fill":"17324D"}}}}`.
+Without `text`, the label can style the generated equation/R-squared display.
+Set the applicable `display_equation` or `display_r_squared` flag and inspect
+the render; label formatting alone does not enable an equation. The existing
+`trendlines` operation replaces the whole series trendline list, so include
+all trendlines/settings that should remain. Omit `trendlines` to preserve them.
+Use only with a newer local schema exposing `label`.
