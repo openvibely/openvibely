@@ -146,6 +146,33 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   cache.pages.set('older-shell',{threadKey:cache.threadKey('p','same-task'),time:now,html:'',sources:[{text:oldestOutput}],virtual:[]});
   cache.sweep();assert(cache.runs.size===0&&cache.pages.size===0,'page-held pruned output was excluded from byte budget');
   cache.clear();
+  // Mixed accounting: unique output, HTML and parsed-row strings total
+  // exactly 64 MiB including one segment's 128-byte estimate. References to
+  // the same strings across both page shells and source/model fields count
+  // only once within the thread. No single category is over budget alone.
+  active=[];
+  const MiB=1024*1024;
+  const mixedOutput='o'.repeat(8*MiB), mixedHTML='h'.repeat(8*MiB);
+  const mixedNormalized='n'.repeat(4*MiB), mixedContent='c'.repeat(4*MiB);
+  const mixedResult='r'.repeat(4*MiB), mixedSecondary='s'.repeat(4*MiB-64);
+  const accountingView=view('accounting',mixedOutput);await tick();
+  const accountingStream=streams.at(-1);accountingView.listener.close();
+  const accountingSegment={content:mixedContent,resultOutput:mixedResult,secondary:mixedSecondary};
+  const accountingPage={threadKey:cache.threadKey('p','accounting'),time:now,
+   runKeys:[record('accounting').key],html:mixedHTML,
+   sources:[{text:mixedOutput},{text:mixedNormalized}],
+   virtual:[{source:mixedOutput,normalized:mixedNormalized,models:[{segments:[accountingSegment]}]}]};
+  cache.pages.set('accounting-page',accountingPage);
+  cache.pages.set('accounting-alias',{threadKey:accountingPage.threadKey,time:now,
+   runKeys:accountingPage.runKeys,html:mixedHTML,sources:[{text:mixedContent},{text:mixedResult},{text:mixedSecondary}],virtual:[]});
+  cache.sweep();
+  assert(record('accounting')&&cache.pages.size===2&&!accountingStream.closed,'shared strings counted twice or exact size limit rejected');
+  // Change both references together so only two accounted bytes are added.
+  accountingSegment.secondary += 'x';
+  cache.pages.get('accounting-alias').sources[2].text=accountingSegment.secondary;
+  cache.sweep();
+  assert(!record('accounting')&&cache.pages.size===0&&accountingStream.closed,'combined HTML/output/parsed-row size did not evict the whole thread');
+  cache.clear();
   // Admit new running tasks one at a time: 21 and 22 each displace the
   // least recently viewed background task, not the mounted foreground view.
   active=[];
