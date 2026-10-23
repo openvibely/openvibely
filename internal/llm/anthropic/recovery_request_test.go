@@ -73,3 +73,86 @@ func TestRecoverySummaryEndsWithUserMessageOnWire(t *testing.T) {
 		})
 	}
 }
+
+func TestFollowupPreservesTrailingUserHistoryOnWire(t *testing.T) {
+	const retained = "Keep the database migration backward compatible."
+	const followup = "Continue with the implementation."
+	for _, tc := range []struct {
+		name    string
+		history []models.Execution
+	}{
+		{
+			name: "sole truncated user message",
+			history: []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_truncated",
+				ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"messages":[{"role":"user","content":"Keep the database migration backward compatible."}]}`}}}},
+		},
+		{
+			name: "truncated conversation ending in user",
+			history: []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_truncated",
+				ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"messages":[{"role":"user","content":"Review the migration."},{"role":"assistant","content":"I reviewed it."},{"role":"user","content":"Keep the database migration backward compatible."}]}`}}}},
+		},
+		{
+			name: "previous unanswered followup",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, PromptSent: "Review the migration.", Output: "I reviewed it."},
+				{Status: models.ExecFailed, PromptSent: retained},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests [][]anthropicclient.Message
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Messages []anthropicclient.Message `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					http.Error(w, "invalid request", http.StatusBadRequest)
+					return
+				}
+				requests = append(requests, body.Messages)
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, event := range []string{
+					`{"type":"message_start","message":{"id":"done","model":"claude-opus-4-6","usage":{"input_tokens":8}}}`,
+					`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+					`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}`,
+					`{"type":"content_block_stop","index":0}`,
+					`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
+					`{"type":"message_stop"}`,
+				} {
+					fmt.Fprintf(w, "data: %s\n\n", event)
+				}
+			}))
+			defer server.Close()
+			oldHost := anthropicclient.AnthropicAPIHost
+			anthropicclient.AnthropicAPIHost = server.URL
+			defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
+
+			_, err := New(nil, nil, nil).Call(context.Background(), llmcontracts.AgentRequest{
+				Operation: llmcontracts.OperationStreaming, Followup: true, Message: followup,
+				Agent:       models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-4-6", AuthMethod: models.AuthMethodAPIKey, APIKey: "test"},
+				ChatHistory: tc.history,
+			}, t.TempDir(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(requests) != 1 {
+				t.Fatalf("requests = %d, want 1", len(requests))
+			}
+			messages := requests[0]
+			var content strings.Builder
+			for _, message := range messages {
+				content.WriteString(message.Content)
+				content.Write(message.ContentBlocks)
+			}
+			for _, text := range []string{retained, followup} {
+				if strings.Count(content.String(), text) != 1 {
+					t.Errorf("want exactly one %q in outgoing messages: %#v", text, messages)
+				}
+			}
+			if len(messages) < 2 || messages[len(messages)-1].Role != "user" || messages[len(messages)-1].Content != followup {
+				t.Fatalf("new followup must follow retained history: %#v", messages)
+			}
+		})
+	}
+}

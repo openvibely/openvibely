@@ -56,35 +56,26 @@ func TestProviderSwitchRecoversSteeringAndPreservesReadableTail(t *testing.T) {
 			expected, err := summaryHistoryInput(p, tail)
 			require.NoError(t, err)
 			svc := &LLMService{execRepo: stores.Executions, threadInputRepo: stores.ThreadInputs}
-			summaries, calls, initialLen := 0, 0, 0
+			calls := 0
 			_, err = svc.callProviderWithCompaction(providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-				if len(req.SummaryInput) > 0 {
-					summaries++
-					raw, _ := json.Marshal(req.SummaryInput)
-					require.Contains(t, string(raw), "old steering")
-					require.Contains(t, string(raw), "exact position within output unknown")
-					require.Contains(t, string(raw), "BACKGROUND_TOOL_FACT")
-					require.NotContains(t, string(raw), "visible steering")
-					require.NotContains(t, string(raw), "pending steering")
-					require.NotContains(t, string(raw), "cancelled steering")
-					require.NotContains(t, string(raw), "aW1hZ2U=")
-					if summaries == 1 {
-						initialLen = len(req.SummaryInput)
-						return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
-					}
-					require.Less(t, len(req.SummaryInput), initialLen)
-					return llmcontracts.AgentResult{Output: "recovered background with old steering"}, nil
-				}
+				require.Empty(t, req.SummaryInput)
 				calls++
 				actual, e := summaryHistoryInput(p, req.ChatHistory)
 				require.NoError(t, e)
+				raw, _ := json.Marshal(actual)
+				require.Contains(t, string(raw), "old steering")
+				require.Contains(t, string(raw), "BACKGROUND_TOOL_FACT")
+				require.NotContains(t, string(raw), "pending steering")
+				require.NotContains(t, string(raw), "cancelled steering")
+				require.Equal(t, expected, actual[len(actual)-len(expected):], "readable tail survives truncation retries")
+				if calls == 1 {
+					return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
+				}
 				require.Len(t, actual, len(expected)+1)
-				require.Equal(t, expected, actual[1:], "readable message order, images and tool exchanges survive summary retries")
 				return llmcontracts.AgentResult{Output: "done"}, nil
 			}), llmcontracts.AgentRequest{Ctx: ctx, ExecID: current.ID, TransportScope: "task:" + task.ID, Followup: true, Message: "continue", Agent: models.LLMConfig{ID: string(p), Provider: p, Model: "test", ContextWindow: 200000}, ChatHistory: []models.Execution{*saved}})
 			require.NoError(t, err)
-			require.Equal(t, 2, summaries)
-			require.Equal(t, 1, calls)
+			require.Equal(t, 2, calls)
 			rows, err = stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
 			require.NoError(t, err)
 			require.Equal(t, transcript, rows[exec.ID][0].TranscriptJSON, "recovery never rewrites saved history")
