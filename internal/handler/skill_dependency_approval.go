@@ -30,8 +30,14 @@ func (h *Handler) requireDependencyHuman(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusUnauthorized, "Sign in to answer installation questions")
 		}
 	}
-	origin, err := url.Parse(c.Request().Header.Get("Origin"))
-	if err != nil || origin.Host != c.Request().Host || (origin.Scheme != "http" && origin.Scheme != "https") || c.Request().Header.Get("X-OpenVibely-UI") != "chat-input-answer" {
+	r := c.Request()
+	originText := r.Header.Get("Origin")
+	origin, err := url.Parse(originText)
+	sameOrigin := err == nil && origin.Host == r.Host && (origin.Scheme == "http" || origin.Scheme == "https")
+	// Wails uses a custom origin on macOS/Linux, sometimes serialized as null
+	// or omitted. Match the existing native asset proxy convention, only in desktop mode.
+	nativeOrigin := h.desktopMode && r.Header.Get("X-OpenVibely-Native-Window") == "1" && r.Host == "localhost" && (originText == "wails://localhost" || originText == "null" || originText == "")
+	if (!sameOrigin && !nativeOrigin) || r.Header.Get("X-OpenVibely-UI") != "chat-input-answer" {
 		return echo.NewHTTPError(http.StatusForbidden, "same-origin UI decision required")
 	}
 	return nil
