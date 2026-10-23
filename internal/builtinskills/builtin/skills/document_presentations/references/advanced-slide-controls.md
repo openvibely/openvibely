@@ -550,3 +550,20 @@ Run fill overrides that run's `color`; a supplied whole-cell `text_paint` is
 applied afterward and overrides the corresponding run paint properties.
 Omit whole-cell paint when retaining different fills between runs. Images are
 not supported as text fills. Render and inspect the resulting text.
+
+## Table-cell horizontal overflow (after RC4)
+
+Set `horizontal_overflow` to `clip` or `overflow` on a zero-based
+`table_format.cells` entry. This writes the native cell setting; omitting it
+preserves the existing setting. It does not resize the cell or change its text.
+For an existing table, inspect its shape ID and save this edit in a spec:
+
+```json
+{"edits":[{"operation":"table-format","slide":1,"shape_id":"INSPECTED_TABLE_ID","table_format":{"cells":[{"row":0,"column":0,"horizontal_overflow":"clip"}]}}]}
+```
+
+Run `"$PAPERWORKS" slide-edit INPUT.pptx --spec SPEC.json --output OUTPUT.pptx`.
+Use `overflow` to allow horizontal text overflow instead of clipping. The same
+cell setting works in `table_format` during creation. For merged cells, target
+the top-left origin. Render and inspect in the intended viewer to check the
+visible result with the document's wrapping and sizing settings.
