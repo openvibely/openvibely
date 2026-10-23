@@ -16,7 +16,7 @@ For strict unchanged-part preservation, avoid an Office re-save because it can r
 
 ## Clone a template component
 
-This operation is implemented in newer local Paperworks builds, but not the skill's pinned `v0.0.1-rc2`. Check `"$PAPERWORKS" schema word-edit` for `clone-component` before using it. If absent, report that this runtime lacks the operation; do not silently rebuild the template. Use a newer executable only when supplied for the task.
+Use `word-edit` with `clone-component`; preserve the template rather than rebuilding it.
 
 Save the operation in a JSON spec and run `"$PAPERWORKS" word-edit input.docx --spec clone.json --output edited.docx`:
 

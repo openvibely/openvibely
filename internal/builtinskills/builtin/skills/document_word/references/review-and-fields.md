@@ -101,7 +101,7 @@ Use `comment-edit` to append text or change resolution state. Check the target a
 
 Use `materialize` for supported SEQ/REF updates without an Office re-save. Pagination-dependent fields and indexes need an Office engine. When the task permits an Office re-save, use `"$PAPERWORKS" refresh input.docx --output new-directory` to create a refreshed copy through LibreOffice. Reopen it, inspect every rendered page and check TOC/PAGE/REF results against the document. Check TOC entries against heading pages, PAGE/NUMPAGES against page count, and REF/PAGEREF against bookmarked targets. A refresh-on-open flag does not establish saved results.
 
-`refresh` can rewrite unrelated package parts. For strict preservation, use `materialize` where sufficient. If a Word refresh is unavailable, request deferred refresh with `word-edit` and `{"operation":"update-fields"}`. First confirm `update-fields` appears in `"$PAPERWORKS" schema word-edit`; it requires a newer build than the pinned release. Save the spec as `refresh-on-open.json`, then run:
+`refresh` can rewrite unrelated package parts. For strict preservation, use `materialize` where sufficient. If a Word refresh is unavailable, request deferred refresh with `word-edit` and `{"operation":"update-fields"}`. Save the spec as `refresh-on-open.json`, then run:
 
 ```sh
 "$PAPERWORKS" word-edit input.docx --spec refresh-on-open.json --output deferred.docx

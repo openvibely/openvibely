@@ -30,7 +30,7 @@ func TestPaperworksSkillPackages(t *testing.T) {
 			t.Fatalf("%s: %v %v", name, dependencies, err)
 		}
 		paperworks := dependencies[0]
-		if paperworks.Version != "0.0.1-rc2" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
+		if paperworks.Version != "0.0.0-rc3" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
 			t.Fatalf("%s: invalid Paperworks release configuration: %+v", name, paperworks)
 		}
 		platforms := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64"}

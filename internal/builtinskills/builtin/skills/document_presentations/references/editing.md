@@ -112,7 +112,7 @@ If inspection finds a missing notes-master reference, run `"$PAPERWORKS" repair-
 
 ## Extended editing operations
 
-These operations are implemented in newer local Paperworks builds, but not the skill's pinned `v0.0.1-rc2`. Before using them, check `"$PAPERWORKS" schema slide-edit`: table merges need `end_row`/`end_column`, formatted notes need `paragraphs`, nested layouts need `Layout.root`, and drawing styles need `pattern`/`image`. Resolve schema references to check the relevant object, not an unrelated field with the same name. If absent, report that this runtime lacks the operation; do not send fields that it may silently ignore. Use a newer executable only when supplied for the task.
+In `slide-edit`, table merges use `end_row`/`end_column`, formatted notes use `paragraphs`, nested layouts use `Layout.root`, and drawing styles use `pattern`/`image`.
 
 Use the same `slide-edit` command and `{"edits":[...]}` wrapper as above. Replace sample IDs with inspected IDs.
 
@@ -166,7 +166,7 @@ Layout moves and resizes shapes; it does not react to later edits. Use `fit_text
 
 ### Fit text height and span grid cells
 
-These additions also require a newer build than the pinned release. Check `schema slide-edit` for `LayoutNode.fit_text`, `column_span` and `row_span`.
+Use `LayoutNode.fit_text`, `column_span` and `row_span` for measured text and grid spans.
 
 ```json
 {"edits":[{"operation":"layout","slide":1,"layout":{
@@ -183,7 +183,7 @@ Grid children may use positive `column_span` and `row_span`, defaulting to 1. Fo
 
 ## Line spacing
 
-On newer builds, `paragraph_style.line_spacing` sets a line-height multiplier
+`paragraph_style.line_spacing` sets a line-height multiplier
 (`1` is single spacing, `1.2` is 120%; supported range 0.00001–1000).
 This differs from `before`/`after`, which are paragraph spacing in points.
 Confirm `line_spacing` appears in the `ParagraphStyle` definition returned by
