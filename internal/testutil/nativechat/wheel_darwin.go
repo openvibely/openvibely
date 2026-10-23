@@ -13,6 +13,32 @@ static NSView* findWebView(NSView* view) {
  for(NSView* child in view.subviews) { NSView* result=findWebView(child);if(result)return result; }
  return nil;
 }
+// NSView hitTest: consumes superview coordinates, not receiver coordinates.
+static NSView* wheelTarget(NSView* view, NSPoint windowPoint) {
+ NSPoint parentPoint=[view.superview convertPoint:windowPoint fromView:nil];
+ return [view hitTest:parentPoint];
+}
+
+// Exercise routing independently of WebKit timing. Offset and flipped views
+// expose the coordinate-space mistake even when a full-size webview hides it.
+@interface WheelTestFlippedView : NSView
+@end
+@implementation WheelTestFlippedView
+- (BOOL)isFlipped { return YES; }
+@end
+static int checkWheelTargetCoordinates(void) {
+ @autoreleasepool {
+  NSView* root=[[NSView alloc] initWithFrame:NSMakeRect(0,0,800,600)];
+  NSView* view=[[WheelTestFlippedView alloc] initWithFrame:NSMakeRect(150,90,400,300)];
+  NSView* target=[[NSView alloc] initWithFrame:NSMakeRect(20,30,50,50)];
+  [root addSubview:view];[view addSubview:target];
+  NSPoint point=[view convertPoint:NSMakePoint(35,45) toView:nil];
+  BOOL correct=wheelTarget(view,point)==target;
+  BOOL oldWrong=[view hitTest:[view convertPoint:point fromView:nil]]!=target;
+  [target release];[view release];[root release];
+  return correct && oldWrong;
+ }
+}
 static int sendWheel(void* pointer, double x,double y,double dx,double dy,int phase) {
  NSWindow* window=(NSWindow*)pointer;
  if(!window || !window.isVisible)return 1;
@@ -27,8 +53,7 @@ static int sendWheel(void* pointer, double x,double y,double dx,double dy,int ph
  class_addMethod(cls,@selector(locationInWindow),imp_implementationWithBlock(^(id unused){return point;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(locationInWindow))));
  class_addMethod(cls,@selector(window),imp_implementationWithBlock(^(id unused){return window;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(window))));
  objc_registerClassPair(cls);object_setClass(event,cls);
- NSPoint local=[view convertPoint:point fromView:nil];
- NSView* target=[view hitTest:local];
+ NSView* target=wheelTarget(view,point);
  if(!target){CFRelease(cg);return 3;}
  [target scrollWheel:event];
  CFRelease(cg);
@@ -48,3 +73,5 @@ func nativeWheel(window unsafe.Pointer, e wheel) error {
 	}
 	return nil
 }
+
+func checkNativeWheelCoordinates() bool { return C.checkWheelTargetCoordinates() != 0 }
