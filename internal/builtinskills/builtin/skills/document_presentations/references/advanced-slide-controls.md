@@ -497,3 +497,12 @@ These work for creation and `drawing-style` edits on supported drawing objects.
 An outline replaces existing line formatting: include desired dash and arrowhead
 settings as well. Omission uses viewer defaults. Connector routing/attachments
 stay unchanged. Render to inspect the ends and corners in the intended viewer.
+
+### Table-run underline styles (after RC4)
+
+Use `underline_style` instead of boolean `underline` for a native DrawingML
+style: `{"text":"Total","underline_style":"dbl"}` gives double underline.
+Accepted values: `none`, `words`, `sng`, `dbl`, `heavy`, `dotted`,
+`dottedHeavy`, `dash`, `dashHeavy`, `dashLong`, `dashLongHeavy`, `dotDash`,
+`dotDashHeavy`, `dotDotDash`, `dotDotDashHeavy`, `wavy`, `wavyHeavy`, `wavyDbl`.
+The boolean `underline: true` still means single underline.
