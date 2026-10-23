@@ -146,6 +146,68 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
   cache.pages.set('older-shell',{threadKey:cache.threadKey('p','same-task'),time:now,html:'',sources:[{text:oldestOutput}],virtual:[]});
   cache.sweep();assert(cache.runs.size===0&&cache.pages.size===0,'page-held pruned output was excluded from byte budget');
   cache.clear();
+  // Admit new running tasks one at a time: 21 and 22 each displace the
+  // least recently viewed background task, not the mounted foreground view.
+  active=[];
+  const countForeground=view('count-foreground');await tick();
+  const countStreams=[];
+  for(let i=0;i<20;i++){
+   now++;
+   active.push({id:'count'+i,project_id:'p',task_id:'count-task'+i,category:'active'});
+   await cache.discover();countStreams.push(streams.at(-1));
+  }
+  assert(cache.runs.size===21&&countStreams.every(s=>!s.closed),'initial 20 background tasks plus foreground not retained');
+  // New output must not make the oldest unviewed task most recently viewed.
+  countStreams[0].emit('message','still running');
+  for(let i=20;i<22;i++){
+   now++;
+   active.push({id:'count'+i,project_id:'p',task_id:'count-task'+i,category:'active'});
+   await cache.discover();countStreams.push(streams.at(-1));
+   const firstRetained=i-19;
+   assert(cache.runs.size===21&&record('count-foreground'),'sequential admission evicted foreground or exceeded count');
+   countStreams.forEach((stream,index)=>{
+    assert(!!record('count'+index)===(index>=firstRetained),'wrong count victim after admitting '+i+': '+index);
+    assert(stream.closed===(index<firstRetained),'wrong subscription lifetime after admitting '+i+': '+index);
+   });
+   const subscriptions=streams.length;
+   countStreams.slice(0,firstRetained).forEach(s=>s.emit('message','late output'));
+   await cache.discover();await cache.discover();
+   assert(streams.length===subscriptions&&!record('count0'),'count victims were rediscovered or resurrected');
+  }
+  countForeground.listener.close();cache.clear();
+
+  // Four 12 MiB background records start below the 64 MiB budget. A viewed
+  // record exceeding that budget is exempt. Grow the newest background record
+  // twice: first evict one old record, then evict two more in the same sweep.
+  active=[];
+  const sizeForeground=view('size-foreground');await tick();
+  const sizeForegroundStream=streams.at(-1);
+  sizeForegroundStream.emit('message','f'.repeat(33*1024*1024));
+  const sizeStreams=[];
+  for(let i=0;i<4;i++){
+   now++;
+   active.push({id:'size'+i,project_id:'p',task_id:'size-task'+i,category:'active'});
+   await cache.discover();const s=streams.at(-1);sizeStreams.push(s);
+   s.emit('message',String(i).repeat(6*1024*1024));cache.sweep();
+  }
+  assert(cache.runs.size===5&&sizeStreams.every(s=>!s.closed),'under-budget background records were evicted');
+  const growths=[9,13], victims=[1,3];
+  for(let step=0;step<growths.length;step++){
+   sizeStreams[3].emit('message','g'.repeat(growths[step]*1024*1024));cache.sweep();
+   assert(record('size-foreground')&&!sizeForegroundStream.closed,'byte eviction removed displayed record');
+   assert(cache.runs.size===5-victims[step],'wrong number of byte-budget evictions');
+   sizeStreams.forEach((stream,index)=>{
+    assert(!!record('size'+index)===(index>=victims[step]),'wrong byte-budget victim: '+index);
+    assert(stream.closed===(index<victims[step]),'byte-budget victim subscription not closed: '+index);
+   });
+   const retainedBytes=Array.from(cache.runs.values()).filter(r=>r.id!=='size-foreground').reduce((sum,r)=>sum+2*r.output.length,0);
+   assert(retainedBytes<=64*1024*1024,'retained background output still exceeds budget');
+   const subscriptions=streams.length;
+   sizeStreams.slice(0,victims[step]).forEach(s=>s.emit('message','late output'));
+   await cache.discover();await cache.discover();
+   assert(streams.length===subscriptions&&cache.runs.size===5-victims[step],'byte-budget victims were rediscovered or resurrected');
+  }
+  sizeForeground.listener.close();cache.clear();
   // Automatic discovery shares the 20-thread budget and does not cycle through
   // evicted work on every scan. Reopening explicitly admits an evicted thread.
   active=Array.from({length:24},(_,i)=>({id:'discover'+i,project_id:'p',task_id:'task'+i,category:'active'}));
