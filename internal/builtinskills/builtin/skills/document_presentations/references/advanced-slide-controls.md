@@ -225,3 +225,17 @@ apply afterward. Notes do not accept named styles. The PPTX stores the resolved
 formatting, not live named-style bindings: retain the definitions in your JSON
 and supply them again when editing later. Inspect the rendered layout after
 changing font sizes or alignment.
+
+## Individual chart labels
+
+With a newer build exposing `label_overrides` in `schema slide-edit`, select a
+series and cached point index to change one label without changing its data:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"series":[{"index":0,"label_overrides":[{"index":1,"text":"Priority","text_style":{"font_size":18,"bold":true},"position":"outEnd"}]}]}}
+```
+
+Overrides accept `text`, `text_style`, `fill`, `outline`, `position`; indices are
+zero-based. Omitted fields/other labels remain unchanged. Custom text replaces
+the label's existing text formula/runs; chart data is preserved. Hidden-label
+settings remain unchanged. Render and inspect the label placement.
