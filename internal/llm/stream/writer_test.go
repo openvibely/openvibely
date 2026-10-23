@@ -549,6 +549,15 @@ func TestStreamingWriter_WriteDoesNotFlushSynchronouslyWhenIntervalElapsed(t *te
 	if updatedExec.Output != "" {
 		t.Fatalf("Write should not synchronously flush to DB, got output %q", updatedExec.Output)
 	}
+	sw.Flush()
+	last := publisher.events[len(publisher.events)-1]
+	if last.Type != events.ExecutionStreamPersisted || last.Offset != len("instant") {
+		t.Fatalf("missing durable watermark after flush: %+v", last)
+	}
+	saved, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil || saved.Output != "instant" {
+		t.Fatalf("watermark published before output saved: %v %+v", err, saved)
+	}
 }
 
 func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {

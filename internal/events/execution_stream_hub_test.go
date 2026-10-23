@@ -217,3 +217,28 @@ func TestExecutionStreamHubSubscriberLimitUsesTotalSubscribers(t *testing.T) {
 		t.Fatalf("expected subscriber count 0 after unsubscribe, got %d", hub.SubscriberCount())
 	}
 }
+
+func TestExecutionStreamOverflowClosesEvenWithoutAnotherEvent(t *testing.T) {
+	hub := NewExecutionStreamHub()
+	sub, unsubscribe, err := hub.Subscribe("overflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	for i := 0; i <= cap(sub); i++ {
+		hub.Publish(ExecutionStreamEvent{ExecID: "overflow", Type: ExecutionStreamDelta, Delta: "x", Offset: i + 1})
+	}
+	for i := 0; i < cap(sub); i++ {
+		if _, ok := <-sub; !ok {
+			t.Fatal("buffer unexpectedly empty")
+		}
+	}
+	select {
+	case _, ok := <-sub:
+		if ok {
+			t.Fatal("expected closed channel after lost delta")
+		}
+	default:
+		t.Fatal("silent dropped tail leaves subscription waiting forever")
+	}
+}

@@ -84,7 +84,7 @@ The server sends `ready` once per connection. Live subscriptions acknowledge wit
 Execution frames have `id`, `event`, `data`, and UTF-8 byte `start`/`offset` cursors.
 `message` carries output; `done` carries completed/cancelled status; `error` carries
 execution errors or subscription rejection. Omitted byte fields mean zero.
-`retry` means capacity is temporarily unavailable; the client retries only that
+`retry` means capacity is unavailable or an output gap/overflow requires replay; the client retries only that
 subscription with bounded backoff. `done` and `error` retire only their subscription.
 Late frames for unsubscribed IDs are ignored. Detached view listeners do not
 receive output, while their running execution subscription continues updating its snapshot.
@@ -93,7 +93,15 @@ The client retains applied offsets across network failures, uses jittered
 exponential reconnect delays (250 ms initial, capped at 15 s plus jitter), and
 resubscribes after `ready`. The execution worker subscribes to the existing hub
 before reading persistence, deduplicates overlapping deltas, and reconciles gaps
-and terminal state against persistence every two seconds. Replay frames are
+and terminal state against persistence on subscription, gaps, and completion.
+There is no periodic execution-output read. SQLite returns only the missing
+byte suffix and status, without loading reasoning or diffs or concatenating the
+full transcript. It still scans stored segment lengths to locate the byte cursor.
+The writer publishes a durable-offset watermark after saving output; caught-up
+subscribers ignore it without querying SQLite, while recovering subscribers use
+it to retrieve a missing tail even if no further tokens arrive. Subscriber queue
+overflow closes the channel rather than silently losing the final update; the
+client retries that subscription from its retained offset. Replay frames are
 bounded to 32 KiB of output. A terminal authoritative snapshot shorter than the
 client's cursor produces `reset` before the terminal event, covering loss of an
 unpersisted tail during a crash. Output that never reached persistence cannot be

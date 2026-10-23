@@ -244,11 +244,11 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 		if h.execRepo == nil {
 			return false
 		}
-		exec, err := h.execRepo.GetByID(ctx, cmd.ExecID)
-		if err != nil || exec == nil {
+		var err error
+		taskID, err = h.execRepo.GetExecutionTaskID(ctx, cmd.ExecID)
+		if err != nil || taskID == "" {
 			return false
 		}
-		taskID = exec.TaskID
 	}
 	if taskID != "" {
 		if h.taskRepo == nil {
@@ -340,19 +340,23 @@ func (h *Handler) streamExecution(ctx context.Context, cmd liveCommand, send fun
 	defer unsubscribe()
 	sent := cmd.Offset
 	replay := func() bool {
-		exec, err := h.execRepo.GetByID(ctx, cmd.ExecID)
-		if err != nil || exec == nil {
+		exec, err := h.execRepo.ReadOutputAfter(ctx, cmd.ExecID, sent)
+		if err != nil {
+			send(liveFrame{Event: "retry", Data: "execution replay unavailable"})
+			return true
+		}
+		if exec == nil {
 			send(liveFrame{Event: "error", Data: "execution not found"})
 			return true
 		}
-		if len(exec.Output) < sent && (exec.Status == models.ExecCompleted || exec.Status == models.ExecCancelled || exec.Status == models.ExecFailed) {
-			if !send(liveFrame{Event: "reset", Data: exec.Output, Offset: len(exec.Output)}) {
+		if exec.Total < sent && (exec.Status == models.ExecCompleted || exec.Status == models.ExecCancelled || exec.Status == models.ExecFailed) {
+			if !send(liveFrame{Event: "reset", Data: exec.Output, Offset: exec.Total}) {
 				return true
 			}
-			sent = len(exec.Output)
+			sent = exec.Total
 		}
-		if len(exec.Output) > sent {
-			start := clampOffsetToUTF8Boundary(sent, exec.Output)
+		if exec.Total > sent {
+			start := 0
 			// Bound frame/queue memory even for very large historical outputs.
 			for start < len(exec.Output) {
 				end := start + 32*1024
@@ -360,11 +364,11 @@ func (h *Handler) streamExecution(ctx context.Context, cmd liveCommand, send fun
 					end = len(exec.Output)
 				}
 				end = clampOffsetToUTF8Boundary(end, exec.Output)
-				if !send(liveFrame{Event: "message", Data: exec.Output[start:end], Start: start, Offset: end}) {
+				if !send(liveFrame{Event: "message", Data: exec.Output[start:end], Start: exec.Start + start, Offset: exec.Start + end}) {
 					return true
 				}
 				start = end
-				sent = end
+				sent = exec.Start + end
 			}
 		}
 		switch exec.Status {
@@ -380,22 +384,20 @@ func (h *Handler) streamExecution(ctx context.Context, cmd liveCommand, send fun
 	if replay() {
 		return
 	}
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			if replay() {
-				return
-			}
 		case ev, ok := <-sub:
 			if !ok {
-				sub = nil
-				if replay() {
-					return
+				// A closed hub channel indicates terminal delivery or overflow.
+				// Retry the subscription instead of leaving a silently idle view.
+				if !replay() {
+					send(liveFrame{Event: "retry", Data: "execution stream interrupted"})
 				}
+				return
+			}
+			if ev.Type == events.ExecutionStreamPersisted && ev.Offset <= sent {
 				continue
 			}
 			if ev.Type != events.ExecutionStreamDelta {
@@ -427,7 +429,8 @@ func (h *Handler) streamExecution(ctx context.Context, cmd liveCommand, send fun
 					return
 				}
 				if start > sent {
-					continue
+					send(liveFrame{Event: "retry", Data: "execution output gap"})
+					return
 				}
 			}
 			if ev.Offset <= sent {

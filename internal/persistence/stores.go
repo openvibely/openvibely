@@ -289,8 +289,18 @@ type ExecutionOutputStore interface {
 }
 
 // ExecutionStore persists task and chat executions, their output, and execution analytics.
+// ExecutionReplay is a byte-addressed suffix read from a consistent DB snapshot.
+type ExecutionReplay struct {
+	Output       string
+	Start, Total int
+	Status       models.ExecutionStatus
+	ErrorMessage string
+}
+
 type ExecutionStore interface {
 	ExecutionOutputStore
+	ReadOutputAfter(ctx context.Context, id string, offset int) (*ExecutionReplay, error)
+	GetExecutionTaskID(ctx context.Context, id string) (string, error)
 
 	CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx context.Context, taskID string, cutoff int64) ([]string, error)
 	CancelQueuedOrdinaryByTask(ctx context.Context, taskID string, message string) error
