@@ -47,10 +47,11 @@ func startDesktopMemoryDiagnostics() (func(), error) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(struct {
-			PID    int
-			Time   time.Time
-			Memory runtime.MemStats
-		}{os.Getpid(), time.Now(), stats})
+			PID              int
+			Time             time.Time
+			Memory           runtime.MemStats
+			ModerncAllocator any `json:",omitempty"`
+		}{os.Getpid(), time.Now(), stats, desktopModerncAllocatorStats()})
 	})
 	var capture sync.Mutex
 	for _, name := range []string{"heap", "allocs"} {
