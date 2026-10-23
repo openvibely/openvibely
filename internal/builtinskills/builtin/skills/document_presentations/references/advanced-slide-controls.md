@@ -485,3 +485,13 @@ Supply the corresponding head/tail type. Use this on created drawing elements or
 in `slide-edit` operation `drawing-style`. An outline replaces existing line
 formatting, so supply all properties you want retained. Omitted sizes use viewer
 defaults. Attachments remain unchanged. Render and check arrow direction and size.
+
+## Line caps and joins (after RC4)
+
+With a newer build, use `drawing_style.outline.cap` (`flat`, `round`, `square`)
+and `join` (`round`, `bevel`, `miter`). Example outline:
+`{"color":"17324D","width":3,"cap":"round","join":"bevel"}`.
+These work for creation and `drawing-style` edits on supported drawing objects.
+An outline replaces existing line formatting: include desired dash and arrowhead
+settings as well. Omission uses viewer defaults. Connector routing/attachments
+stay unchanged. Render to inspect the ends and corners in the intended viewer.
