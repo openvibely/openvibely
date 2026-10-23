@@ -32,7 +32,8 @@ process cleanup even on failure.
 
 The only platform-specific pieces are native input delivery:
 
-- macOS: AppKit wheel events routed to the Wails WKWebView. Native hit testing
+- macOS: AppKit wheel events sent through the Wails NSWindow's event dispatch,
+  rather than directly invoking a private WebKit subview. Native hit testing
   converts the window point into the webview's **superview** coordinates, as
   required by [NSView.hitTest](https://developer.apple.com/documentation/appkit/nsview/hittest(_:)).
   A native regression checks this with an offset, flipped view hierarchy.

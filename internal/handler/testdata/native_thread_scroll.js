@@ -137,14 +137,25 @@
                 // a persistent layout displacement without relaxing the assertion.
                 const followingFrames = [];
                 const failedAt = performance.now();
-                for (let sample=0;sample<12;sample++) {
+                let stableSamples = 0, previousSample = '';
+                for (let sample=0;sample<1000;sample++) {
                     await new Promise(resolve => requestAnimationFrame(resolve));
-                    followingFrames.push({ms:performance.now()-failedAt,
+                    const sampleState = {ms:performance.now()-failedAt,
                         connected:range.startContainer.isConnected,
                         actual:range.startContainer.isConnected ? range.getBoundingClientRect().top-top : null,
                         input:input-startInput,reachableInput:reachableInput-startReachableInput,
                         scrollTop:m.scrollTop,height:m.scrollHeight,events,
-                        restoring:m.dataset.earlierAnchorRestoring,burstDone:!!window._nativeBurstDone});
+                        restoring:m.dataset.earlierAnchorRestoring,burstDone:!!window._nativeBurstDone};
+                    followingFrames.push(sampleState);
+                    // Keep the first twelve frames and the final twelve without
+                    // flooding CI logs. Input is still arriving in early frames.
+                    if(followingFrames.length>24) followingFrames.splice(12,1);
+                    const signature=JSON.stringify([sampleState.actual,input,m.scrollTop,m.scrollHeight]);
+                    const busy=m.dataset.earlierAnchorRestoring==='true' || m.dataset.transcriptHydrating==='true' ||
+                        window._chatContentRenderActive || window._chatContentRenderQueue?.length;
+                    stableSamples=window._nativeBurstDone && !busy && signature===previousSample ? stableSamples+1 : 0;
+                    previousSample=signature;
+                    if(stableSamples>=6 || !range.startContainer.isConnected) break;
                 }
                 throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame + ' '+JSON.stringify({...failure,followingFrames}));
             }
