@@ -200,6 +200,10 @@ in that direction. Trendlines/bars require non-stacked 2D bar, line, area,
 scatter or bubble charts. ChartEx is not supported by this editing action.
 Preserve data, render, and check labels/legend for overlap.
 
+The tested LibreOffice preview ignores individual line-chart marker colors even
+when their native point/marker fills are stored. Verify those colors in the
+intended PowerPoint application; do not claim the preview confirms them.
+
 ## Reusable named text styles (newer local build)
 
 Check `schema create-pptx` / `schema slide-edit` for `named_styles`. Define text
