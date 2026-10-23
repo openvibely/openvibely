@@ -270,3 +270,16 @@ including `Marker`, `Line` and `DataLabel` (Excelize field names). Paperworks st
 generates all `Name`, `Categories`, `Values`, `Sizes` references from `chart.series`;
 do not supply external workbook references. More option entries than data series
 is rejected. Check the build before relying on this post-RC4 behavior.
+
+## Existing chart backgrounds
+
+Check for `chart_fill` / `plot_area_fill` in the newer build's schema:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"chart_fill":{"fill":"FFFFFF"},"plot_area_fill":{"fill":"F2F5F9"}}}
+```
+
+These change the outer chart background and plot interior independently. Solid,
+gradient and pattern fills use the existing drawing-fill format; image fills,
+shadows and embedded outlines are not accepted. Borders, data, axes and labels
+are preserved. Inspect contrast in the final render.
