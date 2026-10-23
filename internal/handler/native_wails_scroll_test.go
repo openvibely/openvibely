@@ -31,6 +31,7 @@ func TestTaskNativeWheelPagingInWails(t *testing.T) {
 		t.Fatalf("build Wails test host: %v\n%s", err, output)
 	}
 	t.Setenv("CHROME_BIN", runner)
+	t.Run("ordinary-page-scroll-range", TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome)
 	// Run sequentially: each scenario owns a native window and input stream.
 	for _, scenario := range []struct{ name, mode string }{
 		{"during-wheel", "native-wheel"},
