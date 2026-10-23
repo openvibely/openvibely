@@ -107,7 +107,9 @@ Fills accept solid `fill`, `gradient`, or `pattern`, not images. Outline `width`
 is in points; zero removes it. Omitted paint settings remain unchanged. Gradient
 `path` can be `circle`, `rect`, or `shape` instead of `angle`; optional `focus`
 insets `left`, `top`, `right`, `bottom` are fractions in 0..1 (default center).
-Opposing focus insets must not sum above 1. Render and check letter readability.
+Opposing focus insets must not sum above 1. LibreOffice may render glyph gradients
+as flat color; check the intended application when that effect matters. Render
+and check letter readability.
 
 ## Table cell styling and individual sizes
 
