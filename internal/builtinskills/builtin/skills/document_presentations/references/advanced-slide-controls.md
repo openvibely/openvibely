@@ -239,3 +239,15 @@ Overrides accept `text`, `text_style`, `fill`, `outline`, `position`; indices ar
 zero-based. Omitted fields/other labels remain unchanged. Custom text replaces
 the label's existing text formula/runs; chart data is preserved. Hidden-label
 settings remain unchanged. Render and inspect the label placement.
+
+## Axis placement
+
+Check the newer build's schema, then use inspected axis IDs:
+
+```json
+{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"axes":[{"id":"INSPECTED_AXIS_ID","position":"right","tick_label_position":"high"}]}}
+```
+
+`position` is `bottom`, `left`, `right` or `top`; `tick_label_position` is
+`nextTo`, `high`, `low` or `none`. Unspecified settings and axis-crossing values
+remain unchanged. Render to check the final placement.
