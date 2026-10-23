@@ -686,11 +686,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Closed dialogs must not retain transparent composited surfaces. */
 				dialog.modal:not([open]) { display: none; }
-				/* Clip the shell without creating a second scrolling container. */
-				.drawer-content { overflow: clip; }
-				/* Only transcript views need the shell to shrink to the viewport. */
-				.drawer-content:has(#task-detail-content),
-				.drawer-content:has(#chat-messages) { min-height: 0; min-width: 0; }
+				/* Clip without adding a scroll container, but let this grid item shrink
+				   on every page so #main-content owns scrolling and its bottom inset. */
+				.drawer-content { overflow: clip; min-height: 0; min-width: 0; }
 				/* Modal layering */
 				dialog.modal {
 					/* Size open dialogs in viewport coordinates. */
