@@ -339,3 +339,14 @@ verify the resulting labels; native flags do not guarantee visible leader lines.
 The tested LibreOffice preview retained a separator for an individual label
 even when its native separator was saved as empty. Verify exact point-label
 separator behavior in the intended PowerPoint application.
+
+## Chart title style and overlay (after RC4)
+
+Inside `chart_format`, `title_style` uses the chart text style fields and
+`title_overlay` selects overlay (`true`) or above-chart placement (`false`).
+Example: `{"title":"Revenue","title_style":{"font_size":24,"bold":true},"title_overlay":false}`.
+Formatting without `title` requires an existing title; a removed/missing title
+cannot be styled. Existing rich-text runs receive supplied style properties;
+omitted properties and manual layout are retained. Formula-backed title text is
+not replaced by style-only edits. Verify these fields in the newer local schema
+and render to check title placement, especially with an existing manual layout.
