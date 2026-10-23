@@ -938,8 +938,16 @@ func TestAutomationRepoCancelsQueuedDispatchAndPreparedExecution(t *testing.T) {
 		if err := repo.MarkDispatchSubmitted(ctx, dispatch.ID, "prepared-cancellation-owner", execution.ID); err != nil {
 			t.Fatalf("mark prepared dispatch submitted: %v", err)
 		}
-		if err := repo.CancelDispatchesForTask(ctx, task.ID, "prepared execution cancelled"); err != nil {
-			t.Fatalf("CancelDispatchesForTask prepared execution: %v", err)
+		cancelledIDs, err := repo.CancelDispatchesForTaskReturningIDs(ctx, task.ID, "prepared execution cancelled")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cancelledIDs) != 1 || cancelledIDs[0] != execution.ID {
+			t.Fatalf("cancelled IDs = %v, want %s", cancelledIDs, execution.ID)
+		}
+		again, err := repo.CancelDispatchesForTaskReturningIDs(ctx, task.ID, "prepared execution cancelled")
+		if err != nil || len(again) != 0 {
+			t.Fatalf("repeated cancellation IDs=%v err=%v", again, err)
 		}
 
 		var taskStatus, taskCategory, executionStatus, dispatchStatus, invocationStatus, activityStatus string

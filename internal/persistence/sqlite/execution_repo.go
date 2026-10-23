@@ -313,12 +313,33 @@ func createExecutionWithExecutor(ctx context.Context, exec sqlExecutor, e *model
 }
 
 func (r *ExecutionRepo) CancelQueuedOrdinaryByTask(ctx context.Context, taskID, message string) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE executions SET status = 'cancelled', error_message = ?, completed_at = datetime('now')
-		WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, message, taskID)
+	_, err := r.CancelQueuedOrdinaryByTaskReturningIDs(ctx, taskID, message)
+	return err
+}
+
+// CancelQueuedOrdinaryByTaskReturningIDs reports only executions changed by this write.
+func (r *ExecutionRepo) CancelQueuedOrdinaryByTaskReturningIDs(ctx context.Context, taskID, message string) ([]string, error) {
+	var ids []string
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = ?, completed_at = datetime('now')
+   WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL RETURNING id`, message, taskID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
 	if err != nil {
-		return fmt.Errorf("cancelling queued ordinary task execution: %w", err)
+		return nil, fmt.Errorf("cancelling queued ordinary task execution: %w", err)
 	}
-	return nil
+	return ids, nil
 }
 
 func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
