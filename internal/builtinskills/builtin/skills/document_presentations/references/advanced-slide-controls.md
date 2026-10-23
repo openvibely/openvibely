@@ -429,3 +429,12 @@ Use adjustment names/formulas appropriate to that preset. A supplied list replac
 all adjustments; `[]` clears them. Omission retains same-preset adjustments;
 changing the preset resets them. Text, fills and placement remain unchanged.
 Inspect and render the saved slide, including text fit after changing geometry.
+
+## Picture aspect-ratio locking (after RC4)
+
+Use a newer build exposing `lock_aspect_ratio`:
+`{"operation":"image-lock","slide":1,"shape_id":"INSPECTED_PICTURE_ID","lock_aspect_ratio":true}`.
+Use `false` to unlock. New image elements accept the same field. It preserves
+placement, crop, image bytes and other locks. This is a native interactive-resize
+setting; it does not constrain subsequent CLI geometry edits. Inspect saved
+properties and verify interactive behavior in the target application when needed.
