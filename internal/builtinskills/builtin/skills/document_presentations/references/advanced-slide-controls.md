@@ -438,3 +438,14 @@ Use `false` to unlock. New image elements accept the same field. It preserves
 placement, crop, image bytes and other locks. This is a native interactive-resize
 setting; it does not constrain subsequent CLI geometry edits. Inspect saved
 properties and verify interactive behavior in the target application when needed.
+
+## Native table style options (after RC4)
+
+Use a newer build exposing `table_format.style_options`:
+`{"operation":"table-format","slide":1,"shape_id":"INSPECTED_TABLE_ID","table_format":{"style_options":{"header_row":true,"total_row":false,"banded_rows":false,"banded_columns":true}}}`.
+Also accepts `first_column` and `last_column`. New table elements accept the same
+`table_format`. Explicit false disables a flag; omission retains it. These flags
+apply regions of the existing native table style without changing its ID, cells
+or direct formatting. Direct cell formatting may override the visual effect.
+Total-row styling does not add a row or calculate totals. Reopen and render to
+check the requested appearance before delivery.
