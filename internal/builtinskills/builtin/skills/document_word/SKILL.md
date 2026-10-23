@@ -58,6 +58,10 @@ dependencies:
 
 The loader runs the executable health check. Use `"$PAPERWORKS" capabilities` to discover commands and `"$PAPERWORKS" help COMMAND` for arguments when needed. Reuse this information until the runtime changes or a command fails. Office rendering and `refresh` require LibreOffice. `materialize` updates supported SEQ/REF fields without it. LibreOffice pagination can differ from Word.
 
+## Reference discovery
+
+Before creating new documents without a supplied template, reference or visual direction, read [references/reference-discovery.md](references/reference-discovery.md).
+
 ## Choose the operation
 
 For follow-ups, edit the latest saved output. If only a published URL remains, download it through the file tools. Preserve the original, write each edit to a new output, and use that output for subsequent edits.
