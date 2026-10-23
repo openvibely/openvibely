@@ -114,7 +114,8 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					}
 					b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 				}
-				b.waitFor("generic menu ready", `String(!!document.querySelector('#generic-submenu-fixture label') && typeof positionMenuSubmenu === 'function')`, "true")
+				// Initial composer autofocus runs on window load; interacting earlier lets it steal focus mid-test.
+				b.waitFor("generic menu ready", `String(document.readyState === 'complete' && !!document.querySelector('#generic-submenu-fixture label') && typeof positionMenuSubmenu === 'function')`, "true")
 				b.evaluate(`document.querySelector('#generic-submenu-fixture label').focus(); 'ok'`)
 				hover(`#generic-submenu-fixture [data-menu-content] > li:first-child`)
 				b.waitFor("generic submenu opens with native hover", `String(!!document.querySelector('[data-menu-submenu-portaled="true"]'))`, "true")
@@ -274,7 +275,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.waitFor("tab menu dismissed", `String(!document.getElementById('project-tab-menu').getClientRects().length)`, "true")
 				}
 				b.call("Page.navigate", map[string]any{"url": server.URL + "/schedule"}, nil)
-				b.waitFor("schedule context menu", `String(!!document.getElementById('schedule-context-menu'))`, "true")
+				b.waitFor("schedule page loaded", `String(document.readyState === 'complete' && !!document.getElementById('schedule-context-menu'))`, "true")
 				for _, theme := range []string{"dark", "light"} {
 					applyTheme(theme)
 					b.evaluate(`var menu=document.getElementById('schedule-context-menu');menu.classList.remove('hidden');menu.style.left='300px';menu.style.top='200px'; 'ok'`)
