@@ -26,7 +26,7 @@ JSON
 "$PAPERWORKS" render reviewed.docx --output reviewed-preview
 ```
 
-Read `after.json` to verify both the revision and comment. To test revision handling, apply `{"operation":"accept"}` and `{"operation":"reject"}` separately to `tracked.docx`, each with a new output.
+Comments may not appear in headless PDF/PNG renders. Their absence from a preview does not mean they are missing from the DOCX. Read `after.json` to verify the comment text, intended anchored text and anchor status, as well as the revision. To test revision handling, apply `{"operation":"accept"}` and `{"operation":"reject"}` separately to `tracked.docx`, each with a new output.
 
 ### Word operation specifications
 
@@ -111,9 +111,11 @@ This sets `w:updateFields=true`; it does not calculate fields or refresh cached 
 
 ## Advanced document edits
 
-Use built-in heading styles at the correct hierarchy levels for navigation; typed number prefixes do not create automatic numbering. Verify hyperlink/bookmark destinations separately from their rendered appearance. Add image descriptions and table header designations where appropriate; review flagged omissions. Treat decorative images separately from informative images.
+Use built-in heading styles at the correct hierarchy levels for navigation; typed number prefixes do not create automatic numbering. Verify hyperlink/bookmark destinations separately from their rendered appearance. Add meaningful image descriptions, not just filenames, and treat decorative images separately from informative images. Mark a table's first row as a header only when it actually labels the columns. Review flagged omissions and re-render after changing header flags because they affect repeated rows across page breaks. These automated checks and fixes do not establish full accessibility compliance; heading changes require editorial judgment.
 
-For captions, references, page numbers and TOCs, use fields/bookmarks with unique IDs and valid relationships. See Field refresh policy for calculation and page checks. Preserve control properties, tags, choices and bindings when filling forms. When merging documents, check styles, numbering and relationship IDs for collisions, then add requested tracked changes/comments or perform requested metadata cleanup on the merged result. Preserve existing review markup unless its removal was requested.
+Before `watermark-remove`, inspect the matching VML header shapes and choose a specific `contains` value. Removal matches text substrings and can delete legitimate header shapes with matching text. Afterward, inspect the package to confirm the intended shapes are gone, and compare rendered pages for missing logos, lines or other header content and unexpected pagination changes. Some VML watermarks do not appear in headless LibreOffice previews, so an unchanged preview alone cannot prove removal; verify in Word when their appearance remains uncertain.
+
+For captions, references, page numbers and TOCs, use fields/bookmarks with unique IDs and valid relationships. See Field refresh policy for calculation and page checks. Preserve control properties, tags, choices and bindings when filling forms. Paperworks merges body content into the first document, retaining its sections, headers and footers. Appended documents’ section properties are discarded; their page layouts and headers/footers are not preserved. Do not use this as a layout-preserving concatenation of differently formatted documents. When merging documents, check styles, numbering and relationship IDs for collisions, then add requested tracked changes/comments or perform requested metadata cleanup on the merged result. Preserve existing review markup unless its removal was requested.
 
 Direct formatting can mask a style-pack change. Normalize only selected styles when restyling is intended, preserving deliberate emphasis and code formatting. `privacy` is broad: it also removes custom properties and their relationships. Use targeted metadata edits when custom properties must remain. Document protection is an advisory editing restriction, not encryption or a security boundary; viewers may ignore it.
 
@@ -152,3 +154,33 @@ When there is no marker, omit `marker` and use `paragraph:0` (the zero-based dir
 
 Reopen the output and check that each body reference resolves to the correct note text, existing notes remain, and the markers are gone. Open the returned page PNGs with `view_image` to verify numbering, placement and wrapping. Rendered placement can differ between Word and LibreOffice; verify in Word when the task requires it.
 
+
+## Caption and cross-reference example
+
+This self-contained example creates one table, adds a numbered caption and references its number. The built-in creation template defines `Caption`; for an existing file, inspect its styles, existing captions and bookmark names first.
+
+```sh
+cat > caption-source.json <<'JSON'
+{"blocks":[
+ {"type":"paragraph","text":"See Table [[REF]] for revenue."},
+ {"type":"table","rows":[["Category","USD"],["Services","80"]],"widths_twips":[5400,2520],"header":true}
+]}
+JSON
+"$PAPERWORKS" create-docx --spec caption-source.json --output caption-source.docx
+cat > caption.json <<'JSON'
+{"operation":"caption","label":"Table","text":"Revenue","after_table":0,"bookmark":"revenue"}
+JSON
+"$PAPERWORKS" word-edit caption-source.docx --spec caption.json --output captioned.docx
+cat > reference.json <<'JSON'
+{"operation":"reference","name":"revenue","field":true,"marker":"[[REF]]"}
+JSON
+"$PAPERWORKS" word-edit captioned.docx --spec reference.json --output referenced.docx
+cat > materialize.json <<'JSON'
+{"operation":"materialize","only":["SEQ","REF"]}
+JSON
+"$PAPERWORKS" word-edit referenced.docx --spec materialize.json --output numbered.docx
+"$PAPERWORKS" inspect numbered.docx
+"$PAPERWORKS" render numbered.docx --output numbered-preview
+```
+
+Verify that the caption reads “Table 1: Revenue”, the prose reads “See Table 1 for revenue.” and the marker is gone. Inspect the returned PNGs with `view_image` for caption placement and wrapping. Field insertion alone does not calculate the displayed numbers. After inserting/removing captions or changing their order, materialize again before the final render; keep the SEQ/REF fields editable unless freezing was requested.

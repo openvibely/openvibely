@@ -115,3 +115,30 @@ Check `schema word-edit` for `header-footer-link` and the boolean `linked` field
 Run with `word-edit` as above, or include it in a general `batch`. Sections are zero-based. `linked:false` gives an inherited header/footer an **empty** independent definition; it does not copy inherited content. If already independent, its content stays unchanged. `linked:true` restores inheritance from the nearest preceding definition of that kind/type; without one, it displays nothing. Other sections' explicit references and their parts remain intact.
 
 Inspect the target and following sections before changing linkage: later sections that inherit from the target can change appearance too. To keep their existing content, retain their original definitions explicitly; do not treat unlinking as a content-copy command. Linkage does not enable first/even-page display flags. Do not supply `text`, `rows`, `widths_twips` or a header/footer `part`; use `header-footer` separately to replace content. Verify effective references and render affected pages.
+
+## Mixed portrait and landscape sections
+
+This example starts with two paragraphs, ends the first section after paragraph 0 and makes only section 1 landscape. Page dimensions are twips, not inches; 12240 × 15840 is US Letter portrait. Both dimensions must be set for the intended orientation.
+
+```sh
+cat > sections-source.json <<'JSON'
+{"page":{"width_in":8.5,"height_in":11,"margin_in":1},"blocks":[
+ {"type":"paragraph","text":"Portrait page"},
+ {"type":"paragraph","text":"Landscape page"}
+]}
+JSON
+"$PAPERWORKS" create-docx --spec sections-source.json --output sections-source.docx
+cat > sections.json <<'JSON'
+{"operation":"batch","edits":[
+ {"operation":"section-insert","section":0,"paragraph":0,"type":"nextPage"},
+ {"operation":"section-format","section":1,"width":15840,"height":12240},
+ {"operation":"header-footer","section":0,"kind":"header","text":"Portrait report"},
+ {"operation":"header-footer","section":1,"kind":"header","text":"Landscape appendix"}
+]}
+JSON
+"$PAPERWORKS" word-edit sections-source.docx --spec sections.json --output mixed-sections.docx
+"$PAPERWORKS" inspect mixed-sections.docx
+"$PAPERWORKS" render mixed-sections.docx --output mixed-sections-preview
+```
+
+Check that the output has two sections and two pages, the first portrait and the second landscape, with the intended header on each. Open every returned PNG with `view_image`. In an existing document, inspect section ownership and effective header/footer references first; do not copy these indices blindly. New sections can share or inherit headers/footers. The example deliberately replaces each default header with a private definition; use the linkage guidance above when retaining existing content. Also check margins, footers and any enabled first/odd/even-page variants. A continuous break does not force a new page.

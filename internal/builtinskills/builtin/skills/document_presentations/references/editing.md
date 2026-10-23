@@ -186,9 +186,8 @@ Grid children may use positive `column_span` and `row_span`, defaulting to 1. Fo
 `paragraph_style.line_spacing` sets a line-height multiplier
 (`1` is single spacing, `1.2` is 120%; supported range 0.00001–1000).
 This differs from `before`/`after`, which are paragraph spacing in points.
-Confirm `line_spacing` appears in the `ParagraphStyle` definition returned by
-`"$PAPERWORKS" schema slide-edit`; the pinned release lacks it. If absent,
-report the runtime limitation instead of sending an ignored field.
+Paperworks RC4 supports this field in `ParagraphStyle`, including
+`slide-edit` paragraph formatting and new paragraph definitions.
 
 Save an edit spec using the actual inspected shape ID and zero-based paragraph:
 
@@ -199,3 +198,39 @@ Save an edit spec using the actual inspected shape ID and zero-based paragraph:
 Run `"$PAPERWORKS" slide-edit input.pptx --spec spacing.json --output spaced.pptx`.
 New paragraph definitions accept the same setting in `format`. Reapply any
 measured layout after changing spacing, then render and inspect wrapping and overflow.
+
+
+## Native bullets and hanging indentation
+
+```sh
+cat > bullets.json <<'JSON'
+{"slides":[{"elements":[{"type":"text","x":1,"y":1,"w":5,"h":4,"font_size":24,
+ "paragraphs":[
+  {"text":"Inspect the original document before choosing which content and formatting to change.","format":{"bullet":true,"margin_left":18,"indent":-9,"after":8,"line_spacing":1.2}},
+  {"text":"Render the edited document and check wrapped lines, spacing and clipping before delivery.","format":{"bullet":true,"margin_left":18,"indent":-9,"after":8,"line_spacing":1.2}}
+ ]}]}]}
+JSON
+"$PAPERWORKS" create-pptx --spec bullets.json --output bullets.pptx
+"$PAPERWORKS" render bullets.pptx --output bullets-preview
+```
+
+Use native `bullet:true`, not a typed bullet character. `margin_left`, `indent` and paragraph spacing are **points**; the box coordinates are inches. Negative `indent` places the bullet to the left of the text. Open the PNG with `view_image` and verify wrapped continuation lines align with the text, not the bullet, and the last line stays inside the box. Existing paragraphs use the same settings under `paragraph_style` in `paragraph-format` edits; inspect their shape IDs and zero-based paragraph indices first.
+
+## Connect shapes with attached arrows
+
+```sh
+cat > connectors.json <<'JSON'
+{"slides":[{"elements":[
+ {"type":"shape","shape":"rect","x":1,"y":2,"w":3,"h":1,"fill":"D9EAF7","text":"Source"},
+ {"type":"shape","shape":"rect","x":6,"y":3,"w":3,"h":1,"fill":"D9EAF7","text":"Target"},
+ {"type":"connector","x":4,"y":2.5,"w":2,"h":1,
+  "connector":{"kind":"straight","start":{"shape_id":"2","site":3},"end":{"shape_id":"3","site":1}},
+  "drawing_style":{"outline":{"color":"17324D","width":2,"tail":"triangle"}}}
+]}]}
+JSON
+"$PAPERWORKS" create-pptx --spec connectors.json --output connectors.pptx
+"$PAPERWORKS" inspect connectors.pptx
+"$PAPERWORKS" render connectors.pptx --output connectors-preview
+```
+
+The two shapes in this new deck receive IDs `2` and `3`. For a supplied deck, inspect actual slide-local IDs; do not assume creation order or use shape names as IDs. These rectangles use site 3 (right) and site 1 (left); connection-site indices depend on shape geometry. `start`/`end` store native attachments, while the connector box supplies its initial geometry. `tail` puts the arrow at the end/target; `head` puts it at the start. Open the PNG with `view_image` to verify endpoints and direction. Check attachments in the saved package or presentation application as well; a line touching a shape is not proof of an attachment.
