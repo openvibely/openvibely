@@ -431,13 +431,13 @@ func (w *WorkerService) dispatchNext() {
 			if err != nil || dbTask == nil || !validStatus ||
 				(dbTask.Category != models.CategoryActive && dbTask.Category != models.CategoryScheduled) {
 				if ordinaryReserved && w.execRepo != nil {
-					if cancelErr := w.execRepo.CancelQueuedOrdinaryByTask(context.Background(), task.ID, "Task was cancelled or is no longer runnable"); cancelErr != nil {
+					if cancelErr := w.cancelQueuedOrdinaryAndPublish(context.Background(), task.ID, "Task was cancelled or is no longer runnable"); cancelErr != nil {
 						applog.Infof("[worker] cancelling stale reserved task=%s failed: %v", task.ID, cancelErr)
 					}
 				}
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
 				if isPrepared && w.automationRepo != nil {
-					if cancelErr := w.automationRepo.CancelDispatchesForTask(context.Background(), task.ID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
+					if cancelErr := w.cancelDispatchesAndPublish(context.Background(), w.automationRepo, task.ID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
 						applog.Infof("[worker] cancelling queued automation task=%s failed: %v", task.ID, cancelErr)
 					}
 				}
@@ -649,7 +649,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		if claimErr != nil {
 			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
 			if errors.Is(claimErr, persistence.ErrAutomationTaskBusy) && w.automationRepo != nil {
-				if cancelErr := w.automationRepo.CancelDispatchesForTask(context.Background(), task.ID, "Automation task is no longer runnable"); cancelErr != nil {
+				if cancelErr := w.cancelDispatchesAndPublish(context.Background(), w.automationRepo, task.ID, "Automation task is no longer runnable"); cancelErr != nil {
 					applog.Infof("[worker] cancelling rejected automation task=%s failed: %v", task.ID, cancelErr)
 				}
 			}
@@ -837,6 +837,8 @@ func (w *WorkerService) failRunningExecutionsAfterPanic(ctx context.Context, tas
 		}
 		if completeErr := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, exec.TokensUsed, durationMs); completeErr != nil {
 			applog.Infof("[worker] task=%s execution=%s failed completion after panic failed: %v", taskID, exec.ID, completeErr)
+		} else {
+			w.llmSvc.publishExecutionTerminal(exec.ID, models.ExecFailed, errMsg)
 		}
 	}
 }
@@ -1195,12 +1197,12 @@ func (w *WorkerService) CancelQueuedTask(ctx context.Context, taskID, message st
 	w.mu.Unlock()
 
 	if reservedExecutionID != "" && w.execRepo != nil {
-		if err := w.execRepo.CancelQueuedOrdinaryByTask(context.WithoutCancel(ctx), taskID, message); err != nil {
+		if err := w.cancelQueuedOrdinaryAndPublish(context.WithoutCancel(ctx), taskID, message); err != nil {
 			return err
 		}
 	}
 	if w.automationRepo != nil {
-		if err := w.automationRepo.CancelDispatchesForTask(context.WithoutCancel(ctx), taskID, message); err != nil {
+		if err := w.cancelDispatchesAndPublish(context.WithoutCancel(ctx), w.automationRepo, taskID, message); err != nil {
 			return err
 		}
 	}
@@ -1545,4 +1547,26 @@ func (w *WorkerService) ModelRunning(agentConfigID string) int {
 		return int(atomic.LoadInt32(counter))
 	}
 	return 0
+}
+
+func (w *WorkerService) cancelQueuedOrdinaryAndPublish(ctx context.Context, taskID, message string) error {
+	ids, err := w.execRepo.CancelQueuedOrdinaryByTaskReturningIDs(ctx, taskID, message)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		w.llmSvc.publishExecutionTerminal(id, models.ExecCancelled, message)
+	}
+	return nil
+}
+
+func (w *WorkerService) cancelDispatchesAndPublish(ctx context.Context, repo persistence.AutomationStore, taskID, message string) error {
+	ids, err := repo.CancelDispatchesForTaskReturningIDs(ctx, taskID, message)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		w.llmSvc.publishExecutionTerminal(id, models.ExecCancelled, message)
+	}
+	return nil
 }

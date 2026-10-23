@@ -32,10 +32,15 @@ process cleanup even on failure.
 
 The only platform-specific pieces are native input delivery:
 
-- macOS: AppKit wheel events routed to the Wails WKWebView. Native hit testing
+- macOS: AppKit wheel events sent through the Wails NSWindow's event dispatch,
+  rather than directly invoking a private WebKit subview. Native hit testing
   converts the window point into the webview's **superview** coordinates, as
   required by [NSView.hitTest](https://developer.apple.com/documentation/appkit/nsview/hittest(_:)).
   A native regression checks this with an offset, flipped view hierarchy.
+  The underlying CoreGraphics event also receives the intended screen position
+  before conversion to NSEvent; its location must agree with local window
+  routing rather than retaining the physical cursor position. A regression
+  checks the AppKit-to-Quartz conversion, including secondary-screen positions.
 - Linux: GDK smooth scroll events routed to the Wails WebKitGTK view.
 - Windows: wheel messages delivered to the WebView2 child window.
 
@@ -58,3 +63,9 @@ it is not a readiness delay. Assertions follow visible text
 across late height corrections rather than assuming absolute scroll offsets are
 constant. Event coalescing is allowed, but actual input, paging, and text tracking
 must all be observed for the test to pass.
+
+On macOS the host logs the first native event of each gesture (decoded deltas,
+phase, hit-test target, coordinates, and window activation/visibility). These
+lines are included in the native process output when a scenario fails. This
+separates a missing DOM event from malformed native input or inactive routing;
+a successful HTTP response alone still does not prove browser delivery.

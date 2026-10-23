@@ -130,6 +130,7 @@ func (w *Writer) flushPeriodicOnce() {
 			w.mu.Lock()
 			w.persistedOffset = startOffset + len(output)
 			w.mu.Unlock()
+			w.publishPersisted(startOffset + len(output))
 			applog.Debugf("[agent-svc] streamingWriter periodic flush to DB exec=%s task=%s delta_len=%d", w.execID, w.taskID, len(output))
 		}
 	}
@@ -199,6 +200,7 @@ func (w *Writer) Flush() {
 			w.mu.Lock()
 			w.persistedOffset = startOffset + len(pending)
 			w.mu.Unlock()
+			w.publishPersisted(startOffset + len(pending))
 		}
 	}
 	if dbErr := w.repo.FinalizeOutput(flushCtx, w.execID, output); dbErr != nil {
@@ -209,6 +211,7 @@ func (w *Writer) Flush() {
 			w.persistedOffset = len(output)
 		}
 		w.mu.Unlock()
+		w.publishPersisted(len(output))
 		applog.Debugf("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, len(output))
 	}
 }
@@ -266,4 +269,12 @@ func (w *Writer) SetSessionID(sessionID string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.sessionID = sessionID
+}
+
+// Subscribers already caught up ignore this watermark without querying SQLite.
+// A recovering subscriber can replay a missing tail even if no more tokens arrive.
+func (w *Writer) publishPersisted(offset int) {
+	if w.publisher != nil {
+		w.publisher.Publish(events.ExecutionStreamEvent{ExecID: w.execID, Type: events.ExecutionStreamPersisted, Offset: offset})
+	}
 }

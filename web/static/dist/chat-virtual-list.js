@@ -185,11 +185,11 @@
         }
         scrollRestores.forEach(restore => restore());
     }
-    // WebKit's scrolling thread can apply an old absolute offset after a prepend
-    // has already corrected scrollTop on the main thread. Handle vertical wheel
-    // input in the same thread as virtual layout, including trackpad momentum.
-    const webkitWheel = /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg\//.test(navigator.userAgent);
-    function scrollWebKitTranscript(list, event) {
+    // Virtual layout and history insertion correct scrollTop on the main thread.
+    // Apply vertical wheel input there too: asynchronous native scrolling can
+    // otherwise race those corrections (including WebView2 smooth scrolling).
+    // Nested scrollers and modified/horizontal gestures retain native handling.
+    function scrollTranscript(list, event) {
         if (!event.isTrusted || !event.cancelable || event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey ||
             !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
         const messages = list.messages;
@@ -245,10 +245,8 @@
                 list.schedule();
             }) : null;
             messages.addEventListener('scroll', list.schedule, {passive:true});
-            if (webkitWheel) {
-                list.wheel = event => scrollWebKitTranscript(list, event);
-                messages.addEventListener('wheel', list.wheel, {passive:false});
-            }
+            list.wheel = event => scrollTranscript(list, event);
+            messages.addEventListener('wheel', list.wheel, {passive:false});
             lists.set(messages, list);
         }
         return list;

@@ -11,9 +11,10 @@ import (
 type ExecutionStreamEventType string
 
 const (
-	ExecutionStreamDelta ExecutionStreamEventType = "delta"
-	ExecutionStreamDone  ExecutionStreamEventType = "done"
-	ExecutionStreamError ExecutionStreamEventType = "error"
+	ExecutionStreamDelta     ExecutionStreamEventType = "delta"
+	ExecutionStreamPersisted ExecutionStreamEventType = "persisted"
+	ExecutionStreamDone      ExecutionStreamEventType = "done"
+	ExecutionStreamError     ExecutionStreamEventType = "error"
 )
 
 type ExecutionStreamEvent struct {
@@ -171,6 +172,10 @@ func (h *ExecutionStreamHub) Publish(event ExecutionStreamEvent) {
 			select {
 			case e.ch <- event:
 			default:
+				// Never silently lose a delta: closure forces replay/reconnect,
+				// including when this was the last output event before a stall.
+				e.guard.closed = true
+				close(e.ch)
 				// Guard the variadic log call so the drop path allocates
 				// nothing (boxing args into []any allocates even when the
 				// debug level suppresses the message) and stays reproducible.

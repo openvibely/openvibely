@@ -713,20 +713,20 @@ func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, 
 	return nil
 }
 
-// CancelDispatchesForTask atomically cancels all not-yet-finished Automation
+// CancelDispatchesForTaskReturningIDs atomically cancels all not-yet-finished Automation
 // dispatches for a task. It covers both capacity-queued dispatches without an
 // execution and restart-recovered prepared executions waiting for worker
 // capacity. The task lifecycle caller remains responsible for its requested
 // category; this method only releases Automation runtime state and any running
-// prepared execution.
-func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, message string) error {
+// prepared execution. It returns cancelled execution IDs only after commit.
+func (r *AutomationRepo) CancelDispatchesForTaskReturningIDs(ctx context.Context, taskID, message string) ([]string, error) {
 	if r == nil || strings.TrimSpace(taskID) == "" {
-		return errors.New("task is required")
+		return nil, errors.New("task is required")
 	}
 	message = strings.TrimSpace(message)
 	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer finishImmediate()
 
@@ -751,7 +751,7 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 		)
 		ORDER BY d.created_at, d.id`, taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var cancellations []cancellation
 	for rows.Next() {
@@ -759,34 +759,43 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 		if err := rows.Scan(&item.dispatchID, &item.invocationID, &item.executionID, &item.projectID,
 			&item.automationID, &item.versionID, &item.nodeID, &item.taskTitle, &item.taskCategory); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
 		item.oldTaskCategory = item.taskCategory
 		cancellations = append(cancellations, item)
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return nil, err
 	}
 
+	var ids []string
 	for i := range cancellations {
 		item := &cancellations[i]
 		if item.executionID != "" {
-			if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled',
+			result, err := conn.ExecContext(ctx, `UPDATE executions SET status = 'cancelled',
 				error_message = ?, completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
-				WHERE id = ? AND status = 'running'`, message, item.executionID); err != nil {
-				return err
+				WHERE id = ? AND status = 'running'`, message, item.executionID)
+			if err != nil {
+				return nil, err
+			}
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return nil, err
+			}
+			if changed > 0 {
+				ids = append(ids, item.executionID)
 			}
 			if err := cancelOpenAIAsyncToolCallsForExecution(ctx, conn, item.executionID, message); err != nil {
-				return err
+				return nil, err
 			}
-			result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled',
+			result, err = conn.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled',
 				category = CASE WHEN category IN ('active', 'scheduled') THEN 'backlog' ELSE category END,
 				updated_at = CURRENT_TIMESTAMP
 				WHERE id = ? AND status = 'running'`, taskID)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			changed, _ := result.RowsAffected()
+			changed, _ = result.RowsAffected()
 			item.taskChanged = changed == 1
 			if item.taskChanged && (item.oldTaskCategory == models.CategoryActive || item.oldTaskCategory == models.CategoryScheduled) {
 				item.taskCategory = models.CategoryBacklog
@@ -796,15 +805,15 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 			activityErr := conn.QueryRowContext(ctx, `SELECT id FROM automation_activities
 				WHERE invocation_id = ? AND activity_key = ?`, item.invocationID, "dispatch:"+item.dispatchID+":execute").Scan(&activityID)
 			if activityErr != nil && !errors.Is(activityErr, sql.ErrNoRows) {
-				return activityErr
+				return nil, activityErr
 			}
 			if activityID != "" {
 				if _, err := conn.ExecContext(ctx, `UPDATE automation_activities SET status = 'cancelled',
 					completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), error_message = ? WHERE id = ?`, message, activityID); err != nil {
-					return err
+					return nil, err
 				}
 				if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
@@ -812,7 +821,7 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 			result, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = CURRENT_TIMESTAMP
 				WHERE id = ? AND status IN ('cancelled', 'failed') AND category IN ('active', 'scheduled')`, taskID)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			changed, _ := result.RowsAffected()
 			if changed == 1 {
@@ -822,18 +831,18 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?,
 			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, message, item.dispatchID); err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'cancelled', error_message = ?,
 			completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`, message, item.invocationID); err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, item.dispatchID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, item := range cancellations {
@@ -857,7 +866,7 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 			automationobs.String("dispatch_id", item.dispatchID), automationobs.String("task_id", taskID),
 			automationobs.String("execution_id", item.executionID))
 	}
-	return nil
+	return ids, nil
 }
 
 func (r *AutomationRepo) ListAbandonedQueuedDispatches(ctx context.Context, limit int) ([]models.AutomationDispatch, error) {

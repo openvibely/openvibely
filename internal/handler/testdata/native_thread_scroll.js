@@ -75,7 +75,7 @@
     let input = 0, reachableInput = 0, events = 0, cancelled = 0, loaded = false, measured = 0;
     m.addEventListener('wheel', event => {
         if (!event.isTrusted) return;
-        // Predict movement BEFORE the synchronous WebKit handler, independently
+        // Predict movement BEFORE the synchronous transcript handler, independently
         // of its resulting offset. History may be inserted between wheel events
         // in a single frame, adding room above what used to be the top boundary.
         // Clamping the entire frame to its starting scrollTop would incorrectly
@@ -118,7 +118,7 @@
             }
         }
         await new Promise(resolve => requestAnimationFrame(resolve));
-        const expected = webkit ? reachableInput - startReachableInput : Math.min(before, input - startInput);
+        const expected = reachableInput - startReachableInput;
         for (const {range, top} of ranges) {
             measured++;
             if (!range.startContainer.isConnected) throw Error('Reading text detached during native scroll');
@@ -137,14 +137,25 @@
                 // a persistent layout displacement without relaxing the assertion.
                 const followingFrames = [];
                 const failedAt = performance.now();
-                for (let sample=0;sample<12;sample++) {
+                let stableSamples = 0, previousSample = '';
+                for (let sample=0;sample<1000;sample++) {
                     await new Promise(resolve => requestAnimationFrame(resolve));
-                    followingFrames.push({ms:performance.now()-failedAt,
+                    const sampleState = {ms:performance.now()-failedAt,
                         connected:range.startContainer.isConnected,
                         actual:range.startContainer.isConnected ? range.getBoundingClientRect().top-top : null,
                         input:input-startInput,reachableInput:reachableInput-startReachableInput,
                         scrollTop:m.scrollTop,height:m.scrollHeight,events,
-                        restoring:m.dataset.earlierAnchorRestoring,burstDone:!!window._nativeBurstDone});
+                        restoring:m.dataset.earlierAnchorRestoring,burstDone:!!window._nativeBurstDone};
+                    followingFrames.push(sampleState);
+                    // Keep the first twelve frames and the final twelve without
+                    // flooding CI logs. Input is still arriving in early frames.
+                    if(followingFrames.length>24) followingFrames.splice(12,1);
+                    const signature=JSON.stringify([sampleState.actual,input,m.scrollTop,m.scrollHeight]);
+                    const busy=m.dataset.earlierAnchorRestoring==='true' || m.dataset.transcriptHydrating==='true' ||
+                        window._chatContentRenderActive || window._chatContentRenderQueue?.length;
+                    stableSamples=window._nativeBurstDone && !busy && signature===previousSample ? stableSamples+1 : 0;
+                    previousSample=signature;
+                    if(stableSamples>=6 || !range.startContainer.isConnected) break;
                 }
                 throw Error('Native scroll moved reading text by ' + shift + 'px at frame ' + frame + ' '+JSON.stringify({...failure,followingFrames}));
             }
@@ -167,7 +178,7 @@
     }
     // Native events may be coalesced under CI load; require actual movement,
     // page insertion and measured text, not a particular event-delivery rate.
-    if (!loaded || events < 2 || input < 148 || measured === 0 || (webkit && cancelled === 0))
+    if (!loaded || events < 2 || input < 148 || measured === 0 || cancelled === 0)
         throw Error('Native paging coverage: '+JSON.stringify({events,input,cancelled,measured,top:m.scrollTop,height:m.scrollHeight,wheelScale,ua:navigator.userAgent}));
 
     // A nested tool scroller must retain native vertical and horizontal input.
