@@ -8,6 +8,8 @@ Record exact source measurements rather than reconstructing the template by eye.
 
 Use `references/editing.md` for ordinary edits and `references/review-and-fields.md` for controls and fields to fill supported slots. Preserve content-control properties, fields, relationships and deliberate formatting. Check the original hash before applying an edit plan; if the source changed, inspect and relocate the targets again.
 
+If content exceeds a slot, shorten it without losing required meaning or reuse a source component permitted by the template contract. Do not silently shrink text or impose a different layout. Leave optional slots blank or remove them only when permitted; never invent facts to fill space. If the required content cannot fit within the permitted changes, report the constraint.
+
 Run `"$PAPERWORKS" verify-preservation before.docx --against after.docx --requirements contract.json`. The contract uses `{"allow_changed":["word/document.xml"]}` with exact authorized part paths. Build the contract from actual authorized package paths, not every part in the document. After edits, compare package hashes and inspect changed XML to confirm edits within allowed parts stayed within the intended slots. An allowed part can contain unrelated content too.
 
 Render and compare all pages against the source, checking wrapping, overflow, pagination, table widths and header/footer placement. Verify updated fields using the field-refresh policy in `references/review-and-fields.md`. Neither unchanged package hashes nor successful rendering alone proves that the filled content is correct.
