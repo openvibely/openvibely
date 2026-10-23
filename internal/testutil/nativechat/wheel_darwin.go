@@ -51,11 +51,15 @@ static int sendWheel(void* pointer, double x,double y,double dx,double dy,int ph
  NSPoint point=[view convertPoint:NSMakePoint(x,view.isFlipped?y:view.bounds.size.height-y) toView:nil];
  Class cls=objc_allocateClassPair(object_getClass(event),[[NSUUID UUID].UUIDString UTF8String],0);
  class_addMethod(cls,@selector(locationInWindow),imp_implementationWithBlock(^(id unused){return point;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(locationInWindow))));
+ class_addMethod(cls,@selector(windowNumber),imp_implementationWithBlock(^NSInteger(id unused){return window.windowNumber;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(windowNumber))));
  class_addMethod(cls,@selector(window),imp_implementationWithBlock(^(id unused){return window;}),method_getTypeEncoding(class_getInstanceMethod([NSEvent class],@selector(window))));
  objc_registerClassPair(cls);object_setClass(event,cls);
  NSView* target=wheelTarget(view,point);
  if(!target){CFRelease(cg);return 3;}
- [target scrollWheel:event];
+ // Enter AppKit through the window so its gesture routing and event context
+ // are established. Directly calling a hit-tested private WebKit subview
+ // bypasses that path and can acknowledge input without a DOM wheel event.
+ [window sendEvent:event];
  CFRelease(cg);
  return 0;
 }
