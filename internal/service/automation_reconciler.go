@@ -152,7 +152,7 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 		return err
 	}
 	for _, dispatch := range abandoned {
-		if err := r.automationRepo.CancelDispatchesForTask(ctx, dispatch.TaskID, "Automation task was cancelled or is no longer runnable"); err != nil {
+		if err := r.workerSvc.cancelDispatchesAndPublish(ctx, r.automationRepo, dispatch.TaskID, "Automation task was cancelled or is no longer runnable"); err != nil {
 			return err
 		}
 		applog.Infof("[automation-reconciler] cancelled abandoned dispatch=%s execution=%s", dispatch.ID, dispatch.ExecutionID)

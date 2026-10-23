@@ -437,7 +437,7 @@ func (w *WorkerService) dispatchNext() {
 				}
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
 				if isPrepared && w.automationRepo != nil {
-					if cancelErr := w.cancelDispatchesAndPublish(context.Background(), task.ID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
+					if cancelErr := w.cancelDispatchesAndPublish(context.Background(), w.automationRepo, task.ID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
 						applog.Infof("[worker] cancelling queued automation task=%s failed: %v", task.ID, cancelErr)
 					}
 				}
@@ -649,7 +649,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		if claimErr != nil {
 			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
 			if errors.Is(claimErr, persistence.ErrAutomationTaskBusy) && w.automationRepo != nil {
-				if cancelErr := w.cancelDispatchesAndPublish(context.Background(), task.ID, "Automation task is no longer runnable"); cancelErr != nil {
+				if cancelErr := w.cancelDispatchesAndPublish(context.Background(), w.automationRepo, task.ID, "Automation task is no longer runnable"); cancelErr != nil {
 					applog.Infof("[worker] cancelling rejected automation task=%s failed: %v", task.ID, cancelErr)
 				}
 			}
@@ -1202,7 +1202,7 @@ func (w *WorkerService) CancelQueuedTask(ctx context.Context, taskID, message st
 		}
 	}
 	if w.automationRepo != nil {
-		if err := w.cancelDispatchesAndPublish(context.WithoutCancel(ctx), taskID, message); err != nil {
+		if err := w.cancelDispatchesAndPublish(context.WithoutCancel(ctx), w.automationRepo, taskID, message); err != nil {
 			return err
 		}
 	}
@@ -1560,8 +1560,8 @@ func (w *WorkerService) cancelQueuedOrdinaryAndPublish(ctx context.Context, task
 	return nil
 }
 
-func (w *WorkerService) cancelDispatchesAndPublish(ctx context.Context, taskID, message string) error {
-	ids, err := w.automationRepo.CancelDispatchesForTaskReturningIDs(ctx, taskID, message)
+func (w *WorkerService) cancelDispatchesAndPublish(ctx context.Context, repo persistence.AutomationStore, taskID, message string) error {
+	ids, err := repo.CancelDispatchesForTaskReturningIDs(ctx, taskID, message)
 	if err != nil {
 		return err
 	}

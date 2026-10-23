@@ -1804,7 +1804,12 @@ func TestAutomationRuntimeReconcilerCancelsPreparedDispatchForCancelledTask(t *t
 	// Simulate a process loss after TaskService persisted cancellation but before
 	// its in-memory worker cleanup could cancel the prepared execution.
 	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCancelled))
-	reconciler := NewAutomationReconciler(fixture.repo, fixture.stores.Executions, NewWorkerService(nil, 1, nil))
+	hub := events.NewExecutionStreamHub()
+	sub, unsubscribe, subErr := hub.Subscribe(execution.ID)
+	require.NoError(t, subErr)
+	defer unsubscribe()
+	worker := NewWorkerService(&LLMService{executionStreamHub: hub}, 1, nil)
+	reconciler := NewAutomationReconciler(fixture.repo, fixture.stores.Executions, worker)
 	require.NoError(t, reconciler.ReconcileOnce(ctx))
 
 	var dispatchStatus, invocationStatus, executionStatus string
@@ -1817,6 +1822,20 @@ func TestAutomationRuntimeReconcilerCancelsPreparedDispatchForCancelledTask(t *t
 	require.Equal(t, "failed", dispatchStatus)
 	require.Equal(t, string(models.AutomationInvocationCancelled), invocationStatus)
 	require.Equal(t, string(models.ExecCancelled), executionStatus)
+	select {
+	case ev, ok := <-sub:
+		require.True(t, ok)
+		require.Equal(t, events.ExecutionStreamDone, ev.Type)
+		require.Equal(t, string(models.ExecCancelled), ev.Status)
+	default:
+		t.Fatal("cancelled execution subscriber received no terminal event")
+	}
+	select {
+	case _, ok := <-sub:
+		require.False(t, ok, "terminal subscription must close")
+	default:
+		t.Fatal("terminal subscription remained open")
+	}
 	var reservations int
 	reservations = fixture.dispatchOutcome(t, dispatch.ID).Reservations
 	require.Zero(t, reservations)
@@ -1844,7 +1863,11 @@ func TestAutomationRuntimeDispatcherDoesNotResurrectCancelledPreparedExecution(t
 	past := time.Now().UTC().Add(-time.Minute)
 	require.NoError(t, fixture.stores.Fixtures.ExpireAutomationDispatch(ctx, dispatch.ID, past))
 
-	worker := NewWorkerService(nil, 1, nil)
+	hub := events.NewExecutionStreamHub()
+	sub, unsubscribe, subErr := hub.Subscribe(execution.ID)
+	require.NoError(t, subErr)
+	defer unsubscribe()
+	worker := NewWorkerService(&LLMService{executionStreamHub: hub}, 1, nil)
 	dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
 	dispatched, err := dispatcher.DispatchOne(ctx)
 	require.NoError(t, err)
@@ -1860,6 +1883,20 @@ func TestAutomationRuntimeDispatcherDoesNotResurrectCancelledPreparedExecution(t
 	require.Equal(t, "failed", dispatchStatus)
 	require.Equal(t, string(models.AutomationInvocationCancelled), invocationStatus)
 	require.Equal(t, string(models.ExecCancelled), executionStatus)
+	select {
+	case ev, ok := <-sub:
+		require.True(t, ok)
+		require.Equal(t, events.ExecutionStreamDone, ev.Type)
+		require.Equal(t, string(models.ExecCancelled), ev.Status)
+	default:
+		t.Fatal("cancelled execution subscriber received no terminal event")
+	}
+	select {
+	case _, ok := <-sub:
+		require.False(t, ok, "terminal subscription must close")
+	default:
+		t.Fatal("terminal subscription remained open")
+	}
 	var reservations int
 	reservations = fixture.dispatchOutcome(t, dispatch.ID).Reservations
 	require.Zero(t, reservations)

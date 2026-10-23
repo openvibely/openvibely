@@ -122,7 +122,7 @@ func (d *AutomationDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 		execution, err := d.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, d.claimant)
 		if err != nil {
 			if errors.Is(err, persistence.ErrAutomationTaskBusy) {
-				if cancelErr := d.automationRepo.CancelDispatchesForTask(context.WithoutCancel(ctx), dispatch.TaskID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
+				if cancelErr := d.workerSvc.cancelDispatchesAndPublish(context.WithoutCancel(ctx), d.automationRepo, dispatch.TaskID, "Automation task was cancelled or is no longer runnable"); cancelErr != nil {
 					return true, fmt.Errorf("cancelling non-runnable automation dispatch: %w", cancelErr)
 				}
 				return true, nil
