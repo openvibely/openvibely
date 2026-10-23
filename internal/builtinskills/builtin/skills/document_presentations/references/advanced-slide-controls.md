@@ -305,3 +305,17 @@ inside `chart_format`. Widths are points; zero removes the border.
 Use the same solid/gradient/pattern fill and dash options as other outlines.
 Omitted outlines and existing backgrounds remain unchanged. Check the newer
 local schema before use, then render and inspect border placement.
+
+
+## Axis crossing, label offset and line (after RC4)
+
+On an inspected `chart_format.axes` entry, `crosses_at` writes the crossing
+coordinate on that native axis and removes its mutually exclusive automatic
+`crosses` mode. For a value axis it specifies the value at which the other axis
+crosses; category-axis coordinates represent category positions.
+`label_offset_percent` is an integer 0..1000 for category/date axes only
+(100 means 100% of the label font size). `outline` uses point-valued line width,
+fill and optional dash; width zero removes the axis line.
+Example: `{"id":"INSPECTED_VALUE_AXIS_ID","crosses_at":25,"outline":{"width":1,"fill":{"fill":"17324D"}}}`.
+Omitted settings remain unchanged. These are post-RC4 fields; check the local
+schema and render to verify crossing, tick labels and line placement.
