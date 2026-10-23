@@ -203,3 +203,54 @@ func TestProviderSwitchPersistsOnlySuccessfulWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderSwitchNativeCompactionFallback(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rejected", true: "previously rejected"}[cached], func(t *testing.T) {
+			ctx := context.Background()
+			stores := teststores.New(t).Stores
+			svc := &LLMService{execRepo: stores.Executions}
+			agent := models.LLMConfig{ID: "switch-native-fallback", Provider: models.ProviderAnthropic, Model: "claude-opus-4-6", AuthMethod: models.AuthMethodAPIKey, ContextWindow: 200000}
+			key := nativeCompactionSessionKey(agent)
+			knownUnsupportedNativeCompaction.Delete(key)
+			t.Cleanup(func() { knownUnsupportedNativeCompaction.Delete(key) })
+			if cached {
+				knownUnsupportedNativeCompaction.Store(key, true)
+			}
+			req := llmcontracts.AgentRequest{Ctx: ctx, ExecID: "current", TransportScope: "chat:project:switch-native-fallback", Operation: llmcontracts.OperationStreaming, Followup: true, Message: "continue", Agent: agent, ChatHistory: []models.Execution{{ID: "previous", Status: models.ExecCompleted, PromptSent: "earlier question", Output: "earlier answer", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"compaction","encrypted_content":"opaque"}]}`}}}}}
+			calls := 0
+			result, err := svc.callProviderWithCompaction(providerAdapterFunc(func(sent llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				calls++
+				if !cached && calls == 1 {
+					require.False(t, sent.Agent.DisableNativeCompaction)
+					return llmcontracts.AgentResult{}, errors.New("unsupported context management compaction")
+				}
+				require.True(t, sent.Agent.DisableNativeCompaction)
+				require.True(t, sent.DisableNativeCompaction)
+				if !cached && calls == 2 {
+					require.Equal(t, llmcontracts.OperationDirect, sent.Operation)
+					require.NotEmpty(t, sent.SummaryInput)
+					return llmcontracts.AgentResult{Output: "Conversation summary for continuation."}, nil
+				}
+				require.Equal(t, llmcontracts.OperationStreaming, sent.Operation)
+				require.Equal(t, "continue", sent.Message)
+				return llmcontracts.AgentResult{Output: "done"}, nil
+			}), req)
+			require.NoError(t, err)
+			require.Equal(t, "done", result.Output)
+			require.True(t, knownNativeCompactionUnsupported(agent))
+			checkpoint, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "chat_project", "switch-native-fallback")
+			require.NoError(t, err)
+			require.NotNil(t, checkpoint)
+			require.Equal(t, "previous", checkpoint.SourceExecutionID)
+			if cached {
+				require.Equal(t, 1, calls)
+				require.Equal(t, "provider_recovery", checkpoint.Strategy)
+			} else {
+				require.Equal(t, 3, calls)
+				require.Equal(t, "local_summary", checkpoint.Strategy)
+				require.Contains(t, checkpoint.Summary, "Conversation summary")
+			}
+		})
+	}
+}

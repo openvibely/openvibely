@@ -59,8 +59,8 @@ func selectRecoveryWindow(req llmcontracts.AgentRequest, input []json.RawMessage
 	return input[start:]
 }
 
-// Provider switches use readable recent history directly. No summary request or
-// source-provider call is needed; normal compaction resumes on subsequent turns.
+// Provider switches use readable recent history directly, without a source-provider
+// call. Destination native-compaction failures use the normal summary fallback.
 func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, original, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req.NativeCompactionStateJSON = ""
 	req.ProviderSessionStateJSON = ""
@@ -87,6 +87,7 @@ func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, 
 	limits := compactionLimitsForAgent(req.Agent)
 	req.NativeCompactionTokenThreshold = limits.TriggerLimit
 	req.Agent.CompactionThreshold = limits.TriggerLimit
+	req = applyNativeCompactionSupport(req)
 	for {
 		if err := req.Ctx.Err(); err != nil {
 			return llmcontracts.AgentResult{}, err
@@ -98,6 +99,7 @@ func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, 
 		}
 		logContextDecisionWithBudget(original.ChatHistory, req, "provider_switch_truncation", false, nil, budget)
 		res, err := adapter.Call(req)
+		recordProviderRecovery(req, err)
 		if err == nil {
 			// Retry windows remain in memory until the call succeeds. A provider
 			// may already have saved a newer checkpoint during this execution.
@@ -108,6 +110,16 @@ func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, 
 			return res, nil
 		}
 		err = categorizeProviderError(err)
+		if !contextCompactionFallbackDisabled(req.Ctx) && providerSupportsNativeCompaction(req.Agent) && nativeCompactionFailure(err) && !recognizedContextLengthError(err) {
+			// Preserve the saved boundary when the selected window has virtual IDs.
+			recovery := req
+			recovery.RestoredCompactionSourceExecutionID = original.RestoredCompactionSourceExecutionID
+			if len(original.ChatHistory) > 0 && original.ChatHistory[len(original.ChatHistory)-1].ID != "" {
+				recovery.RestoredCompactionSourceExecutionID = original.ChatHistory[len(original.ChatHistory)-1].ID
+			}
+			recovery = restoreCurrentSteeringForRecovery(recovery)
+			return s.callNativeCompactionFallback(adapter, recovery, err)
+		}
 		// Only retry a rejected input, never restart a turn which produced output.
 		if !recognizedContextLengthError(err) || len(input) == 0 || res.Output != "" || res.Usage.OutputTokens > 0 || recoveryExecutedTools(err, input) {
 			return res, err
