@@ -122,3 +122,29 @@ merged-cell origins, not continuation cells. Cells also accept `fill` and
 `text_paint`. Borders use `left`, `right`, `top`, `bottom`; width zero removes a
 border. The table frame resizes to the total row/column sizes. Check that it
 still fits on the slide and that text fits inside the adjusted cells.
+
+## Additional chart families
+
+Newer `create-pptx` builds accept chart types `surface`, `surface3D`, `ofPie`,
+and `barOfPie`. The split-pie types require one series. These are native charts
+with embedded data; inspect and render them in the intended application.
+
+Newer `extended-charts` builds also add/replace literal `waterfall` and `funnel`
+data. Check command help for these types before use; `schema create-pptx` does
+not describe `extended-charts`. Use `--requirements`, not `--spec`:
+
+```json
+{"action":"add","type":"waterfall","slide":1,"name":"Change","position_emu":[914400,914400,5486400,3657600],"categories":["Start","Increase","Decrease"],"values":[100,40,-20]}
+```
+
+```sh
+"$PAPERWORKS" extended-charts input.pptx --requirements chart.json --output updated.pptx
+```
+
+Waterfall values are signed increments. Funnel values must be nonnegative with
+at least one positive value. For replacement, use `action:"replace-data"`, the
+inspected `chart_part`, and `values`; omitted categories keep existing labels,
+so provide new categories when changing the count. Linked workbook data still
+uses `chart-inputs`. Histogram bin settings and hierarchy paths do not apply.
+Do not infer map, combo, box-and-whisker or a cumulative Pareto curve from this
+list. Speaker notes visibility is not a native PPTX edit command.
