@@ -15,8 +15,8 @@ Use `word-edit` with the operations below. `paragraph`, `run`, `table`, `row`, `
 | `image-replace` / `image-resize` / `image-delete` | `image`; replace needs local PNG/JPEG `path`, resize needs `width_in` and/or `height_in`. Replacement uses a private media part. Image indices count standalone pictures in the selected part, excluding charts and grouped artwork. |
 | `section-format` | `section`; page `width`, `height`, margins `top`, `bottom`, `left`, `right`, `header`, `footer`, `gutter`, all in twips (1440 per inch). |
 | `section-insert` | Source `section`, terminating `paragraph`, `type:nextPage/continuous/evenPage/oddPage`. |
-| `header-footer` | `section`, `kind:header/footer`, `type:default/first/even`, `text` or the table specification below on newer builds. Check inherited headers/footers on affected sections. |
-| `header-footer-link` | On newer builds: `section`, `kind:header/footer`, optional `type:default/first/even`, boolean `linked`; see linkage below. |
+| `header-footer` | `section`, `kind:header/footer`, `type:default/first/even`, `text` or the table specification below. Check inherited headers/footers on affected sections. |
+| `header-footer-link` | `section`, `kind:header/footer`, optional `type:default/first/even`, boolean `linked`; see linkage below. |
 | `batch` | `edits` array of these general operations. Indices reflect earlier edits. No nested batches or specialized review operations inside a batch. |
 
 ### General editing example
@@ -40,7 +40,7 @@ Verify the paragraph changed, the table and unrelated text remain, and no tracke
 
 ## Header and footer tables
 
-On newer builds, `header-footer` accepts `rows` instead of `text`. Check `schema word-edit` for `rows` and `widths_twips`; the pinned `v0.0.1-rc2` lacks this addition. If absent, report the runtime limitation rather than sending ignored fields.
+`header-footer` accepts `rows` instead of `text`. Use `widths_twips` for column widths.
 
 ```json
 {"operation":"header-footer","section":0,"kind":"footer","type":"default",
@@ -53,7 +53,6 @@ Run with `word-edit` as above. The zero-based section receives a private header/
 ## Link to the previous section
 
 Check `schema word-edit` for `header-footer-link` and the boolean `linked` field.
-This requires a newer local build than the pinned `v0.0.1-rc2`.
 
 ```json
 {"operation":"header-footer-link","section":1,"kind":"footer","type":"default","linked":false}

@@ -72,7 +72,7 @@ JSON
 
 ## Fit row heights to content
 
-On newer builds, `workbook-edit` supports `autofit-rows`; confirm it appears in `"$PAPERWORKS" help workbook-edit`. It is absent from the pinned `v0.0.1-rc2`.
+Use `workbook-edit` with `autofit-rows` to size rows for a cell range.
 
 ```json
 {"edits":[{"operation":"autofit-rows","sheet":"Data","range":"A1:D20"}]}
