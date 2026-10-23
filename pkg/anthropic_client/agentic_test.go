@@ -1266,12 +1266,23 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 	client := NewWithAPIKey("test-key")
 
 	var compactionCalled bool
+	savedCompaction := false
 	resp, err := client.SendAgentic(context.Background(), "test prompt", &AgenticOptions{
 		Model:          "claude-sonnet-4-6",
 		MaxTokens:      8192,
 		MaxTurns:       5,
 		DisableTools:   true, // We handle tool results manually in the mock
 		AutoCompaction: true,
+		OnReplaySave: func(ctx context.Context, replay []Message) error {
+			encoded, err := json.Marshal(replay)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(encoded), "Summary of prior context.") && strings.Contains(string(encoded), `"type":"compaction"`) {
+				savedCompaction = true
+			}
+			return nil
+		},
 		OnCompaction: func(summary string) {
 			compactionCalled = true
 			if summary != "Summary of prior context." {
@@ -1283,6 +1294,9 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if !savedCompaction {
+		t.Error("pre-tool replay omitted native compaction block")
+	}
 	if !compactionCalled {
 		t.Error("OnCompaction callback was not called")
 	}
@@ -3094,5 +3108,52 @@ func TestCompactionProgressStreamLifecycle(t *testing.T) {
 				t.Fatalf("progress = %#v", events)
 			}
 		})
+	}
+}
+
+func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		if requests > 1 && (!strings.Contains(string(body), "result-first") || !strings.Contains(string(body), "result-second")) {
+			t.Errorf("lost results: %s", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: "+`{"type":"message_start","message":{"id":"message","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}`+"\n\n")
+		if requests == 1 {
+			for i, name := range []string{"first", "second"} {
+				fmt.Fprintf(w, "data: {\"type\":\"content_block_start\",\"index\":%d,\"content_block\":{\"type\":\"tool_use\",\"id\":\"%s\",\"name\":\"%s\",\"input\":{}}}\n\ndata: {\"type\":\"content_block_stop\",\"index\":%d}\n\n", i, name, name, i)
+			}
+			fmt.Fprint(w, "data: "+`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":10}}`+"\n\n")
+		} else {
+			fmt.Fprint(w, "data: "+`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"done"}}`+"\n\ndata: "+`{"type":"content_block_stop","index":0}`+"\n\ndata: "+`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`+"\n\n")
+		}
+		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+	old := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = old }()
+	executed := 0
+	failed, recovered := false, false
+	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "claude-sonnet-4-6", MaxTurns: 2, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "first", InputSchema: json.RawMessage(`{"type":"object"}`)}, {Name: "second", InputSchema: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+		executed++
+		return "result-" + name, false, nil
+	}, OnReplaySave: func(_ context.Context, items []Message) error {
+		data, _ := json.Marshal(items)
+		if strings.Contains(string(data), "result-first") {
+			if !failed {
+				failed = true
+				return errors.New("temporary write failure")
+			}
+			if strings.Contains(string(data), "result-second") {
+				recovered = true
+			}
+		}
+		return nil
+	}})
+	if err != nil || !failed || !recovered || executed != 2 || requests != 2 {
+		t.Fatalf("err=%v failed=%v recovered=%v tools=%d requests=%d", err, failed, recovered, executed, requests)
 	}
 }

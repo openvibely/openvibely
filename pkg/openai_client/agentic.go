@@ -695,19 +695,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			syncTasks = append(syncTasks, task)
 		}
 
-		executed := executeOpenAIToolTasks(ctx, opts, syncTasks)
-		asyncExecuted := executeOpenAIToolTasks(ctx, opts, asyncTasks)
-		for _, exec := range asyncExecuted {
-			if opts.OnAsyncToolResult != nil {
-				if err := opts.OnAsyncToolResult(ctx, exec.record, exec.output, exec.isError); err != nil {
-					return nil, fmt.Errorf("turn %d complete async tool call: %w", turn+1, err)
-				}
-			}
-		}
-		executed = append(executed, asyncExecuted...)
-		localItemsAfterResponse := make([]any, 0, len(executed))
-		deliveryRecords := make([]AsyncToolCallRecord, 0, len(asyncExecuted))
-		for _, exec := range executed {
+		localItemsAfterResponse := make([]any, 0, len(syncTasks)+len(asyncTasks))
+		deliveryRecords := make([]AsyncToolCallRecord, 0, len(asyncTasks))
+		var saveMu sync.Mutex
+		var asyncResultErr error
+		completed := func(exec openAIToolExecutionResult) {
+			saveMu.Lock()
+			defer saveMu.Unlock()
 			if exec.webSearchResult != nil {
 				searchResult := *exec.webSearchResult
 				searchResult.CallID = exec.call.CallID
@@ -748,9 +742,23 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				localItemsAfterResponse = append(localItemsAfterResponse, item)
 			}
 			if exec.record.ID != "" {
+				if opts.OnAsyncToolResult != nil {
+					if err := opts.OnAsyncToolResult(ctx, exec.record, exec.output, exec.isError); err != nil && asyncResultErr == nil {
+						asyncResultErr = err
+					}
+				}
 				deliveryRecords = append(deliveryRecords, exec.record)
 			}
+			if err := persistHistory(context.WithoutCancel(ctx), inputItems); err != nil {
+				applog.Infof("[openai-client] intermediate tool transcript save failed; continuing with in-memory history: %v", err)
+			}
 		}
+		executeOpenAIToolTasks(ctx, opts, syncTasks, completed)
+		executeOpenAIToolTasks(ctx, opts, asyncTasks, completed)
+		if asyncResultErr != nil {
+			return nil, asyncResultErr
+		}
+
 		// Preserve completed tool results even when cancellation or compaction
 		// prevents the next model request from starting.
 		if persistSteeringHistory != nil || opts.OnHistory != nil {
@@ -941,15 +949,20 @@ func openAIToolCallName(namespace, name string) string {
 	return namespace + "." + name
 }
 
-func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []openAIToolExecutionTask) []openAIToolExecutionResult {
+func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []openAIToolExecutionTask, onComplete ...func(openAIToolExecutionResult)) []openAIToolExecutionResult {
 	if len(tasks) == 0 {
 		return nil
 	}
 
 	results := make([]openAIToolExecutionResult, len(tasks))
+	notify := func(r openAIToolExecutionResult) {
+		for _, f := range onComplete {
+			f(r)
+		}
+	}
 	runOne := func(i int) {
 		task := tasks[i]
-		output, isError, webSearchResult := runOpenAIToolTask(ctx, opts, task.call.Name, task.input)
+		output, isError, webSearchResult := runOpenAIToolTask(llmcontracts.WithToolCallID(ctx, task.call.CallID), opts, task.call.Name, task.input)
 		if webSearchResult != nil {
 			webSearchResult.CallID = task.call.CallID
 			webSearchResult.Commands = append(json.RawMessage(nil), task.input...)
@@ -962,6 +975,7 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 			record:          task.record,
 			webSearchResult: webSearchResult,
 		}
+		notify(results[i])
 	}
 	if requestIndex := exclusiveRequestUserInputTask(tasks); requestIndex >= 0 {
 		for i, task := range tasks {
@@ -973,6 +987,7 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 				call: task.call, inputMap: task.inputMap,
 				output: "tool call rejected: request_user_input must complete in its own model turn", isError: true,
 			}
+			notify(results[i])
 		}
 		return results
 	}

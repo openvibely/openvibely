@@ -859,6 +859,43 @@ func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, 
 func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
 	var recovered int64
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		// Installation answers can claim a direct continuation before its runner
+		// starts. Treat both queued claims and running continuations as interrupted,
+		// including Chat, without re-delivering the saved answer. Only executions
+		// still active and explicitly linked to a question are selected.
+		const interruptedInstallation = `e.status IN ('queued','running') AND e.dispatch_id IS NULL
+            AND EXISTS (SELECT 1 FROM chat_input_requests q
+                WHERE q.status='resolved' AND json_extract(q.questions_json,'$.kind')='skill_installation'
+                  AND json_extract(q.questions_json,'$.installation.continuation_execution_id')=e.id)
+            AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id=e.task_id)`
+		// Preserve undelivered steering before terminalizing these executions;
+		// ordinary steering recovery below only selects running executions.
+		if _, err := exec.ExecContext(ctx, `UPDATE thread_inputs
+            SET input_mode='queued', turn_id=NULL, expected_turn_id=NULL, updated_at=datetime('now')
+            WHERE input_status='pending' AND input_mode='steering'
+              AND run_execution_id IN (SELECT e.id FROM executions e WHERE `+interruptedInstallation+`)`); err != nil {
+			return fmt.Errorf("requeueing interrupted installation steering inputs: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks
+            SET status='failed', category=CASE WHEN category='chat' THEN category ELSE 'backlog' END,
+                updated_at=datetime('now')
+            WHERE status!='cancelled' AND id IN (SELECT e.task_id FROM executions e WHERE `+interruptedInstallation+`)`); err != nil {
+			return fmt.Errorf("recovering interrupted installation tasks: %w", err)
+		}
+		interrupted, err := exec.ExecContext(ctx, `UPDATE executions AS e
+            SET status=CASE WHEN (SELECT t.status FROM tasks t WHERE t.id=e.task_id)='cancelled' THEN 'cancelled' ELSE 'failed' END,
+                error_message=CASE WHEN COALESCE(error_message,'')=''
+                THEN 'Recovered interrupted execution after restart' ELSE error_message END,
+                completed_at=datetime('now')
+            WHERE `+interruptedInstallation)
+		if err != nil {
+			return fmt.Errorf("recovering interrupted installation executions: %w", err)
+		}
+		recovered, err = interrupted.RowsAffected()
+		if err != nil {
+			return err
+		}
+
 		// No direct or promoted task-thread runner survives a process restart.
 		// Automation dispatches retain a durable dispatch identity/reservation and
 		// are deliberately left to Automation reconciliation.
@@ -922,7 +959,8 @@ func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Conte
 		if err != nil {
 			return fmt.Errorf("recovering pre-restart task-thread executions: %w", err)
 		}
-		recovered, err = result.RowsAffected()
+		count, err := result.RowsAffected()
+		recovered += count
 		if err != nil {
 			return fmt.Errorf("counting pre-restart task-thread executions: %w", err)
 		}

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/skilldeps"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -66,16 +68,18 @@ type skillSaveRequest struct {
 }
 
 type skillDetailResponse struct {
-	Handle      string   `json:"handle"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Scope       string   `json:"scope"`
-	Source      string   `json:"source"`
-	Content     string   `json:"content"`
-	Files       []string `json:"files"`
-	Archived    bool     `json:"archived"`
-	Enabled     bool     `json:"enabled"`
-	AlwaysUse   bool     `json:"always_use"`
+	Dependencies []skilldeps.Dependency `json:"dependencies"`
+	Platform     string                 `json:"platform"`
+	Handle       string                 `json:"handle"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Scope        string                 `json:"scope"`
+	Source       string                 `json:"source"`
+	Content      string                 `json:"content"`
+	Files        []string               `json:"files"`
+	Archived     bool                   `json:"archived"`
+	Enabled      bool                   `json:"enabled"`
+	AlwaysUse    bool                   `json:"always_use"`
 }
 
 func (h *Handler) ListSkills(c echo.Context) error {
@@ -218,15 +222,17 @@ func (h *Handler) GetSkillDetail(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	resp := skillDetailResponse{
-		Handle:      handle,
-		Name:        firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, handle),
-		Description: firstNonEmpty(decl.Skill.Description, decl.Routing.Description),
-		Scope:       scope,
-		Source:      scope,
-		Content:     content,
-		Files:       listStandaloneSkillPackageFiles(skillPath),
-		Archived:    decl.Skill.Archived,
-		Enabled:     decl.Skill.Enabled == nil || *decl.Skill.Enabled,
+		Dependencies: decl.Dependencies,
+		Platform:     runtime.GOOS + "/" + runtime.GOARCH,
+		Handle:       handle,
+		Name:         firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, handle),
+		Description:  firstNonEmpty(decl.Skill.Description, decl.Routing.Description),
+		Scope:        scope,
+		Source:       scope,
+		Content:      content,
+		Files:        listStandaloneSkillPackageFiles(skillPath),
+		Archived:     decl.Skill.Archived,
+		Enabled:      decl.Skill.Enabled == nil || *decl.Skill.Enabled,
 	}
 	switch scope {
 	case "global":
@@ -680,6 +686,7 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 			card.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
 			card.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
 			card.Archived = decl.Skill.Archived
+			card.RequiresExternalTools = len(decl.Dependencies) > 0
 			card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
 		}
 		out = append(out, card)

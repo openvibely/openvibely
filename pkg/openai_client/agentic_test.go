@@ -5606,3 +5606,69 @@ func contextWindowForSafeInputBudget(target int) int {
 	}
 	return low
 }
+
+func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
+	for _, compatible := range []bool{false, true} {
+		t.Run(fmt.Sprintf("compatible=%t", compatible), func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				body, _ := io.ReadAll(r.Body)
+				if requests > 1 && (!strings.Contains(string(body), "result-first") || !strings.Contains(string(body), "result-second")) {
+					t.Errorf("lost tool results: %s", body)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				if compatible {
+					if requests == 1 {
+						fmt.Fprint(w, "data: "+`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"first","type":"function","function":{"name":"first","arguments":"{}"}},{"index":1,"id":"second","type":"function","function":{"name":"second","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`+"\n\n")
+					} else {
+						fmt.Fprint(w, "data: "+`{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`+"\n\n")
+					}
+					fmt.Fprint(w, "data: [DONE]\n\n")
+				} else {
+					if requests == 1 {
+						for i, name := range []string{"first", "second"} {
+							fmt.Fprintf(w, "data: {\"type\":\"response.output_item.done\",\"output_index\":%d,\"item\":{\"type\":\"function_call\",\"call_id\":\"%s\",\"name\":\"%s\",\"arguments\":\"{}\"}}\n\n", i, name, name)
+						}
+					} else {
+						fmt.Fprint(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n")
+					}
+					fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n")
+				}
+			}))
+			defer server.Close()
+			tools := []ToolDefinition{{Type: "function", Name: "first", Parameters: json.RawMessage(`{"type":"object"}`)}, {Type: "function", Name: "second", Parameters: json.RawMessage(`{"type":"object"}`)}}
+			executed := 0
+			executor := func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+				executed++
+				return "result-" + name, false, nil
+			}
+			failed, recovered := false, false
+			save := func(items any) error {
+				data, _ := json.Marshal(items)
+				if strings.Contains(string(data), "result-first") {
+					if !failed {
+						failed = true
+						return errors.New("temporary write failure")
+					}
+					if strings.Contains(string(data), "result-second") {
+						recovered = true
+					}
+				}
+				return nil
+			}
+			var err error
+			if compatible {
+				_, err = NewWithCompatibleAPIKey("test", server.URL+"/v1", "", "").SendCompletions(context.Background(), "test", &CompletionsOptions{MaxTurns: 2, SkipDefaultTools: true, ExtraTools: tools, ToolExecutor: executor, OnReplay: func(_ context.Context, items []CompletionsHistoryMessage) error { return save(items) }})
+			} else {
+				old := OpenAIAPIBaseURL
+				OpenAIAPIBaseURL = server.URL + "/"
+				defer func() { OpenAIAPIBaseURL = old }()
+				_, err = newHTTPTestAPIKeyClient("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "gpt-5.3-codex", MaxTurns: 2, SkipDefaultTools: true, ExtraTools: tools, ToolExecutor: executor, OnHistory: func(_ context.Context, items []any) error { return save(items) }})
+			}
+			if err != nil || !failed || !recovered || executed != 2 || requests != 2 {
+				t.Fatalf("err=%v failed=%v recovered=%v tools=%d requests=%d", err, failed, recovered, executed, requests)
+			}
+		})
+	}
+}

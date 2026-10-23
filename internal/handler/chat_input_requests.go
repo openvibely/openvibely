@@ -47,28 +47,30 @@ type chatInputRequestAnswerPayload struct {
 }
 
 type chatInputRequestBroker struct {
-	mu       sync.Mutex
-	requests map[string]*chatInputRequest
-	now      func() time.Time
+	startedAt time.Time
+	mu        sync.Mutex
+	requests  map[string]*chatInputRequest
+	now       func() time.Time
 }
 
 type chatInputRequest struct {
-	ID        string
-	ProjectID string
-	ExecID    string
-	Questions []chatInputRequestQuestion
-	Answers   []chatInputRequestAnswer
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	answerCh  chan []chatInputRequestAnswer
-	resolved  bool
+	Installation *persistence.ChatInstallationRequest
+	ID           string
+	ProjectID    string
+	ExecID       string
+	Questions    []chatInputRequestQuestion
+	Answers      []chatInputRequestAnswer
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	answerCh     chan []chatInputRequestAnswer
+	resolved     bool
 }
 
 func newChatInputRequestBroker() *chatInputRequestBroker {
-	return &chatInputRequestBroker{requests: map[string]*chatInputRequest{}, now: time.Now}
+	return &chatInputRequestBroker{startedAt: time.Now(), requests: map[string]*chatInputRequest{}, now: time.Now}
 }
 
-func (b *chatInputRequestBroker) create(projectID, execID string, questions []chatInputRequestQuestion) (*chatInputRequest, error) {
+func (b *chatInputRequestBroker) create(projectID, execID string, questions []chatInputRequestQuestion, installation ...*persistence.ChatInstallationRequest) (*chatInputRequest, error) {
 	if b == nil {
 		return nil, fmt.Errorf("input request broker unavailable")
 	}
@@ -85,6 +87,9 @@ func (b *chatInputRequestBroker) create(projectID, execID string, questions []ch
 		CreatedAt: now,
 		ExpiresAt: now.Add(chatInputRequestTTL),
 		answerCh:  make(chan []chatInputRequestAnswer, 1),
+	}
+	if len(installation) > 0 {
+		req.Installation = installation[0]
 	}
 	b.mu.Lock()
 	b.cleanupLocked(now)
@@ -115,7 +120,7 @@ func (b *chatInputRequestBroker) wait(ctx context.Context, id string) ([]chatInp
 	}
 }
 
-func (b *chatInputRequestBroker) resolve(id, projectID string, answers []chatInputRequestAnswer) (*chatInputRequest, error) {
+func (b *chatInputRequestBroker) resolve(id, projectID string, answers []chatInputRequestAnswer, installation ...bool) (*chatInputRequest, error) {
 	if b == nil {
 		return nil, echo.NewHTTPError(http.StatusGone, "input request broker unavailable")
 	}
@@ -125,6 +130,9 @@ func (b *chatInputRequestBroker) resolve(id, projectID string, answers []chatInp
 	req := b.requests[strings.TrimSpace(id)]
 	if req == nil {
 		return nil, echo.NewHTTPError(http.StatusGone, "input request is missing, expired, or already resolved")
+	}
+	if req.Installation != nil && (len(installation) == 0 || !installation[0]) {
+		return nil, echo.NewHTTPError(http.StatusForbidden, "installation answer requires human authorization")
 	}
 	if req.resolved {
 		return nil, echo.NewHTTPError(http.StatusConflict, "input request already resolved")
@@ -261,6 +269,21 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
 		return err
 	}
+	if h.chatInputRequestRepo != nil {
+		record, err := h.chatInputRequestRepo.Get(c.Request().Context(), id)
+		if err != nil {
+			return err
+		}
+		if record != nil {
+			_, installation, err := record.DecodeQuestions()
+			if err != nil {
+				return err
+			}
+			if installation != nil {
+				return h.answerSkillInstallation(c, record, payload)
+			}
+		}
+	}
 	resolved, err := h.chatInputRequests.resolve(id, projectID, payload.Answers)
 	recovered := false
 	if err != nil {
@@ -297,6 +320,21 @@ func (h *Handler) ChatInputRequests(c echo.Context) error {
 	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
 		return err
 	}
+	if executionID := strings.TrimSpace(c.QueryParam("execution_id")); executionID != "" {
+		records, err := h.chatInputRequestRepo.ListByExecutions(c.Request().Context(), projectID, []string{executionID})
+		if err != nil {
+			return err
+		}
+		var items []*events.ChatInputRequestEvent
+		for _, record := range records {
+			request, err := chatInputRequestFromRecord(record)
+			if err != nil {
+				return err
+			}
+			items = append(items, chatInputRequestForEvent(request))
+		}
+		return render(c, http.StatusOK, pages.ChatInputRequestCards(items))
+	}
 	items, err := h.chatInputRequestEvents(c.Request().Context(), projectID)
 	if err != nil {
 		return err
@@ -314,6 +352,22 @@ func (h *Handler) chatInputRequestEvents(ctx context.Context, projectID string) 
 	}
 	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
 	for _, req := range requests {
+		if req.Installation != nil {
+			execution, err := h.execRepo.GetByID(ctx, req.ExecID)
+			if err != nil {
+				return nil, err
+			}
+			if execution == nil {
+				continue
+			}
+			task, err := h.taskRepo.GetByID(ctx, execution.TaskID)
+			if err != nil {
+				return nil, err
+			}
+			if task == nil || task.Category != models.CategoryChat {
+				continue
+			}
+		}
 		items = append(items, chatInputRequestForEvent(req))
 	}
 	return items, nil
@@ -326,6 +380,12 @@ func (h *Handler) persistChatInputRequest(ctx context.Context, req *chatInputReq
 	questionsJSON, err := json.Marshal(req.Questions)
 	if err != nil {
 		return fmt.Errorf("encoding chat input request questions: %w", err)
+	}
+	if req.Installation != nil {
+		questionsJSON, err = json.Marshal(persistence.ChatInputRequestPayload{Kind: "skill_installation", Questions: questionsJSON, Installation: req.Installation})
+		if err != nil {
+			return err
+		}
 	}
 	return h.chatInputRequestRepo.Create(ctx, persistence.ChatInputRequestRecord{
 		ID:            req.ID,
@@ -416,7 +476,11 @@ func (h *Handler) completeRecoveredChatInputExecution(ctx context.Context, req *
 
 func chatInputRequestFromRecord(record persistence.ChatInputRequestRecord) (*chatInputRequest, error) {
 	var questions []chatInputRequestQuestion
-	if err := json.Unmarshal([]byte(record.QuestionsJSON), &questions); err != nil {
+	raw, installation, err := record.DecodeQuestions()
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &questions); err != nil {
 		return nil, fmt.Errorf("decoding chat input request questions: %w", err)
 	}
 	var answers []chatInputRequestAnswer
@@ -426,15 +490,16 @@ func chatInputRequestFromRecord(record persistence.ChatInputRequestRecord) (*cha
 		}
 	}
 	return &chatInputRequest{
-		ID:        record.ID,
-		ProjectID: record.ProjectID,
-		ExecID:    record.ExecutionID,
-		Questions: cloneChatInputQuestions(questions),
-		Answers:   cloneChatInputAnswers(answers),
-		CreatedAt: record.CreatedAt,
-		ExpiresAt: record.ExpiresAt,
-		answerCh:  make(chan []chatInputRequestAnswer, 1),
-		resolved:  record.Status == persistence.ChatInputRequestResolved,
+		Installation: installation,
+		ID:           record.ID,
+		ProjectID:    record.ProjectID,
+		ExecID:       record.ExecutionID,
+		Questions:    cloneChatInputQuestions(questions),
+		Answers:      cloneChatInputAnswers(answers),
+		CreatedAt:    record.CreatedAt,
+		ExpiresAt:    record.ExpiresAt,
+		answerCh:     make(chan []chatInputRequestAnswer, 1),
+		resolved:     record.Status == persistence.ChatInputRequestResolved,
 	}, nil
 }
 
@@ -446,7 +511,12 @@ func chatInputRequestForEvent(req *chatInputRequest) *events.ChatInputRequestEve
 	for _, answer := range req.Answers {
 		answers = append(answers, events.ChatInputRequestAnswer{QuestionID: answer.QuestionID, Label: answer.Label})
 	}
+	var installation json.RawMessage
+	if req.Installation != nil {
+		installation = req.Installation.Manifest
+	}
 	return &events.ChatInputRequestEvent{
+		ProjectID: req.ProjectID, Installation: installation,
 		ID: req.ID, ExecID: req.ExecID, ExpiresAt: req.ExpiresAt.UTC().Format(time.RFC3339),
 		Questions: chatInputQuestionsForEvent(req.Questions), Answers: answers, Completed: req.resolved,
 	}

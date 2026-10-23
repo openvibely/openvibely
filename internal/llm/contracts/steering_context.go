@@ -161,3 +161,8 @@ func RecordResponsesRecovery(ctx context.Context, transcript string) {
 		record(transcript)
 	}
 }
+
+// Internal installation delivery records are never user messages. The original
+// provider tool exchange is completed before sampling again.
+const SkillInputResultPrefix = "openvibely:skill-input-result\n"
+const PendingSkillInputPrefix = "skill_view awaiting user input: "

@@ -140,8 +140,10 @@ type AgenticOptions struct {
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
 	// RecoveryMessages replaces history and prompt after service-side compaction.
-	RecoveryMessages     []Message
-	OnReplay             func([]Message)
+	RecoveryMessages []Message
+	OnReplay         func([]Message)
+	// OnReplaySave saves replay, including native compaction blocks, before tools run.
+	OnReplaySave         func(context.Context, []Message) error
 	OnCompactionProgress func(llmcontracts.CompactionProgress)
 	OnCompaction         func(summary string) // called when context is compacted
 }
@@ -611,7 +613,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 
 		replayBlocks, _ := json.Marshal(resp.contentBlocks)
+		if resp.compaction != nil {
+			blocks := []any{compactionBlockJSON{Type: "compaction", Content: resp.compaction.content, EncryptedContent: resp.compaction.encryptedContent}}
+			for _, block := range resp.contentBlocks {
+				blocks = append(blocks, block)
+			}
+			replayBlocks, _ = json.Marshal(blocks)
+		}
 		replay = append(replay, Message{Role: "assistant", ContentBlocks: replayBlocks})
+		if opts.OnReplaySave != nil {
+			if err := opts.OnReplaySave(ctx, replay); err != nil {
+				return nil, err
+			}
+		}
 		// Collect text blocks for this turn.
 		turnText := ""
 		for _, block := range resp.contentBlocks {
@@ -657,9 +671,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			toolUseBlocks = append(toolUseBlocks, block)
 		}
 
-		executed := executeAnthropicToolUses(ctx, opts, toolUseBlocks)
-		toolResults := make([]agenticBlock, 0, len(executed))
-		for _, exec := range executed {
+		toolResults := make([]agenticBlock, 0, len(toolUseBlocks))
+		replayResultIndex := len(replay)
+		var saveMu sync.Mutex
+		completed := func(exec anthropicToolExecutionResult) {
+			saveMu.Lock()
+			defer saveMu.Unlock()
 			if opts.OnToolResult != nil {
 				opts.OnToolResult(exec.block.Name, exec.output, exec.isError)
 			}
@@ -683,7 +700,18 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				Content:   content,
 				IsError:   exec.isError,
 			})
+			if opts.OnReplaySave != nil {
+				encoded, _ := json.Marshal(toolResults)
+				if len(replay) == replayResultIndex {
+					replay = append(replay, Message{Role: "user"})
+				}
+				replay[replayResultIndex].ContentBlocks = encoded
+				if err := opts.OnReplaySave(context.WithoutCancel(ctx), replay); err != nil {
+					applog.Infof("[anthropicclient] intermediate tool transcript save failed; continuing with in-memory history: %v", err)
+				}
+			}
 		}
+		executeAnthropicToolUses(ctx, opts, toolUseBlocks, completed)
 
 		// For server-side pause_turn, continue the loop by re-sending the same
 		// conversation context (no extra user message required).
@@ -711,7 +739,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// Persist the exact model-visible results, including resolved tool images.
 		replayResults := append([]agenticBlock(nil), toolResults...)
 		replayJSON, _ := json.Marshal(replayResults)
-		replay = append(replay, Message{Role: "user", ContentBlocks: replayJSON})
+		if len(replay) == replayResultIndex {
+			replay = append(replay, Message{Role: "user"})
+		}
+		replay[replayResultIndex].ContentBlocks = replayJSON
 		// Add tool results as user message.
 		userBlocks := append([]agenticBlock(nil), toolResults...)
 		if opts.OnToolBoundarySteering != nil {
@@ -944,20 +975,26 @@ type anthropicToolExecutionResult struct {
 	isError bool
 }
 
-func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks []agenticBlock) []anthropicToolExecutionResult {
+func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks []agenticBlock, onComplete ...func(anthropicToolExecutionResult)) []anthropicToolExecutionResult {
 	if len(blocks) == 0 {
 		return nil
 	}
 
 	results := make([]anthropicToolExecutionResult, len(blocks))
+	notify := func(r anthropicToolExecutionResult) {
+		for _, f := range onComplete {
+			f(r)
+		}
+	}
 	runOne := func(i int) {
 		block := blocks[i]
-		output, isError := runAnthropicToolUse(ctx, opts, block.Name, block.Input)
+		output, isError := runAnthropicToolUse(llmcontracts.WithToolCallID(ctx, block.ID), opts, block.Name, block.Input)
 		results[i] = anthropicToolExecutionResult{
 			block:   block,
 			output:  output,
 			isError: isError,
 		}
+		notify(results[i])
 	}
 	if requestIndex := exclusiveAnthropicRequestUserInput(blocks); requestIndex >= 0 {
 		for i, block := range blocks {
@@ -968,6 +1005,7 @@ func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks 
 			results[i] = anthropicToolExecutionResult{
 				block: block, output: "tool call rejected: request_user_input must complete in its own model turn", isError: true,
 			}
+			notify(results[i])
 		}
 		return results
 	}

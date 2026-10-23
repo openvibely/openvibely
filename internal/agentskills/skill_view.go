@@ -109,8 +109,43 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 			switch strings.ToLower(strings.TrimSpace(name)) {
 			case "skill_view":
+				ctx = skilldeps.WithSkillViewArguments(ctx, input)
 				body, err := resolveSkillView(catalog, input)
 				if err == nil && prepareDependencies {
+					if project, prompt := skilldeps.ApprovalFromContext(ctx); prompt != nil {
+						ctx = skilldeps.WithApproval(ctx, project, func(callCtx context.Context, request skilldeps.InstallationRequest) error {
+							if err := prompt(callCtx, request); err != nil {
+								return err
+							}
+							// The skill may have been disabled or removed while the
+							// question was open. Revalidate its main file before setup,
+							// including when this call requested a support file.
+							var selection struct {
+								Handle string `json:"handle"`
+							}
+							_ = json.Unmarshal(input, &selection) // Already validated by resolveSkillView.
+							main, _ := json.Marshal(selection)
+							if _, err := resolveSkillView(catalog, main); err != nil {
+								return fmt.Errorf("skill_view could not read this skill because access is no longer available. Continue without this skill.")
+							}
+							return nil
+						})
+					}
+					var support struct {
+						Handle   string `json:"handle"`
+						FilePath string `json:"file_path"`
+					}
+					if json.Unmarshal(input, &support) == nil && support.FilePath != "" {
+						activation, _ := json.Marshal(map[string]string{"handle": support.Handle})
+						mainBody, loadErr := resolveSkillView(catalog, activation)
+						if loadErr == nil {
+							_, loadErr = prepareSkillView(ctx, mainBody)
+						}
+						if loadErr != nil {
+							return loadErr.Error(), true, true, nil
+						}
+					}
+
 					body, err = prepareSkillView(ctx, body)
 				}
 				if err != nil {
@@ -589,7 +624,9 @@ func prepareSkillView(ctx context.Context, output string) (string, error) {
 			report(p)
 		}
 	}
-	view.Dependencies, err = manager.Resolve(ctx, deps)
+	projectID, check := skilldeps.ApprovalFromContext(ctx)
+	identity := skilldeps.SkillIdentity{ProjectID: projectID, Source: view.Source, Skill: filepath.Base(filepath.Clean(view.SkillDir)), Agent: view.AgentKey}
+	view.Dependencies, err = manager.ResolveWithInstallPrompt(ctx, identity, deps, check)
 	if err != nil {
 		return "", err
 	}

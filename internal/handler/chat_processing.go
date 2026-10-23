@@ -1582,6 +1582,11 @@ func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID 
 // registerTaskCancellation registers a cancel function for a task with the worker service.
 // No-op if worker service is unavailable.
 func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed streamingResponseParams, excludeExecID string) {
+	installationTaskID := completed.TaskID
+	if !completed.IsTaskFollowup {
+		installationTaskID = ""
+	}
+	h.startInstallationContinuations(ctx, completed.ProjectID, installationTaskID)
 	if h.execRepo == nil || h.threadInputRepo == nil {
 		return
 	}

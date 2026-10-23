@@ -24,6 +24,8 @@ import (
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
+	// OnReplay durably saves each assistant response before executing its tools.
+	OnReplay        func(context.Context, []CompletionsHistoryMessage) error
 	Model           string
 	MaxOutputTokens int
 	ContextWindow   int
@@ -324,6 +326,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			ToolCalls:        append([]CompletionsToolCall(nil), turnResult.toolCalls...),
 		})
 
+		if opts.OnReplay != nil {
+			if err := opts.OnReplay(ctx, append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)); err != nil {
+				return nil, err
+			}
+		}
+
 		// Add assistant message to history
 		if len(turnResult.toolCalls) > 0 {
 			messages = append(messages, completionsMessage{
@@ -370,7 +378,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				isError = true
 				output = fmt.Sprintf("tool %s is not allowed by this agent", tc.Function.Name)
 			} else if opts.ToolExecutor != nil {
-				output, isError, err = opts.ToolExecutor(ctx, tc.Function.Name, inputJSON)
+				output, isError, err = opts.ToolExecutor(llmcontracts.WithToolCallID(ctx, tc.ID), tc.Function.Name, inputJSON)
 				if err != nil {
 					isError = true
 					output = err.Error()
@@ -416,10 +424,19 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				}
 				imageMessages = append(imageMessages, completionsMessage{Role: "user", Content: content})
 			}
+			if opts.OnReplay != nil {
+				snapshot := append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
+				for _, image := range imageMessages {
+					snapshot = append(snapshot, CompletionsHistoryMessage{Role: "user", ImageContent: image.Content.([]map[string]interface{})})
+				}
+				if err := opts.OnReplay(context.WithoutCancel(ctx), snapshot); err != nil {
+					applog.Infof("[openai-completions] intermediate tool transcript save failed; continuing with in-memory history: %v", err)
+				}
+			}
 		}
 		messages = append(messages, imageMessages...)
-		for _, message := range imageMessages {
-			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: message.Content.([]map[string]interface{})})
+		for _, image := range imageMessages {
+			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: image.Content.([]map[string]interface{})})
 		}
 		if opts.OnToolBoundarySteering != nil {
 			steering, err := opts.OnToolBoundarySteering(ctx)

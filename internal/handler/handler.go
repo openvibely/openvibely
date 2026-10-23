@@ -331,6 +331,9 @@ func New(
 		oauthIdentityResolver:  service.ResolveAnthropicOAuthIdentity,
 		openAIIdentityResolver: service.ResolveVerifiedOpenAIOAuthIdentity,
 	}
+	if llmSvc != nil {
+		llmSvc.SetSkillInstallationPrompt(h.requestSkillInstallation, h.completeSkillInstallationContinuation)
+	}
 	if projectSvc != nil {
 		projectSvc.SetWorkerRepo(workerRepo)
 		if taskSvc != nil {
@@ -1105,6 +1108,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/history/summary", h.GenerateReflectionSummary)
 
 	// Alerts
+	e.POST("/skills/dependency-preview", h.PreviewSkillDependencies)
+	e.GET("/chat/input-requests/:id/open", h.OpenChatInputRequest)
 	e.GET("/alerts", h.ListAlerts)
 	e.GET("/alerts/:id/details", h.GetAlertDetail)
 	e.POST("/alerts/:id/read", h.MarkAlertRead)

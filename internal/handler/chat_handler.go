@@ -59,6 +59,19 @@ func (h *Handler) Chat(c echo.Context) error {
 		hasEarlier = false
 	}
 
+	if targetID := strings.TrimSpace(c.QueryParam("approval_execution_id")); targetID != "" && beforeExecID == "" {
+		target, targetErr := h.execRepo.GetByID(c.Request().Context(), targetID)
+		if targetErr == nil && target != nil {
+			owner, ownerErr := h.taskRepo.GetByID(c.Request().Context(), target.TaskID)
+			if ownerErr == nil && owner != nil && owner.ProjectID == currentProjectID && owner.Category == models.CategoryChat {
+				older, more, loadErr := h.loadChatExecutionWindow(c.Request().Context(), currentProjectID, target.ID, limit)
+				if loadErr == nil {
+					chatHistory = append(older, *target)
+					hasEarlier = more
+				}
+			}
+		}
+	}
 	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), chatHistory, "Chat")
 
 	pendingInputs := []models.ThreadInput{}

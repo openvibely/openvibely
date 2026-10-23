@@ -919,6 +919,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 
 	req.Ctx = attachment.WithToolImages(req.Ctx)
 	req.Ctx = s.withDependencyProgress(req)
+	req.Ctx = s.withSkillDependencyApproval(req)
 	if files := s.fileRuntime(req); files != nil {
 		req.Ctx = llmcontracts.WithRuntimeTools(req.Ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(req.Ctx), files))
 	}
@@ -938,11 +939,28 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		}
 	}
 
+	installationContinuation := false
+	if s.skillInstallationResult != nil && !req.LifecycleHookCall && req.ExecID != "" {
+		result, err := s.skillInstallationResult(req.Ctx, req)
+		if err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
+		if result != "" {
+			req.Message = result
+			installationContinuation = strings.HasPrefix(result, llmcontracts.SkillInputResultPrefix)
+		}
+	}
 	req = trackSteeringRecovery(req)
 	var replayErr error
 	req, replayErr = s.loadProviderReplayHistory(req)
 	if replayErr != nil {
 		return llmcontracts.AgentResult{}, replayErr
+	}
+	if installationContinuation {
+		req, replayErr = s.completeInstallationTranscript(req)
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
 	}
 	// Mixture is virtual. Its adapter resolves concrete reference and aggregator
 	// models, then re-enters this budget boundary for each pinned route.

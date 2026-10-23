@@ -324,6 +324,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
+		OnReplay:                 a.replaySaver(req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
@@ -382,6 +383,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
+		OnReplay:                 a.replaySaver(req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
@@ -444,6 +446,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
+		OnReplay:               a.replaySaver(req.ExecID),
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:    llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                  strings.TrimSpace(req.Agent.Model),
@@ -904,5 +907,24 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 			return command
 		}
 		return get("file_path")
+	}
+}
+
+func (a *Adapter) replaySaver(execID string) func(context.Context, []openaiclient.CompletionsHistoryMessage) error {
+	return func(ctx context.Context, transcript []openaiclient.CompletionsHistoryMessage) error {
+		if a.execRepo == nil || execID == "" {
+			return nil
+		}
+		data, err := json.Marshal(transcript)
+		if err != nil {
+			return err
+		}
+		var reasoning strings.Builder
+		for _, m := range transcript {
+			if m.Role == "assistant" {
+				reasoning.WriteString(m.ReasoningContent)
+			}
+		}
+		return a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: string(data)}})
 	}
 }

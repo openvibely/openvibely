@@ -58,11 +58,16 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 		class="chat-input-request-card card shadow-lg"
 		data-chat-input-request-id={ req.ID }
 		data-chat-input-exec-id={ req.ExecID }
+ data-project-id={ req.ProjectID }
+ data-chat-input-installation={ string(req.Installation) }
 		data-current-question-index="0"
 		aria-label="Input requested"
 		hx-preserve="true"
 	>
 		<div class="card-body gap-4 p-4">
+ if len(req.Installation)>0 {
+<section data-skill-dependency-details="true"></section>
+}
 			for i, q := range req.Questions {
 				<fieldset class={ chatInputQuestionClass(i) } data-chat-input-question-id={ q.ID } data-chat-input-question-index={ fmt.Sprintf("%d", i) }>
 					<legend class="text-xl font-semibold leading-snug">{ chatInputQuestionLegend(q, i) }</legend>
@@ -71,7 +76,7 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 							<span class="flex min-w-0 flex-col items-start">
 								<span class="flex min-w-0 flex-wrap items-center gap-2">
 									<span class="font-medium">{ opt.Label }</span>
-									if j == 0 {
+									if j == 0 && len(req.Installation)==0 {
 										<span class="chat-input-recommended-badge">Recommended</span>
 									}
 								</span>
@@ -79,12 +84,16 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 							</span>
 						</div>
 					}
+if len(req.Installation)==0 {
 					<div class={ chatInputOptionClass } style="--btn-focus-scale: 1" role="button" tabindex="0" data-chat-input-option="true" data-chat-input-custom-option="true" data-question-id={ q.ID } aria-pressed="false">Something else</div>
 					<div class="hidden space-y-2 rounded-lg border border-base-300/70 p-3" data-chat-input-custom-wrap="true">
 						<textarea class="textarea textarea-bordered min-h-20 w-full" maxlength="2000" placeholder="Type your answer" data-chat-input-custom-answer="true" aria-label="Custom answer"></textarea>
 					</div>
+}
+
 				</fieldset>
 			}
+if len(req.Installation)==0 {
 			<div class="pt-1" data-chat-input-recommended-actions="true">
 				<div class="chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md hover:border-primary transition-all inline-flex items-center justify-start h-auto min-h-0 w-fit max-w-full px-4 py-2 text-left font-normal normal-case" style="--btn-focus-scale: 1" role="button" tabindex="0" data-chat-input-nav="recommended" aria-label="Use recommended answers and continue">Recommended and move forward</div>
 			</div>
@@ -95,6 +104,8 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 					<button type="button" class="btn btn-primary btn-sm" data-chat-input-nav="next" aria-label="Next question">Next</button>
 				</div>
 			</div>
+}
+
 			<div class="text-sm font-medium hidden" role="status" aria-live="polite"></div>
 		</div>
 	</section>
