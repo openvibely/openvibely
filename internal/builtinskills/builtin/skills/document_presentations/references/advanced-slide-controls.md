@@ -506,3 +506,13 @@ Accepted values: `none`, `words`, `sng`, `dbl`, `heavy`, `dotted`,
 `dottedHeavy`, `dash`, `dashHeavy`, `dashLong`, `dashLongHeavy`, `dotDash`,
 `dotDashHeavy`, `dotDotDash`, `dotDotDashHeavy`, `wavy`, `wavyHeavy`, `wavyDbl`.
 The boolean `underline: true` still means single underline.
+
+### Hyperlinks within table-cell text (after RC4)
+
+Set `hyperlink` on the intended run, for example
+`{"text":"Source","hyperlink":"https://example.com","underline_style":"sng","color":"2563EB"}`.
+This works in `table-cell.paragraphs` and in `table_format.cells[].paragraphs`
+for creation and `table-format`. Links accept HTTP, HTTPS and mailto URLs.
+The link is attached only to that run; set its color and underline explicitly
+if desired. Replacing the paragraphs without a hyperlink removes the link from
+the replacement text. This does not change the other cells.
