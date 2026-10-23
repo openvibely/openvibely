@@ -182,7 +182,9 @@ func TestLiveWebSocketGapRecoveryAndTerminalFailure(t *testing.T) {
 	waitForExecutionStreamSubscribers(t, tc.handler.executionStreamHub, 1)
 	// A lost hub delta followed by another delta before persistence catches up.
 	tc.handler.executionStreamHub.Publish(events.ExecutionStreamEvent{ExecID: exec.ID, Type: events.ExecutionStreamDelta, Delta: "tail", Offset: 11})
+	client.next(t, "run", "retry")
 	require.NoError(t, tc.execRepo.FinalizeOutput(context.Background(), exec.ID, "missed tail"))
+	client.send(t, executionCommand("run", exec, 0))
 	require.Equal(t, "missed tail", client.next(t, "run", "message").Data)
 	require.NoError(t, tc.execRepo.Complete(context.Background(), exec.ID, models.ExecFailed, "missed tail!", "line one\nline two", 0, 0))
 	tc.handler.executionStreamHub.CloseTerminal(exec.ID, models.ExecFailed, "line one\nline two")
