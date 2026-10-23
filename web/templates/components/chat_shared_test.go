@@ -6151,7 +6151,7 @@ func TestBrowserPerformance_LargeToolOutputHydrationIsLazyAndStatefulInChrome(t 
 	}
 
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(baseHTML.String(), -1), "")
-	html := `<!DOCTYPE html><html lang="en" data-theme="dark" style="--bc: 0.746477 0.0216 264.436"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">` + styles + `<style>html[data-theme="dark"] body { color: oklch(var(--bc)); }</style></head><body>`
+	html := `<!DOCTYPE html><html lang="en" data-theme="dark" style="--bc: 0.746477 0.0216 264.436"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">` + `<link rel="stylesheet" href="/static/app.css">` + styles + `<link rel="stylesheet" href="/static/app-utilities.css"><style>html[data-theme="dark"] body { color: oklch(var(--bc)); }</style></head><body>`
 	fixture := `<main id="fixture-root"><div id="streaming-message-large-fixture" class="chat-stream-content chat-bubble-assistant-msg"></div></main><script>` + renderedBaseMarkdownCodeHelpers(t) + `</script>` + chatScript.String() + `<script>
 window.addEventListener('DOMContentLoaded', function() {
   var result = document.getElementById('fixture-root');
@@ -6252,6 +6252,13 @@ window.addEventListener('DOMContentLoaded', function() {
     if (getComputedStyle(wideBox).overflowX !== 'clip') fail('wide output created a horizontal scroller');
     wideBox.scrollLeft = 500;
     if (wideBox.scrollLeft !== 0 || widePre.getBoundingClientRect().width > wideBox.clientWidth + 1) fail('wide output is not clipped to its container '+JSON.stringify({left:wideBox.scrollLeft,pre:widePre.getBoundingClientRect().width,box:wideBox.clientWidth,css:getComputedStyle(widePre).cssText,width:getComputedStyle(widePre).width,min:getComputedStyle(widePre).minWidth}));
+    container.querySelectorAll('.stream-tool-copy').forEach(function(button) {
+      var cell = button.closest('.stream-tool-body-content');
+      var surface = cell.querySelector('pre');
+      var box = surface.getBoundingClientRect(), rect = button.getBoundingClientRect();
+      if (!button.querySelector('svg') || !button.classList.contains('btn-square')) fail('tool copy must use the inset alert icon style');
+      if (rect.left < box.left || rect.right > box.right + 1 || rect.top < box.top || rect.bottom > box.bottom + 1) fail('copy button is outside the input/output surface '+JSON.stringify({box:box,button:rect,text:surface.textContent.slice(0,30)}));
+    });
     wideBox.parentElement.querySelector('.stream-tool-copy').click();
     await Promise.resolve();
     if (copiedText !== wideOutput) fail('copy truncated the wide output');
@@ -6273,7 +6280,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
     var largeOutputContainer = largeToggle.closest('.stream-tool-body-content');
     var largeToolName = largeToggle.closest('.stream-tool').querySelector('.tool-name-text');
-    if (!largeOutputContainer || largeOutputContainer.className !== 'stream-tool-body-content') fail('large output toggle is not contained by the original OUT cell');
+    if (!largeOutputContainer || !largeOutputContainer.classList.contains('stream-tool-body-content')) fail('large output toggle is not contained by the original OUT cell');
     var darkToggleColor = window.getComputedStyle(largeToggle).color;
     if (darkToggleColor === 'rgb(255, 255, 255)' || darkToggleColor === 'rgba(255, 255, 255, 1)') fail('dark output toggle foreground must be muted rather than white');
     var largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
