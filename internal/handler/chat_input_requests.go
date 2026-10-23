@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -470,7 +471,12 @@ func (h *Handler) completeRecoveredChatInputExecution(ctx context.Context, req *
 	if err != nil || exec == nil || (exec.Status != models.ExecRunning && exec.Status != models.ExecQueued) {
 		return
 	}
-	_ = h.execRepo.Complete(ctx, req.ExecID, models.ExecFailed, "", "The app restarted while waiting for this input request, so the original response cannot resume. Send a new Chat message to continue.", 0, 0)
+	const message = "The app restarted while waiting for this input request, so the original response cannot resume. Send a new Chat message to continue."
+	if err := h.execRepo.Complete(ctx, req.ExecID, models.ExecFailed, "", message, 0, 0); err != nil {
+		applog.Infof("[handler] recovered input execution=%s completion failed: %v", req.ExecID, err)
+		return
+	}
+	h.publishExecutionTerminal(req.ExecID, models.ExecFailed, message)
 	h.PromoteQueuedChatInput(req.ProjectID)
 }
 
