@@ -460,3 +460,18 @@ if present and retains region flags and direct formatting. It does not import
 custom style definitions; use the existing style resources mechanism for those.
 Omitting `style_id` preserves the current style. Direct cell formatting can mask
 the style's appearance, so render and inspect the result.
+
+## Mixed-format text in table cells (after RC4)
+
+Use a newer build exposing structured table-cell paragraphs:
+`{"operation":"table-cell","slide":1,"shape_id":"INSPECTED_TABLE_ID","row":0,"column":0,"paragraphs":[{"runs":[{"text":"Revenue:","bold":true},{"text":" $200","bold":false}]}]}`.
+Use `paragraphs` instead of `text`. For creation or `table-format`, put the same
+`paragraphs` on the selected zero-based `table_format.cells` entry. This replaces
+all text paragraphs in that cell; an empty array clears it. Omission preserves
+text during table formatting. Use merged-cell origins. Borders, margins, body
+properties and unrelated cells remain unchanged.
+Runs accept bold, italic, underline, font size and color. Paragraphs accept
+bullet/level and `format`; named run styles are not supported in this path.
+Unspecified authored text defaults to Arial 12pt and the helper's text color;
+specify intended sizes/colors when matching existing content. Render and inspect
+wrapping and row height; writing rich text does not automatically expand the row.
