@@ -15,32 +15,32 @@ dependencies:
     packages:
       darwin/amd64:
         url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-darwin-amd64.zip
-        sha256: 47075d45f826f44a3cfb62da2a5f0fdb646d73a591c31a630e5852a470ba4fec
+        sha256: ef2617d835a74bccc9ebcca7a74efd1b70bf3b0f93810cfb330f9dbdcb53e371
         format: zip
         executable: paperworks-darwin-amd64
       darwin/arm64:
         url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-darwin-arm64.zip
-        sha256: 5aecea2146066598336f06d7ce6ceb0aef3d7a0647db8f99bed6e569a8f56db5
+        sha256: 72ed6a1dc3740e21b0e74862dbdd912935838fac1e2cb747956792e3d8f6a04d
         format: zip
         executable: paperworks-darwin-arm64
       linux/amd64:
         url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-linux-amd64.zip
-        sha256: 74c1cd86344ce9b60a28ce606dbdcb675aae8f30eb6cd2d139d76f61df15652d
+        sha256: abdf0ecc8b1b6513364e01f93ba69aa0305708b27f47add616c99a95b4e5b673
         format: zip
         executable: paperworks-linux-amd64
       linux/arm64:
         url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-linux-arm64.zip
-        sha256: 25c08b1d5de99a111f2f7f72171102abbf4ea2a44ac59fa4096a38fb6596beba
+        sha256: 2c197ceb3a14667603b97406c4ba1b2939473e8e8c6b648f8372ae2c3f05350e
         format: zip
         executable: paperworks-linux-arm64
       windows/amd64:
         url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-windows-amd64.zip
-        sha256: ad1830a62cfc375ff222b614c124fc744872de07641bf675eaf39545aec6dbf1
+        sha256: 49294a420590fac2e5a99c638a326f537447bdd155abd509c2e4166fa01277c8
         format: zip
         executable: paperworks-windows-amd64.exe
       windows/arm64:
         url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-windows-arm64.zip
-        sha256: 63991c2bdc6cb01948f786b2d25d8bd3a6b54469f22b2f69ace7f792f7c399cd
+        sha256: 702cc55cdefc18531684b6bc3d24daf4e54e80fa7314be18dc1a0ced7485b27c
         format: zip
         executable: paperworks-windows-arm64.exe
   - name: libreoffice
