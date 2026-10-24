@@ -82,6 +82,25 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
 		b.waitFor("delayed titlebar restores controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 	})
+	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "native-visibility-recovery", func(b *composerFocusCDP) {
+		b.waitFor("native bridge ready", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+		for _, failure := range []string{"throw", "reject", "cancel"} {
+			b.evaluate(`window.originalVisibilityEmit=window.wails.Events.Emit;window.failVisibilityOnce=true;window.wails.Events.Emit=(name,data)=>{if(name==='desktop:controls-visibility' && window.failVisibilityOnce){window.failVisibilityOnce=false;` + map[string]string{
+				"throw":  `throw new Error('bridge unavailable');`,
+				"reject": `return Promise.reject(new Error('bridge unavailable'));`,
+				"cancel": `return Promise.resolve(true);`,
+			}[failure] + `}return window.originalVisibilityEmit(name,data);};document.getElementById('image-gallery').showModal();'opened'`)
+			b.waitFor("retry hides controls after "+failure, `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
+			b.evaluate(`window.wails.Events.Emit=window.originalVisibilityEmit;document.getElementById('image-gallery').close();'closed'`)
+			b.waitFor("close restores controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+		}
+		b.evaluate(`window.wails.Events.Emit=(name,data)=>name==='desktop:controls-visibility' && data.hidden ? new Promise((resolve,reject)=>{window.rejectVisibility=reject;}) : window.originalVisibilityEmit(name,data);document.getElementById('image-gallery').showModal();'opened'`)
+		b.waitFor("hide pending", `String(!!window.rejectVisibility)`, "true")
+		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("close supersedes pending hide", `String(!document.getElementById('image-gallery').open && window.nativeControlEvents['desktop:controls-visibility'].hidden===false)`, "true")
+		b.evaluate(`window.rejectVisibility(new Error('late failure'));window.wails.Events.Emit=window.originalVisibilityEmit;window.nativeControlEvents['desktop:controls-visibility'].hidden=true;window.dispatchEvent(new Event('focus'));'focused'`)
+		b.waitFor("focus reconciles native visibility", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "image-gallery", func(b *composerFocusCDP) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
