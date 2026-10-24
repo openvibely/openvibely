@@ -211,11 +211,37 @@ func chatLinkOpeningBrowserRunner() string {
 	    var svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="2"/></svg>';
 	    safety.innerHTML = window.renderChatMarkdown(svg);
 	    if (safety.querySelector('svg') || !safety.querySelector('code.language-svg') || safety.querySelector('code').textContent.trim() !== svg) fail('SVG preview source regressed');
+	    var tick = String.fromCharCode(96);
+	    var svgCode = 'Inline ' + tick + svg + tick + ' example.';
+	    var svgLink = '[Example ' + tick + svg + tick + '](<' + publishedURL + '>)';
+	    function checkSVGCode(root, linked) {
+	      if (root.querySelector('pre, svg, .chat-svg-preview')) fail('inline SVG code became a preview');
+	      var code = root.querySelector(linked ? 'a > code' : 'p > code');
+	      if (!code || code.textContent !== svg) fail('inline SVG code was split');
+	      if (linked) checkPublishedLinks(root, 1);
+	      else if (root.textContent.trim() !== 'Inline ' + svg + ' example.') fail('inline SVG prose changed');
+	    }
+	    safety.innerHTML = window.renderChatMarkdown(svgCode);
+	    checkSVGCode(safety, false);
+	    safety.innerHTML = window.renderChatMarkdown(svgLink);
+	    checkSVGCode(safety, true);
 	    var large = ('padding paragraph\n\n').repeat(4000) + sources.join('\n\n') + '\n\n' + malformed;
 	    var fragment = await window.renderChatMarkdownAsync(large, {});
 	    if (!window._markdownWorkerURL || !fragment || typeof fragment === 'string') fail('large Markdown worker did not render');
 	    checkPublishedLinks(fragment, sources.length);
 	    if (!fragment.textContent.includes(malformed)) fail('worker failed to preserve literal HTML');
+	    var svgFragment = await window.renderChatMarkdownAsync(('padding paragraph\n\n').repeat(4000) + svgCode + '\n\n' + svgLink + '\n\n' + svg, {});
+	    var svgParagraphs = svgFragment.querySelectorAll('p');
+	    var codeParagraph = Array.from(svgParagraphs).find(function(p) { return p.textContent.startsWith('Inline '); });
+	    var linkParagraph = Array.from(svgParagraphs).find(function(p) { return p.querySelector('a'); });
+	    if (!codeParagraph || !linkParagraph) fail('worker lost SVG code or link');
+	    var codeRoot = document.createElement('div');
+	    codeRoot.appendChild(codeParagraph.cloneNode(true));
+	    checkSVGCode(codeRoot, false);
+	    var linkRoot = document.createElement('div');
+	    linkRoot.appendChild(linkParagraph.cloneNode(true));
+	    checkSVGCode(linkRoot, true);
+	    if (svgFragment.querySelectorAll('pre > code.language-svg').length !== 1) fail('worker SVG preview count changed');
 	    var webOpened = [];
 	    var originalOpen = window.open;
 	    window.open = function(url, target, features) { webOpened.push([String(url), String(target || ''), String(features || '')]); return { opener: null }; };
