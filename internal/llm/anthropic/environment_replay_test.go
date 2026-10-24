@@ -93,7 +93,7 @@ func TestExecutionEnvironmentSurvivesFreshAdaptersAndDirectoryChanges(t *testing
 		require.NoError(t, err)
 		require.Len(t, saved[id], 1)
 		require.Equal(t, "question", saved[id][0].UserContent)
-		require.Equal(t, "answer", saved[id][0].AssistantContent, "final metadata must still be written when transcript JSON is reused")
+		require.Equal(t, "answer", saved[id][0].AssistantContent, "final metadata must be written alongside the transcript")
 		var stored anthropicEnvironmentReplay
 		require.NoError(t, json.Unmarshal([]byte(saved[id][0].TranscriptJSON), &stored))
 		require.Equal(t, executionenv.Context(dir), stored.Environment)
