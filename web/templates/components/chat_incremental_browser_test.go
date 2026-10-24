@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,7 +56,8 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	 var messagesId = 'messages', trackerKey = '_measurementTracker', tracker = {shouldAutoScroll:()=>false};
 	 ` + bubbleJS[coalescerStart:coalescerEnd] + `
 	 return {append: function(delta) {textBuffer += delta; renderBufferedOutput(false);},
-	 idle: function() {return !renderScheduled && lastRenderedSourceLength === textBuffer.length;},
+	 state: function() {return {scheduled:renderScheduled, timer:renderDelayTimer !== null, rendered:lastRenderedSourceLength, received:textBuffer.length};},
+ idle: function() {return !renderScheduled && lastRenderedSourceLength === textBuffer.length;},
 	 finish: function() {return renderBufferedOutput(true, true);}};
 	};`
 	// Test-only probes sum elapsed time inside synchronous render phases and worker
@@ -77,7 +80,15 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(source, -1), "")
 	// Match the page's parser scripts: large Markdown workers import the math
 	// parser through its data attribute, even when the response contains no math.
-	fixture := `<!doctype html><html><head><script src="` + static.URL("chat-virtual-list.js") + `"></script>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
+	diagnostics := `<script>
+ window.streamPhase = 'loading scripts';
+ window.streamDiagnostic = () => ({phase:window.streamPhase, ready:document.readyState, visibility:document.visibilityState});
+ window.reportStreamError = error => fetch('/report', {method:'POST', body:JSON.stringify({error:String(error && (error.stack || error))})});
+ window.addEventListener('error', event => window.reportStreamError(event.error || event.message || ('asset load failed: '+(event.target.src || event.target.href))), true);
+ window.addEventListener('unhandledrejection', event => window.reportStreamError(event.reason));
+ setInterval(() => fetch('/progress', {method:'POST',body:JSON.stringify(window.streamDiagnostic())}).catch(()=>{}), 1000);
+ </script>`
+	fixture := `<!doctype html><html><head>` + diagnostics + `<script src="` + static.URL("chat-virtual-list.js") + `"></script>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
  <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
  <script>` + probe + baseJS + `</script>` + sharedJS + `<script>
  ` + coalescer + `
@@ -86,7 +97,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
  const paint = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
  const fence = String.fromCharCode(96).repeat(3);
  const stream = document.getElementById('stream');
- async function run() {` + script + `}
+ async function run() {window.streamPhase = 'running scenario';` + script + `}
  run().then(report => fetch('/report', {method:'POST',body:JSON.stringify({report})})).catch(error => fetch('/report', {method:'POST',body:JSON.stringify({error:String(error.stack || error)})}));
  </script></body></html>`
 	type result struct {
@@ -94,13 +105,34 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 		Error  string          `json:"error"`
 	}
 	reports := make(chan result, 1)
+	var progressMu sync.Mutex
+	progress := "no browser heartbeat received"
+	progressAt := time.Now()
+	diagnosticsText := func() string {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		return fmt.Sprintf("last heartbeat %s ago: %s", time.Since(progressAt).Round(time.Millisecond), progress)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/progress" {
+			data, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+			if err == nil {
+				progressMu.Lock()
+				progress, progressAt = string(data), time.Now()
+				progressMu.Unlock()
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.URL.Path == "/report" {
 			var report result
 			if err := json.NewDecoder(r.Body).Decode(&report); err != nil {
 				report.Error = err.Error()
 			}
-			reports <- report
+			select {
+			case reports <- report:
+			default:
+			}
 			return
 		}
 		if static.ServeAsset(w, r) {
@@ -111,19 +143,34 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	}))
 	defer server.Close()
 	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), server.URL)
+	outputPath := filepath.Join(t.TempDir(), "chrome.log")
+	output, err := os.Create(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	cmd.Stdout, cmd.Stderr = output, output
 	configureTestBrowserProcess(cmd)
 	if err := startTestBrowserProcess(cmd); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { stopTestBrowserProcess(cmd); _ = cmd.Wait() }()
+	defer stopTestBrowserProcess(cmd)
+	// Leave time for diagnostics and browser cleanup before Go kills the package.
+	timeout := 150 * time.Second
+	if deadline, ok := t.Deadline(); ok {
+		timeout = min(timeout, time.Until(deadline)-10*time.Second)
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case result := <-reports:
 		if result.Error != "" {
-			t.Fatal(result.Error)
+			t.Fatalf("%s; %s", result.Error, diagnosticsText())
 		}
 		return result.Report
-	case <-time.After(150 * time.Second):
-		t.Fatal("incremental browser fixture timed out")
+	case <-timer.C:
+		browserOutput, _ := os.ReadFile(outputPath)
+		t.Fatalf("incremental browser fixture timed out; %s\nChrome output:\n%s", diagnosticsText(), browserOutput)
 	}
 	return nil
 }
@@ -331,6 +378,8 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
    // Same production coalescer in both cases; the baseline uses 250 ms and
    // full-content rendering, whereas the incremental path uses 100 ms.
    const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 100);
+   window.streamPhase = size+' bytes / '+mode+' / receiving';
+   window.streamDiagnostic = () => ({phase:window.streamPhase, ready:document.readyState, visibility:document.visibilityState, coalescer:input.state(), arrivals:arrivals.length, visible:latencies.length, pendingPaints, workerReplies:window.streamWorkerReplies});
    const start = performance.now();
    // Schedule every delta in advance, independently of renderer completion.
    await Promise.all(Array.from({length:size/8192}, (_,i)=>new Promise(resolve=>{
@@ -341,8 +390,10 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
      resolve();
     }, i*50);
    })));
+   window.streamPhase = size+' bytes / '+mode+' / draining renders';
    while (!input.idle() || pendingPaints) await pause(10);
    assert(latencies.length === size/8192, 'missing delta visibility samples');
+   window.streamPhase = size+' bytes / '+mode+' / final reconciliation';
    await input.finish();
    latencies.sort((a,b)=>a-b);
    report[size][mode] = {renderMS:window.streamRenderMS,characters:chars,p95MS:latencies[Math.ceil(latencies.length*.95)-1],yieldedRenders:yielded,workerReplies:window.streamWorkerReplies,arrivalSpanMS:arrivals.at(-1).received-start};
