@@ -267,11 +267,10 @@ func TestCompleteSkillToolTranscript(t *testing.T) {
 		})
 	}
 	for _, raw := range []string{
-		`{"responses_input":[{"type":"function_call","name":"write_file","call_id":"sibling","arguments":"{}"},{"type":"function_call","name":"skill_view","call_id":"original","arguments":"{}"}]}`,
 		`[{"role":"assistant","tool_calls":[{"id":"one","function":{"name":"skill_view","arguments":"{}"}},{"id":"two","function":{"name":"skill_view","arguments":"{}"}}]}]`,
 	} {
 		if _, _, err := completeSkillToolTranscript(raw, "question", json.RawMessage(`{}`), "result", false); err == nil {
-			t.Fatal("accepted ambiguous or unfinished sibling exchange")
+			t.Fatal("accepted ambiguous exchange")
 		}
 	}
 }
@@ -484,6 +483,38 @@ func TestSkillContinuationInsertsCompletionsResultBeforeImages(t *testing.T) {
 			again, found, err := completeSkillToolTranscript(updated, "question", json.RawMessage(`{}`), output, denied, "skill")
 			if err != nil || !found || again != updated {
 				t.Fatalf("existing result moved or duplicated: %s %v", again, err)
+			}
+		})
+	}
+}
+
+func TestCompleteSkillToolTranscriptInterruptedSiblings(t *testing.T) {
+	for _, tc := range []struct{ name, raw string }{
+		{"responses", `{"responses_input":[{"type":"function_call","name":"skill_view","call_id":"skill","arguments":"{}"},{"type":"function_call","name":"read_file","call_id":"missing","arguments":"{}"},{"type":"function_call","name":"read_file","call_id":"done","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"KEEP result"},{"type":"message","role":"user","content":"KEEP image"}]}`},
+		{"completions", `[{"role":"assistant","tool_calls":[{"id":"skill","function":{"name":"skill_view","arguments":"{}"}},{"id":"missing","function":{"name":"read_file","arguments":"{}"}},{"id":"done","function":{"name":"read_file","arguments":"{}"}}]},{"role":"tool","tool_call_id":"done","content":"KEEP result"},{"role":"user","content":"KEEP image"}]`},
+		{"anthropic", `{"messages":[{"role":"assistant","content_blocks":[{"type":"tool_use","id":"skill","name":"skill_view","input":{}},{"type":"tool_use","id":"missing","name":"read_file","input":{}},{"type":"tool_use","id":"done","name":"read_file","input":{}}]},{"role":"user","content_blocks":[{"type":"tool_result","tool_use_id":"done","content":"KEEP result"},{"type":"text","text":"KEEP image"}]}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, denied := range []bool{false, true} {
+				result, found, err := completeSkillToolTranscript(tc.raw, "question", json.RawMessage(`{}`), "skill result", denied, "skill")
+				if err != nil || !found {
+					t.Fatalf("found=%v err=%v", found, err)
+				}
+				for _, keep := range []string{"KEEP result", "KEEP image", "skill result", "Tool execution was interrupted. Try again."} {
+					if strings.Count(result, keep) != 1 {
+						t.Fatalf("missing/duplicated %q: %s", keep, result)
+					}
+				}
+				if strings.Index(result, "Tool execution was interrupted.") > strings.Index(result, "KEEP image") {
+					t.Fatalf("tool reply follows image: %s", result)
+				}
+				if tc.name == "anthropic" && !strings.Contains(result, `"is_error":true`) {
+					t.Fatal("missing error flag")
+				}
+				again, found, err := completeSkillToolTranscript(result, "question", json.RawMessage(`{}`), "skill result", denied, "skill")
+				if err != nil || !found || again != result {
+					t.Fatalf("not idempotent: %v %s", err, again)
+				}
 			}
 		})
 	}
