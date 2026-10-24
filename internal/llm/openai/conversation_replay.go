@@ -17,20 +17,18 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	raw, err := replayjson.Encode(transcript)
-	if err != nil {
-		return fmt.Errorf("encode OpenAI conversation: %w", err)
-	}
-	return a.saveSerializedConversation(ctx, execID, raw)
+	saver := a.conversationSaver(execID)
+	saver.EncodeError = func(err error) error { return fmt.Errorf("encode OpenAI conversation: %w", err) }
+	return saver.Save(context.WithoutCancel(ctx), transcript)
 }
 
-// raw is produced by json.Marshal in the callers. Reuse the immutable string
-// for persistence and recovery rather than encoding the same JSON again.
-func (a *Adapter) saveSerializedConversation(ctx context.Context, execID, raw string) error {
-	if err := a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, "", []models.ExecutionReplayMessage{{TranscriptJSON: raw}}); err != nil {
-		return fmt.Errorf("save OpenAI conversation: %w", err)
-	}
-	return nil
+func (a *Adapter) conversationSaver(execID string) replayjson.Saver {
+	return replayjson.Saver{Persist: func(ctx context.Context, raw string) error {
+		if err := a.execRepo.ReplaceReasoningReplay(ctx, execID, "", []models.ExecutionReplayMessage{{TranscriptJSON: raw}}); err != nil {
+			return fmt.Errorf("save OpenAI conversation: %w", err)
+		}
+		return nil
+	}}
 }
 
 // responsesHistoryRecorder saves only the current provider conversation.
@@ -39,16 +37,9 @@ func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, 
 		return nil
 	}
 	return func(ctx context.Context, items []any) error {
-		raw, err := replayjson.Encode(map[string]any{"responses_input": items})
-		if err != nil {
-			return err
-		}
-		transcript := raw
-		if err := a.saveSerializedConversation(ctx, execID, transcript); err != nil {
-			return err
-		}
-		llmcontracts.RecordResponsesRecovery(ctx, transcript)
-		return nil
+		saver := a.conversationSaver(execID)
+		saver.AfterSave = func(raw string) { llmcontracts.RecordResponsesRecovery(ctx, raw) }
+		return saver.Save(context.WithoutCancel(ctx), map[string]any{"responses_input": items})
 	}
 }
 

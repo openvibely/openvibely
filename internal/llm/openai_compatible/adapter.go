@@ -508,30 +508,33 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 		// failed, instead of leaving its pre-compaction replay in storage.
 		transcript = []openaiclient.CompletionsHistoryMessage{}
 	}
-	transcriptJSON, err := replayjson.Encode(transcript)
+	err := (replayjson.Saver{
+		EncodeError: func(err error) error {
+			if callErr != nil {
+				return callErr
+			}
+			return fmt.Errorf("marshal reasoning replay transcript: %w", err)
+		},
+		Persist: func(ctx context.Context, raw string) error {
+			var reasoning strings.Builder
+			for _, message := range transcript {
+				if message.Role == "assistant" {
+					reasoning.WriteString(message.ReasoningContent)
+				}
+			}
+			err := a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: raw}})
+			if err != nil {
+				if callErr != nil {
+					applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
+					return callErr
+				}
+				return fmt.Errorf("persist reasoning replay: %w", err)
+			}
+			return nil
+		},
+	}).Save(context.WithoutCancel(ctx), transcript)
 	if err != nil {
-		if callErr != nil {
-			return callErr
-		}
-		return fmt.Errorf("marshal reasoning replay transcript: %w", err)
-	}
-	var reasoning strings.Builder
-	for _, message := range transcript {
-		if message.Role == "assistant" {
-			reasoning.WriteString(message.ReasoningContent)
-		}
-	}
-	replay := []models.ExecutionReplayMessage{{
-		ReasoningContent: reasoning.String(),
-		TranscriptJSON:   transcriptJSON,
-	}}
-	err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, reasoning.String(), replay)
-	if err != nil {
-		if callErr != nil {
-			applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
-			return callErr
-		}
-		return fmt.Errorf("persist reasoning replay: %w", err)
+		return err
 	}
 	return callErr
 }
@@ -916,16 +919,14 @@ func (a *Adapter) replaySaver(execID string) func(context.Context, []openaiclien
 		if a.execRepo == nil || execID == "" {
 			return nil
 		}
-		data, err := replayjson.Encode(transcript)
-		if err != nil {
-			return err
-		}
-		var reasoning strings.Builder
-		for _, m := range transcript {
-			if m.Role == "assistant" {
-				reasoning.WriteString(m.ReasoningContent)
+		return (replayjson.Saver{Persist: func(ctx context.Context, raw string) error {
+			var reasoning strings.Builder
+			for _, m := range transcript {
+				if m.Role == "assistant" {
+					reasoning.WriteString(m.ReasoningContent)
+				}
 			}
-		}
-		return a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: data}})
+			return a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: raw}})
+		}}).Save(ctx, transcript)
 	}
 }
