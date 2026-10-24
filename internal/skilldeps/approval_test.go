@@ -25,7 +25,7 @@ func installationFixture(t *testing.T) (*Manager, Dependency, *atomic.Int32) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { downloads.Add(1); w.Write(script) }))
 	t.Cleanup(server.Close)
 	platform := runtime.GOOS + "/" + runtime.GOARCH
-	d := Dependency{Name: "tool", Version: "1.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{platform: {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(script)), Format: "raw", Executable: "tool"}}}
+	d := Dependency{Name: "tool", Version: "1.0.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{platform: {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(script)), Format: "raw", Executable: "tool"}}}
 	return &Manager{CacheDir: filepath.Join(t.TempDir(), "cache"), Platform: platform, Client: server.Client()}, d, downloads
 }
 func testSkill() SkillIdentity {
@@ -73,7 +73,7 @@ func TestInstalledDependenciesProceedWithoutPromptAcrossProjects(t *testing.T) {
 		}
 	}
 	// A changed version has no installed copy, so it asks before any new download.
-	d.Version = "2.0"
+	d.Version = "2.0.0"
 	_, err = m.ResolveWithInstallPrompt(context.Background(), testSkill(), []Dependency{d}, nil)
 	if !errors.Is(err, ErrApprovalRequired) || downloads.Load() != 1 {
 		t.Fatalf("missing version downloaded: %v", err)
