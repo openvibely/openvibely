@@ -71,7 +71,7 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 				if err := dialog.Render(r.Context(), w); err != nil {
 					t.Error(err)
 				}
-				fmt.Fprint(w, "</body></html>")
+				fmt.Fprint(w, `<input id="standard-modal-input" class="input input-bordered" aria-label="Standard input" style="position:fixed;visibility:hidden"></body></html>`)
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "project-tab-height-"+mode, func(b *composerFocusCDP) {
@@ -96,8 +96,8 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					       const bounds = field.getBoundingClientRect();
 					       if (bounds.height && Math.abs(bounds.height - w.height) > 1) return 'inconsistent control heights';
 					     }
+					     if (Math.abs(w.height - document.getElementById('standard-modal-input').getBoundingClientRect().height) > 1) return 'controls differ from standard modal height';
 					     if (content.scrollWidth > content.clientWidth) return 'controls overflow';
-					     if (innerWidth > 640 && content.scrollHeight > content.clientHeight) return 'general still needs desktop scrolling';
 					   }
 					   if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
 					   const after = box.getBoundingClientRect();

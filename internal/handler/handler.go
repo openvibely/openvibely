@@ -791,6 +791,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PUT("/projects/:id", h.UpdateProject)
 	e.DELETE("/projects/:id", h.DeleteProject)
 	e.GET("/projects/:id/edit", h.EditProjectDialog)
+	e.POST("/projects/:id/reclone", h.RecoverProjectRepo)
 
 	// Automations (project-scoped via ?project_id= query param)
 	e.GET("/breadcrumb-selectors/:resource", h.GetBreadcrumbSelectorResults)

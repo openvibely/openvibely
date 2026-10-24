@@ -526,6 +526,21 @@ func (h *Handler) NewProjectDialog(c echo.Context) error {
 	return render(c, http.StatusOK, pages.NewProjectDialog(agents, h.isLocalRepoPathEnabled(), globalMaxWorkers))
 }
 
+func (h *Handler) RecoverProjectRepo(c echo.Context) error {
+	p, err := h.projectSvc.GetByID(c.Request().Context(), c.Param("id"))
+	if err != nil { return err }
+	if p == nil { return c.JSON(http.StatusNotFound, map[string]string{"error": "Project not found."}) }
+	if p.RepoURL == "" || h.projectSvc.RepoPathHealth(p).Status != models.RepoPathHealthMissing {
+		return c.JSON(http.StatusConflict, map[string]string{"error": "Re-clone is only available for a missing GitHub repository folder. Reopen project settings to check its status."})
+	}
+	if h.githubSvc == nil { return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "GitHub integration is unavailable."}) }
+	if err := h.githubSvc.RecoverProjectRepo(c.Request().Context(), p.ID, p.RepoPath, p.RepoURL); err != nil {
+		applog.Infof("[handler] repository recovery failed for project %s: %v", p.ID, err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Re-clone failed. Check GitHub access and the managed repository storage, then retry."})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "healthy"})
+}
+
 func (h *Handler) EditProjectDialog(c echo.Context) error {
 	projectID := c.Param("id")
 	applog.Infof("[handler] EditProjectDialog id=%s", projectID)

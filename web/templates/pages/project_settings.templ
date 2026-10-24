@@ -628,10 +628,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 
 templ ProjectSettingsTabs(prefix string) {
  <style>
-  [data-project-panel="general"] .label { padding: 0.125rem 0; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
+  [data-project-panel="general"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }
   [data-project-panel="general"] .flex > .btn { flex-shrink: 0; }
-  [data-project-panel="general"] .textarea { min-height: 3.5rem; }
   [data-project-panel="general"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
   [data-project-panel="general"] .project-defaults-fields .form-control { min-width: 0; }
   [data-project-panel="general"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }
