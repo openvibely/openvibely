@@ -20,6 +20,12 @@ import (
 // Archives are expanded into an unpublished staging directory. Links are created
 // last, so an archive entry can never write through an earlier symlink.
 func prepare(ctx context.Context, p Package, archive, root string) error {
+	if p.Format == "libreoffice-deb" {
+		return prepareOfficeDEBs(ctx, archive, root)
+	}
+	if p.Format == "libreoffice-msi" {
+		return prepareOfficeMSI(ctx, archive, root)
+	}
 	if p.Format == "dmg" {
 		return prepareDMG(ctx, archive, root, p.Executable)
 	}
@@ -81,6 +87,14 @@ func prepare(ctx context.Context, p Package, archive, root string) error {
 		}
 	default:
 		return errors.New("unsupported archive format")
+	}
+	return x.finishLinks()
+}
+
+func (x *extractor) finishLinks() error {
+	root, err := filepath.EvalSymlinks(x.root)
+	if err != nil {
+		return err
 	}
 	for name, target := range x.links {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0700); err != nil {
