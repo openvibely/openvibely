@@ -1171,7 +1171,7 @@ func TestBrowserFunctional_VirtualSmallScrollBatchesAnchorCorrections(t *testing
   if(reading)assert(reading.node.isConnected && Math.abs(reading.node.getBoundingClientRect().top-top)<2,'visible message moved during small scroll');
  }
  assert(maxWrites<=1,'multiple anchor corrections in one scroll frame: '+maxWrites);
- assert(stream.querySelector('.stream-tool-body-scroll'),'tool output disappeared during batched mounting');
+ assert(Array.from(stream.querySelectorAll('[data-tool-row="out"] .stream-tool-text-clip')).some(node=>/^result \d+$/.test(node.textContent)),'tool output disappeared during batched mounting');
  return {maxWrites};
  `)
 }
@@ -1198,7 +1198,7 @@ func TestBrowserFunctional_ColdThreadPreparesFirstUpwardScroll(t *testing.T) {
   if(reading)assert(reading.node.isConnected && Math.abs(reading.node.getBoundingClientRect().top-top)<2,'visible message moved during small scroll');
  }
  assert(maxWrites===0,'first upward gesture required cold height corrections: '+maxWrites);
- assert(stream.querySelector('.stream-tool-body-scroll'),'tool output disappeared during batched mounting');
+ assert(Array.from(stream.querySelectorAll('[data-tool-row="out"] .stream-tool-text-clip')).some(node=>/^result \d+$/.test(node.textContent)),'tool output disappeared during batched mounting');
  return {maxWrites};
  `)
 }

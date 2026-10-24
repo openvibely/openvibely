@@ -863,7 +863,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
+	agentDefs := h.listAgentDefinitions(c.Request().Context())
 
 	if isHTMX {
 		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
