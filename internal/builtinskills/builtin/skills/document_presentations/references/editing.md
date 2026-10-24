@@ -234,3 +234,22 @@ JSON
 ```
 
 The two shapes in this new deck receive IDs `2` and `3`. For a supplied deck, inspect actual slide-local IDs; do not assume creation order or use shape names as IDs. These rectangles use site 3 (right) and site 1 (left); connection-site indices depend on shape geometry. `start`/`end` store native attachments, while the connector box supplies its initial geometry. `tail` puts the arrow at the end/target; `head` puts it at the start. Open the PNG with `view_image` to verify endpoints and direction. Check attachments in the saved package or presentation application as well; a line touching a shape is not proof of an attachment.
+
+### Connector endpoints in builds after RC5
+
+RC5 accepts `straight`, `elbow`, and `curved` with explicit endpoint site indices.
+Newer builds also accept `elbow2`, `elbow3`, `elbow4`, and `elbow5` and expose
+`slide-edit` operation `connector`:
+
+```json
+{"edits":[{"operation":"connector","slide":1,"shape_id":"4","connector":{
+ "kind":"elbow4","start":{"shape_id":"2","side":"auto"},
+ "end":{"shape_id":"3","side":"auto"}
+}}]}
+```
+Check the runtime's schema before using this operation. Omitted endpoints/kind
+retain their values. `side` accepts `top`, `left`, `bottom`, `right`, or `auto`
+for unrotated, unflipped rectangles, rounded rectangles and diamonds; otherwise
+supply an inspected `site`. Automatic selection faces the other endpoint's
+center; it does not move the connector or avoid obstacles. Set its geometry
+separately, inspect saved attachments and view the rendered result.
