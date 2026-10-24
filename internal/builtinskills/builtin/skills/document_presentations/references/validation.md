@@ -10,3 +10,11 @@ The same check rejects reported off-slide geometry, the placeholder chart title 
 
 Literal-only charts need an explicit delivery choice. For a user-requested PowerPoint-only output, pass `"target_application":"powerpoint"` in the requirements; literal values are validated and reported separately from workbook references. For a new snapshot that should have editable workbook data, explicitly run `"$PAPERWORKS" materialize-charts draft.pptx --output with-workbooks.pptx`, then `verify-slides`, render and inspect. Materialization preserves literal values and chart styling; it does not recover source formulas or links. It refuses charts that already have workbook references, rather than replacing their lineage.
 
+
+## Paired previews and native layout reports (after RC5)
+
+Use `"$PAPERWORKS" slide-preview input.pptx --output new-preview-dir` when you need an image and matching native object metadata. It returns one `slide-N.png` / `slide-N.layout.json` pair per slide. It requires LibreOffice and a new output directory; a page-count mismatch fails without publishing the directory.
+
+Read each report alongside its image. Positions use logical 96-DPI pixels; divide by 96 for Paperworks editing inches. The PNG's actual dimensions are in `preview`. Slide-owned records supply `edit_target` with the one-based slide and native `shape_id`. Inherited master/layout objects are marked `editable:false`; they are source-layer records, not additional visible objects or slide-owned edit targets.
+
+Reports resolve local/placeholder geometry and cascading text properties, including Latin theme fonts. Native XML retains paint, cropping, tables and inherited layers. Group-transformed coordinates, renderer font substitutions and theme paint effects are not fully resolved; read the report's limitations and inspect PNGs instead of treating missing properties as defaults. This command is not available in pinned RC5.
