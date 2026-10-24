@@ -74,7 +74,23 @@ window.addEventListener('load', async function() {
     const canvas=document.createElement('canvas');main.append(canvas);
     charts.test={canvas,destroy(){destroyed++;}};
     charts.throwing={destroy(){destroyed++;throw Error('simulated Chart cleanup failure');}};
-    if(visit===0) document.body.dispatchEvent(new CustomEvent('htmx:beforeRequest',{bubbles:true,detail:{target:main,pathInfo:{requestPath:'/tasks'}}}));
+    const link=document.createElement('a');link.href='/tasks';main.append(link);
+    link.addEventListener('click',event=>event.preventDefault());
+    for(const options of [{button:2},{button:1},{button:0,metaKey:true},{button:0,ctrlKey:true},{button:0}]) {
+     link.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,...options}));
+     link.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,...options}));
+     check(destroyed===2*visit,'navigation intent destroyed charts before departure');
+     check(!window._analyticsAbortController.signal.aborted,'navigation intent disposed Analytics');
+    }
+    link.target='_blank';link.click();
+    check(destroyed===2*visit,'new-tab link destroyed charts');
+    document.body.dispatchEvent(new CustomEvent('htmx:beforeRequest',{bubbles:true,detail:{target:main,pathInfo:{requestPath:'/tasks'}}}));
+    check(destroyed===2*visit,'request start destroyed charts before a successful swap');
+    check(!window._analyticsAbortController.signal.aborted,'request start disposed the still-visible page');
+    if(visit===2) {
+     window.dispatchEvent(new Event('pagehide'));
+     check(destroyed===2*(visit+1),'document departure did not destroy charts');
+    }
     htmx.swap(main,'<p>Tasks</p>',{swapStyle:'innerHTML',settleDelay:0});await wait();
     check(destroyed===2*(visit+1),'charts not destroyed exactly once on departure');
     check(Object.keys(charts).length===0,'departed chart map retains objects');

@@ -1042,9 +1042,15 @@ func TestBrowserFunctional_AnalyticsContent_ImmediateNavigationAwayAbortsWorkInC
 	if (requestSignals.length === 1 && requestSignals.every(Boolean)) {
       var nav = document.getElementById('other-nav');
       nav.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true}));
-      if (requestSignals.some(function(signal) { return !signal.aborted; })) fail('Analytics requests were not aborted before sidebar navigation');
+      if (requestSignals.some(function(signal) { return signal.aborted; })) fail('Pointer-down aborted work before navigation');
+      document.body.dispatchEvent(new CustomEvent('htmx:beforeRequest', {bubbles:true, detail:{target:{id:'main-content'},pathInfo:{requestPath:'/tasks'}}}));
+      if (requestSignals.some(function(signal) { return !signal.aborted; })) fail('Analytics requests were not aborted when navigation started');
+      if (window._analyticsAbortController.signal.aborted) fail('Navigation request disposed the visible Analytics page');
       setTimeout(function() {
 		if (requests !== 1) fail('Analytics started more work after navigation: ' + requests + ' requests');
+        // If navigation fails without swapping the page, controls must still work.
+        document.getElementById('refreshBtn').click();
+        if (requests !== 2 || requestSignals[1].aborted) fail('Visible Analytics page could not refresh after cancelled navigation');
         result.setAttribute('data-test-result', 'pass');
       }, 50);
       return;

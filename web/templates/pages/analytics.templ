@@ -435,21 +435,14 @@ templ analyticsContent(currentProject *models.Project) {
 									if (analyticsGeneration === window._analyticsGeneration) window._analyticsGeneration++;
 									if (window._analyticsAbortController && !window._analyticsAbortController.signal.aborted) window._analyticsAbortController.abort();
 								}
-								function navigationLeavesAnalytics(event) {
-									const link = event.target && event.target.closest ? event.target.closest('a[href], [data-nav-base]') : null;
-									if (!link) return false;
-									const destination = link.getAttribute('hx-get') || link.getAttribute('href') || link.getAttribute('data-nav-base');
-									if (!destination) return false;
-									try { return new URL(destination, window.location.href).pathname !== '/analytics'; } catch (_) { return false; }
-								}
-								document.addEventListener('pointerdown', function(event) {
-									if (navigationLeavesAnalytics(event)) leaveAnalytics();
-								}, { capture: true, signal: eventSignal });
 								document.body.addEventListener('htmx:beforeRequest', function(event) {
 									const detail = event.detail || {};
 									const target = detail.target || (detail.requestConfig && detail.requestConfig.target);
 									const path = detail.pathInfo && detail.pathInfo.requestPath;
-									if (target && target.id === 'main-content' && path && new URL(path, window.location.href).pathname !== '/analytics') leaveAnalytics();
+									// Cancel data work on a navigation request, but keep the visible page
+                                    // usable if the request fails or is cancelled. Actual removal (or
+                                    // pagehide) disposes charts and page listeners via leaveAnalytics.
+                                    if (target && target.id === 'main-content' && path && new URL(path, window.location.href).pathname !== '/analytics') abortAnalyticsData();
 								}, { signal: eventSignal });
 								window.addEventListener('pagehide', leaveAnalytics, { once: true, signal: eventSignal });
 						function destroyChart(key) {
