@@ -9,6 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	templateui "github.com/openvibely/openvibely/web/templates"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestBrowserFunctional_ProjectKnowledgeDialog(t *testing.T) {
@@ -140,4 +141,69 @@ func TestBrowserFunctional_ProjectRepoRecovery(t *testing.T) {
 		b.evaluate(`document.querySelector('[data-recover-repo]').click();finishRecovery({ok:true,json:async()=>({status:'healthy'})});'ok'`)
 		b.waitFor("healthy after recovery", `String(document.querySelector('[data-repo-path-health]').dataset.repoPathHealth==='healthy' && !document.querySelector('[data-recover-repo]') && document.querySelector('[name="repo_url"]').value==='https://github.com/acme/widgets')`, "true")
 	})
+}
+
+func TestBrowserFunctional_ProjectRepositorySourceVisibility(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, mode := range []string{"new", "edit", "edit-remote", "edit-legacy-local"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/" {
+					if err := layout.Base("Projects", nil, "default").Render(r.Context(), w); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				if r.URL.Path != "/dialog" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				dialog := NewProjectDialog(nil, true, 4)
+				if mode != "new" {
+					project := &models.Project{ID: "test", Name: "Test", RepoPath: "/tmp/project", IsDefault: true}
+					if mode == "edit-remote" {
+						project.RepoURL = "https://github.com/acme/widgets"
+					}
+					dialog = EditProjectDialog(project, nil, mode != "edit-legacy-local", 4, models.ProjectRepoPathHealth{})
+				}
+				if err := dialog.Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL, "repo-source-"+mode, func(b *composerFocusCDP) {
+				b.waitFor("shell ready", `String(document.readyState==='complete' && !!window.htmx && !!document.getElementById('project-settings-container'))`, "true")
+				b.evaluate(`document.body.addEventListener('htmx:beforeSwap', function(e) {
+ const parsed = new DOMParser().parseFromString(e.detail.serverResponse, 'text/html');
+ const remote = parsed.querySelector('[name="repo_source"]').value === 'github';
+ window.initialRepoVisibility = parsed.querySelector('[id$="-local-fields"]').hidden === remote && parsed.querySelector('[id$="-github-fields"]').hidden === !remote;
+ }, {once:true});htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
+				b.waitFor("ready", `String(document.readyState==='complete' && !!document.querySelector('dialog[open]'))`, "true")
+				b.waitFor("server-rendered source visibility", `String(window.initialRepoVisibility)`, "true")
+				check := `(() => {
+     const source=document.querySelector('[name="repo_source"]');
+     const remote=source.value==='github';
+     const local=document.querySelector('[id$="-local-fields"]');
+     const github=document.querySelector('[id$="-github-fields"]');
+     const localVisible=local.getBoundingClientRect().height>0;
+     const githubVisible=github.getBoundingClientRect().height>0;
+     const url=document.querySelector('[name="repo_url"]');
+     return String(localVisible===!remote && githubVisible===remote && url.required===remote);
+    })()`
+				if got := b.evaluate(check); got != "true" {
+					t.Fatalf("initial repository fields visibility: %s", got)
+				}
+				for _, source := range []string{"github", "local"} {
+					b.evaluate(fmt.Sprintf(`var source=document.querySelector('[name="repo_source"]');source.value=%q;source.dispatchEvent(new Event('change'));'ok'`, source))
+					if got := b.evaluate(check); got != "true" {
+						t.Fatalf("%s fields visibility: %s", source, got)
+					}
+				}
+			})
+		})
+	}
 }
