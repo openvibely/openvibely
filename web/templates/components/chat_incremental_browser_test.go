@@ -84,9 +84,19 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
  window.streamPhase = 'loading scripts';
  window.streamDiagnostic = () => ({phase:window.streamPhase, ready:document.readyState, visibility:document.visibilityState});
  window.reportStreamError = error => fetch('/report', {method:'POST', body:JSON.stringify({error:String(error && (error.stack || error))})});
- window.addEventListener('error', event => window.reportStreamError(event.error || event.message || ('asset load failed: '+(event.target.src || event.target.href))), true);
+ window.streamResizeWarnings = 0;
+ window.addEventListener('error', event => {
+  // ResizeObserver defers notifications that would recurse within a frame.
+  // Keep these diagnostics, but let the scenario's layout/anchor assertions
+  // decide correctness rather than treating a deferred delivery as an exception.
+  if (!event.error && (event.message === 'ResizeObserver loop completed with undelivered notifications.' || event.message === 'ResizeObserver loop limit exceeded')) {
+   window.streamResizeWarnings++;
+   return;
+  }
+  window.reportStreamError(event.error || event.message || ('asset load failed: '+(event.target.src || event.target.href)));
+ }, true);
  window.addEventListener('unhandledrejection', event => window.reportStreamError(event.reason));
- setInterval(() => fetch('/progress', {method:'POST',body:JSON.stringify(window.streamDiagnostic())}).catch(()=>{}), 1000);
+ setInterval(() => fetch('/progress', {method:'POST',body:JSON.stringify({...window.streamDiagnostic(), resizeWarnings:window.streamResizeWarnings})}).catch(()=>{}), 1000);
  </script>`
 	fixture := `<!doctype html><html><head>` + diagnostics + `<script src="` + static.URL("chat-virtual-list.js") + `"></script>` + styles + `<script src="` + static.URL("vendor/marked.min.js") + `" data-ov-asset="marked"></script><script src="` + static.URL("file-math-parser.js") + `" data-ov-math-parser></script></head><body>
  <div id="messages" style="height:300px;overflow:auto"><div id="pair" data-execution-pair="true" data-exec-id="fixture" data-exec-status="running"><div id="stream" class="chat-bubble-assistant-msg"></div></div></div>
