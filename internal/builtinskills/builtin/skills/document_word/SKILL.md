@@ -9,35 +9,40 @@ skill:
     description: Read, create, and edit Word DOCX documents with styles, tables, images, and comments.
 dependencies:
   - name: paperworks
-    version: 0.0.0-rc7
+    version: 0.0.1
     environment_variable: PAPERWORKS
     health_check: [version]
     packages:
       darwin/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-darwin-amd64.zip
-        sha256: db27fb6bdf28426d4d5110b47ec51a5d395d99f598b7bf2250e2cb827dc27cd1
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-darwin-amd64.zip
+        sha256: 47075d45f826f44a3cfb62da2a5f0fdb646d73a591c31a630e5852a470ba4fec
         format: zip
-        executable: paperworks
+        executable: paperworks-darwin-amd64
       darwin/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-darwin-arm64.zip
-        sha256: 2a3ae0d076363aa8c47014556a4c1f2265d948923e14ab275f9a9128627d186c
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-darwin-arm64.zip
+        sha256: 5aecea2146066598336f06d7ce6ceb0aef3d7a0647db8f99bed6e569a8f56db5
         format: zip
-        executable: paperworks
+        executable: paperworks-darwin-arm64
       linux/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-linux-amd64.zip
-        sha256: b284b0ba013a09645157e4bd4bc5ff6938114e2415dc85644600749a1fb845d6
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-linux-amd64.zip
+        sha256: 74c1cd86344ce9b60a28ce606dbdcb675aae8f30eb6cd2d139d76f61df15652d
         format: zip
-        executable: paperworks
+        executable: paperworks-linux-amd64
       linux/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-linux-arm64.zip
-        sha256: 1e2ce5ead1e1f3195859be195e2e96d94bb55e6b2ba490fb7b7459fdd455df32
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-linux-arm64.zip
+        sha256: 25c08b1d5de99a111f2f7f72171102abbf4ea2a44ac59fa4096a38fb6596beba
         format: zip
-        executable: paperworks
+        executable: paperworks-linux-arm64
       windows/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-windows-amd64.zip
-        sha256: 35a6f259722c76e4fc6c13fb6410c98ca2aed60a96a02420c91830e43cd34fe7
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-windows-amd64.zip
+        sha256: ad1830a62cfc375ff222b614c124fc744872de07641bf675eaf39545aec6dbf1
         format: zip
-        executable: paperworks.exe
+        executable: paperworks-windows-amd64.exe
+      windows/arm64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-windows-arm64.zip
+        sha256: 63991c2bdc6cb01948f786b2d25d8bd3a6b54469f22b2f69ace7f792f7c399cd
+        format: zip
+        executable: paperworks-windows-arm64.exe
   - name: libreoffice
     version: 26.8.1
     environment_variable: DOCUMENT_SOFFICE
