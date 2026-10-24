@@ -22,7 +22,7 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 	decisions := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/approval.js" {
-			w.Header().Set("Content-Type", "application/javascript")
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 			w.Write(script)
 			return
 		}
@@ -67,13 +67,29 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/?project_id=project#chat-input-request-request", "dependency-approval", func(browser *composerFocusCDP) {
-		browser.waitFor("approval card", `document.getElementById('chat-input-request-request')?.textContent.includes('Install dependencies') ? 'ready' : 'waiting'`, "ready")
+		browser.waitFor("approval card", `document.getElementById('chat-input-request-request')?.textContent.includes('Install and continue') ? 'ready' : 'waiting'`, "ready")
 		text := browser.evaluate(`document.getElementById('chat-input-request-request').textContent`)
-		for _, want := range []string{"1.2.3", "example.test", "machine hosting OpenVibely", "do not prove trust", "--version", "bin/tool"} {
+		for _, want := range []string{"1.2.3", "example.test", "Download details", "SHA-256", "bin/tool", "Install and continue"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("card missing %q: %s", want, text)
 			}
 		}
+		for _, unwanted := range []string{"Requires external tools", "do not prove trust", "--version", "health_check"} {
+			if strings.Contains(text, unwanted) {
+				t.Fatalf("unexpected technical copy %q", unwanted)
+			}
+		}
+		browser.waitFor("details collapsed", `document.querySelector('[data-skill-dependency-details] details')?.open === false ? 'closed' : 'open'`, "closed")
+		for _, phase := range []struct{ stage, label string }{{"downloading", "Downloading Example…"}, {"preparing", "Installing Example…"}, {"checking executable", "Checking Example…"}} {
+			payload, _ := json.Marshal(map[string]string{"type": "skill_dependency_progress", "exec_id": "execution", "dependency_name": "example", "phase": phase.stage})
+			browser.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:` + string(payload) + `})); 'sent'`)
+			browser.waitFor("progress label", `document.querySelector('[data-skill-dependency-status]')?.textContent || ''`, phase.label)
+			browser.waitFor("one shared spinner", `document.querySelectorAll('[data-skill-dependency-status] .loading-spinner').length.toString()`, "1")
+		}
+		browser.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_progress',exec_id:'execution',dependency_name:'example',phase:'failed'}})); 'sent'`)
+		browser.waitFor("failed spinner stopped", `document.querySelector('[data-skill-dependency-status]')?.textContent.includes('installation failed') && !document.querySelector('[data-skill-dependency-status] .loading-spinner') ? 'stopped' : 'waiting'`, "stopped")
+		browser.evaluate(`window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_progress',exec_id:'execution',dependency_name:'example',phase:'ready'}})); 'sent'`)
+		browser.waitFor("ready status removed", `document.querySelector('[data-skill-dependency-status]') ? 'waiting' : 'removed'`, "removed")
 		browser.evaluate(`document.getElementById('chat-input-request-request').dataset.beforeRefresh='true';window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'skill_dependency_approval',exec_id:'execution',project_id:'project',pending_input_id:'request',status:'pending'}})); 'sent'`)
 		browser.waitFor("navigable toast", `window.approvalToast?.clickURL || ''`, "/chat/input-requests/request/open?project_id=project")
 		// Clicking while the refresh swaps the card splits press and release across nodes.
