@@ -3241,14 +3241,24 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				window.escapeRawHTMLForMarkdown = function(text, ranges) {
 					if (!text) return text;
 					ranges = ranges || window.codeRanges(text);
+					// Angle brackets delimit Markdown link/image destinations; escaping
+					// their opener makes Marked include the brackets in the actual URL.
+					// Preserve only destination syntax, leaving raw HTML escaping and
+					// the rendered HTML sanitizer in place (also used by the worker).
+					var destinationOpeners = new Set();
+					var destinationPattern = /(?:\]\([ \t\r\n]*|^ {0,3}\[[^\]\r\n]+\]:[ \t]*)<[^<>\r\n]*>/gm;
+					var destinationMatch;
+					while ((destinationMatch = destinationPattern.exec(text))) {
+						destinationOpeners.add(destinationMatch.index + destinationMatch[0].lastIndexOf('<'));
+					}
 					var rangeIndex = 0;
 					var escaped = '';
 					for (var i = 0; i < text.length; i++) {
-						while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
+					while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
 						var inCode = rangeIndex < ranges.length && i >= ranges[rangeIndex].start && i < ranges[rangeIndex].end;
 						// Promote complete SVG output to a code block. The SVG viewer renders
 						// an isolated image from this source; raw HTML stays escaped.
-						if (!inCode && text.charAt(i) === '<' && /^<svg(?:\s|>)/i.test(text.slice(i, i + 5))) {
+						if (!inCode && !destinationOpeners.has(i) && text.charAt(i) === '<' && /^<svg(?:\s|>)/i.test(text.slice(i, i + 5))) {
 							var candidate = text.slice(i, i + 1024 * 1024);
 							var tags = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?svg\b[^>]*>/gi;
 							var depth = 0, tag, end = 0;
@@ -3266,7 +3276,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								continue;
 							}
 						}
-						escaped += text.charAt(i) === '<' && !inCode ? '&lt;' : text.charAt(i);
+						escaped += text.charAt(i) === '<' && !inCode && !destinationOpeners.has(i) ? '&lt;' : text.charAt(i);
 					}
 					return escaped;
 				};

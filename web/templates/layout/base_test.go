@@ -593,6 +593,34 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 		"for (const [name, value] of Object.entries(validClosers)) { const escaped = window.escapeRawHTMLForMarkdown(value); if (escaped.indexOf('<img src=x') === -1 || escaped.indexOf('<img src=y') !== -1 || escaped.indexOf('&lt;img src=y') === -1) { console.error('valid closer mismatch', name, JSON.stringify(escaped)); process.exit(4); } }\n" +
 		"const maliciousCases = " + mustJSON(t, malicious) + ";\n" +
 		"for (const value of maliciousCases) { const escaped = window.escapeRawHTMLForMarkdown(value); if (/<\\/?(?:img|script|a)\\b/i.test(escaped) || /<img\\//i.test(escaped)) { console.error('raw tag survived', JSON.stringify(value), JSON.stringify(escaped)); process.exit(2); } const rendered = window.renderChatMarkdown(value); if (/<\\/?(?:img|script|a)\\b/i.test(rendered) || /<img\\//i.test(rendered)) { console.error('active tag survived', JSON.stringify(value), JSON.stringify(rendered)); process.exit(3); } }\n"
+	// Use the shipped parser, rather than the safety-test stub, to verify that
+	// angle-delimited published URLs survive preprocessing without becoming relative.
+	script += `
+window.marked = require('../../static/dist/vendor/marked.min.js');
+const publishedURL = '/files/707b783cc80fc7c3f59e907220b226d0?project_id=301ebd410bafc3adf718022dbed7466d';
+const linkCases = [
+  '[Download](<' + publishedURL + '>)',
+  '[Download](' + publishedURL + ')',
+  '[Download](<' + publishedURL + '> "PDF")',
+  '[Download][pdf]\n\n[pdf]: <' + publishedURL + '>',
+  '![Preview](<' + publishedURL + '>)',
+];
+for (const source of linkCases) {
+  const html = window.renderChatMarkdown(source);
+  const match = html.match(/(?:href|src)="([^"]+)"/);
+  if (!match || match[1] !== publishedURL) throw new Error('Broken published URL: ' + html);
+  for (const base of ['wails://localhost/tasks/task-id', 'https://example.test/tasks/task-id']) {
+    const resolved = new URL(match[1], base);
+    if (resolved.pathname !== publishedURL.split('?')[0] || resolved.search !== '?' + publishedURL.split('?')[1]) {
+      throw new Error('Published link resolved relative to task: ' + resolved);
+    }
+  }
+}
+const mixed = window.renderChatMarkdown(linkCases[0] + '\n<img src=x onerror=alert(1)>');
+if (mixed.includes('<img src=x')) throw new Error('Raw HTML escaping regressed');
+const code = window.renderChatMarkdown(String.fromCharCode(96) + linkCases[0] + String.fromCharCode(96));
+if (code.includes('<a ') || !code.includes('&lt;')) throw new Error('Code example became a link');
+`
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("rendered Markdown safety helpers failed: %v\n%s", err, output)
 	}
