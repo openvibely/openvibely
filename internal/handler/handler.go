@@ -151,6 +151,7 @@ type GitHubServiceProvider interface {
 	Disconnect(ctx context.Context) error
 	CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error)
 	RecloneProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
+	RecoverProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) error
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
 	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error)

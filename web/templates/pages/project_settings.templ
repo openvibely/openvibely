@@ -74,6 +74,8 @@ templ projectRepoPathHealth(health models.ProjectRepoPathHealth, remote bool) {
 			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 2 21h20Z"/><path d="M12 9v5m0 3h.01"/></svg>
 			if remote {
 <span>Repository folder not found. Re-clone the repository or restore its folder.</span>
+<button type="button" class="btn btn-outline btn-sm shrink-0" data-recover-repo>Re-clone</button>
+<span data-recovery-feedback role="status" class="hidden"></span>
 } else {
 <span>Folder not found. Choose its new location or restore the folder.</span>
 }
@@ -253,6 +255,33 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			if (input) input.addEventListener('input', updateHealthVisibility);
 			if (githubInput) githubInput.addEventListener('input', updateHealthVisibility);
 			if (repoSourceSelect) repoSourceSelect.addEventListener('change', updateHealthVisibility);
+
+			var recoverButton = m && m.querySelector('[data-recover-repo]');
+			if (recoverButton) recoverButton.addEventListener('click', async function() {
+				if (recoverButton.disabled) return;
+				var feedback = healthStatus.querySelector('[data-recovery-feedback]');
+				recoverButton.disabled = true;
+				recoverButton.textContent = 'Re-cloning...';
+				feedback.classList.add('hidden');
+				try {
+					var response = await fetch(recoverButton.form.getAttribute('hx-put') + '/reclone', {
+						method: 'POST', headers: {'HX-Request': 'true'}
+					});
+					var payload = await response.json();
+					if (!response.ok || payload.status !== 'healthy') throw new Error(payload.error || 'Re-clone failed. Please retry.');
+					healthStatus.dataset.repoPathHealth = 'healthy';
+					healthStatus.classList.replace('text-warning', 'text-success');
+					healthStatus.textContent = 'Repository folder found';
+					updateHealthVisibility();
+				} catch (err) {
+					feedback.textContent = err.message || 'Re-clone failed. Please retry.';
+					feedback.classList.remove('hidden');
+				} finally {
+					recoverButton.disabled = false;
+					recoverButton.textContent = 'Re-clone';
+				}
+			});
+
 
 
 			function isAbsolutePath(pathValue) {
