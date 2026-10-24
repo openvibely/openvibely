@@ -97,7 +97,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				hx-swap="none"
 			>
 				@ProjectSettingsTabs("edit-project")
-<div style="height: 60vh; overflow-y: auto;" data-project-tab-content>
+<div style="height: 55vh; overflow-y: auto;" data-project-tab-content>
 				<section id="edit-project-general" role="tabpanel" aria-labelledby="edit-project-general-tab" data-project-panel="general">
 
 				<div class="form-control mb-3">
@@ -355,7 +355,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					hx-indicator="#new-project-create-progress"
 				>
 				@ProjectSettingsTabs("new-project")
-<div style="height: 60vh; overflow-y: auto;" data-project-tab-content>
+<div style="height: 58vh; overflow-y: auto;" data-project-tab-content>
 <section id="new-project-general" role="tabpanel" aria-labelledby="new-project-general-tab" data-project-panel="general">
 <div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
