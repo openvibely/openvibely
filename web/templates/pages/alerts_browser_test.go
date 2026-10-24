@@ -48,7 +48,6 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 	}
 	page := rendered.String()
 	for _, external := range []string{
-		static.URL("app-utilities.css"),
 		static.URL("vendor/htmx.min.js"),
 		static.URL("vendor/idiomorph-ext.min.js"),
 		static.URL("vendor/marked.min.js"),
@@ -57,10 +56,6 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 	} {
 		page = strings.ReplaceAll(page, external, "/empty.js")
 	}
-	page = strings.Replace(page, "</head>", `<style>
-[data-alert-scroll-anchor] { display: block; width: 720px; min-height: 180px; margin: 16px; }
-[data-alert-scroll-anchor] > .card-body { min-height: 148px; padding: 16px; }
-</style></head>`, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -129,7 +124,9 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 			t.Fatalf("unexpected Alerts card accessibility state: %s", accessibility)
 		}
 
-		browser.click(cardSelector + " .card-body")
+		// Click non-interactive card content, not a center point that may land on
+		// Inspect or an action button (which intentionally suppress navigation).
+		browser.click(cardSelector + " p.font-semibold")
 		browser.waitFor("native mouse task navigation", `window.__alertNavigations[window.__alertNavigations.length - 1] || ''`, taskURL)
 		tabToCard()
 		before := navigationCount(taskURL)

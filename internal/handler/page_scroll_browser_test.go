@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,12 +28,33 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 	}
 	_, e, _ := setupTestHandler(t)
 	results := make(chan string, 1)
+	var stageMu sync.Mutex
+	lastStage := "waiting for document runner"
 	runner := `<script>(async()=>{
  const assert=(v,m)=>{if(!v)throw Error(m)};
  const frame=()=>new Promise(r=>setTimeout(r,100));
+ const stage=async value=>{await fetch('/browser-stage',{method:'POST',body:value})};
+ const bounded=async(promise,label)=>{
+   let timer;
+   try { return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Timed out: '+label)),10000)})]); }
+   finally { clearTimeout(timer); }
+ };
+ await stage('waiting for DOMContentLoaded');
+ if(document.readyState==='loading') await bounded(new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true})),'DOMContentLoaded');
+ assert(window.htmx && typeof htmx.ajax==='function','HTMX unavailable after DOMContentLoaded');
  let current=location.pathname;
  for(const path of ['/models','/schedule','/alerts','/models']) {
-   if(path!==current) await htmx.ajax('GET',path,{target:'#main-content',swap:'innerHTML'});
+   await stage('navigate '+path);
+   if(path!==current) {
+     // Use a per-request source, like the app's navigation helper, and wait
+     // for HTMX's settle lifecycle before changing the new page's geometry.
+     const source=document.createElement('a'); source.href=path; document.body.appendChild(source);
+     let onSettle;
+     const settled=new Promise(resolve=>{onSettle=e=>{if(e.detail.target?.id==='main-content')resolve()};document.body.addEventListener('htmx:afterSettle',onSettle)});
+     try { await bounded(Promise.all([htmx.ajax('GET',path,{source,target:'#main-content',swap:'innerHTML'}),settled]),'navigation and settle '+path); }
+     finally { document.body.removeEventListener('htmx:afterSettle',onSettle);source.remove(); }
+   }
+   await stage('check scroll range '+path);
    current=path;
    const main=document.getElementById('main-content');
    const filler=document.createElement('div'); filler.style.height='4000px'; main.appendChild(filler);
@@ -55,6 +77,15 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 		// The optional native host registers its wheel bridge; this layout test
 		// exercises the scroll range directly and does not need injected input.
 		if r.URL.Path == "/native-test-bridge" && r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/browser-stage" {
+			var body bytes.Buffer
+			_, _ = body.ReadFrom(http.MaxBytesReader(w, r.Body, 1024))
+			stageMu.Lock()
+			lastStage = body.String()
+			stageMu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -103,7 +134,9 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 	select {
 	case outcome = <-results:
 	case <-ctx.Done():
-		outcome = "timeout"
+		stageMu.Lock()
+		outcome = "timeout: " + lastStage
+		stageMu.Unlock()
 	}
 	stopHandlerBrowserProcess(cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
