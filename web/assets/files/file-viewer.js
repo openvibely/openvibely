@@ -179,12 +179,13 @@
  // Server-rendered preview links already own their thumbnail and gallery group.
  // Only enhance ordinary published links, such as links in model responses.
  function scanLinks(root=document){root.querySelectorAll('a[href]:not([data-file-link-bound]):not([data-image-gallery-item]):not([data-file-preview])').forEach(link=>{
+ if(link.closest('[data-thread-refresh-preview]'))return;
  let url;try{url=new URL(link.href,location.href)}catch{return}
  if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return;
  link.dataset.fileLinkBound='';link.dataset.filePreview='';
  if(link.closest('[data-result-content]'))return;
  const meta=new URL(url);meta.searchParams.set('metadata','1');fetch(meta).then(r=>r.ok?r.json():null).then(file=>{
- if(!file||!link.isConnected)return;
+ if(!file||!link.isConnected||link.closest('[data-thread-refresh-preview]'))return;
  if(/^(image|video)\//.test(file.media_type)||/\.svg$/i.test(file.file_name)){
  const video=file.media_type.startsWith('video/');link.removeAttribute('data-file-preview');link.dataset.imageGalleryItem='';link.dataset.imageName=file.file_name;link.dataset.mediaKind=video?'video':'image';(link.closest('.chat-markdown')||link.parentElement).dataset.imageGalleryGroup='';const preview=document.createElement(video?'video':'img');preview.src=mode(url,video?'raw':'thumbnail');preview.alt=file.file_name;preview.style.cssText='max-width:100%;max-height:400px;object-fit:contain';if(video){preview.muted=true;preview.preload='metadata'}link.prepend(preview);return;
  }
