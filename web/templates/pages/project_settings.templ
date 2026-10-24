@@ -59,25 +59,30 @@ script deleteProjectAction(projectID string) {
 	htmx.ajax('DELETE', requestPath, {target: 'body', swap: 'none'});
 }
 
-templ projectRepoPathHealth(health models.ProjectRepoPathHealth) {
+templ projectRepoPathHealth(health models.ProjectRepoPathHealth, remote bool) {
 	if health.Status == models.RepoPathHealthHealthy {
-		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm" data-repo-path-health="healthy">
-			<div class="font-medium text-success">Repository path status: Healthy</div>
-			<p class="mt-1 text-base-content/70">{ health.Message }</p>
-			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
-		</div>
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-success" data-repo-path-health="healthy" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+			if remote {
+<span>Repository folder found</span>
+} else {
+<span>Folder found</span>
+}
+		</span>
 	} else if health.Status == models.RepoPathHealthMissing {
-		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" data-repo-path-health="missing" role="alert">
-			<div class="font-medium text-warning">Repository path status: Missing</div>
-			<p class="mt-1 text-base-content/80">{ health.Message } { health.Guidance }</p>
-			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
-		</div>
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-warning" data-repo-path-health="missing" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 2 21h20Z"/><path d="M12 9v5m0 3h.01"/></svg>
+			if remote {
+<span>Repository folder not found. Re-clone the repository or restore its folder.</span>
+} else {
+<span>Folder not found. Choose its new location or restore the folder.</span>
+}
+		</span>
 	} else if health.Status == models.RepoPathHealthUnknown {
-		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-sm" data-repo-path-health="unknown">
-			<div class="font-medium text-info">Repository path status: Unknown</div>
-			<p class="mt-1 text-base-content/80">{ health.Message } { health.Guidance }</p>
-			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
-		</div>
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-error" data-repo-path-health="unknown" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+			<span>Can’t check folder. Check folder permissions or reconnect the drive.</span>
+		</span>
 	}
 }
 
@@ -123,10 +128,13 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						</label>
 						}
 					</div>
-					@projectRepoPathHealth(repoPathHealth)
 					if localRepoPathEnabled {
 						<div id="edit-project-local-fields" class="form-control mb-3">
-						<label class="label"><span class="label-text">Repository Path</span></label>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">Repository Path</span>
+ if projectRepoSource(project) == "local" {
+ @projectRepoPathHealth(repoPathHealth, false)
+ }
+ </div>
 						<div class="flex gap-2">
 							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
 							<button
@@ -141,25 +149,41 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<p id="edit-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
+ if projectRepoSource(project) == "github" {
+ @projectRepoPathHealth(repoPathHealth, true)
+ }
+ </div>
 							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else if projectRepoSource(project) == "github" {
 					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
+ if projectRepoSource(project) == "github" {
+ @projectRepoPathHealth(repoPathHealth, true)
+ }
+ </div>
 							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
 					<div id="edit-project-local-fields" class="form-control mb-3">
-						<label class="label"><span class="label-text">Repository Path (current local)</span></label>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">Repository Path (current local)</span>
+ if projectRepoSource(project) == "local" {
+ @projectRepoPathHealth(repoPathHealth, false)
+ }
+ </div>
 						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
 						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label>
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
-						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
+ if projectRepoSource(project) == "github" {
+ @projectRepoPathHealth(repoPathHealth, true)
+ }
+ </div>
 							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
@@ -210,6 +234,21 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			var localFields = document.getElementById('edit-project-local-fields');
 			var githubFields = document.getElementById('edit-project-github-fields');
 			var localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';
+			var healthStatus = m && m.querySelector('[data-repo-path-health]');
+			var savedRepoPath = input && input.value;
+			var savedRepoURL = githubInput && githubInput.value;
+			var savedRepoSource = repoSourceSelect && repoSourceSelect.value;
+			function updateHealthVisibility() {
+				if (!healthStatus) return;
+				healthStatus.classList.toggle('hidden',
+					(repoSourceSelect && repoSourceSelect.value !== savedRepoSource) ||
+					(input && input.value !== savedRepoPath) ||
+					(githubInput && githubInput.value !== savedRepoURL));
+			}
+			if (input) input.addEventListener('input', updateHealthVisibility);
+			if (githubInput) githubInput.addEventListener('input', updateHealthVisibility);
+			if (repoSourceSelect) repoSourceSelect.addEventListener('change', updateHealthVisibility);
+
 
 			function isAbsolutePath(pathValue) {
 				return !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\') || /^[a-zA-Z]:[\\/]/.test(pathValue) || pathValue.startsWith('\\\\'));
