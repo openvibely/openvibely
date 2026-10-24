@@ -50,7 +50,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	coalescer := `window.makeMeasuredStream = function(container, interval) {
 	 var textBuffer = '', renderScheduled = false, renderDelayTimer = null;
 	 var lastRenderFinishedAt = 0, lastRenderedSourceLength = 0;
-	 var largeStreamRenderThreshold = 100 * 1024, largeStreamRenderInterval = interval;
+	 var largeStreamRenderThreshold = 100 * 1024, streamRenderInterval = interval;
 	 var messagesId = 'messages', trackerKey = '_measurementTracker', tracker = {shouldAutoScroll:()=>false};
 	 ` + bubbleJS[coalescerStart:coalescerEnd] + `
 	 return {append: function(delta) {textBuffer += delta; renderBufferedOutput(false);},
@@ -328,9 +328,9 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
      return committed;
     });
    };
-   // Same production coalescer in both cases; the baseline used 250 ms and
-   // full-content rendering, whereas the incremental path uses 50 ms.
-   const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 50);
+   // Same production coalescer in both cases; the baseline uses 250 ms and
+   // full-content rendering, whereas the incremental path uses 100 ms.
+   const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 100);
    const start = performance.now();
    // Schedule every delta in advance, independently of renderer completion.
    await Promise.all(Array.from({length:size/8192}, (_,i)=>new Promise(resolve=>{
