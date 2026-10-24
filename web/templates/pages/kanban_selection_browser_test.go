@@ -40,7 +40,7 @@ func TestBrowserFunctional_KanbanSelectedCardsUseThemeTextBorder(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "kanban-selection", func(b *composerFocusCDP) {
-		b.waitFor("ready", `String(!!(window.openVibelyThemes && document.querySelector('#kanban-selection-fixture .card')))`, "true")
+		b.waitFor("ready", `String(!!(window.openVibelyThemes && window.kanbanToggleCard && document.querySelector('#kanban-selection-fixture .card')))`, "true")
 		for _, theme := range []string{"openvibely-light", "github-light", "openvibely-dark"} {
 			b.evaluate(`window.openVibelyThemes.apply('` + theme + `'); 'ok'`)
 			b.waitFor("applied "+theme, `document.documentElement.getAttribute('data-color-theme')`, theme)

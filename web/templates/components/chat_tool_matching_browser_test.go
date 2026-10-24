@@ -3,11 +3,11 @@ package components
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"html"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -49,18 +49,12 @@ func TestBrowserPerformance_ChatToolResultMatchingScalesLinearlyInChrome(t *test
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(baseHTML.String(), -1), "")
 
 	fixture := `<!doctype html><html><head><meta charset="utf-8">` + styles + `</head><body>
-<main id="fixture-root" data-test-result="pending"><div id="stream" class="chat-stream-content chat-bubble-assistant-msg"></div></main>
+<main id="fixture-root"><div id="stream" class="chat-stream-content chat-bubble-assistant-msg"></div></main>
 <script>` + renderedBaseMarkdownCodeHelpers(t) + `</script>` + chatScript.String() + `<script>
 window.addEventListener('DOMContentLoaded', function() {
-  var root = document.getElementById('fixture-root');
   var container = document.getElementById('stream');
   var report = {matcher: {}, preparation: {}};
-  function fail(message) {
-    root.setAttribute('data-test-result', 'fail');
-    root.setAttribute('data-test-error', String(message));
-    throw new Error(message);
-  }
-  function assert(condition, message) { if (!condition) fail(message); }
+  function assert(condition, message) { if (!condition) throw new Error(message); }
   function makeSegments(count, scenario) {
     var segments = [];
     var names = [];
@@ -276,16 +270,27 @@ window.addEventListener('DOMContentLoaded', function() {
     assert(staleCommitted === false, 'superseded large render did not report cancellation');
     assert(container.textContent.indexOf('newest render') !== -1 && container.textContent.indexOf('xxxxxxxx') === -1, 'stale render replaced newer output');
 
-    root.setAttribute('data-matcher-metrics', btoa(unescape(encodeURIComponent(JSON.stringify(report)))));
-    root.setAttribute('data-test-result', 'pass');
+    return fetch('/report', {method: 'POST', body: JSON.stringify({report: report})});
   })().catch(function(error) {
-    root.setAttribute('data-test-result', 'fail');
-    root.setAttribute('data-test-error', String(error && error.stack || error));
+    fetch('/report', {method: 'POST', body: JSON.stringify({error: String(error && error.stack || error)})});
   });
 });
 </script></body></html>`
 
+	type result struct {
+		Report json.RawMessage `json:"report"`
+		Error  string          `json:"error"`
+	}
+	results := make(chan result, 1)
 	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/report" {
+			var reported result
+			if err := json.NewDecoder(r.Body).Decode(&reported); err != nil {
+				reported.Error = err.Error()
+			}
+			results <- reported
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -294,14 +299,23 @@ window.addEventListener('DOMContentLoaded', function() {
 	}))
 	defer fixtureServer.Close()
 
-	result := runHeadlessChromeFixture(t, chrome, fixtureServer.URL, "Chat tool matching performance", 180000, 4*time.Minute)
-	encoded := regexp.MustCompile(`data-matcher-metrics="([^"]+)"`).FindStringSubmatch(result)
-	if len(encoded) != 2 {
-		t.Fatalf("browser tool-matching fixture omitted metrics: %s", html.UnescapeString(regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)))
+	// Real wall time: under --virtual-time-budget, Chrome stops producing frames
+	// after the large commit, so the frame-gap probe's requestAnimationFrame never fires.
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), fixtureServer.URL)
+	configureTestBrowserProcess(cmd)
+	if err := startTestBrowserProcess(cmd); err != nil {
+		t.Fatal(err)
 	}
-	decoded, err := base64.StdEncoding.DecodeString(html.UnescapeString(encoded[1]))
-	if err != nil {
-		t.Fatalf("decode browser tool-matching metrics: %v", err)
+	defer func() { stopTestBrowserProcess(cmd); _ = cmd.Wait() }()
+	var decoded json.RawMessage
+	select {
+	case reported := <-results:
+		if reported.Error != "" {
+			t.Fatal(reported.Error)
+		}
+		decoded = reported.Report
+	case <-time.After(4 * time.Minute):
+		t.Fatal("Chat tool matching performance fixture timed out")
 	}
 	var report chatMatcherBrowserReport
 	if err := json.Unmarshal(decoded, &report); err != nil {
