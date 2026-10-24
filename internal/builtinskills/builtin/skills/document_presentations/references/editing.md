@@ -294,3 +294,31 @@ are rejected; a master resource's layout list is replaced with a registered
 blank layout. Adding or assigning a layout does not relocate existing slide
 content. Inspect native relationships and placeholders, then render every slide
 affected by inheritance changes. These operations are not in pinned RC5.
+
+### Populate layout placeholders in builds after RC5
+
+After assigning a layout, use `deck-edit` to create its missing slide-local
+content placeholders:
+
+```json
+{"edits":[{"operation":"populate-placeholders","slide":1}]}
+```
+
+Run with `"$PAPERWORKS" deck-edit INPUT.pptx --spec SPEC.json --output OUTPUT.pptx`.
+Inspect the saved slide for the new shape IDs, then use `slide-edit` `text`
+to fill text placeholders. Repeating population leaves existing slots and their
+content unchanged. It copies layout geometry/style, clears prompt text, and
+leaves header/footer/date/slide-number furniture inherited. Missing or ambiguous
+layout relationships and duplicate content slots fail explicitly.
+
+For a picture, chart or table slot, use `deck-edit` `replace-element` with the
+inspected shape ID and intended content. Include its inspected `placeholder`
+type and `placeholder_index` on the replacement element to retain the slot
+association. New text/shape/image/chart/table elements accept these fields;
+for example a body text element uses `"placeholder":"body","placeholder_index":1`.
+Use the actual slot index, geometry and styling, not guessed values. Title and
+centered-title share a title slot; other content slots match by index (default 0).
+
+This does not invent a layout from master furniture or resize existing content.
+Render and inspect the affected slides after filling. Confirm the installed
+build exposes this operation before use; pinned RC5 does not include it.
