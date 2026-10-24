@@ -8,6 +8,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
+	"github.com/openvibely/openvibely/internal/llm/replayjson"
 	"github.com/openvibely/openvibely/internal/models"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -16,11 +17,11 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	raw, err := json.Marshal(transcript)
+	raw, err := replayjson.Encode(transcript)
 	if err != nil {
 		return fmt.Errorf("encode OpenAI conversation: %w", err)
 	}
-	return a.saveSerializedConversation(ctx, execID, string(raw))
+	return a.saveSerializedConversation(ctx, execID, raw)
 }
 
 // raw is produced by json.Marshal in the callers. Reuse the immutable string
@@ -38,11 +39,11 @@ func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, 
 		return nil
 	}
 	return func(ctx context.Context, items []any) error {
-		raw, err := json.Marshal(map[string]any{"responses_input": items})
+		raw, err := replayjson.Encode(map[string]any{"responses_input": items})
 		if err != nil {
 			return err
 		}
-		transcript := string(raw)
+		transcript := raw
 		if err := a.saveSerializedConversation(ctx, execID, transcript); err != nil {
 			return err
 		}

@@ -16,6 +16,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
+	"github.com/openvibely/openvibely/internal/llm/replayjson"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -422,22 +423,23 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		// Store the actual environment for this execution, not the environment
 		// of a future client rebuilding its history.
 		environment := executionenv.Context(workDir)
+		encoder := newReplayEncoder()
 		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message) error {
 			replayMessages = messages
-			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: messages})
+			saved, err := encoder.Encode(anthropicEnvironmentReplay{Environment: environment, Messages: messages})
 			if err != nil {
 				return err
 			}
-			return a.execRepo.ReplaceReasoningReplay(saveCtx, req.ExecID, "", []models.ExecutionReplayMessage{{UserContent: req.Message, TranscriptJSON: string(saved)}})
+			return a.execRepo.ReplaceReasoningReplay(saveCtx, req.ExecID, "", []models.ExecutionReplayMessage{{UserContent: req.Message, TranscriptJSON: saved}})
 		})
 		defer func() {
 			if len(replayMessages) == 0 {
 				replayMessages = []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}
 			}
-			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages})
+			saved, err := encoder.Encode(anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages})
 			if err == nil {
 				err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), req.ExecID, "", []models.ExecutionReplayMessage{{
-					UserContent: req.Message, AssistantContent: result.TextOnlyOutput, TranscriptJSON: string(saved),
+					UserContent: req.Message, AssistantContent: result.TextOnlyOutput, TranscriptJSON: saved,
 				}})
 			}
 			if err != nil {
@@ -1002,4 +1004,20 @@ func splitPath(p string) []string {
 		return []string{p}
 	}
 	return parts
+}
+
+func newReplayEncoder() *replayjson.Encoder[anthropicEnvironmentReplay] {
+	return &replayjson.Encoder[anthropicEnvironmentReplay]{Snapshot: func(value anthropicEnvironmentReplay) (anthropicEnvironmentReplay, bool) {
+		if value.Messages != nil {
+			messages := make([]anthropicclient.Message, len(value.Messages))
+			copy(messages, value.Messages)
+			for i := range messages {
+				if messages[i].ContentBlocks != nil {
+					messages[i].ContentBlocks = append(json.RawMessage{}, messages[i].ContentBlocks...)
+				}
+			}
+			value.Messages = messages
+		}
+		return value, true
+	}}
 }
