@@ -1971,27 +1971,42 @@ window.renderSkillDependencyDetails?.(document.getElementById('agent_skill_depen
 				renderLifecycleHooks();
 			}
 
-			document.body.addEventListener('htmx:responseError', function(event) {
-				if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
-				const xhr = event.detail.xhr;
-				if (!xhr) return;
-				const message = String(xhr.responseText || '').trim() || 'Could not save agent';
-				const modal = document.getElementById('agent_modal');
-				if (xhr.status === 400 && message.toLowerCase().includes('directory')) {
-					event.preventDefault();
-					setAgentSection('details');
-					setScopedFilesDirectoryError(message);
-					if (modal && !modal.open) modal.showModal();
-					const input = document.getElementById('scoped_files_directory');
-					if (input) input.focus();
-					return;
-				}
-				if (xhr.status === 400 || xhr.status === 403) {
-					event.preventDefault();
-					if (modal && !modal.open) modal.showModal();
-					if (window.showToast) window.showToast(message, 'failed');
-				}
-			});
+			(function installAgentErrorHandler() {
+				if (window._agentErrorController) window._agentErrorController.abort();
+				const controller = new AbortController();
+				window._agentErrorController = controller;
+				const modalRoot = document.getElementById('agent_modal');
+				function cleanup() { controller.abort(); }
+				controller.signal.addEventListener('abort', function() {
+				    if (window._agentErrorController === controller) delete window._agentErrorController;
+				}, {once: true});
+				document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+				    const element = event.detail && event.detail.elt;
+				    if (element && modalRoot && (element === modalRoot || element.contains(modalRoot))) cleanup();
+				}, {signal: controller.signal});
+				window.addEventListener('pagehide', cleanup, {once: true, signal: controller.signal});
+				document.body.addEventListener('htmx:responseError', function(event) {
+					if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
+					const xhr = event.detail.xhr;
+					if (!xhr) return;
+					const message = String(xhr.responseText || '').trim() || 'Could not save agent';
+					const modal = document.getElementById('agent_modal');
+					if (xhr.status === 400 && message.toLowerCase().includes('directory')) {
+						event.preventDefault();
+						setAgentSection('details');
+						setScopedFilesDirectoryError(message);
+						if (modal && !modal.open) modal.showModal();
+						const input = document.getElementById('scoped_files_directory');
+						if (input) input.focus();
+						return;
+					}
+					if (xhr.status === 400 || xhr.status === 403) {
+						event.preventDefault();
+						if (modal && !modal.open) modal.showModal();
+						if (window.showToast) window.showToast(message, 'failed');
+					}
+				}, {signal: controller.signal});
+			})();
 			setTimeout(() => {
 				const form = document.getElementById('agent_form');
 				if (form && !window._agentFormSubmitHooked) {
