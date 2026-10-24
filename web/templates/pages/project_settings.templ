@@ -136,7 +136,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						}
 					</div>
 					if localRepoPathEnabled {
-						<div id="edit-project-local-fields" class="form-control mb-3">
+						<div id="edit-project-local-fields" class="form-control mb-3" data-project-repo-fields hidden?={ projectRepoSource(project) != "local" }>
 						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">Repository Path</span>
  if projectRepoSource(project) == "local" {
  @projectRepoPathHealth(repoPathHealth, false)
@@ -155,7 +155,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						</label>
 						<p id="edit-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
 					</div>
-					<div id="edit-project-github-fields" class="form-control mb-3">
+					<div id="edit-project-github-fields" class="form-control mb-3" data-project-repo-fields hidden?={ projectRepoSource(project) != "github" }>
 						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
  if projectRepoSource(project) == "github" {
  @projectRepoPathHealth(repoPathHealth, true)
@@ -176,7 +176,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
-					<div id="edit-project-local-fields" class="form-control mb-3">
+					<div id="edit-project-local-fields" class="form-control mb-3" data-project-repo-fields hidden?={ projectRepoSource(project) != "local" }>
 						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">Repository Path (current local)</span>
  if projectRepoSource(project) == "local" {
  @projectRepoPathHealth(repoPathHealth, false)
@@ -185,7 +185,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
 						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label>
 					</div>
-					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
+					<div id="edit-project-github-fields" class="form-control mb-3" data-project-repo-fields hidden>
 						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
  if projectRepoSource(project) == "github" {
  @projectRepoPathHealth(repoPathHealth, true)
@@ -355,8 +355,8 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			function updateRepoSourceFields() {
 				if (!repoSourceSelect || !localFields || !githubFields) return;
 				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
-				localFields.classList.toggle('hidden', source !== 'local');
-				githubFields.classList.toggle('hidden', source !== 'github');
+				localFields.hidden = source !== 'local';
+				githubFields.hidden = source !== 'github';
 				if (localRepoPathEnabled) {
 					if (input) input.required = (source === 'local');
 				}
@@ -418,7 +418,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					}
 				</div>
 				if localRepoPathEnabled {
-					<div id="new-project-local-fields" class="form-control mb-3">
+					<div id="new-project-local-fields" class="form-control mb-3" data-project-repo-fields>
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
 							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered flex-1" placeholder="/path/to/repo"/>
@@ -433,11 +433,11 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 						</label>
 						<p id="new-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
 					</div>
-					<div id="new-project-github-fields" class="form-control mb-3 hidden">
+					<div id="new-project-github-fields" class="form-control mb-3" data-project-repo-fields hidden>
 						<label class="label"><span class="label-text">GitHub URL</span></label>
 							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
-						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
+						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2" data-project-repo-fields>
 						<label class="label cursor-pointer justify-start gap-3">
 							<input type="checkbox" id="new-project-create-dir" name="create_directory" value="true" class="checkbox checkbox-sm checkbox-primary"/>
 							<span class="label-text">Create directory if it doesn't exist</span>
@@ -525,10 +525,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 			function updateRepoSourceFields() {
 				if (!repoSourceSelect || !localFields || !githubFields) return;
 				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
-				localFields.classList.toggle('hidden', source !== 'local');
-				githubFields.classList.toggle('hidden', source !== 'github');
+				localFields.hidden = source !== 'local';
+				githubFields.hidden = source !== 'github';
 				if (createDirWrapper) {
-					createDirWrapper.classList.toggle('hidden', source !== 'local');
+					createDirWrapper.hidden = source !== 'local';
 				}
 				if (repoPathInput) {
 					repoPathInput.required = (source === 'local');
@@ -659,6 +659,7 @@ templ ProjectSettingsTabs(prefix string) {
  <style>
   #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }
   [data-project-tab-content] { height: min(44rem, calc(100dvh - 17rem)); overflow-y: auto; }
+  [data-project-repo-fields][hidden] { display: none !important; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
   [data-project-panel="general"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }
   [data-project-panel="general"] .flex > .btn { flex-shrink: 0; }
