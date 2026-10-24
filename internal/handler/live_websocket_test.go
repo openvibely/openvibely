@@ -62,10 +62,15 @@ func (c *liveTestClient) next(t testing.TB, id, event string) liveFrame {
 	t.Helper()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
+	var observed []string
 	for {
 		select {
 		case f, ok := <-c.frames:
-			require.True(t, ok, "connection closed waiting for %s/%s", id, event)
+			require.True(t, ok, "connection closed waiting for %s/%s; observed: %v", id, event, observed)
+			if len(observed) == 16 {
+				observed = observed[1:]
+			}
+			observed = append(observed, fmt.Sprintf("%s/%s [%d:%d]", f.ID, f.Event, f.Start, f.Offset))
 			if f.ID == id && f.Event == event {
 				return f
 			}
@@ -73,7 +78,7 @@ func (c *liveTestClient) next(t testing.TB, id, event string) liveFrame {
 				t.Fatalf("unexpected error: %+v", f)
 			}
 		case <-timer.C:
-			t.Fatalf("timed out waiting for %s/%s", id, event)
+			t.Fatalf("timed out waiting for %s/%s; observed: %v", id, event, observed)
 		}
 	}
 }
@@ -172,6 +177,34 @@ func TestLiveWebSocketReconnectReplayAndIndependentWindows(t *testing.T) {
 	restarted.send(t, executionCommand("restart", exec, len("héllo")))
 	require.Equal(t, " world!", restarted.next(t, "restart", "message").Data)
 	restarted.next(t, "restart", "done")
+}
+
+// Exercise the ordering that used to depend on whether the main loop selected
+// the worker's finished notification before a client retried the same ID.
+func TestLiveTerminalFrameRetiresOnlyItsOwner(t *testing.T) {
+	for _, event := range []string{"retry", "done", "error"} {
+		t.Run(event, func(t *testing.T) {
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			owner := &liveSubscription{id: "run", stop: stop}
+			subscriptions := map[string]*liveSubscription{"run": owner}
+			retireLiveFrameSubscription(subscriptions, liveFrame{ID: "run", Event: "message", subscription: owner})
+			require.Same(t, owner, subscriptions["run"])
+			require.NoError(t, ctx.Err())
+			terminal := liveFrame{ID: "run", Event: event, subscription: owner}
+			retireLiveFrameSubscription(subscriptions, terminal)
+			require.NotContains(t, subscriptions, "run")
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			replacementCtx, replacementStop := context.WithCancel(context.Background())
+			defer replacementStop()
+			replacement := &liveSubscription{id: "run", stop: replacementStop}
+			subscriptions["run"] = replacement
+			// A delayed terminal frame from the prior worker cannot cancel a retry.
+			retireLiveFrameSubscription(subscriptions, terminal)
+			require.Same(t, replacement, subscriptions["run"])
+			require.NoError(t, replacementCtx.Err())
+		})
+	}
 }
 
 func TestLiveWebSocketGapRecoveryAndTerminalFailure(t *testing.T) {
