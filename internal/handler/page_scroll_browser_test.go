@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -30,10 +31,31 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 	results := make(chan string, 1)
 	var stageMu sync.Mutex
 	lastStage := "waiting for document runner"
+	started := time.Now()
+	var diagnostics []string
+	record := func(message string) {
+		stageMu.Lock()
+		defer stageMu.Unlock()
+		if len(diagnostics) >= 160 {
+			diagnostics = diagnostics[1:]
+		}
+		diagnostics = append(diagnostics, fmt.Sprintf("%s %s", time.Since(started).Round(time.Millisecond), message))
+	}
+	// Install before assets/page scripts, so parse errors and startup failures
+	// are recorded even if the scenario never starts. No layout reads here:
+	// the heartbeat must remain independent of a potentially blocked layout.
+	diagnosticScript := `<script>
+window.__scrollTestErrors=[];
+window.__scrollTestReport=function(value){fetch('/browser-diagnostic',{method:'POST',body:JSON.stringify(value)}).catch(()=>{});};
+window.addEventListener('error',e=>{const value={kind:'error',message:e.message||'resource load failed',source:e.filename||e.target?.src||e.target?.href||'',line:e.lineno,stack:e.error?.stack||''};window.__scrollTestErrors.push(value);window.__scrollTestReport(value);},true);
+window.addEventListener('unhandledrejection',e=>{window.__scrollTestReport({kind:'unhandledrejection',message:String(e.reason),stack:e.reason?.stack||''});});
+window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'heartbeat',ready:document.readyState,visibility:document.visibilityState,focus:document.hasFocus(),stage:window.__scrollTestStage||'startup',errors:window.__scrollTestErrors.length}),1000);
+['htmx:beforeRequest','htmx:afterRequest','htmx:beforeSwap','htmx:afterSettle','htmx:responseError','htmx:sendError','htmx:swapError'].forEach(name=>document.addEventListener(name,e=>window.__scrollTestReport({kind:name,target:e.detail?.target?.id,status:e.detail?.xhr?.status,url:e.detail?.xhr?.responseURL,error:String(e.detail?.error||'')})));
+</script>`
 	runner := `<script>(async()=>{
  const assert=(v,m)=>{if(!v)throw Error(m)};
  const frame=()=>new Promise(r=>setTimeout(r,100));
- const stage=async value=>{await fetch('/browser-stage',{method:'POST',body:value})};
+ const stage=async value=>{window.__scrollTestStage=value;await fetch('/browser-stage',{method:'POST',body:value})};
  const bounded=async(promise,label)=>{
    let timer;
    try { return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Timed out: '+label)),10000)})]); }
@@ -57,20 +79,51 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
    await stage('check scroll range '+path);
    current=path;
    const main=document.getElementById('main-content');
+   assert(main,'missing main-content '+path);
+   await stage(path+' before append filler');
    const filler=document.createElement('div'); filler.style.height='4000px'; main.appendChild(filler);
+   await stage(path+' after append filler; before timer');
    await frame();
+   await stage(path+' after timer; before layout read');
    const rect=main.getBoundingClientRect();
+   const geometry={bottom:rect.bottom,viewport:innerHeight,height:main.clientHeight,scrollHeight:main.scrollHeight,top:main.scrollTop,overflow:getComputedStyle(main).overflowY};
+   await stage(path+' layout '+JSON.stringify(geometry));
    assert(rect.bottom<=innerHeight-9 && rect.bottom>=innerHeight-20,path+' lost bottom inset: '+rect.bottom+' viewport '+innerHeight);
-   assert(main.scrollHeight>main.clientHeight+100,path+' expanded instead of scrolling');
-   main.scrollTop=500; await frame();
-   assert(main.scrollTop>=499,path+' cannot scroll');
-   main.scrollTop=main.scrollHeight; await frame();
-   assert(Math.abs(main.scrollHeight-main.clientHeight-main.scrollTop)<2,path+' cannot reach bottom');
-   assert(document.scrollingElement.scrollTop===0,'root scrolled instead of page');
+   assert(geometry.scrollHeight>geometry.height+100,path+' expanded instead of scrolling');
+   await stage(path+' before scrollTop=500');
+   main.scrollTop=500;
+   await stage(path+' after scrollTop=500; before timer');
+   await frame();
+   await stage(path+' after scroll timer; before scrollTop read');
+   const middle=main.scrollTop;
+   await stage(path+' middle scrollTop='+middle);
+   assert(middle>=499,path+' cannot scroll');
+   await stage(path+' before bottom scrollHeight read');
+   const end=main.scrollHeight;
+   await stage(path+' before bottom scrollTop='+end);
+   main.scrollTop=end;
+   await stage(path+' after bottom scroll; before timer');
+   await frame();
+   await stage(path+' after bottom timer; before final layout read');
+   const final={height:main.clientHeight,scrollHeight:main.scrollHeight,top:main.scrollTop,rootTop:document.scrollingElement.scrollTop};
+   await stage(path+' final '+JSON.stringify(final));
+   assert(Math.abs(final.scrollHeight-final.height-final.top)<2,path+' cannot reach bottom');
+   assert(final.rootTop===0,'root scrolled instead of page');
  }
+ clearInterval(window.__scrollTestHeartbeat);
  await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/browser-diagnostic" && r.URL.Path != "/browser-stage" {
+			record("HTTP " + r.Method + " " + r.URL.Path)
+		}
+		if r.URL.Path == "/browser-diagnostic" {
+			var body bytes.Buffer
+			_, _ = body.ReadFrom(http.MaxBytesReader(w, r.Body, 8192))
+			record("browser " + body.String())
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -86,6 +139,7 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 			stageMu.Lock()
 			lastStage = body.String()
 			stageMu.Unlock()
+			record("stage " + body.String())
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -118,7 +172,7 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1)))
+			_, _ = w.Write([]byte(strings.Replace(strings.Replace(rec.Body.String(), "<head>", "<head>"+diagnosticScript, 1), "</body>", runner+"</body>", 1)))
 			return
 		}
 		e.ServeHTTP(w, r)
@@ -129,6 +183,7 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/models")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.Stdout = &stderr
 	require.NoError(t, startHandlerBrowserProcess(cmd))
 	var outcome string
 	select {
@@ -138,6 +193,20 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 		outcome = "timeout: " + lastStage
 		stageMu.Unlock()
 	}
+	if outcome != "pass" {
+		// A JavaScript heartbeat can stop when WebKit's event loop hangs. Capture
+		// process state from outside that loop before terminating the test host.
+		if output, err := exec.Command("ps", "-axo", "pid,ppid,stat,pcpu,comm").CombinedOutput(); err == nil {
+			for _, line := range strings.Split(string(output), "\n") {
+				if strings.Contains(line, "WebKit") || strings.Contains(line, "native-chat") {
+					record("process " + line)
+				}
+			}
+		}
+	}
 	stopHandlerBrowserProcess(cmd)
-	require.Equal(t, "pass", outcome, stderr.String())
+	stageMu.Lock()
+	trace := strings.Join(diagnostics, "\n")
+	stageMu.Unlock()
+	require.Equal(t, "pass", outcome, "Browser trace:\n%s\nHost output:\n%s", trace, stderr.String())
 }
