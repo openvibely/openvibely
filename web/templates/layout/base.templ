@@ -2273,36 +2273,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					font-size: 0.8em;
 					line-height: 1.5;
 				}
-				.chat-markdown pre .code-copy-btn {
-					position: absolute;
-					top: 0.4em;
-					right: 0.4em;
-					padding: 0.25em 0.4em;
-					border: none;
-					border-radius: 0.3rem;
-					background: hsl(var(--bc) / 0.08);
-					color: hsl(var(--bc) / 0.5);
-					cursor: pointer;
-					font-size: 0.75em;
-					line-height: 1;
-					opacity: 0;
-					transition: opacity 0.15s, background 0.15s, color 0.15s;
-					display: flex;
-					align-items: center;
-					gap: 0.3em;
-					z-index: 1;
-				}
-				.chat-markdown pre:hover .code-copy-btn {
-					opacity: 1;
-				}
-				.chat-markdown pre .code-copy-btn:hover {
-					background: hsl(var(--bc) / 0.15);
-					color: hsl(var(--bc) / 0.8);
-				}
-				.chat-markdown pre .code-copy-btn.copied {
-					opacity: 1;
-					color: hsl(var(--su, 158 64% 52%));
-				}
 				.chat-markdown blockquote {
 					margin: 0.5em 0;
 					padding: 0.25em 0.75em;
@@ -2522,12 +2492,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					min-width: 0;
 					overflow: clip;
 				}
-				.stream-tool-copy {
+				.stream-tool-copy, .chat-markdown pre .code-copy-btn {
 					position: absolute;
 					top: 0.5rem;
 					right: 0.5rem;
 				}
-				.stream-tool-copy:focus-visible { outline: 1px solid currentColor; }
+				.stream-tool-copy:focus-visible, .chat-markdown pre .code-copy-btn:focus-visible { outline: 1px solid currentColor; }
+				@media (hover: hover) and (pointer: fine) {
+					.stream-tool-copy, .chat-markdown pre .code-copy-btn { opacity: 0; pointer-events: none; }
+					.stream-tool-has-copy:hover > .stream-tool-copy,
+					.stream-tool-has-copy:focus-within > .stream-tool-copy,
+					.chat-markdown pre:hover .code-copy-btn,
+					.chat-markdown pre:focus-within .code-copy-btn { opacity: 1; pointer-events: auto; }
+				}
 				.stream-tool-body-scroll::-webkit-scrollbar {
 					width: 6px;
 					height: 6px;
@@ -2632,9 +2609,6 @@ html[data-color-theme="openvibely-dark"] :is(.chat-bubble-user-msg, .chat-bubble
 /* Keep pinned diff headers opaque even when page-local hover rules load later. */
 html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"],
 html[data-ov-theme-layer="custom"] .diff-file-header[data-stuck="1"]:hover { background-color: var(--ov-content-bg) !important; }
-[data-ov-theme-layer="custom"] .chat-markdown pre .code-copy-btn { background: var(--ov-surface-raised); color: var(--ov-text-muted); }
-[data-ov-theme-layer="custom"] .chat-markdown pre .code-copy-btn:hover { background: var(--ov-hover-bg); color: var(--ov-text); }
-[data-ov-theme-layer="custom"] .chat-markdown pre .code-copy-btn.copied { color: var(--ov-success); }
 [data-ov-theme-layer="custom"] .file-input { background-color: var(--ov-input-bg); color: var(--ov-text); border-color: var(--ov-input-border); }
 [data-ov-theme-layer="custom"] .file-input::file-selector-button { background-color: var(--ov-button-bg); color: var(--ov-button-fg); border-color: var(--ov-button-bg); }
 [data-ov-theme-layer="custom"] .file-input:hover:not(:disabled)::file-selector-button { background-color: var(--ov-button-hover-bg); color: var(--ov-button-hover-fg); border-color: var(--ov-button-hover-bg); }
@@ -3520,23 +3494,27 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					pres.forEach(function(pre) {
 						if (pre.querySelector('.code-copy-btn')) return;
 						var btn = document.createElement('button');
-						btn.className = 'code-copy-btn';
 						btn.type = 'button';
+						btn.className = 'code-copy-btn btn btn-xs btn-ghost btn-square';
 						btn.setAttribute('aria-label', 'Copy code');
-						btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
-						btn.addEventListener('click', function(e) {
-							e.preventDefault();
-							e.stopPropagation();
-							var code = pre.querySelector('code');
-							var text = (code || pre).textContent;
-							navigator.clipboard.writeText(text).then(function() {
-								btn.classList.add('copied');
-								btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg><span>Copied!</span>';
-								setTimeout(function() {
-									btn.classList.remove('copied');
-									btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
-								}, 2000);
-							});
+						btn.setAttribute('data-tooltip-disabled', '');
+						var copyPath = 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z';
+						btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + copyPath + '"></path></svg><span class="sr-only" aria-live="polite">Copy</span>';
+						var feedback = btn.querySelector('span');
+						var icon = btn.querySelector('path');
+						btn.addEventListener('click', async function(event) {
+							event.preventDefault(); event.stopPropagation();
+							try {
+								var code = pre.querySelector('code');
+								var content = code || pre.cloneNode(true);
+								if (!code) content.querySelector('.code-copy-btn')?.remove();
+								await navigator.clipboard.writeText(content.textContent);
+								feedback.textContent = 'Copied';
+								icon.setAttribute('d', 'M5 13l4 4L19 7');
+							} catch (_) {
+								feedback.textContent = 'Copy failed';
+								icon.setAttribute('d', 'M6 18L18 6M6 6l12 12');
+							}
 						});
 						pre.appendChild(btn);
 					});
