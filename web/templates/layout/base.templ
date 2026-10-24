@@ -2986,6 +2986,36 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								}
 							});
 						}
+						if (typeof parser.use === 'function') {
+							// Let Marked distinguish destinations, code, and raw HTML before
+							// escaping HTML tokens. Never rewrite Markdown link syntax.
+							function svgToken(src) {
+								if (!/^<svg(?:\s|>)/i.test(src)) return;
+								var candidate = src.slice(0, 1024 * 1024);
+								var tags = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?svg\b[^>]*>/gi;
+								var depth = 0, tag;
+								while ((tag = tags.exec(candidate))) {
+									if (tag[0].startsWith('<!')) continue;
+									if (tag[0].startsWith('</')) depth--;
+									else if (!/\/\s*>$/.test(tag[0])) depth++;
+									if (depth === 0) {
+										var raw = candidate.slice(0, tags.lastIndex);
+										return { type: 'chatSVG', raw: raw, text: raw };
+									}
+								}
+							}
+							parser.use({
+								renderer: { html: function(token) { return window.escapeHTMLForChat(token.text); } },
+								extensions: ['block', 'inline'].map(function(level) {
+									return {
+										name: 'chatSVG', level: level,
+										start: function(src) { var at = src.search(/<svg(?:\s|>)/i); return at < 0 ? undefined : at; },
+										tokenizer: svgToken,
+										renderer: function(token) { return this.parser.renderer.code({ text: token.text, lang: 'svg', escaped: false }); }
+									};
+								})
+							});
+						}
 						window._chatMarkedConfiguredFor = parser;
 						return true;
 					} catch(e) {
@@ -3236,29 +3266,19 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				window.isInsideCode = function(text, start, end) {
 					return window.isInsideCodeRanges(window.codeRanges(text), start, end);
 				};
-				// Escape raw HTML from model output before Markdown parsing. Code ranges
-				// remain byte-for-byte intact so Marked can render benign HTML examples.
+				// Compatibility path for parsers without renderer extensions. Code ranges
+				// remain byte-for-byte intact; the shipped Marked uses HTML token escaping.
 				window.escapeRawHTMLForMarkdown = function(text, ranges) {
 					if (!text) return text;
 					ranges = ranges || window.codeRanges(text);
-					// Angle brackets delimit Markdown link/image destinations; escaping
-					// their opener makes Marked include the brackets in the actual URL.
-					// Preserve only destination syntax, leaving raw HTML escaping and
-					// the rendered HTML sanitizer in place (also used by the worker).
-					var destinationOpeners = new Set();
-					var destinationPattern = /(?:\]\([ \t\r\n]*|^ {0,3}\[[^\]\r\n]+\]:[ \t]*)<[^<>\r\n]*>/gm;
-					var destinationMatch;
-					while ((destinationMatch = destinationPattern.exec(text))) {
-						destinationOpeners.add(destinationMatch.index + destinationMatch[0].lastIndexOf('<'));
-					}
 					var rangeIndex = 0;
 					var escaped = '';
 					for (var i = 0; i < text.length; i++) {
-					while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
+						while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
 						var inCode = rangeIndex < ranges.length && i >= ranges[rangeIndex].start && i < ranges[rangeIndex].end;
 						// Promote complete SVG output to a code block. The SVG viewer renders
 						// an isolated image from this source; raw HTML stays escaped.
-						if (!inCode && !destinationOpeners.has(i) && text.charAt(i) === '<' && /^<svg(?:\s|>)/i.test(text.slice(i, i + 5))) {
+						if (!inCode && text.charAt(i) === '<' && /^<svg(?:\s|>)/i.test(text.slice(i, i + 5))) {
 							var candidate = text.slice(i, i + 1024 * 1024);
 							var tags = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?svg\b[^>]*>/gi;
 							var depth = 0, tag, end = 0;
@@ -3276,7 +3296,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								continue;
 							}
 						}
-						escaped += text.charAt(i) === '<' && !inCode && !destinationOpeners.has(i) ? '&lt;' : text.charAt(i);
+						escaped += text.charAt(i) === '<' && !inCode ? '&lt;' : text.charAt(i);
 					}
 					return escaped;
 				};
@@ -3446,7 +3466,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						return window.renderChatMarkdownFallback(text);
 					}
 					try {
-						var escapedText = window.escapeRawHTMLForMarkdown(text);
+						var escapedText = typeof window.marked.use === 'function' ? text : window.escapeRawHTMLForMarkdown(text);
 						return window.sanitizeChatHTML(window.marked.parse(escapedText));
 					} catch(e) {
 						return window.renderChatMarkdownFallback(text);
@@ -3481,13 +3501,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					}
 					try {
 						if (!window._markdownWorkerURL) {
-							var workerSource = 'var window=self;window.markdownLineRanges=' + window.markdownLineRanges.toString() +
-								';window.codeRanges=' + window.codeRanges.toString() +
-								';window.escapeRawHTMLForMarkdown=' + window.escapeRawHTMLForMarkdown.toString() +
+							var workerSource = 'var window=self;window.escapeHTMLForChat=' + window.escapeHTMLForChat.toString() +
+								';window.configureChatMarked=' + window.configureChatMarked.toString() +
 								";importScripts(" + JSON.stringify(window.chatMarkedScriptURL()) + ");" +
-								"marked.setOptions({breaks:true,gfm:true});" +
+								"if (!window.configureChatMarked()) throw new Error('Markdown configuration failed');" +
  "importScripts("+JSON.stringify(new URL(document.querySelector('[data-ov-math-parser]').src,location.href).href)+");" +
-								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(window.escapeRawHTMLForMarkdown(event.data))});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
+								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
 							window._markdownWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
 						}
 						return new Promise(function(resolve) {
