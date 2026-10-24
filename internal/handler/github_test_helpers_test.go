@@ -8,6 +8,7 @@ import (
 )
 
 type fakeGitHubService struct {
+	recoverFn              func(context.Context, string, string, string) error
 	statusFn               func(ctx context.Context) (service.GitHubConnectionStatus, error)
 	connectURLFn           func(ctx context.Context) (string, error)
 	callbackFn             func(ctx context.Context, installationID string) error
@@ -224,4 +225,11 @@ func (f *fakeGitHubService) GlobalAPIEndpoint(_ context.Context) string {
 		return f.globalAPIEndpoint
 	}
 	return ""
+}
+
+func (f *fakeGitHubService) RecoverProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) error {
+	if f != nil && f.recoverFn != nil {
+		return f.recoverFn(ctx, projectID, currentRepoPath, repoURL)
+	}
+	return fmt.Errorf("recovery not configured")
 }

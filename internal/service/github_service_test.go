@@ -4308,3 +4308,69 @@ func TestPublishExistingLocalCommitWithTokenUpdatesOrCreatesRefs(t *testing.T) {
 		t.Fatalf("expected blank branch validation error, got %v", err)
 	}
 }
+
+func TestRecoverProjectRepoPreservesExistingPathsAndAllowsRetry(t *testing.T) {
+	storeEnv := teststores.New(t)
+	settings := storeEnv.Stores.Settings
+	ctx := context.Background()
+	requireNoError(t, settings.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settings.Set(ctx, GitHubSettingPAT, "pat"))
+	root := t.TempDir()
+	svc := NewGitHubService(settings, "", "", "", root)
+	dest := filepath.Join(root, "recover-test")
+	calls := 0
+	fail := true
+	svc.runGit = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, error) {
+		calls++
+		if len(args) != 3 || args[0] != "clone" || args[2] != dest {
+			t.Fatalf("unexpected git args: %v", args)
+		}
+		requireNoError(t, os.WriteFile(filepath.Join(dest, "checkout.txt"), []byte("checkout"), 0600))
+		if fail {
+			return nil, fmt.Errorf("clone failed")
+		}
+		return nil, nil
+	}
+	recoverRepo := func() error {
+		return svc.RecoverProjectRepo(ctx, "recover-test", dest, "https://github.com/acme/widgets")
+	}
+	if err := svc.RecoverProjectRepo(ctx, "recover-test", filepath.Join(root, "other"), "https://github.com/acme/widgets"); err == nil {
+		t.Fatal("accepted unmanaged path")
+	}
+	requireNoError(t, os.WriteFile(dest, []byte("keep"), 0600))
+	if err := recoverRepo(); err == nil {
+		t.Fatal("accepted existing file")
+	}
+	if data, err := os.ReadFile(dest); err != nil || string(data) != "keep" {
+		t.Fatal("existing file modified")
+	}
+	requireNoError(t, os.Remove(dest))
+	requireNoError(t, os.Symlink(filepath.Join(root, "missing-target"), dest))
+	if err := recoverRepo(); err == nil {
+		t.Fatal("accepted dangling symlink")
+	}
+	if _, err := os.Readlink(dest); err != nil {
+		t.Fatal("symlink modified")
+	}
+	requireNoError(t, os.Remove(dest))
+	if calls != 0 {
+		t.Fatal("cloned into protected path")
+	}
+	if err := recoverRepo(); err == nil {
+		t.Fatal("expected clone failure")
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatal("incomplete checkout was not cleaned up")
+	}
+	fail = false
+	requireNoError(t, recoverRepo())
+	if err := recoverRepo(); err == nil {
+		t.Fatal("accepted existing checkout")
+	}
+	if calls != 2 {
+		t.Fatalf("unexpected clone count %d", calls)
+	}
+	if data, err := os.ReadFile(filepath.Join(dest, "checkout.txt")); err != nil || string(data) != "checkout" {
+		t.Fatal("checkout modified")
+	}
+}

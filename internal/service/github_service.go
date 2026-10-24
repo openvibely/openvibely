@@ -491,21 +491,37 @@ func (s *GitHubService) CloneProjectRepoWithEndpoint(ctx context.Context, projec
 // recloning, it never replaces an existing file, directory, or symlink.
 func (s *GitHubService) RecoverProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) error {
 	repo, err := ParseGitHubRepoURL(repoURL)
-	if err != nil { return err }
-	if err := ConfigureGitHubRepoEndpoint(&repo, s.GlobalAPIEndpoint(ctx)); err != nil { return err }
+	if err != nil {
+		return err
+	}
+	if err := ConfigureGitHubRepoEndpoint(&repo, s.GlobalAPIEndpoint(ctx)); err != nil {
+		return err
+	}
 	root, err := s.ensureRepoRoot(ctx)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	dest := filepath.Join(root, projectID)
 	currentAbs, err := filepath.Abs(currentRepoPath)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	destAbs, err := filepath.Abs(dest)
-	if err != nil { return err }
-	if currentAbs != destAbs { return fmt.Errorf("repository path does not match this project's managed checkout") }
+	if err != nil {
+		return err
+	}
+	if currentAbs != destAbs {
+		return fmt.Errorf("repository path does not match this project's managed checkout")
+	}
 	// Mkdir atomically reserves the destination, including against concurrent
 	// recovery requests and dangling symlinks that os.Stat treats as missing.
-	if err := os.Mkdir(dest, 0755); err != nil { return fmt.Errorf("cannot recover repository into an existing or inaccessible path: %w", err) }
+	if err := os.Mkdir(dest, 0755); err != nil {
+		return fmt.Errorf("cannot recover repository into an existing or inaccessible path: %w", err)
+	}
 	if err := s.cloneProjectRepo(ctx, repo.CloneURL, localGitCloneURL(repoURL, repo.CloneURL), dest, githubAPIBaseURLForRepo(&repo, s.apiBaseURL)); err != nil {
-		if cleanupErr := os.RemoveAll(dest); cleanupErr != nil { return fmt.Errorf("%w; could not remove incomplete checkout: %v", err, cleanupErr) }
+		if cleanupErr := os.RemoveAll(dest); cleanupErr != nil {
+			return fmt.Errorf("%w; could not remove incomplete checkout: %v", err, cleanupErr)
+		}
 		return err
 	}
 	return nil
