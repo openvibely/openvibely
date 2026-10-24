@@ -3,6 +3,7 @@ package openai_compatible
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
-	"github.com/openvibely/openvibely/internal/llm/replayjson"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
@@ -508,33 +508,26 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 		// failed, instead of leaving its pre-compaction replay in storage.
 		transcript = []openaiclient.CompletionsHistoryMessage{}
 	}
-	err := (replayjson.Saver{
-		EncodeError: func(err error) error {
+	var reasoning strings.Builder
+	for _, message := range transcript {
+		if message.Role == "assistant" {
+			reasoning.WriteString(message.ReasoningContent)
+		}
+	}
+	_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, transcript, models.ExecutionReplayMessage{ReasoningContent: reasoning.String()})
+	if err != nil {
+		var encoding *persistence.ReplayEncodingError
+		if errors.As(err, &encoding) {
 			if callErr != nil {
 				return callErr
 			}
-			return fmt.Errorf("marshal reasoning replay transcript: %w", err)
-		},
-		Persist: func(ctx context.Context, raw string) error {
-			var reasoning strings.Builder
-			for _, message := range transcript {
-				if message.Role == "assistant" {
-					reasoning.WriteString(message.ReasoningContent)
-				}
-			}
-			err := a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: raw}})
-			if err != nil {
-				if callErr != nil {
-					applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
-					return callErr
-				}
-				return fmt.Errorf("persist reasoning replay: %w", err)
-			}
-			return nil
-		},
-	}).Save(context.WithoutCancel(ctx), transcript)
-	if err != nil {
-		return err
+			return fmt.Errorf("marshal reasoning replay transcript: %w", encoding.Err)
+		}
+		if callErr != nil {
+			applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
+			return callErr
+		}
+		return fmt.Errorf("persist reasoning replay: %w", err)
 	}
 	return callErr
 }
@@ -919,14 +912,13 @@ func (a *Adapter) replaySaver(execID string) func(context.Context, []openaiclien
 		if a.execRepo == nil || execID == "" {
 			return nil
 		}
-		return (replayjson.Saver{Persist: func(ctx context.Context, raw string) error {
-			var reasoning strings.Builder
-			for _, m := range transcript {
-				if m.Role == "assistant" {
-					reasoning.WriteString(m.ReasoningContent)
-				}
+		var reasoning strings.Builder
+		for _, m := range transcript {
+			if m.Role == "assistant" {
+				reasoning.WriteString(m.ReasoningContent)
 			}
-			return a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: raw}})
-		}}).Save(ctx, transcript)
+		}
+		_, err := a.execRepo.SaveConversationReplay(ctx, execID, transcript, models.ExecutionReplayMessage{ReasoningContent: reasoning.String()})
+		return err
 	}
 }

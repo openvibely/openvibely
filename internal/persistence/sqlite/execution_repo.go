@@ -514,6 +514,21 @@ func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasonin
 	return nil
 }
 
+// SaveConversationReplay owns encoding and persistence for one checkpoint.
+// Returning no snapshot on failure prevents recovery from advancing past storage.
+func (r *ExecutionRepo) SaveConversationReplay(ctx context.Context, id string, history any, metadata models.ExecutionReplayMessage) (string, error) {
+	raw, err := json.Marshal(history)
+	if err != nil {
+		return "", &persistence.ReplayEncodingError{Err: err}
+	}
+	encoded := string(raw)
+	metadata.TranscriptJSON = encoded
+	if err := r.ReplaceReasoningReplay(ctx, id, metadata.ReasoningContent, []models.ExecutionReplayMessage{metadata}); err != nil {
+		return "", err
+	}
+	return encoded, nil
+}
+
 func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasoningContent string, messages []models.ExecutionReplayMessage) error {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {

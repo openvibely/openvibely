@@ -16,7 +16,6 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
-	"github.com/openvibely/openvibely/internal/llm/replayjson"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -425,19 +424,14 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		environment := executionenv.Context(workDir)
 		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message) error {
 			replayMessages = messages
-			return (replayjson.Saver{Persist: func(ctx context.Context, raw string) error {
-				return a.execRepo.ReplaceReasoningReplay(ctx, req.ExecID, "", []models.ExecutionReplayMessage{{UserContent: req.Message, TranscriptJSON: raw}})
-			}}).Save(saveCtx, anthropicEnvironmentReplay{Environment: environment, Messages: messages})
+			_, err := a.execRepo.SaveConversationReplay(saveCtx, req.ExecID, anthropicEnvironmentReplay{Environment: environment, Messages: messages}, models.ExecutionReplayMessage{UserContent: req.Message})
+			return err
 		})
 		defer func() {
 			if len(replayMessages) == 0 {
 				replayMessages = []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}
 			}
-			err := (replayjson.Saver{Persist: func(ctx context.Context, raw string) error {
-				return a.execRepo.ReplaceReasoningReplay(ctx, req.ExecID, "", []models.ExecutionReplayMessage{{
-					UserContent: req.Message, AssistantContent: result.TextOnlyOutput, TranscriptJSON: raw,
-				}})
-			}}).Save(context.WithoutCancel(ctx), anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages})
+			_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), req.ExecID, anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages}, models.ExecutionReplayMessage{UserContent: req.Message, AssistantContent: result.TextOnlyOutput})
 			if err != nil {
 				callErr = errors.Join(callErr, fmt.Errorf("persist Anthropic execution environment: %w", err))
 			}

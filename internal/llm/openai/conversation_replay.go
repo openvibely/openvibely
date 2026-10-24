@@ -8,8 +8,8 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
-	"github.com/openvibely/openvibely/internal/llm/replayjson"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -17,18 +17,15 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	saver := a.conversationSaver(execID)
-	saver.EncodeError = func(err error) error { return fmt.Errorf("encode OpenAI conversation: %w", err) }
-	return saver.Save(context.WithoutCancel(ctx), transcript)
-}
-
-func (a *Adapter) conversationSaver(execID string) replayjson.Saver {
-	return replayjson.Saver{Persist: func(ctx context.Context, raw string) error {
-		if err := a.execRepo.ReplaceReasoningReplay(ctx, execID, "", []models.ExecutionReplayMessage{{TranscriptJSON: raw}}); err != nil {
-			return fmt.Errorf("save OpenAI conversation: %w", err)
+	_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, transcript, models.ExecutionReplayMessage{})
+	if err != nil {
+		var encoding *persistence.ReplayEncodingError
+		if errors.As(err, &encoding) {
+			return fmt.Errorf("encode OpenAI conversation: %w", encoding.Err)
 		}
-		return nil
-	}}
+		return fmt.Errorf("save OpenAI conversation: %w", err)
+	}
+	return nil
 }
 
 // responsesHistoryRecorder saves only the current provider conversation.
@@ -37,9 +34,16 @@ func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, 
 		return nil
 	}
 	return func(ctx context.Context, items []any) error {
-		saver := a.conversationSaver(execID)
-		saver.AfterSave = func(raw string) { llmcontracts.RecordResponsesRecovery(ctx, raw) }
-		return saver.Save(context.WithoutCancel(ctx), map[string]any{"responses_input": items})
+		raw, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, map[string]any{"responses_input": items}, models.ExecutionReplayMessage{})
+		if err != nil {
+			var encoding *persistence.ReplayEncodingError
+			if errors.As(err, &encoding) {
+				return encoding.Err
+			}
+			return fmt.Errorf("save OpenAI conversation: %w", err)
+		}
+		llmcontracts.RecordResponsesRecovery(ctx, raw)
+		return nil
 	}
 }
 
