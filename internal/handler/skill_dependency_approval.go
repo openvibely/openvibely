@@ -224,6 +224,29 @@ func (h *Handler) OpenChatInputRequest(c echo.Context) error {
 		destination = "/chat?project_id=" + url.QueryEscape(record.ProjectID)
 	}
 	destination += "&approval_execution_id=" + url.QueryEscape(record.ExecutionID) + "#chat-input-request-" + url.PathEscape(record.ID)
+	if c.Request().Header.Get("HX-Request") == "true" {
+		// In-app navigation (including Wails) needs a page fragment and its
+		// canonical URL, not an HTTP redirect through the question endpoint.
+		target, err := url.Parse(destination)
+		if err != nil {
+			return err
+		}
+		c.Response().Header().Set("HX-Push-Url", destination)
+		query := c.QueryParams()
+		for key := range query {
+			delete(query, key)
+		}
+		for key, values := range target.Query() {
+			query[key] = values
+		}
+		c.Request().URL = target
+		if task.Category == models.CategoryChat {
+			return h.Chat(c)
+		}
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		return h.GetTask(c)
+	}
 	return c.Redirect(http.StatusSeeOther, destination)
 }
 

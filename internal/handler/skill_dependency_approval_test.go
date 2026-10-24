@@ -1173,3 +1173,64 @@ func TestInstallationDecisionDesktopOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInstallationToastOpensThreadFragment(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryChat} {
+		t.Run(string(category), func(t *testing.T) {
+			h, e, configs, _ := setupTestHandlerWithStores(t)
+			ctx := context.Background()
+			model := createAgent(t, configs)
+			project := createProject(t, h, "toast destination")
+			task := createTask(t, h, project.ID, "approval toast task", func(task *models.Task) {
+				task.Category = category
+				task.Status = models.StatusFailed
+				task.AgentID = &model.ID
+			})
+			execution := createExec(t, h, task.ID, model.ID, func(ex *models.Execution) { ex.Status = models.ExecFailed; ex.PromptSent = "original question" })
+			question, err := h.chatInputRequests.create(project.ID, execution.ID, []chatInputRequestQuestion{{ID: "install", Question: "Install Example?", Options: []chatInputRequestOption{{Label: "Install dependencies"}, {Label: "Not now"}}}}, &persistence.ChatInstallationRequest{Manifest: json.RawMessage(`{"identity":{"skill":"example"}}`), ToolArguments: json.RawMessage(`{"handle":"example"}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = h.persistChatInputRequest(ctx, question); err != nil {
+				t.Fatal(err)
+			}
+			for _, htmx := range []bool{false, true} {
+				req := httptest.NewRequest(http.MethodGet, "http://localhost/chat/input-requests/"+question.ID+"/open?project_id="+project.ID, nil)
+				if htmx {
+					req.Header.Set("HX-Request", "true")
+					req.Header.Set("HX-Target", "main-content")
+				}
+				rec := httptest.NewRecorder()
+				c := e.NewContext(req, rec)
+				c.SetParamNames("id")
+				c.SetParamValues(question.ID)
+				if err = h.OpenChatInputRequest(c); err != nil {
+					t.Fatal(err)
+				}
+				destination := rec.Header().Get("Location")
+				if htmx {
+					if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" {
+						t.Fatalf("fragment redirects: %d %v", rec.Code, rec.Header())
+					}
+					destination = rec.Header().Get("HX-Push-Url")
+					marker := `id="task-detail-content"`
+					if category == models.CategoryChat {
+						marker = `id="chat-page-root"`
+					}
+					if !strings.Contains(rec.Body.String(), marker) {
+						t.Fatalf("missing page content %s: %s", marker, rec.Body.String())
+					}
+				} else if rec.Code != http.StatusSeeOther {
+					t.Fatalf("normal navigation status %d", rec.Code)
+				}
+				prefix := "/tasks/" + task.ID + "?"
+				if category == models.CategoryChat {
+					prefix = "/chat?"
+				}
+				if !strings.HasPrefix(destination, prefix) || !strings.Contains(destination, "approval_execution_id="+execution.ID) || !strings.HasSuffix(destination, "#chat-input-request-"+question.ID) {
+					t.Fatalf("wrong destination: %s", destination)
+				}
+			}
+		})
+	}
+}
