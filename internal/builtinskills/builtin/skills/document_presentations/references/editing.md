@@ -268,3 +268,29 @@ also include `previousslide`, `firstslide`, `lastslide`, `endshow`, and
 `lastslideviewed`; program/macro actions are rejected. Verify the runtime schema
 first: RC5 does not expose `link`. Inspect saved relationships and check click
 behavior in PowerPoint; a PNG does not verify interactive links.
+
+### Add masters and layouts in builds after RC5
+
+After confirming `schema deck-edit` exposes these fields, use:
+
+```json
+{"edits":[
+ {"operation":"add-master","part":"ppt/slideMasters/brand.xml","name":"Brand"},
+ {"operation":"add-layout","part":"ppt/slideLayouts/brand-title.xml","parent_part":"ppt/slideMasters/brand.xml","name":"Brand title",
+  "placeholders":[{"type":"title","index":0,"x":1,"y":0.5,"w":10,"h":1}]},
+ {"operation":"set-layout","slide":1,"part":"ppt/slideLayouts/brand-title.xml"}
+]}
+```
+Choose unused part paths. `add-master` registers a master and blank layout;
+`theme_part` selects an inspected existing theme (omission uses the first theme
+by part name). `add-layout` registers a layout under `parent_part`.
+Placeholder coordinates are inches and indices must be unique/nonnegative.
+Types include `title`, `ctrTitle`, `subTitle`, `body`, `obj`, `pic`, `chart`,
+`tbl`, `dt`, `ftr`, and `sldNum`.
+
+Alternatively, `path` reads self-contained master/layout XML, including its
+color map/background, instead of `placeholders`. Relationship-dependent assets
+are rejected; a master resource's layout list is replaced with a registered
+blank layout. Adding or assigning a layout does not relocate existing slide
+content. Inspect native relationships and placeholders, then render every slide
+affected by inheritance changes. These operations are not in pinned RC5.
