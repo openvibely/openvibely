@@ -15,7 +15,7 @@ func TestBrowserFunctional_StreamingSVGPreview(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	base := renderTerminalBrowserComponent(t, layout.Base("Math", nil, ""))
 	shared := renderTerminalBrowserComponent(t, components.ChatAutoScrollScript())
-	fixture := strings.Replace(base, "</body>", shared+`<div id="chat-messages"><div id="math-stream"></div></div></body>`, 1)
+	fixture := strings.Replace(base, "</body>", shared+`<div id="chat-page-root"><div id="chat-messages"><div id="math-stream"></div></div></div></body>`, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -48,7 +48,7 @@ func TestBrowserFunctional_StreamingSVGPreview(t *testing.T) {
           await renderLiveChatContent(root,svgSource+'\n\nFinished.',false,true);await paint();
           if(!dialog.open||root.querySelector('.chat-svg-preview')!==figure)throw Error('final render closed SVG preview');
           if(!(await fetch(url)).ok)throw Error('retained blob was revoked');
-          root.remove();await paint();
+          document.getElementById('chat-page-root').remove();await paint();
           if(dialog.open)throw Error('removed conversation left gallery open');
           let revoked=false;try{await fetch(url)}catch{revoked=true}
           if(!revoked)throw Error('removed SVG leaked blob');
