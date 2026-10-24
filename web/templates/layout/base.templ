@@ -427,14 +427,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						syncNativeTheme();
 						let visibilitySequence = 0;
 						let previewHidden;
-						const syncNativeVisibility = () => {
+						let visibilityRetry;
+						const syncNativeVisibility = (force = false) => {
 							// Resolve the live dialog: navigation can replace the original node.
 							const hidden = !!document.querySelector('#image-gallery[open]');
-							if (hidden === previewHidden) return;
+							if (!force && hidden === previewHidden) return;
+							clearTimeout(visibilityRetry);
 							previewHidden = hidden;
-							runtime.Events.Emit('desktop:controls-visibility', {hidden, page: performance.timeOrigin, sequence: ++visibilitySequence});
+							const sequence = ++visibilitySequence;
+							const retry = () => {
+								// A failed older send must not undo a newer open/close.
+								if (sequence !== visibilitySequence) return;
+								previewHidden = undefined;
+								visibilityRetry = setTimeout(() => syncNativeVisibility(), 250);
+							};
+							try {
+								Promise.resolve(runtime.Events.Emit('desktop:controls-visibility', {hidden, page: performance.timeOrigin, sequence})).then(cancelled => {
+									if (cancelled === true) retry();
+								}, retry);
+							} catch (_) {
+								retry();
+							}
 						};
-						new MutationObserver(syncNativeVisibility).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['open']});
+						new MutationObserver(() => syncNativeVisibility()).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['open']});
+						window.addEventListener('focus', () => syncNativeVisibility(true));
+						window.addEventListener('pageshow', () => syncNativeVisibility(true));
 						syncNativeVisibility();
 					}
 					window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();
