@@ -5,6 +5,7 @@
     const cache = window.openVibelyThreadCache;
     const entries = cache ? cache.pages : new Map();
     const composerRefreshes = new WeakMap();
+    const preservedScrolls = new WeakMap();
     const ttl = 30 * 60 * 1000;
     const maxBytes = 64 * 1024 * 1024;
     const maxEntries = 20;
@@ -342,6 +343,32 @@
                 el.setAttribute('hx-preserve', 'true');
             }
         });
+        // A warm refresh can contain the exact terminal transcript already on
+        // screen. Preserve its scroll container as well as its execution rows:
+        // replacing it briefly hides the page and resets scrollTop before the
+        // new page scripts run. Compare the surrounding rows too so paging,
+        // agent banners and queued inputs still receive server updates.
+        const currentMessages = currentRoot.querySelector('#task-thread-messages');
+        const nextMessages = nextRoot.querySelector('#task-thread-messages');
+        if (currentMessages && nextMessages &&
+            !currentMessages.hasAttribute('data-transcript-hydrating') &&
+            currentRoot.getAttribute('data-thread-revision') &&
+            currentRoot.getAttribute('data-thread-revision') === nextRoot.getAttribute('data-thread-revision')) {
+            const oldChildren = Array.from(currentMessages.children);
+            const newChildren = Array.from(nextMessages.children);
+            const unchanged = newChildren.length === oldChildren.length && newChildren.every((child, i) => {
+                const old = oldChildren[i];
+                if (child.matches('[data-execution-pair]')) {
+                    return child.id === old.id && child.getAttribute('hx-preserve') === 'true';
+                }
+                return child.outerHTML === old.outerHTML;
+            });
+            if (unchanged) {
+                preservedScrolls.set(detail.xhr, {messages: currentMessages, top: currentMessages.scrollTop});
+                nextMessages.setAttribute('hx-preserve', 'true');
+                nextMessages.querySelectorAll('[hx-preserve]').forEach(el => el.removeAttribute('hx-preserve'));
+            }
+        }
         // Keep the live draft, attachment controls and their handlers. Queue and
         // active-turn controls belong to the server and must still be refreshed.
         const composers = [];
@@ -362,6 +389,13 @@
         detail.serverResponse = next.innerHTML;
     }, true);
     document.addEventListener('htmx:afterSwap', function (event) {
+        const scroll = preservedScrolls.get(event.detail.xhr);
+        if (scroll && event.detail.target?.id === 'main-content') {
+            // HTMX temporarily parks preserved nodes outside their layout. That
+            // move can clamp scrollTop; restore it synchronously before paint.
+            if (scroll.messages.isConnected) scroll.messages.scrollTop = scroll.top;
+            preservedScrolls.delete(event.detail.xhr);
+        }
         // Direct cached swaps do not carry eventInfo into afterSwap detail.
         // Mark them while restoration is synchronous, before page handlers run.
         if (restoringEntry && event.detail.target?.id === 'main-content') {
