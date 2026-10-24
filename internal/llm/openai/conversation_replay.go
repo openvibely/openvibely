@@ -20,7 +20,13 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	if err != nil {
 		return fmt.Errorf("encode OpenAI conversation: %w", err)
 	}
-	if err := a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, "", []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}); err != nil {
+	return a.saveSerializedConversation(ctx, execID, string(raw))
+}
+
+// raw is produced by json.Marshal in the callers. Reuse the immutable string
+// for persistence and recovery rather than encoding the same JSON again.
+func (a *Adapter) saveSerializedConversation(ctx context.Context, execID, raw string) error {
+	if err := a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, "", []models.ExecutionReplayMessage{{TranscriptJSON: raw}}); err != nil {
 		return fmt.Errorf("save OpenAI conversation: %w", err)
 	}
 	return nil
@@ -36,10 +42,11 @@ func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, 
 		if err != nil {
 			return err
 		}
-		if err := a.saveConversation(ctx, execID, json.RawMessage(raw)); err != nil {
+		transcript := string(raw)
+		if err := a.saveSerializedConversation(ctx, execID, transcript); err != nil {
 			return err
 		}
-		llmcontracts.RecordResponsesRecovery(ctx, string(raw))
+		llmcontracts.RecordResponsesRecovery(ctx, transcript)
 		return nil
 	}
 }
