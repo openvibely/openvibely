@@ -324,9 +324,8 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	}
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
-	encoder := newReplayEncoder()
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
-		OnReplay:                 a.replaySaver(req.ExecID, encoder),
+		OnReplay:                 a.replaySaver(req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
@@ -346,7 +345,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		ToolExecutor:             toolExecutor(ctx, workDir),
 		ToolFilter:               toolFilter(ctx, true, models.ChatModeOrchestrate, req.AgentDefinition),
 	})
-	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err, encoder)
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
@@ -384,9 +383,8 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	defer sw.Stop()
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
-	encoder := newReplayEncoder()
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
-		OnReplay:                 a.replaySaver(req.ExecID, encoder),
+		OnReplay:                 a.replaySaver(req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
@@ -409,7 +407,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:                streamToolUse(sw),
 		OnToolResult:             streamToolResult(sw),
 	})
-	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err, encoder)
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -448,9 +446,8 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
-	encoder := newReplayEncoder()
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
-		OnReplay:               a.replaySaver(req.ExecID, encoder),
+		OnReplay:               a.replaySaver(req.ExecID),
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:    llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                  strings.TrimSpace(req.Agent.Model),
@@ -472,7 +469,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:              streamToolUse(sw),
 		OnToolResult:           streamToolResult(sw),
 	})
-	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err, encoder)
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -494,7 +491,7 @@ func isKimiModel(model string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "kimi-")
 }
 
-func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error, encoder *replayjson.Encoder[[]openaiclient.CompletionsHistoryMessage]) error {
+func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
 	if client != nil {
 		callErr = client.ConversationError(callErr)
 	}
@@ -511,7 +508,7 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 		// failed, instead of leaving its pre-compaction replay in storage.
 		transcript = []openaiclient.CompletionsHistoryMessage{}
 	}
-	transcriptJSON, err := encoder.Encode(transcript)
+	transcriptJSON, err := replayjson.Encode(transcript)
 	if err != nil {
 		if callErr != nil {
 			return callErr
@@ -914,12 +911,12 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 	}
 }
 
-func (a *Adapter) replaySaver(execID string, encoder *replayjson.Encoder[[]openaiclient.CompletionsHistoryMessage]) func(context.Context, []openaiclient.CompletionsHistoryMessage) error {
+func (a *Adapter) replaySaver(execID string) func(context.Context, []openaiclient.CompletionsHistoryMessage) error {
 	return func(ctx context.Context, transcript []openaiclient.CompletionsHistoryMessage) error {
 		if a.execRepo == nil || execID == "" {
 			return nil
 		}
-		data, err := encoder.Encode(transcript)
+		data, err := replayjson.Encode(transcript)
 		if err != nil {
 			return err
 		}
@@ -931,25 +928,4 @@ func (a *Adapter) replaySaver(execID string, encoder *replayjson.Encoder[[]opena
 		}
 		return a.execRepo.ReplaceReasoningReplay(ctx, execID, reasoning.String(), []models.ExecutionReplayMessage{{ReasoningContent: reasoning.String(), TranscriptJSON: data}})
 	}
-}
-
-// Multimodal maps can contain arbitrary mutable values. Conservatively encode
-// those snapshots normally rather than retain references to their contents.
-func newReplayEncoder() *replayjson.Encoder[[]openaiclient.CompletionsHistoryMessage] {
-	return &replayjson.Encoder[[]openaiclient.CompletionsHistoryMessage]{Snapshot: func(messages []openaiclient.CompletionsHistoryMessage) ([]openaiclient.CompletionsHistoryMessage, bool) {
-		if messages == nil {
-			return nil, true
-		}
-		copyMessages := make([]openaiclient.CompletionsHistoryMessage, len(messages))
-		for i, m := range messages {
-			if m.ImageContent != nil {
-				return nil, false
-			}
-			copyMessages[i] = m
-			if m.ToolCalls != nil {
-				copyMessages[i].ToolCalls = append(make([]openaiclient.CompletionsToolCall, 0, len(m.ToolCalls)), m.ToolCalls...)
-			}
-		}
-		return copyMessages, true
-	}}
 }
