@@ -209,3 +209,64 @@ func TestBrowserFunctional_ProjectRepositorySourceVisibility(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_ProjectSubmitProgress(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, tc := range []struct{ mode, source, label string }{
+		{"new", "local", "Creating..."}, {"new", "github", "Cloning repository..."},
+		{"edit", "local", "Saving..."}, {"edit", "github", "Cloning repository..."}, {"edit-remote", "github", "Saving..."},
+	} {
+		t.Run(tc.mode+"-"+tc.source, func(t *testing.T) {
+			responses := make(chan int, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/" {
+					if err := layout.Base("Projects", nil, "default").Render(r.Context(), w); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				if r.URL.Path == "/submit" {
+					select {
+					case status := <-responses:
+						w.WriteHeader(status)
+					case <-r.Context().Done():
+					}
+					return
+				}
+				if r.URL.Path != "/dialog" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				dialog := NewProjectDialog(nil, true, 4)
+				if tc.mode != "new" {
+					project := &models.Project{ID: "test", Name: "Test", RepoPath: "/tmp/project", IsDefault: true}
+					if tc.mode == "edit-remote" {
+						project.RepoURL = "https://github.com/acme/new"
+					}
+					dialog = EditProjectDialog(project, nil, true, 4, models.ProjectRepoPathHealth{})
+				}
+				if err := dialog.Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL, "submit-progress", func(b *composerFocusCDP) {
+				b.waitFor("shell", `String(document.readyState==='complete' && !!window.htmx)`, "true")
+				b.evaluate(`htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
+				b.waitFor("dialog", `String(!!document.querySelector('dialog[open] form[hx-swap]'))`, "true")
+				b.evaluate(fmt.Sprintf(`window.submitForm=document.querySelector('dialog[open] form[hx-swap]');window.submitButton=submitForm.querySelector('[type="submit"]');window.submitSpinner=submitButton.querySelector('.htmx-indicator');window.normalWidth=submitButton.getBoundingClientRect().width;
+     submitForm.setAttribute(submitForm.hasAttribute('hx-put')?'hx-put':'hx-post','/submit');htmx.process(submitForm);
+     submitForm.elements.name.value='Test';submitForm.elements.repo_path.value='/tmp/project';submitForm.elements.repo_url.value='https://github.com/acme/new';submitForm.elements.repo_source.value=%q;submitForm.elements.repo_source.dispatchEvent(new Event('change'));'ok'`, tc.source))
+				for _, status := range []int{http.StatusBadRequest, http.StatusOK} {
+					b.evaluate(`submitForm.requestSubmit();'ok'`)
+					b.waitFor("busy label and spinner", fmt.Sprintf(`String(submitButton.disabled && submitButton.innerText.trim()===%q && submitSpinner.getBoundingClientRect().width>0 && getComputedStyle(submitSpinner).opacity==='1' && submitForm.querySelector('[id$="-cancel-button"]').disabled)`, tc.label), "true")
+					responses <- status
+					b.waitFor("idle button restored", `String(!submitButton.disabled && submitSpinner.getBoundingClientRect().width===0 && Math.abs(submitButton.getBoundingClientRect().width-normalWidth)<1 && !submitForm.querySelector('[id$="-cancel-button"]').disabled)`, "true")
+				}
+			})
+		})
+	}
+}
