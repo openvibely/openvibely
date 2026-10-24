@@ -438,8 +438,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							const retry = () => {
 								// A failed older send must not undo a newer open/close.
 								if (sequence !== visibilitySequence) return;
-								previewHidden = undefined;
-								visibilityRetry = setTimeout(() => syncNativeVisibility(), 250);
+								// Keep the attempted state so unrelated DOM mutations cannot
+								// bypass the retry delay. A real open/close still sends immediately.
+								visibilityRetry = setTimeout(() => syncNativeVisibility(true), 250);
 							};
 							try {
 								Promise.resolve(runtime.Events.Emit('desktop:controls-visibility', {hidden, page: performance.timeOrigin, sequence})).then(cancelled => {
