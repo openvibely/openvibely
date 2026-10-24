@@ -94,11 +94,35 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			b.evaluate(`window.wails.Events.Emit=window.originalVisibilityEmit;document.getElementById('image-gallery').close();'closed'`)
 			b.waitFor("close restores controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
 		}
+		if got := b.evaluateAwait(`(async()=>{
+			let sends=0;
+			window.wails.Events.Emit=(name,data)=>{if(name==='desktop:controls-visibility'){sends++;if(data.hidden)return Promise.reject(new Error('offline'));}return window.originalVisibilityEmit(name,data);};
+			const gallery=document.getElementById('image-gallery');
+			gallery.showModal();
+			for(let i=0;i<20;i++){document.body.append(document.createComment('stream update'));await Promise.resolve();await Promise.resolve();}
+			const attempts=sends;
+			gallery.close();
+			await Promise.resolve();await Promise.resolve();
+			window.wails.Events.Emit=window.originalVisibilityEmit;
+			return String(attempts===1 && sends===2);
+		})()`); got != "true" {
+			t.Fatalf("unrelated mutations must respect retry delay while close sends immediately: %s", got)
+		}
 		b.evaluate(`window.wails.Events.Emit=(name,data)=>name==='desktop:controls-visibility' && data.hidden ? new Promise((resolve,reject)=>{window.rejectVisibility=reject;}) : window.originalVisibilityEmit(name,data);document.getElementById('image-gallery').showModal();'opened'`)
 		b.waitFor("hide pending", `String(!!window.rejectVisibility)`, "true")
 		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
 		b.waitFor("close supersedes pending hide", `String(!document.getElementById('image-gallery').open && window.nativeControlEvents['desktop:controls-visibility'].hidden===false)`, "true")
-		b.evaluate(`window.rejectVisibility(new Error('late failure'));window.wails.Events.Emit=window.originalVisibilityEmit;window.nativeControlEvents['desktop:controls-visibility'].hidden=true;window.dispatchEvent(new Event('focus'));'focused'`)
+		if got := b.evaluateAwait(`(async()=>{
+			const sequence=window.nativeControlEvents['desktop:controls-visibility'].sequence;
+			window.rejectVisibility(new Error('late failure'));
+			window.wails.Events.Emit=window.originalVisibilityEmit;
+			await new Promise(resolve=>setTimeout(resolve,350));
+			const current=window.nativeControlEvents['desktop:controls-visibility'];
+			return String(current.sequence===sequence && current.hidden===false);
+		})()`); got != "true" {
+			t.Fatalf("late hide failure must not send again after close: %s", got)
+		}
+		b.evaluate(`window.nativeControlEvents['desktop:controls-visibility'].hidden=true;window.dispatchEvent(new Event('focus'));'focused'`)
 		b.waitFor("focus reconciles native visibility", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "image-gallery", func(b *composerFocusCDP) {
