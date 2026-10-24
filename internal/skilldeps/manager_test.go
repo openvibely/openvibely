@@ -52,7 +52,7 @@ func TestInstallConcurrentCacheAndCorruption(t *testing.T) {
 		w.Write(data)
 	}))
 	defer server.Close()
-	dep := Dependency{Name: "tool", Version: "1.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Format: "zip", Executable: "bin/tool"}}}
+	dep := Dependency{Name: "tool", Version: "1.0.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Format: "zip", Executable: "bin/tool"}}}
 	manager := &Manager{CacheDir: t.TempDir(), Platform: "linux/amd64", Client: server.Client()}
 	var wg sync.WaitGroup
 	for range 8 {
@@ -93,7 +93,7 @@ func TestUnsupportedAndLocalOverrides(t *testing.T) {
 	if err := os.WriteFile(local, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	deps := []Dependency{{Name: "tool", Version: "development", HealthCheck: []string{"version"}}, {Name: "office", Version: "local", HealthCheck: []string{"--version"}}}
+	deps := []Dependency{{Name: "tool", Version: "0.0.0-dev", HealthCheck: []string{"version"}}, {Name: "office", Version: "0.0.0-local", HealthCheck: []string{"--version"}}}
 	m := &Manager{Platform: "windows/arm64", LookupEnv: func(name string) string {
 		if name == "OPENVIBELY_TOOL_TOOL" {
 			return local
@@ -127,7 +127,7 @@ func TestRejectUnsafeArchivesAndBadChecksums(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
 	defer server.Close()
 	m := &Manager{CacheDir: t.TempDir(), Platform: "linux/amd64", Client: server.Client()}
-	r, err := m.Resolve(context.Background(), []Dependency{{Name: "tool", Version: "1", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: strings.Repeat("0", 64), Format: "zip", Executable: "tool"}}}})
+	r, err := m.Resolve(context.Background(), []Dependency{{Name: "tool", Version: "1.0.0", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: strings.Repeat("0", 64), Format: "zip", Executable: "tool"}}}})
 	if err != nil || !strings.Contains(r[0].Error, "checksum mismatch") {
 		t.Fatalf("%v %v", r, err)
 	}
@@ -144,7 +144,7 @@ func TestCancelledInstallAndProgress(t *testing.T) {
 	defer server.Close()
 	var stages []string
 	m := &Manager{CacheDir: t.TempDir(), Platform: "linux/amd64", Client: server.Client(), Progress: func(p Progress) { stages = append(stages, p.Stage) }}
-	dep := Dependency{Name: "tool", Version: "1", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: strings.Repeat("0", 64), Format: "raw", Executable: "tool"}}}
+	dep := Dependency{Name: "tool", Version: "1.0.0", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: strings.Repeat("0", 64), Format: "raw", Executable: "tool"}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan []Result)
@@ -172,7 +172,7 @@ func TestCancellationPreservesCachedExecutable(t *testing.T) {
 	data := zipTool(t, "bin/tool", fmt.Sprintf("#!/bin/sh\nif [ -f '%s' ]; then touch '%s.started'; while :; do :; done; fi\nexit 0\n", marker, marker))
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
 	defer server.Close()
-	dep := Dependency{Name: "tool", Version: "1", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Format: "zip", Executable: "bin/tool"}}}
+	dep := Dependency{Name: "tool", Version: "1.0.0", HealthCheck: []string{"version"}, Packages: map[string]Package{"linux/amd64": {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256(data)), Format: "zip", Executable: "bin/tool"}}}
 	manager := &Manager{CacheDir: t.TempDir(), Platform: "linux/amd64", Client: server.Client()}
 	installed, err := manager.Resolve(context.Background(), []Dependency{dep})
 	if err != nil || installed[0].Error != "" {

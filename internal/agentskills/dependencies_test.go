@@ -33,11 +33,11 @@ skill:
   enabled: true
 dependencies:
   - name: test_tool
-    version: development
+    version: 0.0.0-dev
     environment_variable: TEST_TOOL
     health_check: [version]
   - name: unavailable
-    version: local
+    version: 0.0.0-local
     health_check: [--version]
 ---
 Use declared executables.
@@ -97,7 +97,7 @@ skill:
   enabled: true
 dependencies:
   - name: uninstalled-skill-view-fixture
-    version: test-missing
+    version: 0.0.0-test-missing
     health_check: [--version]
     packages:
       %s/%s:
