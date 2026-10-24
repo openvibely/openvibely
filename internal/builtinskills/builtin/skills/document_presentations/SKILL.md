@@ -61,22 +61,24 @@ dependencies:
       linux/amd64:
         url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/x86_64/LibreOffice_26.8.1_Linux_x86-64_deb.tar.gz
         sha256: 30903df3b9f61360d9660cd707de48cd2831469114492a5008ed58a0ac77d044
-        format: libreoffice-deb
-        executable: program/soffice
+        format: deb-bundle
+        executable: opt/libreoffice26.8/program/soffice
       linux/arm64:
         url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/aarch64/LibreOffice_26.8.1_Linux_aarch64_deb.tar.gz
         sha256: 1b069c20dd237f6decad3ea02cb02f39fdf458b03d09c2a9facb7b9b71e6a27a
-        format: libreoffice-deb
-        executable: program/soffice
+        format: deb-bundle
+        executable: opt/libreoffice26.8/program/soffice
       windows/amd64:
         url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/win/x86_64/LibreOffice_26.8.1_Win_x86-64.msi
         sha256: c6298b10cfa1748bcbedad94c62ce771e240e5021bfd6d7a967cd571b04b5312
-        format: libreoffice-msi
+        format: msi
+        find_root: true
         executable: program/soffice.exe
       windows/arm64:
         url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/win/aarch64/LibreOffice_26.8.1_Win_aarch64.msi
         sha256: 97c2173752325af1da3d8731f41c8e09a7c4ad491cf55d9b1069fadb5668e6d7
-        format: libreoffice-msi
+        format: msi
+        find_root: true
         executable: program/soffice.exe
 ---
 

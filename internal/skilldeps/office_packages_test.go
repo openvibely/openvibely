@@ -35,38 +35,35 @@ func officeTar(t *testing.T, entries []*tar.Header) *bytes.Reader {
 func TestOfficeDEBPayloadExtraction(t *testing.T) {
 	root := t.TempDir()
 	x := extractor{ctx: context.Background(), root: root, links: map[string]string{}}
-	prefix := ""
 	r := officeTar(t, []*tar.Header{
 		{Name: "./opt/libreoffice26.8/program/soffice", Mode: 0755, Size: 1},
 		{Name: "./opt/libreoffice26.8/program/soffice.bin", Mode: 0755, Size: 1},
 		{Name: "./usr/share/applications/libreoffice.desktop", Mode: 0644, Size: 1},
 		{Name: "./opt/libreoffice26.8/program/alias", Typeflag: tar.TypeSymlink, Linkname: "soffice"},
+		{Name: "./usr/bin/office", Typeflag: tar.TypeSymlink, Linkname: "/opt/libreoffice26.8/program/soffice"},
 	})
-	if err := extractOfficePayload(&x, r, &prefix); err != nil {
+	if err := extractDEBPayload(&x, r); err != nil {
 		t.Fatal(err)
 	}
 	if err := x.finishLinks(); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"program/soffice", "program/soffice.bin", "program/alias"} {
+	for _, name := range []string{"opt/libreoffice26.8/program/soffice", "opt/libreoffice26.8/program/soffice.bin", "opt/libreoffice26.8/program/alias", "usr/share/applications/libreoffice.desktop", "usr/bin/office"} {
 		if b, err := os.ReadFile(filepath.Join(root, name)); err != nil || string(b) != "x" {
 			t.Fatalf("%s: %q %v", name, b, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "usr")); !os.IsNotExist(err) {
-		t.Fatal("desktop integration was extracted")
-	}
+
 }
 func TestOfficeDEBRejectsUnsafePayload(t *testing.T) {
 	for _, h := range []*tar.Header{
 		{Name: "opt/libreoffice26.8/../../escape", Mode: 0644, Size: 1},
-		{Name: "opt/libreoffice26.8/program/link", Typeflag: tar.TypeSymlink, Linkname: "../../escape"},
+		{Name: "opt/libreoffice26.8/program/link", Typeflag: tar.TypeSymlink, Linkname: "../../../../escape"},
 		{Name: "opt/libreoffice26.8/program/link", Typeflag: tar.TypeLink, Linkname: "/etc/passwd"},
 	} {
 		t.Run(h.Name+string(h.Typeflag), func(t *testing.T) {
 			x := extractor{ctx: context.Background(), root: t.TempDir(), links: map[string]string{}}
-			prefix := ""
-			if err := extractOfficePayload(&x, officeTar(t, []*tar.Header{h}), &prefix); err == nil {
+			if err := extractDEBPayload(&x, officeTar(t, []*tar.Header{h})); err == nil {
 				t.Fatal("unsafe payload accepted")
 			}
 		})
@@ -85,7 +82,7 @@ func TestMoveOfficeMSITree(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := moveOfficeTree(stage, root); err != nil {
+			if err := movePackageTree(stage, root, Package{Executable: "program/soffice.exe", FindRoot: true}); err != nil {
 				t.Fatal(err)
 			}
 			for _, name := range []string{"program/soffice.exe", "program/soffice.bin", "share/registry/main.xcd"} {
@@ -98,7 +95,7 @@ func TestMoveOfficeMSITree(t *testing.T) {
 }
 func TestMoveOfficeMSIRejectsMissingOrAmbiguousTree(t *testing.T) {
 	stage := t.TempDir()
-	if err := moveOfficeTree(stage, t.TempDir()); err == nil {
+	if err := movePackageTree(stage, t.TempDir(), Package{Executable: "program/soffice.exe", FindRoot: true}); err == nil {
 		t.Fatal("empty MSI accepted")
 	}
 	for _, prefix := range []string{"one", "two"} {
@@ -110,14 +107,14 @@ func TestMoveOfficeMSIRejectsMissingOrAmbiguousTree(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := moveOfficeTree(stage, t.TempDir()); err == nil {
+	if err := movePackageTree(stage, t.TempDir(), Package{Executable: "program/soffice.exe", FindRoot: true}); err == nil {
 		t.Fatal("ambiguous MSI accepted")
 	}
 }
 func TestOfficeFormatsRequireMatchingPlatform(t *testing.T) {
 	for _, tc := range []struct{ format, exe, platform string }{
-		{"libreoffice-msi", "program/soffice.exe", "windows/arm64"},
-		{"libreoffice-deb", "program/soffice", "linux/arm64"},
+		{"msi", "program/soffice.exe", "windows/arm64"},
+		{"deb-bundle", "opt/libreoffice26.8/program/soffice", "linux/arm64"},
 	} {
 		d := Dependency{Name: "office", Version: "1.0.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{tc.platform: {Format: tc.format, Executable: tc.exe, URL: "https://example.com/office", SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
 		if err := Validate([]Dependency{d}); err != nil {
@@ -165,13 +162,17 @@ func TestOfficePackageAcceptance(t *testing.T) {
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	format, exe := "libreoffice-deb", "program/soffice"
+	format, exe := "deb-bundle", "opt/libreoffice26.8/program/soffice"
 	if runtime.GOOS == "windows" {
-		format, exe = "libreoffice-msi", "program/soffice.exe"
+		format, exe = "msi", "program/soffice.exe"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := prepare(ctx, Package{Format: format, Executable: exe}, local, root); err != nil {
+	p := Package{Format: format, Executable: exe}
+	if runtime.GOOS == "windows" {
+		p.FindRoot = true
+	}
+	if err := prepare(ctx, p, local, root); err != nil {
 		t.Fatal(err)
 	}
 	executable := filepath.Join(root, filepath.FromSlash(exe))
@@ -195,5 +196,56 @@ func TestOfficePackageAcceptance(t *testing.T) {
 	pdf, err := os.ReadFile(filepath.Join(stage, "sample.pdf"))
 	if err != nil || !bytes.HasPrefix(pdf, []byte("%PDF-")) {
 		t.Fatalf("missing rendered PDF: %s %v", output, err)
+	}
+}
+
+func TestGenericPackageLayouts(t *testing.T) {
+	for _, prefix := range []string{"", "opt/example-1.2"} {
+		root := t.TempDir()
+		x := extractor{ctx: context.Background(), root: root, links: map[string]string{}}
+		name := "bin/example"
+		if prefix != "" {
+			name = prefix + "/" + name
+		}
+		if err := extractDEBPayload(&x, officeTar(t, []*tar.Header{{Name: name, Mode: 0755, Size: 1}})); err != nil {
+			t.Fatal(err)
+		}
+		if b, err := os.ReadFile(filepath.Join(root, name)); err != nil || string(b) != "x" {
+			t.Fatalf("%q %v", b, err)
+		}
+	}
+	for _, discover := range []bool{false, true} {
+		stage, root := t.TempDir(), t.TempDir()
+		name := "bin/nested/example.exe"
+		if discover {
+			name = "Vendor/Product/" + name
+		}
+		file := filepath.Join(stage, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("example"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := movePackageTree(stage, root, Package{Executable: "bin/nested/example.exe", FindRoot: discover}); err != nil {
+			t.Fatal(err)
+		}
+		if b, err := os.ReadFile(filepath.Join(root, "bin/nested/example.exe")); err != nil || string(b) != "example" {
+			t.Fatalf("%q %v", b, err)
+		}
+	}
+}
+
+func TestPackageLayoutValidation(t *testing.T) {
+	for _, p := range []Package{
+		{Format: "raw", FindRoot: true},
+	} {
+		p.URL = "https://example.com/package"
+		p.SHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		p.Executable = "bin/example"
+		d := Dependency{Name: "example", Version: "1.0.0", HealthCheck: []string{"--version"}, Packages: map[string]Package{"linux/amd64": p}}
+		if err := Validate([]Dependency{d}); err == nil {
+			t.Fatalf("invalid layout accepted: %+v", p)
+		}
 	}
 }
