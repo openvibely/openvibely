@@ -84,6 +84,14 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "native-visibility-recovery", func(b *composerFocusCDP) {
 		b.waitFor("native bridge ready", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+		// WKWebView's timeOrigin can drift without navigation. All messages from
+		// this document must retain the same page key or native stale-event
+		// rejection will silently discard a valid gallery open.
+		b.evaluate(`window.visibilityPageKey=window.nativeControlEvents['desktop:controls-visibility'].page;Object.defineProperty(performance,'timeOrigin',{configurable:true,get:()=>window.visibilityPageKey-1});document.getElementById('image-gallery').showModal();'opened'`)
+		b.waitFor("clock drift cannot change page identity on open", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden && window.nativeControlEvents['desktop:controls-visibility'].page===window.visibilityPageKey)`, "true")
+		b.evaluate(`Object.defineProperty(performance,'timeOrigin',{configurable:true,get:()=>window.visibilityPageKey+1});document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("clock drift cannot change page identity on close", `String(!window.nativeControlEvents['desktop:controls-visibility'].hidden && window.nativeControlEvents['desktop:controls-visibility'].page===window.visibilityPageKey)`, "true")
+		b.evaluate(`delete performance.timeOrigin;'restored clock'`)
 		for _, failure := range []string{"throw", "reject", "cancel"} {
 			b.evaluate(`window.originalVisibilityEmit=window.wails.Events.Emit;window.failVisibilityOnce=true;window.wails.Events.Emit=(name,data)=>{if(name==='desktop:controls-visibility' && window.failVisibilityOnce){window.failVisibilityOnce=false;` + map[string]string{
 				"throw":  `throw new Error('bridge unavailable');`,
