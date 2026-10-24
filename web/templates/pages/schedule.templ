@@ -1707,18 +1707,17 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			// Guard against duplicate intervals on HTMX swaps (inline script re-executes)
 			if (window._schedIntervalId) clearInterval(window._schedIntervalId);
 			window._schedIntervalId = setInterval(updateNowIndicator, 60000);
-			if (!window._schedIntervalCleanupBound) {
-				window._schedIntervalCleanupBound = true;
-				document.body.addEventListener('htmx:beforeSwap', function(event) {
-					var target = event.detail && event.detail.target;
-					if (!target || target.id !== 'main-content' || !window._schedIntervalId) return;
-					clearInterval(window._schedIntervalId);
-					window._schedIntervalId = null;
-					calendarRoot = null;
-					timeline = null;
-					selectedScheduleCards.clear();
+			(function(root, intervalId) {
+				if (!root) return;
+				// Cancelled swaps never clean up elements; the incoming page's script runs before this fires.
+				document.body.addEventListener('htmx:beforeCleanupElement', function stopScheduleInterval(event) {
+					var elt = event.detail && event.detail.elt;
+					if (!elt || (elt !== root && !elt.contains(root))) return;
+					document.body.removeEventListener('htmx:beforeCleanupElement', stopScheduleInterval);
+					clearInterval(intervalId);
+					if (window._schedIntervalId === intervalId) window._schedIntervalId = null;
 				});
-			}
+			})(document.currentScript && document.currentScript.closest('#schedule-content'), window._schedIntervalId);
 
 			// Update after HTMX loads new content into the DOM.
 			// htmx:load fires on newly-inserted elements and bubbles correctly,

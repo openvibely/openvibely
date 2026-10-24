@@ -1924,11 +1924,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					if (window._taskDetailFileChangesHandlers.fileChangeEvent) {
 						window.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);
 					}
-					if (window._taskDetailFileChangesHandlers.taskEvent) {
-						window.removeEventListener('sse-task-event', window._taskDetailFileChangesHandlers.taskEvent);
+						if (window._taskDetailFileChangesHandlers.taskEvent) {
+							window.removeEventListener('sse-task-event', window._taskDetailFileChangesHandlers.taskEvent);
+						}
+						if (window._taskDetailFileChangesHandlers.cleanup) {
+							document.body.removeEventListener('htmx:beforeCleanupElement', window._taskDetailFileChangesHandlers.cleanup);
+						}
 					}
-				}
-
 				var _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;
 
 				// Listen for SSE task_status_changed events so action buttons refresh immediately
@@ -1997,13 +1999,22 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
 							window.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
 						}
-						if (target.id === 'main-content') {
-							window.removeEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
-							document.body.removeEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
-							document.body.removeEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
-							document.removeEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
-							if (window._taskDetailFileChangesHandlers && window._taskDetailFileChangesHandlers.beforeSwap === _taskDetailBeforeSwapHandler) window._taskDetailFileChangesHandlers = null;
-						}
+				};
+
+				// Cancelled swaps never clean up elements; replacement scripts run before this fires.
+				var _taskDetailRoot = (document.currentScript && document.currentScript.closest('#task-detail-content')) || document.getElementById('task-detail-content');
+				var _taskDetailCleanupHandler = function(evt) {
+					var elt = evt.detail && evt.detail.elt;
+					if (!elt || !_taskDetailRoot || (elt !== _taskDetailRoot && !elt.contains(_taskDetailRoot))) return;
+					document.body.removeEventListener('htmx:beforeCleanupElement', _taskDetailCleanupHandler);
+					window.removeEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
+					document.body.removeEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
+					document.body.removeEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
+					document.removeEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
+					window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
+					window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
+					window.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
+					if (window._taskDetailFileChangesHandlers && window._taskDetailFileChangesHandlers.beforeSwap === _taskDetailBeforeSwapHandler) window._taskDetailFileChangesHandlers = null;
 				};
 
 				// Block event-triggered changes refreshes while Changes tab is not active.
@@ -2051,11 +2062,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						afterSettle: _taskDetailAfterSettleHandler,
 						fileChangeEvent: _taskDetailFileChangeEventHandler,
 						taskEvent: _taskDetailTaskEventHandler,
-						liveConnected: _taskDetailLiveConnectedHandler
-					};
+							liveConnected: _taskDetailLiveConnectedHandler,
+							cleanup: _taskDetailCleanupHandler
+						};
 
-					window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
-					document.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
+						document.body.addEventListener('htmx:beforeCleanupElement', _taskDetailCleanupHandler);
+						window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);					document.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
 					document.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
 					document.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
 					window.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);

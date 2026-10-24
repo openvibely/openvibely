@@ -345,7 +345,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 
 					function cleanupKanbanListeners() {
 						if (window._kanbanListenersCleanup === cleanupKanbanListeners) window._kanbanListenersCleanup = null;
-						document.body.removeEventListener('htmx:beforeSwap', cleanupKanbanListenersOnNavigation);
+						document.body.removeEventListener('htmx:beforeCleanupElement', cleanupKanbanListenersOnNavigation);
 						window.removeEventListener('sse-task-event', handleTaskEvent);
 						window.removeEventListener('sse-live-connected', handleSSEReconnected);
 						window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
@@ -362,10 +362,11 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						if (refreshTimeout) clearTimeout(refreshTimeout);
 					}
 					function cleanupKanbanListenersOnNavigation(event) {
-						if (event.detail.target && event.detail.target.id === 'main-content') cleanupKanbanListeners();
+						var elt = event.detail && event.detail.elt;
+						if (elt && (elt === tasksPage || elt.contains(tasksPage))) cleanupKanbanListeners();
 					}
-					// Clean up listeners when navigating away via HTMX
-					document.body.addEventListener('htmx:beforeSwap', cleanupKanbanListenersOnNavigation);
+					// Cancelled swaps never clean up elements, so a failed navigation keeps the board live.
+					document.body.addEventListener('htmx:beforeCleanupElement', cleanupKanbanListenersOnNavigation);
 					window._kanbanListenersCleanup = cleanupKanbanListeners;
 				})();
 
