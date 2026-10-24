@@ -147,10 +147,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    down(days[3],{metaKey:true});up();
    check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip','multiple day label');
    down(days[1]);up();
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped','one partially skipped day has explicit action labels');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip' && toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip','one partially skipped day keeps concise action labels');
    check(days[1].getBoundingClientRect().top===initialHeaderTop,'selection toolbar must not shift headers: shift='+(days[1].getBoundingClientRect().top-initialHeaderTop)+'px, toolbar height='+toolbar.getBoundingClientRect().height+'px, scrollbar and borders='+(toolbar.offsetHeight-toolbar.clientHeight)+'px');down(days[3],{ctrlKey:true});up();check(count()===2,'nonconsecutive header selection');
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip remaining','partial date selection explains remaining runs');
-   check(toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip skipped','partial date selection explains skipped runs');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip','partial date selection keeps the Skip label concise');
+   check(toolbar.querySelector('[data-calendar-action="restore"]').textContent==='Unskip','partial date selection keeps the Unskip label concise');
    checkHeaderAlignment();
    var panel=toolbar.getBoundingClientRect(), viewport=root.querySelector('#schedule-calendar-viewport').getBoundingClientRect();
    var slot=root.querySelector('#schedule-selection-slot').getBoundingClientRect();
