@@ -1,6 +1,5 @@
 # Advanced slide controls
 
-These controls are available in the pinned Paperworks **0.0.0-rc6** release.
 Use `schema create-pptx` and `schema slide-edit` for the supported fields.
 
 All edit examples below go inside `{"edits":[...]}` and run with
@@ -171,9 +170,9 @@ chart part, including any objects sharing it. It does not style ChartEx charts
 or reconstruct charts stored only as images. Verify data, legend, axis labels
 and layout after saving; this is not a replacement for the chart-data checks.
 
-## Detailed chart styling (RC5 build)
+## Detailed chart styling
 
-Check `schema slide-edit` for these fields before use. Existing standard charts
+Existing standard charts
 accept `chart-format` with axis `minor_unit`, `text_style`, `major_gridline` and
 `minor_gridline`; legend `text_style`, `fill`, `outline`; and series label
 `text_style`. Text style uses `font`, `font_size` in points, hex `color`, `bold`,
@@ -200,7 +199,7 @@ The tested LibreOffice preview ignores line-chart marker colors, including
 series-level colors, even when native marker fills are stored. Verify those colors in the
 intended PowerPoint application; do not claim the preview confirms them.
 
-## Reusable named text styles (RC5 build)
+## Reusable named text styles
 
 Check `schema create-pptx` / `schema slide-edit` for `named_styles`. Define text
 formatting once and reuse it across shapes:
@@ -224,7 +223,7 @@ changing font sizes or alignment.
 
 ## Individual chart labels
 
-With a RC5 build exposing `label_overrides` in `schema slide-edit`, select a
+Use `label_overrides` to select a
 series and cached point index to change one label without changing its data:
 
 ```json
@@ -238,7 +237,7 @@ settings remain unchanged. Render and inspect the label placement.
 
 ## Axis placement
 
-Check the RC5 schema, then use inspected axis IDs:
+Use inspected axis IDs:
 
 ```json
 {"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"axes":[{"id":"INSPECTED_AXIS_ID","position":"right","tick_label_position":"high"}]}}
@@ -250,7 +249,7 @@ remain unchanged. Render to check the final placement.
 
 ## Chart markers and creation formatting
 
-With a RC5 build exposing series `marker`, use:
+Use series `marker`:
 
 ```json
 {"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"series":[{"index":0,"marker":{"symbol":"diamond","size":12,"fill":{"fill":"FF0000"}}}]}}
@@ -265,11 +264,11 @@ Standard chart creation now preserves `chart.options.Series` formatting by index
 including `Marker`, `Line` and `DataLabel` (Excelize field names). Paperworks still
 generates all `Name`, `Categories`, `Values`, `Sizes` references from `chart.series`;
 do not supply external workbook references. More option entries than data series
-is rejected. Check the build before relying on this post-RC4 behavior.
+is rejected.
 
 ## Existing chart backgrounds
 
-Check for `chart_fill` / `plot_area_fill` in the RC5 schema:
+Use `chart_fill` / `plot_area_fill`:
 
 ```json
 {"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"chart_fill":{"fill":"FFFFFF"},"plot_area_fill":{"fill":"F2F5F9"}}}
@@ -281,29 +280,27 @@ shadows and embedded outlines are not accepted. Borders, data, axes and labels
 are preserved. Inspect contrast in the final render.
 
 
-## Edit a chart title (after RC4)
+## Edit a chart title
 
 Use `chart_format.title` with `slide-edit` to replace an existing standard
 chart title or add one: `{"operation":"chart-format","slide":1,"shape_id":"2","chart_format":{"title":"Revenue by quarter"}}`.
 An empty string removes the title and disables automatic titles. Omission
 preserves it. Replacement uses plain text instead of the previous title's
 formula/runs; title layout and other title properties remain. Chart data and
-the embedded workbook are unchanged. Verify a RC5 build exposes
-`title` in `schema slide-edit`; render and inspect the result.
+the embedded workbook are unchanged. Render and inspect the result.
 
 
-## Chart and plot borders (after RC4)
+## Chart and plot borders
 
 `chart_format.chart_outline` and `plot_area_outline` independently set
 the outer chart and plot-interior borders. For example:
 `{"chart_outline":{"width":2,"fill":{"fill":"17324D"}},"plot_area_outline":{"width":0}}`
 inside `chart_format`. Widths are points; zero removes the border.
 Use the same solid/gradient/pattern fill and dash options as other outlines.
-Omitted outlines and existing backgrounds remain unchanged. Check the newer
-local schema before use, then render and inspect border placement.
+Omitted outlines and existing backgrounds remain unchanged. Render and inspect border placement.
 
 
-## Axis crossing, label offset and line (after RC4)
+## Axis crossing, label offset and line
 
 On an inspected `chart_format.axes` entry, `crosses_at` writes the crossing
 coordinate on that native axis and removes its mutually exclusive automatic
@@ -313,11 +310,10 @@ crosses; category-axis coordinates represent category positions.
 (100 means 100% of the label font size). `outline` uses point-valued line width,
 fill and optional dash; width zero removes the axis line.
 Example: `{"id":"INSPECTED_VALUE_AXIS_ID","crosses_at":25,"outline":{"width":1,"fill":{"fill":"17324D"}}}`.
-Omitted settings remain unchanged. These are post-RC4 fields; check the local
-schema and render to verify crossing, tick labels and line placement.
+Omitted settings remain unchanged. Render to verify crossing, tick labels and line placement.
 
 
-## Additional chart label controls (after RC4)
+## Additional chart label controls
 
 Series `labels` accepts `separator`, `show_legend_key`, `show_leader_lines`
 and `show_bubble_size`, alongside the existing value/category/series/percent
@@ -329,14 +325,14 @@ Booleans accept explicit false; an empty separator clears it. Omission preserves
 existing settings/inheritance. Percent=true requires pie/doughnut, and bubble
 size/leader-line display depends on the chart family and application. Existing
 hidden-label settings remain unchanged. Leader lines are a series-label
-setting, not a per-point field. Check the RC5 schema, then render to
+setting, not a per-point field. Render to
 verify the resulting labels; native flags do not guarantee visible leader lines.
 
 The tested LibreOffice preview retained a separator for an individual label
 even when its native separator was saved as empty. Verify exact point-label
 separator behavior in the intended PowerPoint application.
 
-## Chart title style and overlay (after RC4)
+## Chart title style and overlay
 
 Inside `chart_format`, `title_style` uses the chart text style fields and
 `title_overlay` selects overlay (`true`) or above-chart placement (`false`).
@@ -344,10 +340,9 @@ Example: `{"title":"Revenue","title_style":{"font_size":24,"bold":true},"title_o
 Formatting without `title` requires an existing title; a removed/missing title
 cannot be styled. Existing rich-text runs receive supplied style properties;
 omitted properties and manual layout are retained. Formula-backed title text is
-not replaced by style-only edits. Verify these fields in the RC5 schema
-and render to check title placement, especially with an existing manual layout.
+not replaced by style-only edits. Render to check title placement, especially with an existing manual layout.
 
-## Chart text underline and alignment (after RC4)
+## Chart text underline and alignment
 
 All chart `text_style` objects and `title_style` accept `alignment`
 (`left`, `center`, `right`, `justify`) and native `underline` tokens.
@@ -360,7 +355,7 @@ inside `chart_format`. Alignment applies to paragraphs; underline applies to
 run/default properties. Omission preserves existing settings. Check the local
 schema and render to verify the intended application displays the style.
 
-## Trendline label formatting (after RC4)
+## Trendline label formatting
 
 A `chart_format.series[].trendlines[]` entry accepts `label` with `text`,
 `text_style`, `fill` and `outline`. Example:
@@ -370,9 +365,8 @@ Set the applicable `display_equation` or `display_r_squared` flag and inspect
 the render; label formatting alone does not enable an equation. The existing
 `trendlines` operation replaces the whole series trendline list, so include
 all trendlines/settings that should remain. Omit `trendlines` to preserve them.
-Use only with a RC5 schema exposing `label`.
 
-## Series-label visibility, paint and source formats (after RC4)
+## Series-label visibility, paint and source formats
 
 Series `labels` accepts `visible`, `fill`, `outline` and
 `number_format_source_linked`. Example:
@@ -384,38 +378,38 @@ Setting `number_format` alone retains the existing command behavior of disabling
 source linkage. Otherwise omitted properties remain unchanged. Inspect the newer
 local schema and the saved labels, then render to check the final appearance.
 
-## Separate axis-title styling (after RC4)
+## Separate axis-title styling
 
 Each inspected `chart_format.axes[]` entry accepts `title_style`, independently of `text_style` for tick labels. For example: `{"id":"INSPECTED_AXIS_ID","title":"Revenue","title_style":{"font_size":21,"bold":true},"text_style":{"font_size":10}}`.
-Omit `title` to style the existing title without replacing its text or formula reference. Styling requires an existing or nonempty new title; it fails if the title is removed. Supplied properties apply to its rich text and fallback text properties; omitted properties remain unchanged. Use a RC5 build exposing this field, then render and inspect the title and tick labels.
+Omit `title` to style the existing title without replacing its text or formula reference. Styling requires an existing or nonempty new title; it fails if the title is removed. Supplied properties apply to its rich text and fallback text properties; omitted properties remain unchanged. Render and inspect the title and tick labels.
 
-## Chart text fills (after RC4)
+## Chart text fills
 
 Chart `text_style` and `title_style` accept `fill` using Paperworks' existing solid, gradient or pattern text-paint format. This styles glyphs, not the label box. For example:
 ```json
 {"title_style":{"fill":{"gradient":{"angle":45,"stops":[{"position":0,"color":"FF0000"},{"position":1,"color":"0000FF"}]}}}}
 ```
-Gradient stop positions are ascending fractions from 0 to 1; angles are degrees. The existing `color` field remains a solid-color shortcut. Supply `color` or `fill`, never both. Supplied fills replace existing run/default fills; omission preserves them. Image fills, shadows and outlines are not accepted inside text `fill`. Use a RC5 build exposing this field and render to verify the result in the intended viewer.
+Gradient stop positions are ascending fractions from 0 to 1; angles are degrees. The existing `color` field remains a solid-color shortcut. Supply `color` or `fill`, never both. Supplied fills replace existing run/default fills; omission preserves them. Image fills, shadows and outlines are not accepted inside text `fill`. Render to verify the result in the intended viewer.
 
-## Picture corner radius (after RC4)
+## Picture corner radius
 
 `slide-edit` `image-mask` accepts `corner_radius_points` for rectangular/rounded-rectangle pictures:
 ```json
 {"edits":[{"operation":"image-mask","slide":1,"shape_id":"INSPECTED_ID","mask":"roundRect","corner_radius_points":18}]}
 ```
-Radius is in points, from zero to half the shorter picture side; picture dimensions must be explicit. Setting a radius on `rect` converts it to `roundRect`. Omit `mask` to adjust the current rectangular mask. Omitted radius retains adjustments when the mask type stays the same; a different mask uses its defaults. Crop, placement and image bytes remain unchanged. Use a RC5 build and render the result.
+Radius is in points, from zero to half the shorter picture side; picture dimensions must be explicit. Setting a radius on `rect` converts it to `roundRect`. Omit `mask` to adjust the current rectangular mask. Omitted radius retains adjustments when the mask type stays the same; a different mask uses its defaults. Crop, placement and image bytes remain unchanged. Render the result.
 
-## Additional picture mask shapes (after RC4)
+## Additional picture mask shapes
 
 `image-mask` accepts native DrawingML preset shape names, including `hexagon`, `triangle`, `diamond`, `star5`, `heart` and `rightArrow`, as well as `rect`, `roundRect` and `ellipse`. These change the picture's clipping geometry without replacing its image data, crop or placement.
 ```json
 {"edits":[{"operation":"image-mask","slide":1,"shape_id":"INSPECTED_ID","mask":"hexagon"}]}
 ```
-Names are case-sensitive. Unknown names, `textbox` and `custom` are rejected. A new mask uses the preset's default adjustments; keeping the same mask preserves existing adjustments. `corner_radius_points` remains restricted to rectangular masks. Use a RC5 build and render the result; RC4 supports only the original three mask shapes.
+Names are case-sensitive. Unknown names, `textbox` and `custom` are rejected. A new mask uses the preset's default adjustments; keeping the same mask preserves existing adjustments. `corner_radius_points` remains restricted to rectangular masks. Render the result.
 
-## Shape corner radii and adjustments (after RC4)
+## Shape corner radii and adjustments
 
-Use a RC5 build exposing `shape_geometry`. For an existing ordinary shape:
+Use `shape_geometry` for an existing ordinary shape:
 `{"operation":"shape-geometry","slide":1,"shape_id":"INSPECTED_ID","shape_geometry":{"corner_radius_points":18}}`.
 New text/shape elements accept the same `shape_geometry` object. Radius requires
 rect/roundRect and explicit dimensions, from zero to half the shorter side.
@@ -426,18 +420,18 @@ all adjustments; `[]` clears them. Omission retains same-preset adjustments;
 changing the preset resets them. Text, fills and placement remain unchanged.
 Inspect and render the saved slide, including text fit after changing geometry.
 
-## Picture aspect-ratio locking (after RC4)
+## Picture aspect-ratio locking
 
-Use a RC5 build exposing `lock_aspect_ratio`:
+Use `lock_aspect_ratio`:
 `{"operation":"image-lock","slide":1,"shape_id":"INSPECTED_PICTURE_ID","lock_aspect_ratio":true}`.
 Use `false` to unlock. New image elements accept the same field. It preserves
 placement, crop, image bytes and other locks. This is a native interactive-resize
 setting; it does not constrain subsequent CLI geometry edits. Inspect saved
 properties and verify interactive behavior in the target application when needed.
 
-## Native table style options (after RC4)
+## Native table style options
 
-Use a RC5 build exposing `table_format.style_options`:
+Use `table_format.style_options`:
 `{"operation":"table-format","slide":1,"shape_id":"INSPECTED_TABLE_ID","table_format":{"style_options":{"header_row":true,"total_row":false,"banded_rows":false,"banded_columns":true}}}`.
 Also accepts `first_column` and `last_column`. New table elements accept the same
 `table_format`. Explicit false disables a flag; omission retains it. These flags
@@ -446,9 +440,9 @@ or direct formatting. Direct cell formatting may override the visual effect.
 Total-row styling does not add a row or calculate totals. Reopen and render to
 check the requested appearance before delivery.
 
-## Select a native table style (after RC4)
+## Select a native table style
 
-With a RC5 build exposing `table_format.style_id`, set a known built-in or
+With `table_format.style_id`, set a known built-in or
 existing deck style GUID:
 `{"operation":"table-format","slide":1,"shape_id":"INSPECTED_TABLE_ID","table_format":{"style_id":"{5940675A-B579-460E-94D1-54222C63F5DA}"}}`.
 New table elements accept the same `table_format`. This replaces an inline style
@@ -457,9 +451,9 @@ custom style definitions; use the existing style resources mechanism for those.
 Omitting `style_id` preserves the current style. Direct cell formatting can mask
 the style's appearance, so render and inspect the result.
 
-## Mixed-format text in table cells (after RC4)
+## Mixed-format text in table cells
 
-Use a RC5 build exposing structured table-cell paragraphs:
+Use structured table-cell paragraphs:
 `{"operation":"table-cell","slide":1,"shape_id":"INSPECTED_TABLE_ID","row":0,"column":0,"paragraphs":[{"runs":[{"text":"Revenue:","bold":true},{"text":" $200","bold":false}]}]}`.
 Use `paragraphs` instead of `text`. For creation or `table-format`, put the same
 `paragraphs` on the selected zero-based `table_format.cells` entry. This replaces
@@ -474,9 +468,9 @@ Unspecified authored text defaults to Arial 12pt and the helper's text color;
 specify intended sizes/colors when matching existing content. Render and inspect
 wrapping and row height; writing rich text does not automatically expand the row.
 
-## Arrowhead sizing (after RC4)
+## Arrowhead sizing
 
-In a RC5 build, `drawing_style.outline` accepts `head_width`, `head_length`,
+`drawing_style.outline` accepts `head_width`, `head_length`,
 `tail_width`, `tail_length`, each `sm`, `med` or `lg`. Example outline:
 `{"color":"17324D","width":2,"tail":"arrow","tail_width":"lg","tail_length":"sm"}`.
 Supply the corresponding head/tail type. Use this on created drawing elements or
@@ -484,9 +478,9 @@ in `slide-edit` operation `drawing-style`. An outline replaces existing line
 formatting, so supply all properties you want retained. Omitted sizes use viewer
 defaults. Attachments remain unchanged. Render and check arrow direction and size.
 
-## Line caps and joins (after RC4)
+## Line caps and joins
 
-With a RC5 build, use `drawing_style.outline.cap` (`flat`, `round`, `square`)
+Use `drawing_style.outline.cap` (`flat`, `round`, `square`)
 and `join` (`round`, `bevel`, `miter`). Example outline:
 `{"color":"17324D","width":3,"cap":"round","join":"bevel"}`.
 These work for creation and `drawing-style` edits on supported drawing objects.
@@ -494,7 +488,7 @@ An outline replaces existing line formatting: include desired dash and arrowhead
 settings as well. Omission uses viewer defaults. Connector routing/attachments
 stay unchanged. Render to inspect the ends and corners in the intended viewer.
 
-### Table-run underline styles (after RC4)
+### Table-run underline styles
 
 Use `underline_style` instead of boolean `underline` for a native DrawingML
 style: `{"text":"Total","underline_style":"dbl"}` gives double underline.
@@ -503,7 +497,7 @@ Accepted values: `none`, `words`, `sng`, `dbl`, `heavy`, `dotted`,
 `dotDashHeavy`, `dotDotDash`, `dotDotDashHeavy`, `wavy`, `wavyHeavy`, `wavyDbl`.
 The boolean `underline: true` still means single underline.
 
-### Hyperlinks within table-cell text (after RC4)
+### Hyperlinks within table-cell text
 
 Set `hyperlink` on the intended run, for example
 `{"text":"Source","hyperlink":"https://example.com","underline_style":"sng","color":"2563EB"}`.
@@ -513,7 +507,7 @@ The link is attached only to that run; set its color and underline explicitly
 if desired. Replacing the paragraphs without a hyperlink removes the link from
 the replacement text. This does not change the other cells.
 
-## Different text fills within a table cell (after RC4)
+## Different text fills within a table cell
 
 Set `text_paint` on an individual run to give it a solid, gradient or pattern
 fill, or a text outline. For example, this `table-cell` edit makes only the
@@ -547,7 +541,7 @@ applied afterward and overrides the corresponding run paint properties.
 Omit whole-cell paint when retaining different fills between runs. Images are
 not supported as text fills. Render and inspect the resulting text.
 
-## Table-cell horizontal overflow (after RC4)
+## Table-cell horizontal overflow
 
 Set `horizontal_overflow` to `clip` or `overflow` on a zero-based
 `table_format.cells` entry. This writes the native cell setting; omitting it
