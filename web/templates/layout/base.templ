@@ -425,16 +425,37 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const syncNativeTheme = () => runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});
 						new MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
 						syncNativeTheme();
+						// WebKit can adjust timeOrigin while a document is alive. Capture
+						// it once: native ordering must not mistake clock drift for navigation.
+						const visibilityPage = performance.timeOrigin;
 						let visibilitySequence = 0;
 						let previewHidden;
-						const syncNativeVisibility = () => {
+						let visibilityRetry;
+						const syncNativeVisibility = (force = false) => {
 							// Resolve the live dialog: navigation can replace the original node.
 							const hidden = !!document.querySelector('#image-gallery[open]');
-							if (hidden === previewHidden) return;
+							if (!force && hidden === previewHidden) return;
+							clearTimeout(visibilityRetry);
 							previewHidden = hidden;
-							runtime.Events.Emit('desktop:controls-visibility', {hidden, page: performance.timeOrigin, sequence: ++visibilitySequence});
+							const sequence = ++visibilitySequence;
+							const retry = () => {
+								// A failed older send must not undo a newer open/close.
+								if (sequence !== visibilitySequence) return;
+								// Keep the attempted state so unrelated DOM mutations cannot
+								// bypass the retry delay. A real open/close still sends immediately.
+								visibilityRetry = setTimeout(() => syncNativeVisibility(true), 250);
+							};
+							try {
+								Promise.resolve(runtime.Events.Emit('desktop:controls-visibility', {hidden, page: visibilityPage, sequence})).then(cancelled => {
+									if (cancelled === true) retry();
+								}, retry);
+							} catch (_) {
+								retry();
+							}
 						};
-						new MutationObserver(syncNativeVisibility).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['open']});
+						new MutationObserver(() => syncNativeVisibility()).observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['open']});
+						window.addEventListener('focus', () => syncNativeVisibility(true));
+						window.addEventListener('pageshow', () => syncNativeVisibility(true));
 						syncNativeVisibility();
 					}
 					window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();
@@ -2965,6 +2986,37 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								}
 							});
 						}
+						if (typeof parser.use === 'function') {
+							// Let Marked distinguish destinations, code, and raw HTML before
+							// escaping HTML tokens. Never rewrite Markdown link syntax.
+							function svgToken(src) {
+								if (!/^<svg(?:\s|>)/i.test(src)) return;
+								var candidate = src.slice(0, 1024 * 1024);
+								var tags = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\/?svg\b[^>]*>/gi;
+								var depth = 0, tag;
+								while ((tag = tags.exec(candidate))) {
+									if (tag[0].startsWith('<!')) continue;
+									if (tag[0].startsWith('</')) depth--;
+									else if (!/\/\s*>$/.test(tag[0])) depth++;
+									if (depth === 0) {
+										var raw = candidate.slice(0, tags.lastIndex);
+										return { type: 'chatSVG', raw: raw, text: raw };
+									}
+								}
+							}
+							parser.use({
+								renderer: { html: function(token) { return window.escapeHTMLForChat(token.text); } },
+								extensions: ['block', 'inline'].map(function(level) {
+									return {
+										name: 'chatSVG', level: level,
+										// Tokenize only at the current parser position. A lookahead
+										// here can split paragraphs inside code spans or link labels.
+										tokenizer: svgToken,
+										renderer: function(token) { return this.parser.renderer.code({ text: token.text, lang: 'svg', escaped: false }); }
+									};
+								})
+							});
+						}
 						window._chatMarkedConfiguredFor = parser;
 						return true;
 					} catch(e) {
@@ -3215,8 +3267,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				window.isInsideCode = function(text, start, end) {
 					return window.isInsideCodeRanges(window.codeRanges(text), start, end);
 				};
-				// Escape raw HTML from model output before Markdown parsing. Code ranges
-				// remain byte-for-byte intact so Marked can render benign HTML examples.
+				// Compatibility path for parsers without renderer extensions. Code ranges
+				// remain byte-for-byte intact; the shipped Marked uses HTML token escaping.
 				window.escapeRawHTMLForMarkdown = function(text, ranges) {
 					if (!text) return text;
 					ranges = ranges || window.codeRanges(text);
@@ -3415,7 +3467,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						return window.renderChatMarkdownFallback(text);
 					}
 					try {
-						var escapedText = window.escapeRawHTMLForMarkdown(text);
+						var escapedText = typeof window.marked.use === 'function' ? text : window.escapeRawHTMLForMarkdown(text);
 						return window.sanitizeChatHTML(window.marked.parse(escapedText));
 					} catch(e) {
 						return window.renderChatMarkdownFallback(text);
@@ -3450,13 +3502,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					}
 					try {
 						if (!window._markdownWorkerURL) {
-							var workerSource = 'var window=self;window.markdownLineRanges=' + window.markdownLineRanges.toString() +
-								';window.codeRanges=' + window.codeRanges.toString() +
-								';window.escapeRawHTMLForMarkdown=' + window.escapeRawHTMLForMarkdown.toString() +
+							var workerSource = 'var window=self;window.escapeHTMLForChat=' + window.escapeHTMLForChat.toString() +
+								';window.configureChatMarked=' + window.configureChatMarked.toString() +
 								";importScripts(" + JSON.stringify(window.chatMarkedScriptURL()) + ");" +
-								"marked.setOptions({breaks:true,gfm:true});" +
+								"if (!window.configureChatMarked()) throw new Error('Markdown configuration failed');" +
  "importScripts("+JSON.stringify(new URL(document.querySelector('[data-ov-math-parser]').src,location.href).href)+");" +
-								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(window.escapeRawHTMLForMarkdown(event.data))});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
+								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
 							window._markdownWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
 						}
 						return new Promise(function(resolve) {

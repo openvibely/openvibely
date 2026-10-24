@@ -1,0 +1,7 @@
+package components
+
+templ AttachmentFileIcon(name, mediaType string) {
+ <span class="attachment-file-icon" data-file-icon={attachmentIconKind(name, mediaType)} aria-hidden="true">
+  @templ.Raw(fileIconSVGs[attachmentIconKind(name, mediaType)])
+ </span>
+}

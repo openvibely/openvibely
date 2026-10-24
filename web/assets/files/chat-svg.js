@@ -39,7 +39,7 @@
       if (!figure.isConnected) { urls.forEach(url => URL.revokeObjectURL(url)); images.delete(figure); }
     }
     document.querySelectorAll('pre > code.language-svg').forEach(code => {
-      if (processed.has(code)) return;
+      if (code.closest('[data-thread-refresh-preview]') || processed.has(code)) return;
       processed.add(code);
       const source = code.textContent, safe = imageSource(source);
       if (!safe) return; // Incomplete/invalid streamed output stays readable source.

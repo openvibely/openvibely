@@ -23,7 +23,7 @@
  const stage=dialog.querySelector('[data-gallery-stage]'),imageControls=dialog.querySelector('[data-image-controls]');
  const prev=dialog.querySelector('[data-gallery-prev]'),next=dialog.querySelector('[data-gallery-next]');
  const selector='[data-image-gallery-item],[data-file-preview]';
- let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false;
+ let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false,owner=null;
  function mode(raw,key){const url=new URL(raw,location.href);for(const k of ['view','raw','download','thumbnail'])url.searchParams.delete(k);url.searchParams.set(key,'1');return url.href}
  function original(raw){const url=new URL(raw,location.href);return url.origin===location.origin&&/\/(attachments|files)\//.test(url.pathname)?mode(raw,'download'):raw}
  function clear(){
@@ -74,6 +74,10 @@
   }
  }
  function open(url,trigger,event){
+  if (!dialog.contains(trigger)) {
+   const root=trigger?.closest('#task-detail-content,#chat-page-root');
+   owner=root?{id:root.id,task:root.dataset.taskId||'',project:root.dataset.projectId||''}:null;
+  }
   // Snapshot a list before replacing an in-dialog Files panel.
   group=trigger?.closest('[data-image-gallery-group],[data-files-list],.chat-markdown');
   let links=group?Array.from(group.querySelectorAll(selector)):[];
@@ -121,8 +125,18 @@
  dialog.addEventListener('pointerup',event=>{const released=document.elementFromPoint(event.clientX,event.clientY);backdropPress=backdropPress&&event.button===0&&released&&dialog.contains(released)&&isBackdrop(released)},true);
  dialog.addEventListener('pointercancel',()=>{backdropPress=false});
  dialog.addEventListener('click',event=>{if(backdropPress&&isBackdrop(event.target))close();backdropPress=false;const toggle=event.target.closest('[data-file-html-mode]');if(toggle){const root=toggle.closest('[data-file-viewer]'),source=toggle.dataset.fileHtmlMode==='source';root.querySelector('iframe').hidden=source;root.querySelector('[data-file-source]').hidden=!source}});
- document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail.target;if(!event.detail.shouldSwap||!dialog.open||!target||!group)return;if(target.id==='attachment-list'&&target.closest('[data-task-files]')&&(target===group||target.contains(group)||group.contains(target))){if(target===group||target.contains(group))group=target.closest('[data-task-files]');if(target.contains(opener))opener=target.closest('[data-task-files]');return}if(target===group||target.contains(group))close()});
- new MutationObserver(()=>{if(dialog.open&&group&&(!group.isConnected||!opener?.isConnected))close()}).observe(document.body,{childList:true,subtree:true});
+ // The preview owns its loaded content and item snapshot. Replacing a
+ // message/attachment during background refresh must not dismiss it.
+ document.addEventListener('htmx:beforeSwap',event=>{
+  const target=event.detail?.target;
+  if(event.detail?.shouldSwap && dialog.open && target?.id==='main-content')close();
+ });
+ window.addEventListener('popstate',close);
+ new MutationObserver(()=>{
+  if(!dialog.open||!owner)return;
+  const root=document.getElementById(owner.id);
+  if(!root||(root.dataset.taskId||'')!==owner.task||(root.dataset.projectId||'')!==owner.project)close();
+ }).observe(document.body,{childList:true,subtree:true});
  window.imageGallery={close,refreshItem(element){const at=items.findIndex(item=>item.element===element);if(at<0)return;items[at]=itemFrom(element);if(at===index){if(currentKind==='image'&&window.OVFileImage.refresh(items[at])){download.href=items[at].download}else show(at)}}};
  // Retain enhanced published file links while the surrounding response is rebuilt.
  function prepareStream(fragment,previous){
@@ -165,12 +179,13 @@
  // Server-rendered preview links already own their thumbnail and gallery group.
  // Only enhance ordinary published links, such as links in model responses.
  function scanLinks(root=document){root.querySelectorAll('a[href]:not([data-file-link-bound]):not([data-image-gallery-item]):not([data-file-preview])').forEach(link=>{
+ if(link.closest('[data-thread-refresh-preview]'))return;
  let url;try{url=new URL(link.href,location.href)}catch{return}
  if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return;
  link.dataset.fileLinkBound='';link.dataset.filePreview='';
  if(link.closest('[data-result-content]'))return;
  const meta=new URL(url);meta.searchParams.set('metadata','1');fetch(meta).then(r=>r.ok?r.json():null).then(file=>{
- if(!file||!link.isConnected)return;
+ if(!file||!link.isConnected||link.closest('[data-thread-refresh-preview]'))return;
  if(/^(image|video)\//.test(file.media_type)||/\.svg$/i.test(file.file_name)){
  const video=file.media_type.startsWith('video/');link.removeAttribute('data-file-preview');link.dataset.imageGalleryItem='';link.dataset.imageName=file.file_name;link.dataset.mediaKind=video?'video':'image';(link.closest('.chat-markdown')||link.parentElement).dataset.imageGalleryGroup='';const preview=document.createElement(video?'video':'img');preview.src=mode(url,video?'raw':'thumbnail');preview.alt=file.file_name;preview.style.cssText='max-width:100%;max-height:400px;object-fit:contain';if(video){preview.muted=true;preview.preload='metadata'}link.prepend(preview);return;
  }

@@ -391,3 +391,64 @@ func TestUpdateProject_GitHubImportRecloneFailureHTMXShowsToast(t *testing.T) {
 		t.Fatalf("expected repo_path unchanged on reclone failure, got %q", unchanged.RepoPath)
 	}
 }
+
+func TestRecoverProjectRepo(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		state   string
+		remote  bool
+		service bool
+		fail    bool
+		want    int
+		called  bool
+	}{
+		{"missing checkout", "missing", true, true, false, http.StatusOK, true},
+		{"clone failure", "missing", true, true, true, http.StatusBadRequest, true},
+		{"no service", "missing", true, false, false, http.StatusServiceUnavailable, false},
+		{"local project", "missing", false, true, false, http.StatusConflict, false},
+		{"existing folder", "directory", true, true, false, http.StatusConflict, false},
+		{"existing file", "file", true, true, false, http.StatusConflict, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			p := &models.Project{Name: tc.name, RepoPath: filepath.Join(t.TempDir(), "checkout")}
+			if tc.remote {
+				p.RepoURL = "https://github.com/acme/widgets"
+			}
+			if tc.state == "directory" {
+				if err := os.Mkdir(p.RepoPath, 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.state == "file" {
+				if err := os.WriteFile(p.RepoPath, []byte("keep"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := h.projectSvc.Create(context.Background(), p); err != nil {
+				t.Fatal(err)
+			}
+			called := false
+			if tc.service {
+				h.SetGitHubService(&fakeGitHubService{recoverFn: func(_ context.Context, id, path, repoURL string) error {
+					called = true
+					if id != p.ID || path != p.RepoPath || repoURL != p.RepoURL {
+						t.Fatalf("wrong recovery target: %s %s %s", id, path, repoURL)
+					}
+					if tc.fail {
+						return fmt.Errorf("private credential details")
+					}
+					return nil
+				}})
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/projects/"+p.ID+"/reclone", nil))
+			if rec.Code != tc.want || called != tc.called {
+				t.Fatalf("status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "private credential") {
+				t.Fatal("response leaked service details")
+			}
+		})
+	}
+}

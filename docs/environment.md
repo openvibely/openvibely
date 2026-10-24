@@ -54,6 +54,34 @@ Document skills resolve executable paths through `skill_view`. To test a local b
 
 The dependency manager validates the override and returns its path as `PAPERWORKS` or `DOCUMENT_SOFFICE` in the skill environment. These are developer overrides, not variables the model should invent or change to bypass missing dependencies.
 
+Package extraction is generic. A Linux `deb-bundle` is a tar.gz containing DEB
+packages; extraction preserves their payload directory structure. Absolute DEB
+symlinks are rebased inside the cache and must resolve within it. A Windows `msi`
+expands an administrative image; optional `find_root: true` selects the unique
+directory containing the declared relative `executable`. Without it, the image
+layout is retained. Ambiguous roots fail. Root discovery is available only for MSI.
+
+The document YAML declares `executable: opt/libreoffice26.8/program/soffice` for DEBs and
+`find_root: true` with `executable: program/soffice.exe` for MSI. The installer
+contains no LibreOffice path or executable-name rules.
+
+The four document skills pin LibreOffice packages for macOS, Linux, and Windows
+on amd64 and arm64. macOS copies the application from its DMG. Windows uses
+`msiexec /a` to expand an administrative image into the dependency cache. Linux
+uses `dpkg-deb --fsys-tarfile` to extract the payloads from
+the official DEB bundle. Neither path installs a system-wide Office package or
+runs Linux package maintainer scripts. The cached executable is health-checked
+before publication, and returned as `DOCUMENT_SOFFICE`.
+
+Linux requires `dpkg-deb` plus the shared libraries and fonts required by
+LibreOffice (including GLib/GIO, NSS, Cairo, CUPS, X11/SM, libxslt and fonts). The archive does not bundle every host library. If these are
+unavailable, provision them on the host or use `OPENVIBELY_TOOL_LIBREOFFICE`
+with a working installation. The isolated Ubuntu 24.04 conversion checks use `dpkg` and:
+`libnss3 libcairo2 libcups2 libxinerama1 libxrender1 libxslt1.1 libsm6 libglib2.0-0t64 libx11-xcb1 fonts-dejavu-core`.
+Package names vary by distribution. Windows requires Windows Installer. MSI extraction
+is noninteractive and suppresses reboots; an extraction or health-check failure
+leaves the dependency unavailable rather than returning a broken executable.
+
 ## Application Updates
 
 Build artifact identity is compiled into official releases and cannot be changed by environment variables. Source builds perform a metric-only daily check and never show or apply updates.

@@ -4308,3 +4308,198 @@ func TestPublishExistingLocalCommitWithTokenUpdatesOrCreatesRefs(t *testing.T) {
 		t.Fatalf("expected blank branch validation error, got %v", err)
 	}
 }
+
+func TestRecoverProjectRepoPreservesExistingPathsAndAllowsRetry(t *testing.T) {
+	storeEnv := teststores.New(t)
+	settings := storeEnv.Stores.Settings
+	ctx := context.Background()
+	requireNoError(t, settings.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settings.Set(ctx, GitHubSettingPAT, "pat"))
+	root := t.TempDir()
+	svc := NewGitHubService(settings, "", "", "", root)
+	dest := filepath.Join(root, "recover-test")
+	calls := 0
+	fail := true
+	svc.runGit = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, error) {
+		calls++
+		if len(args) != 3 || args[0] != "clone" || args[2] != dest {
+			t.Fatalf("unexpected git args: %v", args)
+		}
+		requireNoError(t, os.WriteFile(filepath.Join(dest, "checkout.txt"), []byte("checkout"), 0600))
+		if fail {
+			return nil, fmt.Errorf("clone failed")
+		}
+		return nil, nil
+	}
+	recoverRepo := func() error {
+		return svc.RecoverProjectRepo(ctx, "recover-test", dest, "https://github.com/acme/widgets")
+	}
+	if err := svc.RecoverProjectRepo(ctx, "recover-test", filepath.Join(root, "other"), "https://github.com/acme/widgets"); err == nil {
+		t.Fatal("accepted unmanaged path")
+	}
+	requireNoError(t, os.WriteFile(dest, []byte("keep"), 0600))
+	if err := recoverRepo(); err == nil {
+		t.Fatal("accepted existing file")
+	}
+	if data, err := os.ReadFile(dest); err != nil || string(data) != "keep" {
+		t.Fatal("existing file modified")
+	}
+	requireNoError(t, os.Remove(dest))
+	requireNoError(t, os.Symlink(filepath.Join(root, "missing-target"), dest))
+	if err := recoverRepo(); err == nil {
+		t.Fatal("accepted dangling symlink")
+	}
+	if _, err := os.Readlink(dest); err != nil {
+		t.Fatal("symlink modified")
+	}
+	requireNoError(t, os.Remove(dest))
+	if calls != 0 {
+		t.Fatal("cloned into protected path")
+	}
+	if err := recoverRepo(); err == nil {
+		t.Fatal("expected clone failure")
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatal("incomplete checkout was not cleaned up")
+	}
+	fail = false
+	requireNoError(t, recoverRepo())
+	if err := recoverRepo(); err == nil {
+		t.Fatal("accepted existing checkout")
+	}
+	if calls != 2 {
+		t.Fatalf("unexpected clone count %d", calls)
+	}
+	if data, err := os.ReadFile(filepath.Join(dest, "checkout.txt")); err != nil || string(data) != "checkout" {
+		t.Fatal("checkout modified")
+	}
+}
+
+func TestProjectRecoveryAndURLChangeSerialize(t *testing.T) {
+	for _, recoveryFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("recoveryFirst=%t", recoveryFirst), func(t *testing.T) {
+			env := teststores.New(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			settings := env.Stores.Settings
+			requireNoError(t, settings.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+			requireNoError(t, settings.Set(ctx, GitHubSettingPAT, "pat"))
+			root := t.TempDir()
+			dest := filepath.Join(root, "project")
+			svc := NewGitHubService(settings, "", "", "", root)
+			entered := make(chan struct{}, 2)
+			release := make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			defer unblock()
+			svc.runGit = func(ctx context.Context, _ string, _ []string, args ...string) ([]byte, error) {
+				entered <- struct{}{}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				if args[2] == dest {
+					return nil, fmt.Errorf("recovery failed")
+				}
+				if err := os.MkdirAll(args[2], 0755); err != nil {
+					return nil, err
+				}
+				return nil, os.WriteFile(filepath.Join(args[2], "new-checkout.txt"), []byte("keep"), 0600)
+			}
+			recoverRepo := func() error { return svc.RecoverProjectRepo(ctx, "project", dest, "https://github.com/acme/old") }
+			changeURL := func() error {
+				_, _, err := svc.RecloneProjectRepo(ctx, "project", dest, "https://github.com/acme/new")
+				return err
+			}
+			first, second := recoverRepo, changeURL
+			if !recoveryFirst {
+				first, second = changeURL, recoverRepo
+			}
+			firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+			go func() { firstDone <- first() }()
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal("first clone did not start")
+			}
+			go func() { secondDone <- second() }()
+			select {
+			case <-entered:
+				t.Fatal("second clone started before first finished")
+			case err := <-secondDone:
+				t.Fatalf("second operation did not wait: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			unblock()
+			var firstErr, secondErr error
+			select {
+			case firstErr = <-firstDone:
+			case <-ctx.Done():
+				t.Fatal("first operation stuck")
+			}
+			select {
+			case secondErr = <-secondDone:
+			case <-ctx.Done():
+				t.Fatal("second operation stuck")
+			}
+			recoveryErr, saveErr := firstErr, secondErr
+			if !recoveryFirst {
+				recoveryErr, saveErr = secondErr, firstErr
+			}
+			if recoveryErr == nil {
+				t.Fatal("expected failed recovery or refusal to overwrite new checkout")
+			}
+			requireNoError(t, saveErr)
+			data, err := os.ReadFile(filepath.Join(dest, "new-checkout.txt"))
+			requireNoError(t, err)
+			if string(data) != "keep" {
+				t.Fatal("replacement checkout changed")
+			}
+		})
+	}
+}
+
+func TestProjectCloneLockCancellationAndIndependentProjects(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	settings := env.Stores.Settings
+	requireNoError(t, settings.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settings.Set(ctx, GitHubSettingPAT, "pat"))
+	root := t.TempDir()
+	svc := NewGitHubService(settings, "", "", "", root)
+	unlock, err := svc.lockProjectClone(ctx, "busy")
+	requireNoError(t, err)
+	defer unlock()
+	svc.runGit = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, error) {
+		if filepath.Base(args[2]) != "other" {
+			t.Errorf("cancelled request invoked git: %v", args)
+		}
+		return nil, os.MkdirAll(args[2], 0755)
+	}
+	for _, operation := range []string{"recover", "reclone", "clone"} {
+		t.Run(operation, func(t *testing.T) {
+			waiting, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+			defer cancel()
+			var err error
+			switch operation {
+			case "recover":
+				err = svc.RecoverProjectRepo(waiting, "busy", filepath.Join(root, "busy"), "https://github.com/acme/old")
+			case "reclone":
+				_, _, err = svc.RecloneProjectRepo(waiting, "busy", filepath.Join(root, "busy"), "https://github.com/acme/new")
+			case "clone":
+				_, _, err = svc.CloneProjectRepo(waiting, "busy", "https://github.com/acme/new")
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected cancelled wait, got %v", err)
+			}
+		})
+	}
+	independent, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_, _, err = svc.CloneProjectRepo(independent, "other", "https://github.com/acme/other")
+	requireNoError(t, err)
+	if _, err := os.Stat(filepath.Join(root, "busy")); !os.IsNotExist(err) {
+		t.Fatal("waiting requests touched the checkout")
+	}
+}

@@ -1922,13 +1922,33 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 		if !strings.Contains(body, `data-repo-path-health="healthy"`) {
 			t.Fatalf("dialog should show healthy repo path status, body=%s", body)
 		}
-		if !strings.Contains(body, "Repository path status: Healthy") {
+		if !strings.Contains(body, "Folder found") {
 			t.Fatal("dialog should label existing repo path as healthy")
 		}
-		if strings.Contains(body, "Repository path status: Missing") || strings.Contains(body, "Local folder missing") || strings.Contains(body, "Managed checkout missing") {
+		if strings.Contains(body, "Folder not found") || strings.Contains(body, "Local folder missing") || strings.Contains(body, "Managed checkout missing") {
 			t.Fatal("healthy repo path should not show missing-path warning copy")
 		}
 	})
+
+	for _, repoURL := range []string{"", "https://github.com/openvibely/example"} {
+		t.Run("regular file is not a folder/"+repoURL, func(t *testing.T) {
+			repoPath := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(repoPath, []byte("not a directory"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			body := renderDialog(t, &models.Project{Name: "File Path", RepoPath: repoPath, RepoURL: repoURL})
+			if !strings.Contains(body, `data-repo-path-health="not_directory"`) || strings.Contains(body, `data-repo-path-health="healthy"`) {
+				t.Fatal("regular files must show not-directory status, never healthy")
+			}
+			guidance := "Not a folder. Choose a directory."
+			if repoURL != "" {
+				guidance = "Not a folder. Restore the repository folder or re-clone the repository."
+			}
+			if !strings.Contains(body, guidance) {
+				t.Fatalf("missing guidance %q", guidance)
+			}
+		})
+	}
 
 	t.Run("missing local path shows mount guidance", func(t *testing.T) {
 		repoPath := filepath.Join(t.TempDir(), "missing-local")
@@ -1936,7 +1956,7 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 		if !strings.Contains(body, `data-repo-path-health="missing"`) {
 			t.Fatalf("dialog should show missing repo path status, body=%s", body)
 		}
-		if !strings.Contains(body, "Local folder missing; mount the folder or choose a valid repository path.") {
+		if !strings.Contains(body, "Folder not found. Choose its new location or restore the folder.") {
 			t.Fatal("missing local repo path should show local mount/path guidance")
 		}
 	})
@@ -1947,7 +1967,7 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 		if !strings.Contains(body, `data-repo-path-health="missing"`) {
 			t.Fatalf("dialog should show missing repo path status, body=%s", body)
 		}
-		if !strings.Contains(body, "Managed checkout missing; re-clone the repository or fix persistent storage.") {
+		if !strings.Contains(body, "Repository folder not found. Re-clone the repository or restore its folder.") {
 			t.Fatal("missing GitHub checkout should show re-clone or persistent storage guidance")
 		}
 		if strings.Contains(body, "Local folder missing") {
@@ -1961,7 +1981,7 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 		if !strings.Contains(body, `data-repo-path-health="unknown"`) {
 			t.Fatalf("dialog should show unknown repo path status, body=%s", body)
 		}
-		if !strings.Contains(body, "OpenVibely could not inspect this path. Check permissions or the filesystem mount.") {
+		if !strings.Contains(body, "Can’t check folder. Check folder permissions or reconnect the drive.") {
 			t.Fatal("unknown repo path status should show inspection guidance")
 		}
 	})

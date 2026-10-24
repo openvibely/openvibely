@@ -5,6 +5,7 @@
     const cache = window.openVibelyThreadCache;
     const entries = cache ? cache.pages : new Map();
     const composerRefreshes = new WeakMap();
+    const preservedScrolls = new WeakMap();
     const ttl = 30 * 60 * 1000;
     const maxBytes = 64 * 1024 * 1024;
     const maxEntries = 20;
@@ -13,6 +14,65 @@
     let historySnapshot = null;
     let mutation = 0;
     let restoringEntry = null;
+    let clearRefreshPreview = null;
+
+    // Hold only the already-mounted view during hydration of a changed snapshot.
+    // This is a visual handoff, never a source of conversation or streaming state.
+    function holdRefreshPreview(messages, xhr) {
+        clearRefreshPreview?.();
+        if (!messages?.checkVisibility?.({visibilityProperty: true}) || !messages.clientHeight) return;
+        const bounds = messages.getBoundingClientRect();
+        const preview = messages.cloneNode(true);
+        preview.removeAttribute('id');
+        preview.removeAttribute('data-transcript-hydrating');
+        preview.setAttribute('data-thread-refresh-preview', 'true');
+        preview.setAttribute('aria-hidden', 'true');
+        preview.inert = true;
+        preview.querySelectorAll('script, iframe').forEach(el => el.remove());
+        [preview, ...preview.querySelectorAll('*')].forEach(el => {
+            Array.from(el.attributes).forEach(attr => {
+                if (attr.name === 'id' || attr.name.startsWith('hx-') || attr.name.startsWith('on') ||
+                    (attr.name.startsWith('data-') && attr.name !== 'data-thread-refresh-preview')) el.removeAttribute(attr.name);
+            });
+        });
+        Object.assign(preview.style, {position: 'fixed', top: bounds.top + 'px', left: bounds.left + 'px',
+            width: bounds.width + 'px', height: bounds.height + 'px', boxSizing: 'border-box',
+            margin: '0', zIndex: '10', pointerEvents: 'none', visibility: 'visible'});
+        document.body.appendChild(preview);
+        preview.scrollTop = messages.scrollTop;
+        let observer = null, timer = null;
+        const cleanup = () => {
+            observer?.disconnect();
+            clearTimeout(timer);
+            preview.remove();
+            document.removeEventListener('htmx:afterSwap', swapped, true);
+            if (clearRefreshPreview === cleanup) clearRefreshPreview = null;
+        };
+        const swapped = event => {
+            if (event.detail.xhr !== xhr || event.detail.target?.id !== 'main-content') return;
+            const next = event.detail.target.querySelector('#task-thread-messages, #chat-messages');
+            const ready = () => {
+                if (!next?.isConnected || !next.hasAttribute('data-transcript-hydrating')) cleanup();
+            };
+            if (next) {
+                observer = new MutationObserver(ready);
+                observer.observe(next, {attributes: true, attributeFilter: ['data-transcript-hydrating']});
+            }
+            ready();
+        };
+        clearRefreshPreview = cleanup;
+        document.addEventListener('htmx:afterSwap', swapped, true);
+        // A failed/cancelled hydration must never leave an overlay behind.
+        timer = setTimeout(cleanup, 10000);
+    }
+    window.addEventListener('pagehide', () => clearRefreshPreview?.());
+    window.addEventListener('resize', () => clearRefreshPreview?.());
+    // If the reader interacts during hydration, yield to the live page rather
+    // than leaving a static view over a moving or hidden viewport.
+    ['pointerdown', 'wheel', 'keydown'].forEach(type => {
+        document.addEventListener(type, () => clearRefreshPreview?.(), {capture: true, passive: true});
+    });
+
 
     window.openVibelyDisplayedURL = function () {
         return pending?.cached ? new URL(activeURL, location.href).href : location.href;
@@ -293,6 +353,7 @@
     }, true);
     document.addEventListener('htmx:beforeSwap', function (event) {
         const detail = event.detail;
+        if (detail.target?.matches?.('#main-content, #thread-content, #task-thread-view, #chat-page-root, #task-thread-messages, #chat-messages')) clearRefreshPreview?.();
         if (detail._ovCachedPreview || detail.target?.id !== 'main-content') return;
         if (!pending || pending.xhr !== detail.xhr) return;
         if (!pending.cached) return;
@@ -342,6 +403,37 @@
                 el.setAttribute('hx-preserve', 'true');
             }
         });
+        // A warm refresh can contain the exact terminal transcript already on
+        // screen. Preserve its scroll container as well as its execution rows:
+        // replacing it briefly hides the page and resets scrollTop before the
+        // new page scripts run. Compare the surrounding rows too so paging,
+        // agent banners and queued inputs still receive server updates.
+        const messagesSelector = currentRoot.id === 'task-thread-view' ? '#task-thread-messages' : '#chat-messages';
+        const revisionAttribute = currentRoot.id === 'task-thread-view' ? 'data-thread-revision' : 'data-chat-revision';
+        const currentMessages = currentRoot.querySelector(messagesSelector);
+        const nextMessages = nextRoot.querySelector(messagesSelector);
+        if (currentMessages && nextMessages &&
+            !currentMessages.hasAttribute('data-transcript-hydrating') &&
+            currentRoot.getAttribute(revisionAttribute) &&
+            currentRoot.getAttribute(revisionAttribute) === nextRoot.getAttribute(revisionAttribute)) {
+            const oldChildren = Array.from(currentMessages.children);
+            const newChildren = Array.from(nextMessages.children);
+            const unchanged = newChildren.length === oldChildren.length && newChildren.every((child, i) => {
+                const old = oldChildren[i];
+                if (child.matches('[data-execution-pair]')) {
+                    return child.id === old.id && child.getAttribute('hx-preserve') === 'true';
+                }
+                return child.outerHTML === old.outerHTML;
+            });
+            if (unchanged) {
+                preservedScrolls.set(detail.xhr, {messages: currentMessages, top: currentMessages.scrollTop});
+                nextMessages.setAttribute('hx-preserve', 'true');
+                nextMessages.querySelectorAll('[hx-preserve]').forEach(el => el.removeAttribute('hx-preserve'));
+            }
+        }
+        if (nextMessages?.hasAttribute('data-transcript-hydrating') && nextMessages.getAttribute('hx-preserve') !== 'true') {
+            holdRefreshPreview(currentMessages, detail.xhr);
+        }
         // Keep the live draft, attachment controls and their handlers. Queue and
         // active-turn controls belong to the server and must still be refreshed.
         const composers = [];
@@ -362,6 +454,13 @@
         detail.serverResponse = next.innerHTML;
     }, true);
     document.addEventListener('htmx:afterSwap', function (event) {
+        const scroll = preservedScrolls.get(event.detail.xhr);
+        if (scroll && event.detail.target?.id === 'main-content') {
+            // HTMX temporarily parks preserved nodes outside their layout. That
+            // move can clamp scrollTop; restore it synchronously before paint.
+            if (scroll.messages.isConnected) scroll.messages.scrollTop = scroll.top;
+            preservedScrolls.delete(event.detail.xhr);
+        }
         // Direct cached swaps do not carry eventInfo into afterSwap detail.
         // Mark them while restoration is synchronous, before page handlers run.
         if (restoringEntry && event.detail.target?.id === 'main-content') {

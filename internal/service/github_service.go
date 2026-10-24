@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -27,6 +28,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -218,17 +220,18 @@ type githubAppConfig struct {
 }
 
 type GitHubService struct {
-	settingsRepo    persistence.SettingsStore
-	appID           string
-	appSlug         string
-	appPrivateKey   string
-	projectRepoRoot string
-	httpClient      *http.Client
-	retryPolicy     httpretry.Policy
-	apiBaseURL      string
-	webBaseURL      string
-	runGit          runGitFunc
-	nowFn           func() time.Time
+	projectCloneLocks sync.Map // project ID -> *semaphore.Weighted
+	settingsRepo      persistence.SettingsStore
+	appID             string
+	appSlug           string
+	appPrivateKey     string
+	projectRepoRoot   string
+	httpClient        *http.Client
+	retryPolicy       httpretry.Policy
+	apiBaseURL        string
+	webBaseURL        string
+	runGit            runGitFunc
+	nowFn             func() time.Time
 }
 
 func NewGitHubService(settingsRepo persistence.SettingsStore, appID, appSlug, appPrivateKey, projectRepoRoot string) *GitHubService {
@@ -457,11 +460,28 @@ func (s *GitHubService) Disconnect(ctx context.Context) error {
 	return nil
 }
 
+// lockProjectClone serializes checkout creation, recovery, replacement and cleanup
+// for a project. Waiting requests can be cancelled without touching the checkout.
+func (s *GitHubService) lockProjectClone(ctx context.Context, projectID string) (func(), error) {
+	value, _ := s.projectCloneLocks.LoadOrStore(projectID, semaphore.NewWeighted(1))
+	lock := value.(*semaphore.Weighted)
+	if err := lock.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return func() { lock.Release(1) }, nil
+}
+
 func (s *GitHubService) CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error) {
 	return s.CloneProjectRepoWithEndpoint(ctx, projectID, repoURL, s.GlobalAPIEndpoint(ctx))
 }
 
 func (s *GitHubService) CloneProjectRepoWithEndpoint(ctx context.Context, projectID, repoURL, apiEndpoint string) (string, string, error) {
+	unlock, err := s.lockProjectClone(ctx, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	defer unlock()
+
 	repo, err := ParseGitHubRepoURL(repoURL)
 	if err != nil {
 		return "", "", err
@@ -487,11 +507,63 @@ func (s *GitHubService) CloneProjectRepoWithEndpoint(ctx context.Context, projec
 	return dest, repo.HTMLURL, nil
 }
 
+// RecoverProjectRepo restores only a missing managed checkout. Unlike URL-change
+// recloning, it never replaces an existing file, directory, or symlink.
+func (s *GitHubService) RecoverProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) error {
+	unlock, err := s.lockProjectClone(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	repo, err := ParseGitHubRepoURL(repoURL)
+	if err != nil {
+		return err
+	}
+	if err := ConfigureGitHubRepoEndpoint(&repo, s.GlobalAPIEndpoint(ctx)); err != nil {
+		return err
+	}
+	root, err := s.ensureRepoRoot(ctx)
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(root, projectID)
+	currentAbs, err := filepath.Abs(currentRepoPath)
+	if err != nil {
+		return err
+	}
+	destAbs, err := filepath.Abs(dest)
+	if err != nil {
+		return err
+	}
+	if currentAbs != destAbs {
+		return fmt.Errorf("repository path does not match this project's managed checkout")
+	}
+	// Mkdir atomically reserves the destination, including against concurrent
+	// recovery requests and dangling symlinks that os.Stat treats as missing.
+	if err := os.Mkdir(dest, 0755); err != nil {
+		return fmt.Errorf("cannot recover repository into an existing or inaccessible path: %w", err)
+	}
+	if err := s.cloneProjectRepo(ctx, repo.CloneURL, localGitCloneURL(repoURL, repo.CloneURL), dest, githubAPIBaseURLForRepo(&repo, s.apiBaseURL)); err != nil {
+		if cleanupErr := os.RemoveAll(dest); cleanupErr != nil {
+			return fmt.Errorf("%w; could not remove incomplete checkout: %v", err, cleanupErr)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *GitHubService) RecloneProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error) {
 	return s.RecloneProjectRepoWithEndpoint(ctx, projectID, currentRepoPath, repoURL, s.GlobalAPIEndpoint(ctx))
 }
 
 func (s *GitHubService) RecloneProjectRepoWithEndpoint(ctx context.Context, projectID, currentRepoPath, repoURL, apiEndpoint string) (string, string, error) {
+	unlock, err := s.lockProjectClone(ctx, projectID)
+	if err != nil {
+		return "", "", err
+	}
+	defer unlock()
+
 	repo, err := ParseGitHubRepoURL(repoURL)
 	if err != nil {
 		return "", "", err

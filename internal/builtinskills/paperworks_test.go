@@ -30,22 +30,39 @@ func TestPaperworksSkillPackages(t *testing.T) {
 			t.Fatalf("%s: %v %v", name, dependencies, err)
 		}
 		paperworks := dependencies[0]
-		if paperworks.Version != "0.0.0-rc6" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
+		if paperworks.Version != "0.0.1" || paperworks.EnvironmentVariable != "PAPERWORKS" || strings.Join(paperworks.HealthCheck, " ") != "version" {
 			t.Fatalf("%s: invalid Paperworks release configuration: %+v", name, paperworks)
 		}
-		platforms := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64"}
+		platforms := []string{"darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"}
 		if len(paperworks.Packages) != len(platforms) {
 			t.Fatalf("%s: missing release platforms", name)
 		}
 		for _, platform := range platforms {
 			pkg := paperworks.Packages[platform]
-			executable := "paperworks"
+			executable := "paperworks-" + strings.ReplaceAll(platform, "/", "-")
 			if strings.HasPrefix(platform, "windows/") {
 				executable += ".exe"
 			}
 			url := "https://github.com/openvibely/openvibely-paperworks/releases/download/v" + paperworks.Version + "/paperworks-" + strings.ReplaceAll(platform, "/", "-") + ".zip"
 			if pkg.URL != url || pkg.Format != "zip" || pkg.Executable != executable || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(pkg.SHA256) {
 				t.Fatalf("%s: invalid %s release package: %+v", name, platform, pkg)
+			}
+		}
+		office := dependencies[1]
+		if office.Version != "26.8.1" || office.EnvironmentVariable != "DOCUMENT_SOFFICE" || len(office.Packages) != len(platforms) {
+			t.Fatalf("%s: incomplete LibreOffice platform configuration", name)
+		}
+		for _, platform := range platforms {
+			pkg, ok := office.Packages[platform]
+			wantFormat, wantExecutable := "dmg", "LibreOffice.app/Contents/MacOS/soffice"
+			if strings.HasPrefix(platform, "linux/") {
+				wantFormat, wantExecutable = "deb-bundle", "opt/libreoffice26.8/program/soffice"
+			}
+			if strings.HasPrefix(platform, "windows/") {
+				wantFormat, wantExecutable = "msi", "program/soffice.exe"
+			}
+			if !ok || pkg.Format != wantFormat || pkg.Executable != wantExecutable || pkg.FindRoot != strings.HasPrefix(platform, "windows/") {
+				t.Fatalf("%s: invalid LibreOffice %s package: %+v", name, platform, pkg)
 			}
 		}
 		data = documentSkillText(t, root, name)

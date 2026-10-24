@@ -9,6 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	templateui "github.com/openvibely/openvibely/web/templates"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestBrowserFunctional_ProjectKnowledgeDialog(t *testing.T) {
@@ -71,19 +72,22 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 				if err := dialog.Render(r.Context(), w); err != nil {
 					t.Error(err)
 				}
-				fmt.Fprint(w, "</body></html>")
+				fmt.Fprint(w, `<input id="standard-modal-input" class="input input-bordered" aria-label="Standard input" style="position:fixed;visibility:hidden"></body></html>`)
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "project-tab-height-"+mode, func(b *composerFocusCDP) {
 				b.waitFor("dialog ready", `String(document.readyState === 'complete' && document.querySelector('dialog').open)`, "true")
-				for _, viewport := range []struct{ width, height int }{{1280, 900}, {390, 640}} {
+				for _, viewport := range []struct{ width, height int }{{1728, 1080}, {1280, 900}, {1280, 640}, {390, 640}} {
 					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": viewport.width, "height": viewport.height, "deviceScaleFactor": 1, "mobile": false}, nil)
 					result := b.evaluate(`(() => {
 					 const box = document.querySelector('.modal-box');
 					 const footer = box.querySelector('.modal-action');
 					 const content = box.querySelector('[data-project-tab-content]');
 					 const before = box.getBoundingClientRect();
+					 const general = box.querySelector('[data-project-panel="general"]');
+					 if (innerWidth > 640 && innerHeight >= 900 && content.clientHeight - general.getBoundingClientRect().height > 80) return 'excess empty space below general fields';
 					 const footerBefore = footer.getBoundingClientRect();
+					 if (footerBefore.bottom > innerHeight || before.top < 0) return 'modal actions outside viewport ' + JSON.stringify({box:before.toJSON(),footer:footerBefore.toJSON(),content:content.getBoundingClientRect().toJSON(),scroll:content.scrollHeight});
 					 for (const tab of ['knowledge', 'general', 'knowledge', 'general']) {
 					   box.querySelector('[data-project-tab="' + tab + '"]').click();
 					   if (tab === 'general') {
@@ -96,8 +100,9 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					       const bounds = field.getBoundingClientRect();
 					       if (bounds.height && Math.abs(bounds.height - w.height) > 1) return 'inconsistent control heights';
 					     }
+					     if (Math.abs(w.height - document.getElementById('standard-modal-input').getBoundingClientRect().height) > 1) return 'controls differ from standard modal height';
 					     if (content.scrollWidth > content.clientWidth) return 'controls overflow';
-					     if (innerWidth > 640 && content.scrollHeight > content.clientHeight) return 'general still needs desktop scrolling';
+					     if (innerWidth > 640 && innerHeight >= 900 && (content.scrollHeight > content.clientHeight || Math.max(m.bottom, w.bottom) > content.getBoundingClientRect().bottom)) return 'defaults require desktop scrolling';
 					   }
 					   if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
 					   const after = box.getBoundingClientRect();
@@ -110,6 +115,172 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					if result != "stable" {
 						t.Fatalf("%dx%d: %s", viewport.width, viewport.height, result)
 					}
+				}
+			})
+		})
+	}
+}
+
+func TestBrowserFunctional_ProjectRepoRecovery(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		fmt.Fprintf(w, `<!doctype html><html><head><link rel="stylesheet" href="%s"><link rel="stylesheet" href="%s"></head><body>`, static.URL("app.css"), static.URL("app-utilities.css"))
+		if err := EditProjectDialog(&models.Project{ID: "recover-test", Name: "Test", RepoURL: "https://github.com/acme/widgets", RepoPath: "/missing", IsDefault: true}, nil, true, 4, models.ProjectRepoPathHealth{Status: models.RepoPathHealthMissing}).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, "</body></html>")
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "project-recovery", func(b *composerFocusCDP) {
+		b.waitFor("ready", `String(!!document.querySelector('[data-recover-repo]'))`, "true")
+		b.evaluate(`window.recoveryRequests=[]; window.fetch=(url,options)=>{recoveryRequests.push([url,options.method]);return new Promise(resolve=>window.finishRecovery=resolve)};document.querySelector('[data-recover-repo]').click();document.querySelector('[data-recover-repo]').click();'ok'`)
+		b.waitFor("single in-flight request", `String(recoveryRequests.length===1 && recoveryRequests[0][0]==='/projects/recover-test/reclone' && recoveryRequests[0][1]==='POST' && document.querySelector('[data-recover-repo]').disabled)`, "true")
+		b.evaluate(`finishRecovery({ok:false,json:async()=>({error:'Check GitHub access'})});'ok'`)
+		b.waitFor("retry after error", `String(!document.querySelector('[data-recover-repo]').disabled && document.querySelector('[data-recovery-feedback]').textContent==='Check GitHub access' && !document.querySelector('[data-recovery-feedback]').classList.contains('hidden'))`, "true")
+		b.evaluate(`document.querySelector('[data-recover-repo]').click();finishRecovery({ok:true,json:async()=>({status:'healthy'})});'ok'`)
+		b.waitFor("healthy after recovery", `String(document.querySelector('[data-repo-path-health]').dataset.repoPathHealth==='healthy' && !document.querySelector('[data-recover-repo]') && document.querySelector('[name="repo_url"]').value==='https://github.com/acme/widgets')`, "true")
+	})
+}
+
+func TestBrowserFunctional_ProjectRepositorySourceVisibility(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, mode := range []string{"new", "edit", "edit-remote", "edit-legacy-local"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/" {
+					if err := layout.Base("Projects", nil, "default").Render(r.Context(), w); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				if r.URL.Path != "/dialog" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				dialog := NewProjectDialog(nil, true, 4)
+				if mode != "new" {
+					project := &models.Project{ID: "test", Name: "Test", RepoPath: "/tmp/project", IsDefault: true}
+					if mode == "edit-remote" {
+						project.RepoURL = "https://github.com/acme/widgets"
+					}
+					dialog = EditProjectDialog(project, nil, mode != "edit-legacy-local", 4, models.ProjectRepoPathHealth{})
+				}
+				if err := dialog.Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL, "repo-source-"+mode, func(b *composerFocusCDP) {
+				b.waitFor("shell ready", `String(document.readyState==='complete' && !!window.htmx && !!document.getElementById('project-settings-container'))`, "true")
+				b.evaluate(`document.body.addEventListener('htmx:beforeSwap', function(e) {
+ const parsed = new DOMParser().parseFromString(e.detail.serverResponse, 'text/html');
+ const remote = parsed.querySelector('[name="repo_source"]').value === 'github';
+ window.initialRepoVisibility = parsed.querySelector('[id$="-local-fields"]').hidden === remote && parsed.querySelector('[id$="-github-fields"]').hidden === !remote;
+ }, {once:true});htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
+				b.waitFor("ready", `String(document.readyState==='complete' && !!document.querySelector('dialog[open]'))`, "true")
+				b.waitFor("server-rendered source visibility", `String(window.initialRepoVisibility)`, "true")
+				check := `(() => {
+     const source=document.querySelector('[name="repo_source"]');
+     const remote=source.value==='github';
+     const local=document.querySelector('[id$="-local-fields"]');
+     const github=document.querySelector('[id$="-github-fields"]');
+     const localVisible=local.getBoundingClientRect().height>0;
+     const githubVisible=github.getBoundingClientRect().height>0;
+     const url=document.querySelector('[name="repo_url"]');
+     return String(localVisible===!remote && githubVisible===remote && url.required===remote);
+    })()`
+				if got := b.evaluate(check); got != "true" {
+					t.Fatalf("initial repository fields visibility: %s", got)
+				}
+				for _, source := range []string{"github", "local"} {
+					b.evaluate(fmt.Sprintf(`var source=document.querySelector('[name="repo_source"]');source.value=%q;source.dispatchEvent(new Event('change'));'ok'`, source))
+					if got := b.evaluate(check); got != "true" {
+						t.Fatalf("%s fields visibility: %s", source, got)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestBrowserFunctional_ProjectSubmitProgress(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, tc := range []struct{ mode, source, label string }{
+		{"new", "local", "Creating..."}, {"new", "github", "Cloning repository..."},
+		{"edit", "local", "Saving..."}, {"edit", "github", "Cloning repository..."}, {"edit-remote", "github", "Saving..."},
+	} {
+		t.Run(tc.mode+"-"+tc.source, func(t *testing.T) {
+			responses := make(chan int, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/" {
+					if err := layout.Base("Projects", nil, "default").Render(r.Context(), w); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+				if r.URL.Path == "/submit" {
+					select {
+					case status := <-responses:
+						w.WriteHeader(status)
+					case <-r.Context().Done():
+					}
+					return
+				}
+				if r.URL.Path != "/dialog" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				dialog := NewProjectDialog(nil, true, 4)
+				if tc.mode != "new" {
+					project := &models.Project{ID: "test", Name: "Test", RepoPath: "/tmp/project"}
+					if tc.mode == "edit-remote" {
+						project.RepoURL = "https://github.com/acme/new"
+					}
+					dialog = EditProjectDialog(project, nil, true, 4, models.ProjectRepoPathHealth{})
+				}
+				if err := dialog.Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL, "submit-progress", func(b *composerFocusCDP) {
+				b.waitFor("shell", `String(document.readyState==='complete' && !!window.htmx)`, "true")
+				b.evaluate(`htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
+				b.waitFor("dialog", `String(!!document.querySelector('dialog[open] form[hx-swap]'))`, "true")
+				b.evaluate(fmt.Sprintf(`window.submitForm=document.querySelector('dialog[open] form[hx-swap]');window.submitButton=submitForm.querySelector('[type="submit"]');window.submitSpinner=submitButton.querySelector('.htmx-indicator');window.normalWidth=submitButton.getBoundingClientRect().width;
+     submitForm.setAttribute(submitForm.hasAttribute('hx-put')?'hx-put':'hx-post','/submit');htmx.process(submitForm);
+     submitForm.elements.name.value='Test';submitForm.elements.repo_path.value='/tmp/project';submitForm.elements.repo_url.value='https://github.com/acme/new';submitForm.elements.repo_source.value=%q;submitForm.elements.repo_source.dispatchEvent(new Event('change'));'ok'`, tc.source))
+				for _, status := range []int{http.StatusBadRequest, http.StatusOK} {
+					b.evaluate(`submitForm.requestSubmit();'ok'`)
+					b.waitFor("busy label and spinner", fmt.Sprintf(`String(submitButton.disabled && submitButton.innerText.trim()===%q && submitSpinner.getBoundingClientRect().width>0 && getComputedStyle(submitSpinner).opacity==='1' && submitForm.querySelector('[id$="-cancel-button"]').disabled)`, tc.label), "true")
+					for _, viewport := range []struct{ width, height int }{{1280, 900}, {390, 640}, {320, 640}} {
+						b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": viewport.width, "height": viewport.height, "deviceScaleFactor": 1, "mobile": false}, nil)
+						result := b.evaluate(`(() => {
+                            const footer=submitForm.querySelector('.modal-action');
+                            const bounds=footer.getBoundingClientRect();
+                            for (const button of footer.querySelectorAll('button')) {
+                                const r=button.getBoundingClientRect();
+                                if(r.left < Math.max(0,bounds.left)-1 || r.right > Math.min(innerWidth,bounds.right)+1 || r.bottom > innerHeight+1) return 'button outside footer or viewport: '+button.textContent.trim();
+                            }
+                            if(document.querySelector('dialog[open] .modal-box').scrollWidth > innerWidth) return 'horizontal overflow';
+                            return 'ok';
+                        })()`)
+						if result != "ok" {
+							t.Errorf("%dx%d: %s", viewport.width, viewport.height, result)
+						}
+					}
+					responses <- status
+					b.waitFor("idle button restored", `String(!submitButton.disabled && submitSpinner.getBoundingClientRect().width===0 && Math.abs(submitButton.getBoundingClientRect().width-normalWidth)<1 && !submitForm.querySelector('[id$="-cancel-button"]').disabled)`, "true")
 				}
 			})
 		})

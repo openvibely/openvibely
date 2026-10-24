@@ -55,6 +55,7 @@ type taskDetailContentData struct {
 	agents           []models.LLMConfig
 	agentDefs        []persistence.AgentTaskUIOption
 	attachments      []models.Attachment
+	files            components.TaskFilesSnapshot
 	reviewComments   []models.ReviewComment
 }
 
@@ -1204,6 +1205,17 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
 	agents, _ := h.llmConfigRepo.ListPickerOptions(ctx)
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	generated, err := h.attachmentRepo.ListGeneratedFiles(ctx, task.ProjectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var messages []models.ChatAttachment
+	if !service.IsTaskThread(task) && h.chatAttachmentRepo != nil {
+		messages, err = h.chatAttachmentRepo.ListByTask(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
 
 	return &taskDetailContentData{
@@ -1214,6 +1226,7 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 		agents:           agents,
 		agentDefs:        agentDefs,
 		attachments:      attachments,
+		files:            components.TaskFilesSnapshot{TaskID: taskID, ProjectID: task.ProjectID, Messages: messages, Generated: generated},
 		reviewComments:   h.loadTaskReviewComments(ctx, taskID),
 	}, nil
 }
@@ -1227,6 +1240,7 @@ func (h *Handler) renderTaskDetailContent(c echo.Context, taskID, selectedTab st
 }
 
 func (h *Handler) renderTaskDetailContentData(c echo.Context, data *taskDetailContentData, selectedTab string) error {
+	c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), data.files)))
 	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
 }
 
@@ -1267,6 +1281,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// Full page load: wrap in layout
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), data.files)))
 	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
@@ -3655,6 +3670,7 @@ func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, s
 		}
 	}
 	if detail != nil {
+		c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), detail.files)))
 		return render(c, http.StatusOK, pages.TaskDetailContent(detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
 	}
 	return render(c, http.StatusOK, thread)

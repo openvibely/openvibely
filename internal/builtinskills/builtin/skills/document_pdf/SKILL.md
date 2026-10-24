@@ -9,52 +9,84 @@ skill:
     description: Read, create, edit, and validate PDFs, including page layout and interactive forms.
 dependencies:
   - name: paperworks
-    version: 0.0.0-rc6
+    version: 0.0.1
     environment_variable: PAPERWORKS
     health_check: [version]
     packages:
       darwin/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-darwin-amd64.zip
-        sha256: ea3fb6fd752b1b7694d09d90949a3765ec60ef4cf7bb1f43c9af66f1278d1e99
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-darwin-amd64.zip
+        sha256: ef2617d835a74bccc9ebcca7a74efd1b70bf3b0f93810cfb330f9dbdcb53e371
         format: zip
-        executable: paperworks
+        executable: paperworks-darwin-amd64
       darwin/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-darwin-arm64.zip
-        sha256: 4ad9daf595d90f02518a6169e7a51a43ddcb7838530d7265193bc20da6a93ef3
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-darwin-arm64.zip
+        sha256: 72ed6a1dc3740e21b0e74862dbdd912935838fac1e2cb747956792e3d8f6a04d
         format: zip
-        executable: paperworks
+        executable: paperworks-darwin-arm64
       linux/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-linux-amd64.zip
-        sha256: aa23df030e248fc507b7305e6f42953150849167228f51031632a121bcb26a31
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-linux-amd64.zip
+        sha256: abdf0ecc8b1b6513364e01f93ba69aa0305708b27f47add616c99a95b4e5b673
         format: zip
-        executable: paperworks
+        executable: paperworks-linux-amd64
       linux/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-linux-arm64.zip
-        sha256: dc3c0347b8f73f75c44e151ab2f9f4052f34455243e37881b464adfedfecf722
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-linux-arm64.zip
+        sha256: 2c197ceb3a14667603b97406c4ba1b2939473e8e8c6b648f8372ae2c3f05350e
         format: zip
-        executable: paperworks
+        executable: paperworks-linux-arm64
       windows/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-windows-amd64.zip
-        sha256: 3ff7644dd15a1162a3437f1aa2a00b45b05b7219e76d71e1475301d616c7fcac
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-windows-amd64.zip
+        sha256: 49294a420590fac2e5a99c638a326f537447bdd155abd509c2e4166fa01277c8
         format: zip
-        executable: paperworks.exe
+        executable: paperworks-windows-amd64.exe
+      windows/arm64:
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.1/paperworks-windows-arm64.zip
+        sha256: 702cc55cdefc18531684b6bc3d24daf4e54e80fa7314be18dc1a0ced7485b27c
+        format: zip
+        executable: paperworks-windows-arm64.exe
   - name: libreoffice
     version: 26.8.1
     environment_variable: DOCUMENT_SOFFICE
     health_check: [--headless, --version]
     packages:
+      darwin/amd64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/mac/x86_64/LibreOffice_26.8.1_MacOS_x86-64.dmg
+        sha256: 4c7464313a529e9074400cbcdc894fc40ac4ef9421ded03b16b5a78d12cb155e
+        format: dmg
+        executable: LibreOffice.app/Contents/MacOS/soffice
       darwin/arm64:
         url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/mac/aarch64/LibreOffice_26.8.1_MacOS_aarch64.dmg
         sha256: ca074e0b13571efb30a31fc531c5f95e997030637325e5d5de92d67aefdf0dfc
         format: dmg
         executable: LibreOffice.app/Contents/MacOS/soffice
+      linux/amd64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/x86_64/LibreOffice_26.8.1_Linux_x86-64_deb.tar.gz
+        sha256: 30903df3b9f61360d9660cd707de48cd2831469114492a5008ed58a0ac77d044
+        format: deb-bundle
+        executable: opt/libreoffice26.8/program/soffice
+      linux/arm64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/aarch64/LibreOffice_26.8.1_Linux_aarch64_deb.tar.gz
+        sha256: 1b069c20dd237f6decad3ea02cb02f39fdf458b03d09c2a9facb7b9b71e6a27a
+        format: deb-bundle
+        executable: opt/libreoffice26.8/program/soffice
+      windows/amd64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/win/x86_64/LibreOffice_26.8.1_Win_x86-64.msi
+        sha256: c6298b10cfa1748bcbedad94c62ce771e240e5021bfd6d7a967cd571b04b5312
+        format: msi
+        find_root: true
+        executable: program/soffice.exe
+      windows/arm64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/win/aarch64/LibreOffice_26.8.1_Win_aarch64.msi
+        sha256: 97c2173752325af1da3d8731f41c8e09a7c4ad491cf55d9b1069fadb5668e6d7
+        format: msi
+        find_root: true
+        executable: program/soffice.exe
 ---
 
 # PDF documents
 
 ## Local helpers
 
-`skill_view` supplies executable paths in its `environment` map. Export `PAPERWORKS` and, when supplied, `DOCUMENT_SOFFICE` to those paths. Run commands where the executables and input files are accessible; quote paths.
+`skill_view` supplies executable paths in its `environment` map. Set `PAPERWORKS` to the supplied executable path or invoke that path directly. Paperworks discovers LibreOffice through `DOCUMENT_SOFFICE`, system installations, or OV’s cache; set `DOCUMENT_SOFFICE` only to override discovery. Run commands where the executables and input files are accessible; quote paths.
 
 The loader runs the executable health check. Use `"$PAPERWORKS" capabilities` to discover commands and `"$PAPERWORKS" help COMMAND` for arguments when needed. Reuse this information until the runtime changes or a command fails. PDF and equation rendering do not require LibreOffice.
 
@@ -129,9 +161,9 @@ Use `"$PAPERWORKS" inspect input.pdf` for page counts and form fields, and `"$PA
 
 Render the selected copy with `"$PAPERWORKS" render selected.pdf --output preview --max-pixels 1600` into a new directory. Do not treat extracted text as evidence of appearance, reading order, or chart contents.
 
-## Inspect PDF fonts (RC6)
+## Inspect PDF fonts
 
-Use `"$PAPERWORKS" pdf-fonts input.pdf` to identify fonts before matching existing PDF lettering. It returns a JSON array such as `[{"name":"Helvetica","embedded":false,"pages":[1]}]`. Pages are one-based; named results group matching font names and embedding status. Names retain subset prefixes. Unnamed fonts report `name:"unavailable"`, `name_unavailable:true` and a `text_object` traversal identifier. Each unnamed text-object use remains separate because font identity is unavailable; repeated uses can therefore produce multiple entries, and entry count is not a distinct-font count. The command inspects page text objects, including nested Form XObjects; it does not enumerate unused font resources or annotation appearances, identify outlined/rasterized lettering, or prove which substitute font a viewer uses. Render and check the result visually. This command is included in pinned RC6; do not assume `pdffonts` or Poppler is installed.
+Use `"$PAPERWORKS" pdf-fonts input.pdf` to identify fonts before matching existing PDF lettering. It returns a JSON array such as `[{"name":"Helvetica","embedded":false,"pages":[1]}]`. Pages are one-based; named results group matching font names and embedding status. Names retain subset prefixes. Unnamed fonts report `name:"unavailable"`, `name_unavailable:true` and a `text_object` traversal identifier. Each unnamed text-object use remains separate because font identity is unavailable; repeated uses can therefore produce multiple entries, and entry count is not a distinct-font count. The command inspects page text objects, including nested Form XObjects; it does not enumerate unused font resources or annotation appearances, identify outlined/rasterized lettering, or prove which substitute font a viewer uses. Render and check the result visually. Do not assume `pdffonts` or Poppler is installed.
 
 ## Create and edit
 
