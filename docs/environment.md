@@ -54,10 +54,21 @@ Document skills resolve executable paths through `skill_view`. To test a local b
 
 The dependency manager validates the override and returns its path as `PAPERWORKS` or `DOCUMENT_SOFFICE` in the skill environment. These are developer overrides, not variables the model should invent or change to bypass missing dependencies.
 
+Package extraction is generic. A Linux `deb-bundle` is a tar.gz containing DEB
+packages; extraction preserves their payload directory structure. Absolute DEB
+symlinks are rebased inside the cache and must resolve within it. A Windows `msi`
+expands an administrative image; optional `find_root: true` selects the unique
+directory containing the declared relative `executable`. Without it, the image
+layout is retained. Ambiguous roots fail. Root discovery is available only for MSI.
+
+The document YAML declares `executable: opt/libreoffice26.8/program/soffice` for DEBs and
+`find_root: true` with `executable: program/soffice.exe` for MSI. The installer
+contains no LibreOffice path or executable-name rules.
+
 The four document skills pin LibreOffice packages for macOS, Linux, and Windows
 on amd64 and arm64. macOS copies the application from its DMG. Windows uses
 `msiexec /a` to expand an administrative image into the dependency cache. Linux
-uses `dpkg-deb --fsys-tarfile` to extract only the LibreOffice program tree from
+uses `dpkg-deb --fsys-tarfile` to extract the payloads from
 the official DEB bundle. Neither path installs a system-wide Office package or
 runs Linux package maintainer scripts. The cached executable is health-checked
 before publication, and returned as `DOCUMENT_SOFFICE`.

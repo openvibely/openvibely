@@ -15,15 +15,15 @@ import (
 )
 
 // Extract payloads only: no dpkg installation, maintainer scripts, or host writes.
-func prepareOfficeDEBs(ctx context.Context, archive, root string) error {
+func prepareDEBs(ctx context.Context, p Package, archive, root string) error {
 	if runtime.GOOS != "linux" {
-		return errors.New("LibreOffice DEB preparation requires Linux")
+		return errors.New("DEB preparation requires Linux")
 	}
 	decoder, err := exec.LookPath("dpkg-deb")
 	if err != nil {
-		return errors.New("LibreOffice cache extraction requires dpkg-deb; install it or set OPENVIBELY_TOOL_LIBREOFFICE to an installed executable")
+		return errors.New("DEB cache extraction requires dpkg-deb")
 	}
-	packages, err := os.MkdirTemp(filepath.Dir(root), ".office-debs-")
+	packages, err := os.MkdirTemp(filepath.Dir(root), ".debs-")
 	if err != nil {
 		return err
 	}
@@ -33,7 +33,6 @@ func prepareOfficeDEBs(ctx context.Context, archive, root string) error {
 	}
 	x := extractor{ctx: ctx, root: root, links: map[string]string{}}
 	count := 0
-	prefix := ""
 	err = filepath.WalkDir(packages, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -57,7 +56,7 @@ func prepareOfficeDEBs(ctx context.Context, archive, root string) error {
 		if err = cmd.Start(); err != nil {
 			return err
 		}
-		extractErr := extractOfficePayload(&x, pipe, &prefix)
+		extractErr := extractDEBPayload(&x, pipe)
 		if extractErr != nil {
 			_ = cmd.Process.Kill()
 		}
@@ -67,20 +66,20 @@ func prepareOfficeDEBs(ctx context.Context, archive, root string) error {
 			return extractErr
 		}
 		if waitErr != nil {
-			return fmt.Errorf("decode LibreOffice DEB: %w", waitErr)
+			return fmt.Errorf("decode DEB: %w", waitErr)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if count == 0 || prefix == "" {
-		return errors.New("archive contains no LibreOffice DEB payload")
+	if count == 0 || x.count == 0 {
+		return errors.New("archive contains no matching DEB payload")
 	}
 	return x.finishLinks()
 }
 
-func extractOfficePayload(x *extractor, source io.Reader, prefix *string) error {
+func extractDEBPayload(x *extractor, source io.Reader) error {
 	reader := tar.NewReader(source)
 	for {
 		h, err := reader.Next()
@@ -94,38 +93,42 @@ func extractOfficePayload(x *extractor, source io.Reader, prefix *string) error 
 			return err
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(h.Name, "./"), "/")
-		parts := strings.SplitN(name, "/", 3)
-		// Desktop registration and package-manager integration stay outside the cache.
-		if len(parts) < 2 || parts[0] != "opt" || !strings.HasPrefix(parts[1], "libreoffice") {
+		if name == "" || name == "." {
 			continue
 		}
 		if !safeRelative(name) {
-			return fmt.Errorf("unsafe LibreOffice payload path %q", name)
-		}
-		if *prefix == "" {
-			*prefix = parts[1]
-		} else if *prefix != parts[1] {
-			return errors.New("multiple LibreOffice installation roots")
-		}
-		if len(parts) < 3 {
-			continue
+			return fmt.Errorf("unsafe DEB payload path %q", name)
 		}
 		if h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA && h.Typeflag != tar.TypeDir && h.Typeflag != tar.TypeSymlink {
-			return fmt.Errorf("unsupported LibreOffice payload type %d", h.Typeflag)
+			return fmt.Errorf("unsupported DEB payload type %d", h.Typeflag)
 		}
-		if err := x.entry(parts[2], h.FileInfo().Mode(), h.Size, reader, h.Linkname); err != nil {
+		target := h.Linkname
+		// DEB absolute links refer to the package filesystem root. Rebase them
+		// inside the cache rather than linking to the host filesystem.
+		if h.Typeflag == tar.TypeSymlink && strings.HasPrefix(target, "/") {
+			targetPath := strings.TrimPrefix(target, "/")
+			if !safeRelative(targetPath) {
+				return fmt.Errorf("unsafe DEB link target %q", target)
+			}
+			target, err = filepath.Rel(filepath.Dir(filepath.FromSlash(name)), filepath.FromSlash(targetPath))
+			if err != nil {
+				return err
+			}
+			target = filepath.ToSlash(target)
+		}
+		if err := x.entry(name, h.FileInfo().Mode(), h.Size, reader, target); err != nil {
 			return err
 		}
 	}
 }
 
 // MSI administrative extraction expands files into a private cache directory;
-// it does not register LibreOffice as an installed product or request a reboot.
-func prepareOfficeMSI(ctx context.Context, archive, root string) error {
+// it does not register the package as an installed product or request a reboot.
+func prepareMSI(ctx context.Context, p Package, archive, root string) error {
 	if runtime.GOOS != "windows" {
-		return errors.New("LibreOffice MSI preparation requires Windows")
+		return errors.New("MSI preparation requires Windows")
 	}
-	staging, err := os.MkdirTemp(filepath.Dir(root), ".office-msi-")
+	staging, err := os.MkdirTemp(filepath.Dir(root), ".msi-")
 	if err != nil {
 		return err
 	}
@@ -141,14 +144,13 @@ func prepareOfficeMSI(ctx context.Context, archive, root string) error {
 	}
 	cmd := exec.CommandContext(ctx, filepath.Join(systemRoot, "System32", "msiexec.exe"), "/a", msi, "/qn", "/norestart", "TARGETDIR="+staging)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("extract LibreOffice MSI: %w", err)
+		return fmt.Errorf("extract MSI: %w", err)
 	}
-	return moveOfficeTree(staging, root)
+	return movePackageTree(staging, root, p)
 }
 
-// MSI versions may prepend a product directory. Locate the actual program tree
-// instead of baking Windows Installer's administrative-image layout into YAML.
-func moveOfficeTree(staging, root string) error {
+// Root discovery is opt-in and matches the declared relative executable path.
+func movePackageTree(staging, root string, p Package) error {
 	var found []string
 	err := filepath.WalkDir(staging, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -157,16 +159,30 @@ func moveOfficeTree(staging, root string) error {
 		if entry.Type()&os.ModeSymlink != 0 {
 			return errors.New("unexpected link in MSI administrative image")
 		}
-		if !entry.IsDir() && strings.EqualFold(entry.Name(), "soffice.exe") && strings.EqualFold(filepath.Base(filepath.Dir(path)), "program") {
-			found = append(found, filepath.Dir(filepath.Dir(path)))
+		if !entry.IsDir() && p.FindRoot {
+			rel, err := filepath.Rel(staging, path)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			if strings.EqualFold(rel, p.Executable) || strings.HasSuffix(strings.ToLower(rel), "/"+strings.ToLower(p.Executable)) {
+				candidate := path
+				for range strings.Split(p.Executable, "/") {
+					candidate = filepath.Dir(candidate)
+				}
+				found = append(found, candidate)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
+	if !p.FindRoot {
+		found = []string{staging}
+	}
 	if len(found) != 1 {
-		return fmt.Errorf("expected one LibreOffice program tree, found %d", len(found))
+		return fmt.Errorf("expected one package root containing the declared executable, found %d", len(found))
 	}
 	entries, err := os.ReadDir(found[0])
 	if err != nil {
