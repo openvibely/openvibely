@@ -45,12 +45,33 @@ window.addEventListener('load', async function() {
    history.replaceState({},'','/'+kind+'?project_id=p');
    htmx.swap(main,markup,{swapStyle:'innerHTML',settleDelay:0});await wait();
    check(live(),'page did not install its listeners visit='+visit);
+   // Incoming scripts can run before the outgoing DOM is cleaned up.
+   htmx.swap(main,markup,{swapStyle:'innerHTML',settleDelay:0});await wait();
+   check(live(),'outgoing cleanup disposed the replacement page');
+   if(kind==='task-detail') check(window._taskDetailRoot.isConnected,'replacement task root is detached');
+   if(kind==='schedule') check(calendarRoot.isConnected,'replacement calendar root is detached');
+   let updates=0;
+   if(kind==='task-detail') {
+    window._updateDiffViewer=()=>updates++;
+    window._startFileChangesSSE('t1');
+   }
+   if(kind==='schedule') selectedScheduleCards.add(calendarRoot);
    const cancelled={target:main,shouldSwap:false,xhr:{status:500}};
    document.body.dispatchEvent(new CustomEvent('htmx:beforeSwap',{bubbles:true,detail:cancelled}));
    await wait();
    check(live(),'cancelled navigation tore down the visible page visit='+visit);
+   if(kind==='task-detail') {
+    window.dispatchEvent(new CustomEvent('sse-file-change-event',{detail:{task_id:'t1',type:'diff_snapshot'}}));
+    check(updates===1,'cancelled navigation disabled live file updates');
+   }
    htmx.swap(main,'<p>Other page</p>',{swapStyle:'innerHTML',settleDelay:0});await wait();
    check(!live(),'committed navigation left page listeners installed visit='+visit);
+   if(kind==='task-detail') {
+    check(window._taskDetailRoot===null,'departed task root is still retained');
+    window.dispatchEvent(new CustomEvent('sse-file-change-event',{detail:{task_id:'t1',type:'diff_snapshot'}}));
+    check(updates===1,'departed task still handles live updates');
+   }
+   if(kind==='schedule') check(calendarRoot===null && timeline===null && selectedScheduleCards.size===0,'departed calendar DOM is still retained');
   }
   result.setAttribute('data-test-result','pass');
  } catch(e) {result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(e));}

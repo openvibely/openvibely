@@ -425,8 +425,8 @@ func TestTaskDetailContent_FileChangesListenersRebindAndCleanup(t *testing.T) {
 	if !strings.Contains(output, "window._taskDetailFileChangesHandlers = {") {
 		t.Fatal("expected task-detail file-change handlers to be stored for future cleanup")
 	}
-	if !strings.Contains(output, "if (target.id === 'main-content' || target.id === 'task-detail-content') {") {
-		t.Fatal("expected beforeSwap handler to stop file-change SSE on navigation/content replacement")
+	if !strings.Contains(output, "document.body.addEventListener('htmx:beforeCleanupElement', _taskDetailCleanupHandler);") {
+		t.Fatal("expected element cleanup handler for committed navigation/content replacement")
 	}
 	if !strings.Contains(output, "window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);") {
 		t.Fatal("expected beforeunload cleanup binding for file-change SSE")
