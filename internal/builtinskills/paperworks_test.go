@@ -56,12 +56,12 @@ func TestPaperworksSkillPackages(t *testing.T) {
 			pkg, ok := office.Packages[platform]
 			wantFormat, wantExecutable := "dmg", "LibreOffice.app/Contents/MacOS/soffice"
 			if strings.HasPrefix(platform, "linux/") {
-				wantFormat, wantExecutable = "libreoffice-deb", "program/soffice"
+				wantFormat, wantExecutable = "deb-bundle", "opt/libreoffice26.8/program/soffice"
 			}
 			if strings.HasPrefix(platform, "windows/") {
-				wantFormat, wantExecutable = "libreoffice-msi", "program/soffice.exe"
+				wantFormat, wantExecutable = "msi", "program/soffice.exe"
 			}
-			if !ok || pkg.Format != wantFormat || pkg.Executable != wantExecutable {
+			if !ok || pkg.Format != wantFormat || pkg.Executable != wantExecutable || pkg.FindRoot != strings.HasPrefix(platform, "windows/") {
 				t.Fatalf("%s: invalid LibreOffice %s package: %+v", name, platform, pkg)
 			}
 		}
