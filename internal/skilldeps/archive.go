@@ -20,11 +20,11 @@ import (
 // Archives are expanded into an unpublished staging directory. Links are created
 // last, so an archive entry can never write through an earlier symlink.
 func prepare(ctx context.Context, p Package, archive, root string) error {
-	if p.Format == "libreoffice-deb" {
-		return prepareOfficeDEBs(ctx, archive, root)
+	if p.Format == "deb-bundle" {
+		return prepareDEBs(ctx, p, archive, root)
 	}
-	if p.Format == "libreoffice-msi" {
-		return prepareOfficeMSI(ctx, archive, root)
+	if p.Format == "msi" {
+		return prepareMSI(ctx, p, archive, root)
 	}
 	if p.Format == "dmg" {
 		return prepareDMG(ctx, archive, root, p.Executable)

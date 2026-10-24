@@ -21,6 +21,7 @@ type Dependency struct {
 }
 
 type Package struct {
+	FindRoot   bool   `yaml:"find_root,omitempty" json:"find_root,omitempty"`
 	URL        string `yaml:"url" json:"url"`
 	SHA256     string `yaml:"sha256" json:"sha256"`
 	Format     string `yaml:"format" json:"format"`
@@ -70,18 +71,21 @@ func Validate(deps []Dependency) error {
 				return fmt.Errorf("dependency %s requires SHA-256", d.Name)
 			}
 			switch p.Format {
-			case "raw", "zip", "tar.gz", "dmg", "libreoffice-deb", "libreoffice-msi":
+			case "raw", "zip", "tar.gz", "dmg", "deb-bundle", "msi":
 			default:
 				return fmt.Errorf("unsupported package format %q", p.Format)
 			}
 			if p.Format == "dmg" && !strings.HasPrefix(platform, "darwin/") {
 				return fmt.Errorf("DMG requires darwin")
 			}
-			if p.Format == "libreoffice-deb" && (!strings.HasPrefix(platform, "linux/") || p.Executable != "program/soffice") {
-				return fmt.Errorf("LibreOffice DEB bundle requires linux and program/soffice")
+			if p.Format == "deb-bundle" && !strings.HasPrefix(platform, "linux/") {
+				return fmt.Errorf("DEB bundle requires linux")
 			}
-			if p.Format == "libreoffice-msi" && (!strings.HasPrefix(platform, "windows/") || p.Executable != "program/soffice.exe") {
-				return fmt.Errorf("LibreOffice MSI requires windows and program/soffice.exe")
+			if p.Format == "msi" && !strings.HasPrefix(platform, "windows/") {
+				return fmt.Errorf("MSI requires windows")
+			}
+			if p.FindRoot && p.Format != "msi" {
+				return fmt.Errorf("find_root requires MSI")
 			}
 			if !safeRelative(p.Executable) {
 				return fmt.Errorf("invalid executable path for %s", d.Name)
