@@ -221,8 +221,8 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 		return raw, false, fmt.Errorf("ambiguous original skill_view tool call")
 	}
 	target := matches[0]
-	insertAt := len(items)
-	pending := map[string]bool{}
+	pending := map[string]int{}
+	var callOrder []string
 	replaced := false
 	awaitingSibling := false
 	batchStart := target.index
@@ -237,23 +237,21 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 	}
 	for i := batchStart; i < len(items); i++ {
 		m := asMap(items[i])
-		// Chat Completions requires the tool replies before the next user
-		// message, including images buffered from another tool in the batch.
-		boundary := m["role"] == "assistant" || m["type"] == "reasoning" || (key == "" && m["role"] == "user")
-		if insertAt == len(items) && i > target.index && boundary {
-			insertAt = i
-		}
+
 		if m["type"] == "function_call" {
-			pending[str(m["call_id"])] = true
+			pending[str(m["call_id"])] = i
+			callOrder = append(callOrder, str(m["call_id"]))
 		}
 		tools, _ := m["tool_calls"].([]any)
 		for _, t := range tools {
-			pending[str(asMap(t)["id"])] = true
+			pending[str(asMap(t)["id"])] = i
+			callOrder = append(callOrder, str(asMap(t)["id"]))
 		}
 		for _, b := range blocks(m) {
 			b := asMap(b)
 			if b["type"] == "tool_use" {
-				pending[str(b["id"])] = true
+				pending[str(b["id"])] = i
+				callOrder = append(callOrder, str(b["id"]))
 			}
 		}
 		if m["type"] == "function_call_output" {
@@ -294,24 +292,63 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 			}
 		}
 	}
-	// Do not guess the outcome of other interrupted side-effecting tool calls.
+	// Complete missing replies without rerunning tools. Keep their placement in
+	// the original exchange and leave every existing result untouched.
 	delete(pending, target.id)
-	if len(pending) > 0 {
-		return raw, false, fmt.Errorf("original tool exchange has unfinished sibling calls")
-	}
-	if !replaced {
+	additions := map[int][]any{}
+	addResult := func(id, text string, failed bool, callIndex int) {
 		var result any
 		switch key {
 		case "responses_input":
-			result = map[string]any{"type": "function_call_output", "call_id": target.id, "output": output}
+			result = map[string]any{"type": "function_call_output", "call_id": id, "output": text}
 		case "messages":
-			result = map[string]any{"role": "user", "content_blocks": []any{map[string]any{"type": "tool_result", "tool_use_id": target.id, "content": output, "is_error": isError}}}
+			block := map[string]any{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": failed}
+			// Anthropic groups tool replies in the user message immediately
+			// following tool_use, before any image/text content in that message.
+			if callIndex+1 < len(items) {
+				next := asMap(items[callIndex+1])
+				if next["role"] == "user" && next["content_blocks"] != nil {
+					next["content_blocks"] = append([]any{block}, blocks(next)...)
+					return
+				}
+			}
+			result = map[string]any{"role": "user", "content_blocks": []any{block}}
 		default:
-			result = map[string]any{"role": "tool", "tool_call_id": target.id, "content": output}
+			result = map[string]any{"role": "tool", "tool_call_id": id, "content": text}
 		}
-		items = append(items, nil)
-		copy(items[insertAt+1:], items[insertAt:])
-		items[insertAt] = result
+		at := len(items)
+		for i := callIndex + 1; i < len(items); i++ {
+			m := asMap(items[i])
+			if m["role"] == "assistant" || m["role"] == "user" || m["type"] == "message" || m["type"] == "reasoning" {
+				at = i
+				break
+			}
+		}
+		if key == "messages" && len(additions[at]) > 0 {
+			previous := asMap(additions[at][0])
+			previous["content_blocks"] = append(blocks(previous), blocks(asMap(result))...)
+		} else {
+			additions[at] = append(additions[at], result)
+		}
+	}
+	if !replaced {
+		addResult(target.id, output, isError, target.index)
+	}
+	for _, id := range callOrder {
+		if callIndex, missing := pending[id]; missing {
+			addResult(id, "Tool execution was interrupted. Try again.", true, callIndex)
+			delete(pending, id)
+		}
+	}
+	if len(additions) > 0 {
+		completed := make([]any, 0, len(items)+len(additions))
+		for i := 0; i <= len(items); i++ {
+			completed = append(completed, additions[i]...)
+			if i < len(items) {
+				completed = append(completed, items[i])
+			}
+		}
+		items = completed
 	}
 	if key != "" {
 		root.(map[string]any)[key] = items

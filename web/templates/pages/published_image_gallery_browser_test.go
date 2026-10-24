@@ -76,11 +76,12 @@ func TestBrowserFunctional_PublishedImagesShareTaskGallery(t *testing.T) {
           await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
           if(!dialog.open)throw Error('final render closed preview');
           root.remove();await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-          if(dialog.open)throw Error('removed response left preview open');
+          if(!dialog.open||dialog.querySelector('[data-gallery-image]')!==image||image.style.transform!==transform)throw Error('removed response reset preview');
           return 'pass';
         })()`); got != "pass" {
 			t.Fatal(got)
 		}
+		b.click("[data-gallery-close]")
 		b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),200))`)
 		if got := b.evaluate(`String(Array.from(document.querySelectorAll('#attachment-list .attachment-gallery-open')).every(link=>link.querySelectorAll('img').length===1))`); got != "true" {
 			t.Fatal("Files rows have duplicate thumbnails")
@@ -154,7 +155,7 @@ func TestBrowserFunctional_PublishedDocumentSurvivesStreaming(t *testing.T) {
  await renderLiveChatContent(root,source+' Finished.',false,true);await paint();
  if(!dialog.open||content.firstElementChild!==documentNode||content.scrollTop!==scroll)throw Error('final render reset document preview');
  await renderLiveChatContent(root,'Link removed.');await paint();
- if(dialog.open)throw Error('removed link left preview open');
+ if(!dialog.open||content.firstElementChild!==documentNode||content.scrollTop!==scroll)throw Error('removed link reset preview');
  return 'true';
 })()`)
 		if got != "true" {

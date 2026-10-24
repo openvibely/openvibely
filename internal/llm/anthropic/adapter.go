@@ -424,22 +424,14 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		environment := executionenv.Context(workDir)
 		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message) error {
 			replayMessages = messages
-			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: messages})
-			if err != nil {
-				return err
-			}
-			return a.execRepo.ReplaceReasoningReplay(saveCtx, req.ExecID, "", []models.ExecutionReplayMessage{{UserContent: req.Message, TranscriptJSON: string(saved)}})
+			_, err := a.execRepo.SaveConversationReplay(saveCtx, req.ExecID, anthropicEnvironmentReplay{Environment: environment, Messages: messages}, models.ExecutionReplayMessage{UserContent: req.Message})
+			return err
 		})
 		defer func() {
 			if len(replayMessages) == 0 {
 				replayMessages = []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}
 			}
-			saved, err := json.Marshal(anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages})
-			if err == nil {
-				err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), req.ExecID, "", []models.ExecutionReplayMessage{{
-					UserContent: req.Message, AssistantContent: result.TextOnlyOutput, TranscriptJSON: string(saved),
-				}})
-			}
+			_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), req.ExecID, anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages}, models.ExecutionReplayMessage{UserContent: req.Message, AssistantContent: result.TextOnlyOutput})
 			if err != nil {
 				callErr = errors.Join(callErr, fmt.Errorf("persist Anthropic execution environment: %w", err))
 			}

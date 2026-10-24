@@ -9,6 +9,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -16,11 +17,12 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	raw, err := json.Marshal(transcript)
+	_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, transcript, models.ExecutionReplayMessage{})
 	if err != nil {
-		return fmt.Errorf("encode OpenAI conversation: %w", err)
-	}
-	if err := a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, "", []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}); err != nil {
+		var encoding *persistence.ReplayEncodingError
+		if errors.As(err, &encoding) {
+			return fmt.Errorf("encode OpenAI conversation: %w", encoding.Err)
+		}
 		return fmt.Errorf("save OpenAI conversation: %w", err)
 	}
 	return nil
@@ -32,14 +34,15 @@ func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, 
 		return nil
 	}
 	return func(ctx context.Context, items []any) error {
-		raw, err := json.Marshal(map[string]any{"responses_input": items})
+		raw, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, map[string]any{"responses_input": items}, models.ExecutionReplayMessage{})
 		if err != nil {
-			return err
+			var encoding *persistence.ReplayEncodingError
+			if errors.As(err, &encoding) {
+				return encoding.Err
+			}
+			return fmt.Errorf("save OpenAI conversation: %w", err)
 		}
-		if err := a.saveConversation(ctx, execID, json.RawMessage(raw)); err != nil {
-			return err
-		}
-		llmcontracts.RecordResponsesRecovery(ctx, string(raw))
+		llmcontracts.RecordResponsesRecovery(ctx, raw)
 		return nil
 	}
 }

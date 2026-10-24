@@ -80,7 +80,7 @@ Use `workbook-edit` with `autofit-rows` to size rows for a cell range.
 
 Set final column widths, formats and wrapping first. Recalculate formula results before fitting: this operation measures formatted saved values and rich-text runs, not recalculated formulas. Include all columns whose content should determine the selected row heights, up to 10,000 cells. Unselected rows remain unchanged. It uses available fonts and handles explicit newlines and complete horizontal merges. Vertical merges, rotated text, shrink-to-fit, unavailable fonts/glyphs, missing formula caches and heights beyond Excel's 409.5-point limit fail explicitly. Render the affected range afterward; fonts and shaping can differ in the target engine. Use explicit `row-height` when automatic measurement cannot handle the source.
 
-### Existing worksheet tab colors (post-RC4)
+### Existing worksheet tab colors
 
 Use a `tab-color` operation with a six-digit RGB `color`; an empty string clears the tab color. The sheet must exist. Replacing a color removes its previous theme, indexed-color and tint settings.
 
@@ -88,12 +88,12 @@ Use a `tab-color` operation with a six-digit RGB `color`; an empty string clears
 {"edits":[{"operation":"tab-color","sheet":"Summary","color":"4472C4"}]}
 ```
 
-Run with `paperworks workbook-edit input.xlsx --spec edits.json --output updated.xlsx`. This operation is available in the pinned RC6 release.
+Run with `paperworks workbook-edit input.xlsx --spec edits.json --output updated.xlsx`.
 
-## Add a sensitivity table to an existing workbook (after RC4)
+## Add a sensitivity table to an existing workbook
 
 Use `workbook-edit` with `add-data-table`. Set up the model inputs, output formula and trial headers first, either in earlier edits or in the existing workbook.
 ```json
 {"edits":[{"operation":"add-data-table","sheet":"Model","data_table":{"range":"E3:F4","input1":"B1","input2":"B2"}}]}
 ```
-Here `E3:F4` is the result body, `D2` holds the output formula, `E2:F2` holds row trials, and `D3:D4` holds column trials. `input1` is the row-input cell and `input2` the column-input cell on the same sheet. The command rejects occupied result cells, merges, structured tables and existing formula-range overlaps. It writes a native definition, not calculated results: recalculate the output, inspect the table values, and verify selected scenarios independently. This operation is available in the pinned RC6 release.
+Here `E3:F4` is the result body, `D2` holds the output formula, `E2:F2` holds row trials, and `D3:D4` holds column trials. `input1` is the row-input cell and `input2` the column-input cell on the same sheet. The command rejects occupied result cells, merges, structured tables and existing formula-range overlaps. It writes a native definition, not calculated results: recalculate the output, inspect the table values, and verify selected scenarios independently.

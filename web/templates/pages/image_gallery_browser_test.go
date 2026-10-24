@@ -82,6 +82,57 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
 		b.waitFor("delayed titlebar restores controls", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
 	})
+	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "native-visibility-recovery", func(b *composerFocusCDP) {
+		b.waitFor("native bridge ready", `String(window.nativeControlEvents?.['desktop:controls-visibility']?.hidden)`, "false")
+		// WKWebView's timeOrigin can drift without navigation. All messages from
+		// this document must retain the same page key or native stale-event
+		// rejection will silently discard a valid gallery open.
+		b.evaluate(`window.visibilityPageKey=window.nativeControlEvents['desktop:controls-visibility'].page;Object.defineProperty(performance,'timeOrigin',{configurable:true,get:()=>window.visibilityPageKey-1});document.getElementById('image-gallery').showModal();'opened'`)
+		b.waitFor("clock drift cannot change page identity on open", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden && window.nativeControlEvents['desktop:controls-visibility'].page===window.visibilityPageKey)`, "true")
+		b.evaluate(`Object.defineProperty(performance,'timeOrigin',{configurable:true,get:()=>window.visibilityPageKey+1});document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("clock drift cannot change page identity on close", `String(!window.nativeControlEvents['desktop:controls-visibility'].hidden && window.nativeControlEvents['desktop:controls-visibility'].page===window.visibilityPageKey)`, "true")
+		b.evaluate(`delete performance.timeOrigin;'restored clock'`)
+		for _, failure := range []string{"throw", "reject", "cancel"} {
+			b.evaluate(`window.originalVisibilityEmit=window.wails.Events.Emit;window.failVisibilityOnce=true;window.wails.Events.Emit=(name,data)=>{if(name==='desktop:controls-visibility' && window.failVisibilityOnce){window.failVisibilityOnce=false;` + map[string]string{
+				"throw":  `throw new Error('bridge unavailable');`,
+				"reject": `return Promise.reject(new Error('bridge unavailable'));`,
+				"cancel": `return Promise.resolve(true);`,
+			}[failure] + `}return window.originalVisibilityEmit(name,data);};document.getElementById('image-gallery').showModal();'opened'`)
+			b.waitFor("retry hides controls after "+failure, `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "true")
+			b.evaluate(`window.wails.Events.Emit=window.originalVisibilityEmit;document.getElementById('image-gallery').close();'closed'`)
+			b.waitFor("close restores controls", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+		}
+		if got := b.evaluateAwait(`(async()=>{
+			let sends=0;
+			window.wails.Events.Emit=(name,data)=>{if(name==='desktop:controls-visibility'){sends++;if(data.hidden)return Promise.reject(new Error('offline'));}return window.originalVisibilityEmit(name,data);};
+			const gallery=document.getElementById('image-gallery');
+			gallery.showModal();
+			for(let i=0;i<20;i++){document.body.append(document.createComment('stream update'));await Promise.resolve();await Promise.resolve();}
+			const attempts=sends;
+			gallery.close();
+			await Promise.resolve();await Promise.resolve();
+			window.wails.Events.Emit=window.originalVisibilityEmit;
+			return String(attempts===1 && sends===2);
+		})()`); got != "true" {
+			t.Fatalf("unrelated mutations must respect retry delay while close sends immediately: %s", got)
+		}
+		b.evaluate(`window.wails.Events.Emit=(name,data)=>name==='desktop:controls-visibility' && data.hidden ? new Promise((resolve,reject)=>{window.rejectVisibility=reject;}) : window.originalVisibilityEmit(name,data);document.getElementById('image-gallery').showModal();'opened'`)
+		b.waitFor("hide pending", `String(!!window.rejectVisibility)`, "true")
+		b.evaluate(`document.getElementById('image-gallery').close();'closed'`)
+		b.waitFor("close supersedes pending hide", `String(!document.getElementById('image-gallery').open && window.nativeControlEvents['desktop:controls-visibility'].hidden===false)`, "true")
+		if got := b.evaluateAwait(`(async()=>{
+			const sequence=window.nativeControlEvents['desktop:controls-visibility'].sequence;
+			window.rejectVisibility(new Error('late failure'));
+			window.wails.Events.Emit=window.originalVisibilityEmit;
+			await new Promise(resolve=>setTimeout(resolve,350));
+			const current=window.nativeControlEvents['desktop:controls-visibility'];
+			return String(current.sequence===sequence && current.hidden===false);
+		})()`); got != "true" {
+			t.Fatalf("late hide failure must not send again after close: %s", got)
+		}
+		b.evaluate(`window.nativeControlEvents['desktop:controls-visibility'].hidden=true;window.dispatchEvent(new Event('focus'));'focused'`)
+		b.waitFor("focus reconciles native visibility", `String(window.nativeControlEvents['desktop:controls-visibility'].hidden)`, "false")
+	})
 	runComposerFocusCDP(t, chrome, server.URL+"/gallery", "image-gallery", func(b *composerFocusCDP) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
 		if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
@@ -234,7 +285,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`[data-image-name="message.svg"]`)
 		b.waitFor("failed image", `document.querySelector('[data-gallery-status]').textContent`, "Image unavailable")
 		b.evaluate(`document.querySelector('[data-image-name="message.svg"]').closest('[data-image-gallery-group]').remove();'removed'`)
-		b.waitFor("navigation removes stale preview", `String(document.getElementById('image-gallery').open)`, "false")
+		b.waitFor("removing opener preserves preview", `String(document.getElementById('image-gallery').open)`, "true")
+		b.evaluate(`window.dispatchEvent(new PopStateEvent("popstate")); "away"`)
+		b.waitFor("history navigation closes preview", `String(document.getElementById('image-gallery').open)`, "false")
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/new?tab=attachments", "draft-gallery", func(b *composerFocusCDP) {
 		b.waitFor("composer loaded", `String(!!document.getElementById('task-thread-form-file-input') && typeof window['task-thread-formClearAttachments']==='function')`, "true")
@@ -265,10 +318,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.typeText("Send the image")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("sent image remains in saved panel", `String(!!document.querySelector('#attachment-list [data-image-name="draft.svg"]') && !document.getElementById('draft-panel-attachments'))`, "true")
-		b.waitFor("consistent attachment spacing", `String(getComputedStyle(document.querySelector('#attachment-list .attachment-gallery-open')).gap===window.draftRowSpacing)`, "true")
-		b.waitFor("file thumbnail uses standard content inset", `String(Math.abs(document.querySelector("#attachment-list .attachment-gallery-open img").getBoundingClientRect().top-document.querySelector("#attachment-list").getBoundingClientRect().top-4)<1)`, "true")
-
-		b.waitFor("saved file row aligns with panel rows", `String((function(){var row=document.querySelector('#attachment-list .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#attachment-list').getBoundingClientRect(), list=document.querySelector('#attachment-list').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#attachment-list img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
+		// Saved attachments intentionally switch from composer rows to the details grid.
+		b.waitFor("saved image fills square grid tile", `String((()=>{const tile=document.querySelector('#attachment-list .attachment-grid-tile').getBoundingClientRect(),img=document.querySelector('#attachment-list .attachment-grid-open img').getBoundingClientRect();return Math.abs(tile.width-tile.height)<1 && Math.abs(img.width-(tile.width-2))<1 && Math.abs(img.height-(tile.height-2))<1})())`, "true")
+		b.waitFor("saved grid aligns with panel", `String(Math.abs(document.querySelector('#attachment-list .attachment-grid-tile').getBoundingClientRect().left-document.querySelector('#attachment-list').getBoundingClientRect().left)<1)`, "true")
 		b.click("#attachment-list [data-image-gallery-item]")
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
 		b.evaluate(`window.oldAttachmentList=document.getElementById('attachment-list');htmx.ajax('GET','/tasks/created/attachments',{target:'#attachment-list',swap:'outerHTML'});'refresh'`)

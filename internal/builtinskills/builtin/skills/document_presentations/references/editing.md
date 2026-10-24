@@ -27,7 +27,7 @@ Use `slide-edit` for changes inside existing slides. Geometry is in inches; rota
 | `fill` | `fill` as six hex digits; empty clears. |
 | `replace-image` | Local PNG/JPEG `path`; creates a private media relationship. |
 | `crop` | `crop:{"left":0.1,"right":0,"top":0,"bottom":0}`; fractions in [0,1), with each pair summing to less than 1. |
-| `image-mask` | RC5 supports preset mask shapes and `corner_radius_points`; see [advanced controls](advanced-slide-controls.md#additional-picture-mask-shapes-after-rc4). |
+| `image-mask` | Supports preset mask shapes and `corner_radius_points`; see [advanced controls](advanced-slide-controls.md#additional-picture-mask-shapes). |
 | `table-row-insert/delete` / `table-column-insert/delete` | `row` or `column`; requires an unmerged table. |
 | `table-cell-format` | `row`, `column`, optional `fill`, `font_size`, `bold`, `color`. |
 | `layout` | `layout:{"shape_ids":["2","4"],"mode":"row","x":1,"y":1,"width":10,"height":3,"gap":0.2}`; modes row/column/grid, `columns` for grid. Positions **and resizes** objects into equal cells. |
@@ -186,7 +186,7 @@ Grid children may use positive `column_span` and `row_span`, defaulting to 1. Fo
 `paragraph_style.line_spacing` sets a line-height multiplier
 (`1` is single spacing, `1.2` is 120%; supported range 0.00001–1000).
 This differs from `before`/`after`, which are paragraph spacing in points.
-Paperworks RC4 supports this field in `ParagraphStyle`, including
+Paperworks supports this field in `ParagraphStyle`, including
 `slide-edit` paragraph formatting and new paragraph definitions.
 
 Save an edit spec using the actual inspected shape ID and zero-based paragraph:
@@ -235,9 +235,9 @@ JSON
 
 The two shapes in this new deck receive IDs `2` and `3`. For a supplied deck, inspect actual slide-local IDs; do not assume creation order or use shape names as IDs. These rectangles use site 3 (right) and site 1 (left); connection-site indices depend on shape geometry. `start`/`end` store native attachments, while the connector box supplies its initial geometry. `tail` puts the arrow at the end/target; `head` puts it at the start. Open the PNG with `view_image` to verify endpoints and direction. Check attachments in the saved package or presentation application as well; a line touching a shape is not proof of an attachment.
 
-### Connector endpoints (RC6)
+### Connector endpoints
 
-RC6 accepts `straight`, `elbow`, and `curved` with explicit endpoint site indices.
+Paperworks accepts `straight`, `elbow`, and `curved` with explicit endpoint site indices.
 It also accepts `elbow2`, `elbow3`, `elbow4`, and `elbow5` and exposes
 `slide-edit` operation `connector`:
 
@@ -247,7 +247,7 @@ It also accepts `elbow2`, `elbow3`, `elbow4`, and `elbow5` and exposes
  "end":{"shape_id":"3","side":"auto"}
 }}]}
 ```
-Check the runtime's schema before using this operation. Omitted endpoints/kind
+Omitted endpoints/kind
 retain their values. `side` accepts `top`, `left`, `bottom`, `right`, or `auto`
 for unrotated, unflipped rectangles, rounded rectangles, diamonds and ellipses; otherwise
 supply an inspected `site`. Automatic selection faces the other endpoint's
@@ -256,7 +256,7 @@ sites are top=0, left=2, bottom=4, right=6; side names avoid having to specify
 these manually. Explicit site indices remain unchanged. Set its geometry
 separately, inspect saved attachments and view the rendered result.
 
-### Internal text links (RC6)
+### Internal text links
 
 Structured text runs and `run-format` can use
 `link:{"uri":"ppt/slides/slide2.xml","is_external":false}` instead of
@@ -267,12 +267,12 @@ An empty `link:{}` removes the link.
 For navigation without a fixed slide target, use
 `link:{"action":"ppaction://hlinkshowjump?jump=nextslide"}`. Supported jumps
 also include `previousslide`, `firstslide`, `lastslide`, `endshow`, and
-`lastslideviewed`; program/macro actions are rejected. RC6 exposes `link`. Inspect saved relationships and check click
+`lastslideviewed`; program/macro actions are rejected. Inspect saved relationships and check click
 behavior in PowerPoint; a PNG does not verify interactive links.
 
-### Add masters and layouts (RC6)
+### Add masters and layouts
 
-After confirming `schema deck-edit` exposes these fields, use:
+Use `deck-edit`:
 
 ```json
 {"edits":[
@@ -294,9 +294,9 @@ color map/background, instead of `placeholders`. Relationship-dependent assets
 are rejected; a master resource's layout list is replaced with a registered
 blank layout. Adding or assigning a layout does not relocate existing slide
 content. Inspect native relationships and placeholders, then render every slide
-affected by inheritance changes. These operations are included in pinned RC6.
+affected by inheritance changes.
 
-### Populate layout placeholders (RC6)
+### Populate layout placeholders
 
 After assigning a layout, use `deck-edit` to create its missing slide-local
 content placeholders:
@@ -321,8 +321,8 @@ Use the actual slot index, geometry and styling, not guessed values. Title and
 centered-title share a title slot; other content slots match by index (default 0).
 
 This does not invent a layout from master furniture or resize existing content.
-Render and inspect the affected slides after filling. This operation is included in pinned RC6.
+Render and inspect the affected slides after filling.
 
-### Reassign an existing layout's master (RC6)
+### Reassign an existing layout's master
 
-Use `deck-edit` with `{"edits":[{"operation":"set-layout-master","part":"ppt/slideLayouts/slideLayout1.xml","parent_part":"ppt/slideMasters/brand.xml"}]}`. Inspect the actual existing part names first. This moves the layout's relationship and both masters' registrations, preserving layout content and slide assignments. It affects every slide sharing that layout: render and inspect inherited fonts, colors and backgrounds. Broken/ambiguous registrations fail. This operation is included in pinned RC6.
+Use `deck-edit` with `{"edits":[{"operation":"set-layout-master","part":"ppt/slideLayouts/slideLayout1.xml","parent_part":"ppt/slideMasters/brand.xml"}]}`. Inspect the actual existing part names first. This moves the layout's relationship and both masters' registrations, preserving layout content and slide assignments. It affects every slide sharing that layout: render and inspect inherited fonts, colors and backgrounds. Broken/ambiguous registrations fail.

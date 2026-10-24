@@ -682,8 +682,8 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 		t.Error("resume transport errors must remain owned by the shared connection")
 	}
 	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
-		!strings.Contains(content, "var largeStreamRenderInterval = 50") {
-		t.Error("resume streaming must coalesce large stream updates within the visible latency budget")
+		!strings.Contains(content, "var streamRenderInterval = 50") {
+		t.Error("resume streaming must coalesce updates within the visible latency budget")
 	}
 	if !strings.Contains(content, "if (renderDelayTimer !== null)") {
 		t.Error("resume completion must cancel a pending delayed render before forcing the final render")
@@ -737,8 +737,8 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 		t.Error("Missing requestAnimationFrame batching for streaming renders")
 	}
 	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
-		!strings.Contains(content, "var largeStreamRenderInterval = 50") {
-		t.Error("Missing size-aware throttling for large streaming responses")
+		!strings.Contains(content, "var streamRenderInterval = 50") {
+		t.Error("Missing throttling for streaming responses")
 	}
 	if strings.Contains(content, "container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer)") {
 		t.Error("Streaming onmessage must not normalize and copy the entire accumulated response before the scheduled render")

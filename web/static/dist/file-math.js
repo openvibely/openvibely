@@ -10,7 +10,7 @@
  }
  const key=node=>JSON.stringify([node.dataset.mathDisplay,node.dataset.mathTex]);
  function typeset(node){
-  if(!ready||node.dataset.mathReady)return;
+  if(!ready||node.dataset.mathReady||node.closest('[data-thread-refresh-preview]'))return;
   try{window.katex.render(node.dataset.mathTex,node,{displayMode:node.dataset.mathDisplay==='block',throwOnError:false,trust:false,maxExpand:1000,maxSize:20});node.dataset.mathReady='true'}
   catch{node.textContent=node.dataset.mathTex;node.dataset.mathReady='failed'}
  }
@@ -22,7 +22,7 @@
   fragment.querySelectorAll('[data-math-tex]').forEach(node=>{const old=saved.get(key(node))?.shift();if(old)node.replaceWith(old);else typeset(node)});
  };
  function scan(){
-  const nodes=document.querySelectorAll('[data-math-tex]:not([data-math-ready])');
+  const nodes=Array.from(document.querySelectorAll('[data-math-tex]:not([data-math-ready])')).filter(node=>!node.closest('[data-thread-refresh-preview]'));
   if(!nodes.length)return;
   if(!ready){library();return}
   nodes.forEach(typeset);

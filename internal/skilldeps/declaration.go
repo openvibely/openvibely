@@ -21,6 +21,7 @@ type Dependency struct {
 }
 
 type Package struct {
+	FindRoot   bool   `yaml:"find_root,omitempty" json:"find_root,omitempty"`
 	URL        string `yaml:"url" json:"url"`
 	SHA256     string `yaml:"sha256" json:"sha256"`
 	Format     string `yaml:"format" json:"format"`
@@ -28,14 +29,19 @@ type Package struct {
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
-var versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
+
+// SemVer 2.0.0, without a leading v. Keep the cache path component bounded.
+var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
 
 func Validate(deps []Dependency) error {
 	seen := map[string]bool{}
 	environments := map[string]bool{}
 	for _, d := range deps {
-		if !namePattern.MatchString(d.Name) || !versionPattern.MatchString(d.Version) || seen[d.Name] {
+		if !namePattern.MatchString(d.Name) || seen[d.Name] {
 			return fmt.Errorf("invalid or duplicate dependency %q", d.Name)
+		}
+		if len(d.Version) > 96 || !versionPattern.MatchString(d.Version) {
+			return fmt.Errorf("dependency %s version %q must be SemVer (for example 1.2.3 or 1.2.3-rc.1), without a leading v and at most 96 characters", d.Name, d.Version)
 		}
 		seen[d.Name] = true
 		if d.EnvironmentVariable != "" {
@@ -65,12 +71,21 @@ func Validate(deps []Dependency) error {
 				return fmt.Errorf("dependency %s requires SHA-256", d.Name)
 			}
 			switch p.Format {
-			case "raw", "zip", "tar.gz", "dmg":
+			case "raw", "zip", "tar.gz", "dmg", "deb-bundle", "msi":
 			default:
 				return fmt.Errorf("unsupported package format %q", p.Format)
 			}
 			if p.Format == "dmg" && !strings.HasPrefix(platform, "darwin/") {
 				return fmt.Errorf("DMG requires darwin")
+			}
+			if p.Format == "deb-bundle" && !strings.HasPrefix(platform, "linux/") {
+				return fmt.Errorf("DEB bundle requires linux")
+			}
+			if p.Format == "msi" && !strings.HasPrefix(platform, "windows/") {
+				return fmt.Errorf("MSI requires windows")
+			}
+			if p.FindRoot && p.Format != "msi" {
+				return fmt.Errorf("find_root requires MSI")
 			}
 			if !safeRelative(p.Executable) {
 				return fmt.Errorf("invalid executable path for %s", d.Name)

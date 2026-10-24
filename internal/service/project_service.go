@@ -512,7 +512,16 @@ func projectRepoPathHealth(repoPath, repoURL string) models.ProjectRepoPathHealt
 		health.Status = models.RepoPathHealthNone
 		return health
 	}
-	if _, err := os.Stat(repoPath); err == nil {
+	if info, err := os.Stat(repoPath); err == nil {
+		if !info.IsDir() {
+			health.Status = models.RepoPathHealthNotDirectory
+			health.Message = "Not a folder."
+			health.Guidance = "Choose a directory."
+			if repoURL != "" {
+				health.Guidance = "Restore the repository folder or re-clone the repository."
+			}
+			return health
+		}
 		health.Status = models.RepoPathHealthHealthy
 		health.Message = "Repository path exists."
 		return health

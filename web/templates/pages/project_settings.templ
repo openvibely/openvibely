@@ -59,25 +59,37 @@ script deleteProjectAction(projectID string) {
 	htmx.ajax('DELETE', requestPath, {target: 'body', swap: 'none'});
 }
 
-templ projectRepoPathHealth(health models.ProjectRepoPathHealth) {
+templ projectRepoPathHealth(health models.ProjectRepoPathHealth, remote bool) {
 	if health.Status == models.RepoPathHealthHealthy {
-		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm" data-repo-path-health="healthy">
-			<div class="font-medium text-success">Repository path status: Healthy</div>
-			<p class="mt-1 text-base-content/70">{ health.Message }</p>
-			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
-		</div>
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-success" data-repo-path-health="healthy" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+			if remote {
+<span>Repository folder found</span>
+} else {
+<span>Folder found</span>
+}
+		</span>
 	} else if health.Status == models.RepoPathHealthMissing {
-		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" data-repo-path-health="missing" role="alert">
-			<div class="font-medium text-warning">Repository path status: Missing</div>
-			<p class="mt-1 text-base-content/80">{ health.Message } { health.Guidance }</p>
-			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
-		</div>
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-warning" data-repo-path-health="missing" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 3 2 21h20Z"/><path d="M12 9v5m0 3h.01"/></svg>
+			if remote {
+<span>Repository folder not found. Re-clone the repository or restore its folder.</span>
+<button type="button" class="btn btn-outline btn-sm shrink-0" data-recover-repo>Re-clone</button>
+<span data-recovery-feedback role="status" class="hidden"></span>
+} else {
+<span>Folder not found. Choose its new location or restore the folder.</span>
+}
+		</span>
+	} else if health.Status == models.RepoPathHealthNotDirectory {
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-error" data-repo-path-health="not_directory" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+			<span>{ health.Message } { health.Guidance }</span>
+		</span>
 	} else if health.Status == models.RepoPathHealthUnknown {
-		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-sm" data-repo-path-health="unknown">
-			<div class="font-medium text-info">Repository path status: Unknown</div>
-			<p class="mt-1 text-base-content/80">{ health.Message } { health.Guidance }</p>
-			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
-		</div>
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-error" data-repo-path-health="unknown" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+			<span>Can’t check folder. Check folder permissions or reconnect the drive.</span>
+		</span>
 	}
 }
 
@@ -90,23 +102,24 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				method="post"
 				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
 				hx-swap="none"
+                hx-indicator="#edit-project-save-progress"
 			>
 				@ProjectSettingsTabs("edit-project")
-<div style="height: 60vh; overflow-y: auto;" data-project-tab-content>
+<div data-project-tab-content>
 				<section id="edit-project-general" role="tabpanel" aria-labelledby="edit-project-general-tab" data-project-panel="general">
 
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
-					<input type="text" name="name" class="input input-bordered input-sm" required value={ project.Name }/>
+					<input type="text" name="name" class="input input-bordered" required value={ project.Name }/>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Description</span></label>
-					<textarea name="description" class="textarea textarea-bordered textarea-sm" rows="2">{ project.Description }</textarea>
+					<textarea name="description" class="textarea textarea-bordered" rows="2">{ project.Description }</textarea>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Repository Source</span></label>
 					if localRepoPathEnabled {
-						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered select-sm">
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
 							<option value="local" if projectRepoSource(project) == "local" { selected }>Local Path</option>
 							<option value="github" if projectRepoSource(project) == "github" { selected }>GitHub URL</option>
 						</select>
@@ -114,7 +127,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<input type="hidden" id="edit-project-repo-source" name="repo_source" value="github"/>
 						<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
 					} else {
-						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered select-sm">
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
 							<option value="local" selected>Local Path (existing)</option>
 							<option value="github">GitHub URL</option>
 						</select>
@@ -123,16 +136,19 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						</label>
 						}
 					</div>
-					@projectRepoPathHealth(repoPathHealth)
 					if localRepoPathEnabled {
-						<div id="edit-project-local-fields" class="form-control mb-3">
-						<label class="label"><span class="label-text">Repository Path</span></label>
+						<div id="edit-project-local-fields" class="form-control mb-3" data-project-repo-fields hidden?={ projectRepoSource(project) != "local" }>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">Repository Path</span>
+ if projectRepoSource(project) == "local" {
+ @projectRepoPathHealth(repoPathHealth, false)
+ }
+ </div>
 						<div class="flex gap-2">
-							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered input-sm flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
+							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
 							<button
 								type="button"
 								id="edit-project-browse-btn"
-								class="btn btn-outline btn-sm self-center"
+								class="btn btn-outline self-center"
 							>Choose Folder</button>
 						</div>
 						<label class="label">
@@ -140,27 +156,43 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						</label>
 						<p id="edit-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
 					</div>
-					<div id="edit-project-github-fields" class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
+					<div id="edit-project-github-fields" class="form-control mb-3" data-project-repo-fields hidden?={ projectRepoSource(project) != "github" }>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
+ if projectRepoSource(project) == "github" {
+ @projectRepoPathHealth(repoPathHealth, true)
+ }
+ </div>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else if projectRepoSource(project) == "github" {
 					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
+ if projectRepoSource(project) == "github" {
+ @projectRepoPathHealth(repoPathHealth, true)
+ }
+ </div>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
-					<div id="edit-project-local-fields" class="form-control mb-3">
-						<label class="label"><span class="label-text">Repository Path (current local)</span></label>
-						<input type="text" class="input input-bordered input-sm" value={ project.RepoPath } readonly/>
+					<div id="edit-project-local-fields" class="form-control mb-3" data-project-repo-fields hidden?={ projectRepoSource(project) != "local" }>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">Repository Path (current local)</span>
+ if projectRepoSource(project) == "local" {
+ @projectRepoPathHealth(repoPathHealth, false)
+ }
+ </div>
+						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
 						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label>
 					</div>
-					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
-						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo"/>
+					<div id="edit-project-github-fields" class="form-control mb-3" data-project-repo-fields hidden>
+						<div class="label justify-start gap-3 flex-wrap"><span class="label-text">GitHub URL</span>
+ if projectRepoSource(project) == "github" {
+ @projectRepoPathHealth(repoPathHealth, true)
+ }
+ </div>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
 				}
@@ -176,8 +208,12 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 							onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')"
 						>Delete Project</button>
 					}
-					<button type="button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
-					<button type="submit" class="btn btn-primary">Save</button>
+					<button type="button" id="edit-project-cancel-button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
+					<button type="submit" id="edit-project-save-button" class="btn btn-primary">
+ <span id="edit-project-save-progress" class="loading loading-spinner loading-sm htmx-indicator" aria-hidden="true"></span>
+ <span class="edit-project-save-label">Save</span>
+ <span class="edit-project-save-busy-label hidden" role="status">Saving...</span>
+ </button>
 				</div>
 			</form>
 		</div>
@@ -210,6 +246,71 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			var localFields = document.getElementById('edit-project-local-fields');
 			var githubFields = document.getElementById('edit-project-github-fields');
 			var localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';
+			var healthStatus = m && m.querySelector('[data-repo-path-health]');
+			var savedRepoPath = input && input.value;
+			var savedRepoURL = githubInput && githubInput.value;
+			var savedRepoSource = repoSourceSelect && repoSourceSelect.value;
+            var editForm = m && m.querySelector('form[hx-put]');
+            var saveButton = m && m.querySelector('#edit-project-save-button');
+            var cancelButton = m && m.querySelector('#edit-project-cancel-button');
+            function setSaveBusy(busy) {
+                if (!saveButton) return;
+                var busyLabel = saveButton.querySelector('.edit-project-save-busy-label');
+                if (busy) {
+                    var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&
+                        (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));
+                    busyLabel.textContent = cloning ? 'Cloning repository...' : 'Saving...';
+                }
+                saveButton.disabled = busy;
+                if (cancelButton) cancelButton.disabled = busy;
+                saveButton.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);
+                busyLabel.classList.toggle('hidden', !busy);
+            }
+            if (editForm) {
+                editForm.addEventListener('htmx:beforeRequest', function() { setSaveBusy(true); });
+                ['htmx:afterRequest', 'htmx:sendError', 'htmx:abort', 'htmx:timeout'].forEach(function(eventName) {
+                    editForm.addEventListener(eventName, function() { setSaveBusy(false); });
+                });
+            }
+
+			function updateHealthVisibility() {
+				if (!healthStatus) return;
+				healthStatus.classList.toggle('hidden',
+					(repoSourceSelect && repoSourceSelect.value !== savedRepoSource) ||
+					(input && input.value !== savedRepoPath) ||
+					(githubInput && githubInput.value !== savedRepoURL));
+			}
+			if (input) input.addEventListener('input', updateHealthVisibility);
+			if (githubInput) githubInput.addEventListener('input', updateHealthVisibility);
+			if (repoSourceSelect) repoSourceSelect.addEventListener('change', updateHealthVisibility);
+
+			var recoverButton = m && m.querySelector('[data-recover-repo]');
+			if (recoverButton) recoverButton.addEventListener('click', async function() {
+				if (recoverButton.disabled) return;
+				var feedback = healthStatus.querySelector('[data-recovery-feedback]');
+				recoverButton.disabled = true;
+				recoverButton.textContent = 'Re-cloning...';
+				feedback.classList.add('hidden');
+				try {
+					var response = await fetch(recoverButton.form.getAttribute('hx-put') + '/reclone', {
+						method: 'POST', headers: {'HX-Request': 'true'}
+					});
+					var payload = await response.json();
+					if (!response.ok || payload.status !== 'healthy') throw new Error(payload.error || 'Re-clone failed. Please retry.');
+					healthStatus.dataset.repoPathHealth = 'healthy';
+					healthStatus.classList.replace('text-warning', 'text-success');
+					healthStatus.textContent = 'Repository folder found';
+					updateHealthVisibility();
+				} catch (err) {
+					feedback.textContent = err.message || 'Re-clone failed. Please retry.';
+					feedback.classList.remove('hidden');
+				} finally {
+					recoverButton.disabled = false;
+					recoverButton.textContent = 'Re-clone';
+				}
+			});
+
+
 
 			function isAbsolutePath(pathValue) {
 				return !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\') || /^[a-zA-Z]:[\\/]/.test(pathValue) || pathValue.startsWith('\\\\'));
@@ -260,7 +361,10 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						return;
 					}
 					if (!payload.selected) {
-						setPickerFeedback('No folder selected. You can paste an absolute path manually.', false);
+						if (pickerFeedback) {
+							pickerFeedback.textContent = '';
+							pickerFeedback.classList.add('hidden');
+						}
 						return;
 					}
 					if (!isAbsolutePath(payload.path)) {
@@ -279,8 +383,8 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			function updateRepoSourceFields() {
 				if (!repoSourceSelect || !localFields || !githubFields) return;
 				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
-				localFields.classList.toggle('hidden', source !== 'local');
-				githubFields.classList.toggle('hidden', source !== 'github');
+				localFields.hidden = source !== 'local';
+				githubFields.hidden = source !== 'github';
 				if (localRepoPathEnabled) {
 					if (input) input.required = (source === 'local');
 				}
@@ -316,20 +420,20 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					hx-indicator="#new-project-create-progress"
 				>
 				@ProjectSettingsTabs("new-project")
-<div style="height: 60vh; overflow-y: auto;" data-project-tab-content>
+<div data-project-tab-content>
 <section id="new-project-general" role="tabpanel" aria-labelledby="new-project-general-tab" data-project-panel="general">
 <div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
-					<input type="text" id="new-project-name" name="name" class="input input-bordered input-sm" required placeholder="My Project"/>
+					<input type="text" id="new-project-name" name="name" class="input input-bordered" required placeholder="My Project"/>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Description</span></label>
-					<textarea name="description" class="textarea textarea-bordered textarea-sm" rows="2" placeholder="Project description"></textarea>
+					<textarea name="description" class="textarea textarea-bordered" rows="2" placeholder="Project description"></textarea>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Repository Source</span></label>
 					if localRepoPathEnabled {
-						<select id="new-project-repo-source" name="repo_source" class="select select-bordered select-sm">
+						<select id="new-project-repo-source" name="repo_source" class="select select-bordered">
 							<option value="local" selected>Local Path</option>
 							<option value="github">GitHub URL</option>
 						</select>
@@ -342,14 +446,14 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					}
 				</div>
 				if localRepoPathEnabled {
-					<div id="new-project-local-fields" class="form-control mb-3">
+					<div id="new-project-local-fields" class="form-control mb-3" data-project-repo-fields>
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
-							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered input-sm flex-1" placeholder="/path/to/repo"/>
+							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered flex-1" placeholder="/path/to/repo"/>
 							<button
 								type="button"
 								id="new-project-browse-btn"
-								class="btn btn-outline btn-sm self-center"
+								class="btn btn-outline self-center"
 							>Choose Folder</button>
 						</div>
 						<label class="label">
@@ -357,11 +461,11 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 						</label>
 						<p id="new-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
 					</div>
-					<div id="new-project-github-fields" class="form-control mb-3 hidden">
+					<div id="new-project-github-fields" class="form-control mb-3" data-project-repo-fields hidden>
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
-						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
+						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2" data-project-repo-fields>
 						<label class="label cursor-pointer justify-start gap-3">
 							<input type="checkbox" id="new-project-create-dir" name="create_directory" value="true" class="checkbox checkbox-sm checkbox-primary"/>
 							<span class="label-text">Create directory if it doesn't exist</span>
@@ -376,7 +480,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 				} else {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo" required/>
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>				}
 				@ProjectDefaultsFields("new-project", &models.Project{}, agents, globalMaxWorkers)
@@ -429,7 +533,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					if (createButton) createButton.disabled = !!isBusy;
 					if (cancelButton) cancelButton.disabled = !!isBusy;
 					if (createLabel) createLabel.classList.toggle('hidden', !!isBusy);
-					if (createBusyLabel) createBusyLabel.classList.toggle('hidden', !isBusy);
+					if (createBusyLabel) {
+                        if (isBusy) createBusyLabel.textContent = repoSourceSelect && repoSourceSelect.value === 'github' ? 'Cloning repository...' : 'Creating...';
+                        createBusyLabel.classList.toggle('hidden', !isBusy);
+                    }
 				}
 
 				function updatePathPreview() {
@@ -449,10 +556,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 			function updateRepoSourceFields() {
 				if (!repoSourceSelect || !localFields || !githubFields) return;
 				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
-				localFields.classList.toggle('hidden', source !== 'local');
-				githubFields.classList.toggle('hidden', source !== 'github');
+				localFields.hidden = source !== 'local';
+				githubFields.hidden = source !== 'github';
 				if (createDirWrapper) {
-					createDirWrapper.classList.toggle('hidden', source !== 'local');
+					createDirWrapper.hidden = source !== 'local';
 				}
 				if (repoPathInput) {
 					repoPathInput.required = (source === 'local');
@@ -513,7 +620,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 						return;
 					}
 					if (!payload.selected) {
-						setPickerFeedback('No folder selected. You can paste an absolute path manually.', false);
+						if (pickerFeedback) {
+							pickerFeedback.textContent = '';
+							pickerFeedback.classList.add('hidden');
+						}
 						return;
 					}
 					if (!isAbsolutePath(payload.path)) {
@@ -578,14 +688,24 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 
 templ ProjectSettingsTabs(prefix string) {
  <style>
-  [data-project-panel="general"] .label { padding: 0.125rem 0; }
+  #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }
+  :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }
+  :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }
+  :is(#edit_project_modal, #new_project_modal) .modal-action > button[type="submit"] { min-width: 6rem; }
+  :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }
+  :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }
+  [data-project-tab-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; }
+  [data-project-repo-fields][hidden] { display: none !important; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
+  [data-project-panel="general"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }
   [data-project-panel="general"] .flex > .btn { flex-shrink: 0; }
-  [data-project-panel="general"] .textarea { min-height: 3.5rem; }
   [data-project-panel="general"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
   [data-project-panel="general"] .project-defaults-fields .form-control { min-width: 0; }
   [data-project-panel="general"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }
   [data-project-panel="general"] .project-defaults-fields .label { justify-content: flex-start; gap: 0.375rem; }
+  [data-project-panel="general"] input[name="max_workers"] { -moz-appearance: textfield; appearance: textfield; }
+  [data-project-panel="general"] input[name="max_workers"]::-webkit-inner-spin-button,
+  [data-project-panel="general"] input[name="max_workers"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   [data-project-panel="knowledge"] .table { table-layout: fixed; }
   [data-project-panel="knowledge"] .table :is(th, td) { padding: 0.75rem 0; }
   [data-project-panel="knowledge"] .table th:first-child { width: 50%; }
@@ -666,7 +786,7 @@ templ ProjectDefaultsFields(prefix string, project *models.Project, agents []mod
      <label for={ prefix + "-default-model" } class="text-sm font-medium">Default Model</label>
      @projectPermissionHelp("Default Model", "Used when no model is specified on a task. Leave set to Global default to inherit the global model.")
     </div>
-    <select id={ prefix + "-default-model" } name="default_agent_config_id" class="select select-bordered select-sm">
+    <select id={ prefix + "-default-model" } name="default_agent_config_id" class="select select-bordered">
      <option value="">Global default</option>
      for _, agent := range agents {
       <option value={ agent.ID } selected?={ isProjectDefaultModel(project, agent.ID) }>
@@ -683,7 +803,7 @@ templ ProjectDefaultsFields(prefix string, project *models.Project, agents []mod
      <label for={ prefix + "-max-workers" } class="text-sm font-medium">Worker limit</label>
      @projectPermissionHelp("Worker limit", "Maximum concurrent workers for this project. Leave blank to inherit the global limit. Positive values cannot exceed the current global limit.")
     </div>
-    <input type="number" name="max_workers" id={ prefix + "-max-workers" } value={ projectMaxWorkersValue(project) } min="0" if globalMaxWorkers > 0 { max={ fmt.Sprintf("%d", globalMaxWorkers) } } step="1" placeholder="Inherit" class="input input-bordered input-sm" data-tooltip-disabled/>
+    <input type="number" name="max_workers" id={ prefix + "-max-workers" } value={ projectMaxWorkersValue(project) } min="0" if globalMaxWorkers > 0 { max={ fmt.Sprintf("%d", globalMaxWorkers) } } step="1" placeholder="Inherit" class="input input-bordered" data-tooltip-disabled/>
     if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
      <p class="text-xs text-warning mt-1">The current project limit exceeds the global limit of { fmt.Sprintf("%d", globalMaxWorkers) }. Lower it before saving.</p>
     }
