@@ -112,15 +112,19 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	runner := fmt.Sprintf(`<script>
  window.addEventListener('DOMContentLoaded',()=>{
  const bounded=%t, scrollStability=%t, hiddenPaging=%t, hiddenRow=%t;
- const wait=ms=>new Promise(r=>setTimeout(r,ms));
- async function until(check,label){for(let i=0;i<600;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' '+debug())}
+ const paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ async function until(check,label){const deadline=performance.now()+10000;while(performance.now()<deadline){if(check())return;await paint()}throw Error('Timeout: '+label+' '+debug())}
+ async function settled(label){
+  await paint();
+  await until(()=>{const m=messages();return m && m.dataset.transcriptHydrating!=='true' && m.dataset.earlierAnchorRestoring!=='true' && !window._chatContentRenderActive && !window._chatContentRenderQueue?.length && !Array.from(m.querySelectorAll('[data-chat-virtual-owner]')).some(o=>o._renderingRevision||o._scheduledChatRender||o._activeScheduledChatRender)},label);
+ }
  const errors=window._pagedStartupErrors;
  const messages=()=>document.getElementById('task-thread-messages');
  const view=()=>document.getElementById('task-thread-view');
  function debug(){const m=messages();return JSON.stringify({errors,url:location.href,readyState:document.readyState,htmx:typeof window.htmx,htmxTrigger:typeof window.htmx?.trigger,view:!!view(),messages:!!m,virtualizer:typeof window.renderVisibleChatRows,queue:window._chatContentRenderQueue?.length,active:window._chatContentRenderActive,top:m?.scrollTop,height:m?.scrollHeight,viewport:m?.clientHeight,hydrating:m?.dataset.transcriptHydrating,owners:Array.from(m?.querySelectorAll('[data-chat-virtual-owner]')||[],o=>({rows:o._chatVirtualRows?.length,text:o.textContent.length,revision:!!o._renderedRevision,rendering:!!o._renderingRevision,scheduled:!!o._scheduledChatRender,active:!!o._activeScheduledChatRender,raw:!!o.getAttribute('data-raw-content'),class:o.className,rect:[o.getBoundingClientRect().top,o.getBoundingClientRect().height],ready:o._chatVirtualRows?.filter(r=>r.ready).length}))})}
  function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
  (async()=>{
-  await until(visible,'initial messages'); await wait(150);
+  await until(visible,'initial messages'); await settled('initial render settled');
  %s
   if(hiddenRow){
    const m=messages(),paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
@@ -164,11 +168,11 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
     }
     await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>count,'page appended');
     if(hiddenPaging){
-     await wait(200);
+     await until(()=>!window._chatContentRenderActive && !window._chatContentRenderQueue?.length,'hidden page render queue drained');await paint();
      if(!m._earlierAnchor)throw Error('Paging anchor discarded while Chat hidden');
      window.taskWorkspace.openThread();
     }
-    await until(()=>m.dataset.earlierAnchorRestoring!=='true','page hydration');await paint();await wait(100);recording=false;
+    await until(()=>m.dataset.earlierAnchorRestoring!=='true','page hydration');await settled('page render settled');recording=false;
     if(maxShift>3)throw Error('Page '+page+' moved visible content by '+maxShift+'px from '+before+' '+JSON.stringify(trace)+' '+debug());
     if(!visible())throw Error('Page '+page+' left empty viewport');
    }
@@ -177,7 +181,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
   }
   const m=messages();m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));m.scrollTop=0;m.dispatchEvent(new Event('scroll'));
   await until(()=>m.querySelectorAll(':scope > [data-execution-pair]').length>5,'older page');
-  await until(()=>m.dataset.earlierAnchorRestoring!=='true','older page settled');await wait(150);
+  await until(()=>m.dataset.earlierAnchorRestoring!=='true','older page settled');await settled('history render settled');
   for(let round=0;round<2;round++){
    const pairs=Array.from(messages().querySelectorAll(':scope > [data-execution-pair]'));
    const older=pairs.slice(0,-5).flatMap(pair=>window.captureChatVirtualData(pair));
@@ -195,7 +199,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
    document.removeEventListener('htmx:beforeSwap',preview,true);
    if(bounded && !previewCursorValid)throw Error('Cached preview cannot reload earlier history');
    if(bounded && previewCount!==5)throw Error('Expected five cached executions, got '+previewCount);
-   await until(visible,'visible returned messages');await wait(200);
+   await until(visible,'visible returned messages');await settled('returned render settled');
    if(!visible())throw Error('Returned messages disappeared '+debug());
    if(errors.length)throw Error('Browser errors '+JSON.stringify(errors));
    if(bounded){
@@ -204,7 +208,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
     if(!loader||new URL(loader.getAttribute('hx-get'),location.href).searchParams.get('before')!==first.dataset.execId)throw Error('Wrong cached history cursor');
     current.dispatchEvent(new WheelEvent('wheel',{deltaY:-100000,bubbles:true}));current.scrollTop=0;current.dispatchEvent(new Event('scroll'));
     await until(()=>current.querySelectorAll(':scope > [data-execution-pair]').length===10,'reloaded older page');
-    await until(()=>current.dataset.earlierAnchorRestoring!=='true','reloaded older page settled');await wait(150);
+    await until(()=>current.dataset.earlierAnchorRestoring!=='true','reloaded older page settled');await settled('history render settled');
    }
   }
   await fetch('/browser-result?status=pass');

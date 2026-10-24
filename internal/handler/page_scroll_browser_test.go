@@ -55,7 +55,7 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
 </script>`
 	runner := `<script>(async()=>{
  const assert=(v,m)=>{if(!v)throw Error(m)};
- const frame=()=>new Promise(r=>setTimeout(r,100));
+ const frame=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
  const stage=async value=>{window.__scrollTestStage=value;await fetch('/browser-stage',{method:'POST',body:value})};
  const bounded=async(promise,label)=>{
    let timer;
@@ -83,9 +83,9 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
    assert(main,'missing main-content '+path);
    await stage(path+' before append filler');
    const filler=document.createElement('div'); filler.style.height='4000px'; main.appendChild(filler);
-   await stage(path+' after append filler; before timer');
+   await stage(path+' after append filler; before paint');
    await frame();
-   await stage(path+' after timer; before layout read');
+   await stage(path+' after paint; before layout read');
    const rect=main.getBoundingClientRect();
    const geometry={bottom:rect.bottom,viewport:innerHeight,height:main.clientHeight,scrollHeight:main.scrollHeight,top:main.scrollTop,overflow:getComputedStyle(main).overflowY};
    await stage(path+' layout '+JSON.stringify(geometry));
@@ -93,9 +93,9 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
    assert(geometry.scrollHeight>geometry.height+100,path+' expanded instead of scrolling');
    await stage(path+' before scrollTop=500');
    main.scrollTop=500;
-   await stage(path+' after scrollTop=500; before timer');
+   await stage(path+' after scrollTop=500; before paint');
    await frame();
-   await stage(path+' after scroll timer; before scrollTop read');
+   await stage(path+' after scroll paint; before scrollTop read');
    const middle=main.scrollTop;
    await stage(path+' middle scrollTop='+middle);
    assert(middle>=499,path+' cannot scroll');
@@ -103,9 +103,9 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
    const end=main.scrollHeight;
    await stage(path+' before bottom scrollTop='+end);
    main.scrollTop=end;
-   await stage(path+' after bottom scroll; before timer');
+   await stage(path+' after bottom scroll; before paint');
    await frame();
-   await stage(path+' after bottom timer; before final layout read');
+   await stage(path+' after bottom paint; before final layout read');
    const final={height:main.clientHeight,scrollHeight:main.scrollHeight,top:main.scrollTop,rootTop:document.scrollingElement.scrollTop};
    await stage(path+' final '+JSON.stringify(final));
    assert(Math.abs(final.scrollHeight-final.height-final.top)<2,path+' cannot reach bottom');

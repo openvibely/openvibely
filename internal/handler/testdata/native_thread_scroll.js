@@ -224,7 +224,7 @@
     await until(() => !messages(), 'left thread');
     await openVibelyNavigate(taskPath);
     await until(visible, 'returned thread');
-    await wait(250);
+    await settled('native returned render settled');
     const returned = messages();
     returned.dispatchEvent(new WheelEvent('wheel', {deltaY: -8, bubbles: true}));
     returned.scrollTop = Math.max(0, returned.scrollHeight - returned.clientHeight - 300);
