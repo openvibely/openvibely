@@ -3009,7 +3009,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								extensions: ['block', 'inline'].map(function(level) {
 									return {
 										name: 'chatSVG', level: level,
-										start: function(src) { var at = src.search(/<svg(?:\s|>)/i); return at < 0 ? undefined : at; },
+										// Tokenize only at the current parser position. A lookahead
+										// here can split paragraphs inside code spans or link labels.
 										tokenizer: svgToken,
 										renderer: function(token) { return this.parser.renderer.code({ text: token.text, lang: 'svg', escaped: false }); }
 									};
