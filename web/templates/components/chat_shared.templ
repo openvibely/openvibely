@@ -467,7 +467,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var lastRenderFinishedAt = 0;
 							var lastRenderedSourceLength = 0;
 							var largeStreamRenderThreshold = 100 * 1024;
-							var largeStreamRenderInterval = 50;
+							// Coalesce updates of every size to reduce repaint frequency.
+							var streamRenderInterval = 100;
 							function renderBufferedOutput(force, yieldLarge) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
@@ -552,8 +553,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								return runRender();
 							}
 							renderScheduled = true;
-							if (textBuffer.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
-								var delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));
+							if (lastRenderFinishedAt > 0) {
+								var delay = Math.max(0, streamRenderInterval - (Date.now() - lastRenderFinishedAt));
 								renderDelayTimer = setTimeout(function() {
 									renderDelayTimer = null;
 									requestAnimationFrame(runRender);
@@ -966,7 +967,8 @@ templ ChatStreamingResumeInitScript() {
 					var lastRenderFinishedAt = Date.now();
 					var lastRenderedSourceLength = cumulativeContent.length;
 					var largeStreamRenderThreshold = 100 * 1024;
-					var largeStreamRenderInterval = 50;
+					// Pace repaints below frame rate; see renderBufferedOutput.
+					var streamRenderInterval = 100;
 					function renderCumulativeContent(force, yieldLarge) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
@@ -1046,8 +1048,8 @@ templ ChatStreamingResumeInitScript() {
 						return runRender();
 					}
 					renderScheduled = true;
-					if (cumulativeContent.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
-						var delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));
+					if (lastRenderFinishedAt > 0) {
+						var delay = Math.max(0, streamRenderInterval - (Date.now() - lastRenderFinishedAt));
 						renderDelayTimer = setTimeout(function() {
 							renderDelayTimer = null;
 							requestAnimationFrame(runRender);
