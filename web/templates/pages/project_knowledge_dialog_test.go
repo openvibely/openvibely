@@ -84,6 +84,8 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					 const footer = box.querySelector('.modal-action');
 					 const content = box.querySelector('[data-project-tab-content]');
 					 const before = box.getBoundingClientRect();
+					 const general = box.querySelector('[data-project-panel="general"]');
+					 if (innerWidth > 640 && innerHeight >= 900 && content.clientHeight - general.getBoundingClientRect().height > 80) return 'excess empty space below general fields';
 					 const footerBefore = footer.getBoundingClientRect();
 					 if (footerBefore.bottom > innerHeight || before.top < 0) return 'modal actions outside viewport ' + JSON.stringify({box:before.toJSON(),footer:footerBefore.toJSON(),content:content.getBoundingClientRect().toJSON(),scroll:content.scrollHeight});
 					 for (const tab of ['knowledge', 'general', 'knowledge', 'general']) {
