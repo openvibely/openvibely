@@ -97,16 +97,16 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
-					<input type="text" name="name" class="input input-bordered input-sm" required value={ project.Name }/>
+					<input type="text" name="name" class="input input-bordered" required value={ project.Name }/>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Description</span></label>
-					<textarea name="description" class="textarea textarea-bordered textarea-sm" rows="2">{ project.Description }</textarea>
+					<textarea name="description" class="textarea textarea-bordered" rows="2">{ project.Description }</textarea>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Repository Source</span></label>
 					if localRepoPathEnabled {
-						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered select-sm">
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
 							<option value="local" if projectRepoSource(project) == "local" { selected }>Local Path</option>
 							<option value="github" if projectRepoSource(project) == "github" { selected }>GitHub URL</option>
 						</select>
@@ -114,7 +114,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<input type="hidden" id="edit-project-repo-source" name="repo_source" value="github"/>
 						<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
 					} else {
-						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered select-sm">
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
 							<option value="local" selected>Local Path (existing)</option>
 							<option value="github">GitHub URL</option>
 						</select>
@@ -128,11 +128,11 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<div id="edit-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
-							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered input-sm flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
+							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
 							<button
 								type="button"
 								id="edit-project-browse-btn"
-								class="btn btn-outline btn-sm self-center"
+								class="btn btn-outline self-center"
 							>Choose Folder</button>
 						</div>
 						<label class="label">
@@ -142,25 +142,25 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else if projectRepoSource(project) == "github" {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
 					<div id="edit-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path (current local)</span></label>
-						<input type="text" class="input input-bordered input-sm" value={ project.RepoPath } readonly/>
+						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
 						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label>
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
 				}
@@ -320,16 +320,16 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 <section id="new-project-general" role="tabpanel" aria-labelledby="new-project-general-tab" data-project-panel="general">
 <div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
-					<input type="text" id="new-project-name" name="name" class="input input-bordered input-sm" required placeholder="My Project"/>
+					<input type="text" id="new-project-name" name="name" class="input input-bordered" required placeholder="My Project"/>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Description</span></label>
-					<textarea name="description" class="textarea textarea-bordered textarea-sm" rows="2" placeholder="Project description"></textarea>
+					<textarea name="description" class="textarea textarea-bordered" rows="2" placeholder="Project description"></textarea>
 				</div>
 				<div class="form-control mb-3">
 					<label class="label"><span class="label-text">Repository Source</span></label>
 					if localRepoPathEnabled {
-						<select id="new-project-repo-source" name="repo_source" class="select select-bordered select-sm">
+						<select id="new-project-repo-source" name="repo_source" class="select select-bordered">
 							<option value="local" selected>Local Path</option>
 							<option value="github">GitHub URL</option>
 						</select>
@@ -345,11 +345,11 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					<div id="new-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
-							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered input-sm flex-1" placeholder="/path/to/repo"/>
+							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered flex-1" placeholder="/path/to/repo"/>
 							<button
 								type="button"
 								id="new-project-browse-btn"
-								class="btn btn-outline btn-sm self-center"
+								class="btn btn-outline self-center"
 							>Choose Folder</button>
 						</div>
 						<label class="label">
@@ -359,7 +359,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					</div>
 					<div id="new-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo"/>
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
 						<label class="label cursor-pointer justify-start gap-3">
@@ -376,7 +376,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 				} else {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered input-sm" placeholder="https://github.com/owner/repo" required/>
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>				}
 				@ProjectDefaultsFields("new-project", &models.Project{}, agents, globalMaxWorkers)
@@ -666,7 +666,7 @@ templ ProjectDefaultsFields(prefix string, project *models.Project, agents []mod
      <label for={ prefix + "-default-model" } class="text-sm font-medium">Default Model</label>
      @projectPermissionHelp("Default Model", "Used when no model is specified on a task. Leave set to Global default to inherit the global model.")
     </div>
-    <select id={ prefix + "-default-model" } name="default_agent_config_id" class="select select-bordered select-sm">
+    <select id={ prefix + "-default-model" } name="default_agent_config_id" class="select select-bordered">
      <option value="">Global default</option>
      for _, agent := range agents {
       <option value={ agent.ID } selected?={ isProjectDefaultModel(project, agent.ID) }>
@@ -683,7 +683,7 @@ templ ProjectDefaultsFields(prefix string, project *models.Project, agents []mod
      <label for={ prefix + "-max-workers" } class="text-sm font-medium">Worker limit</label>
      @projectPermissionHelp("Worker limit", "Maximum concurrent workers for this project. Leave blank to inherit the global limit. Positive values cannot exceed the current global limit.")
     </div>
-    <input type="number" name="max_workers" id={ prefix + "-max-workers" } value={ projectMaxWorkersValue(project) } min="0" if globalMaxWorkers > 0 { max={ fmt.Sprintf("%d", globalMaxWorkers) } } step="1" placeholder="Inherit" class="input input-bordered input-sm" data-tooltip-disabled/>
+    <input type="number" name="max_workers" id={ prefix + "-max-workers" } value={ projectMaxWorkersValue(project) } min="0" if globalMaxWorkers > 0 { max={ fmt.Sprintf("%d", globalMaxWorkers) } } step="1" placeholder="Inherit" class="input input-bordered" data-tooltip-disabled/>
     if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
      <p class="text-xs text-warning mt-1">The current project limit exceeds the global limit of { fmt.Sprintf("%d", globalMaxWorkers) }. Lower it before saving.</p>
     }
