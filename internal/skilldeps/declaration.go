@@ -28,14 +28,19 @@ type Package struct {
 }
 
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
-var versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$`)
+
+// SemVer 2.0.0, without a leading v. Keep the cache path component bounded.
+var versionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
 
 func Validate(deps []Dependency) error {
 	seen := map[string]bool{}
 	environments := map[string]bool{}
 	for _, d := range deps {
-		if !namePattern.MatchString(d.Name) || !versionPattern.MatchString(d.Version) || seen[d.Name] {
+		if !namePattern.MatchString(d.Name) || seen[d.Name] {
 			return fmt.Errorf("invalid or duplicate dependency %q", d.Name)
+		}
+		if len(d.Version) > 96 || !versionPattern.MatchString(d.Version) {
+			return fmt.Errorf("dependency %s version %q must be SemVer (for example 1.2.3 or 1.2.3-rc.1), without a leading v and at most 96 characters", d.Name, d.Version)
 		}
 		seen[d.Name] = true
 		if d.EnvironmentVariable != "" {
