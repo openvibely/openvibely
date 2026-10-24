@@ -253,3 +253,18 @@ for unrotated, unflipped rectangles, rounded rectangles and diamonds; otherwise
 supply an inspected `site`. Automatic selection faces the other endpoint's
 center; it does not move the connector or avoid obstacles. Set its geometry
 separately, inspect saved attachments and view the rendered result.
+
+### Internal text links in builds after RC5
+
+Structured text runs and `run-format` can use
+`link:{"uri":"ppt/slides/slide2.xml","is_external":false}` instead of
+`hyperlink`. Use an exact inspected slide part that exists. For external links,
+use `is_external:true` with HTTP, HTTPS or mailto. Do not supply both fields.
+An empty `link:{}` removes the link.
+
+For navigation without a fixed slide target, use
+`link:{"action":"ppaction://hlinkshowjump?jump=nextslide"}`. Supported jumps
+also include `previousslide`, `firstslide`, `lastslide`, `endshow`, and
+`lastslideviewed`; program/macro actions are rejected. Verify the runtime schema
+first: RC5 does not expose `link`. Inspect saved relationships and check click
+behavior in PowerPoint; a PNG does not verify interactive links.
