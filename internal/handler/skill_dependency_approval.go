@@ -70,7 +70,19 @@ func (h *Handler) requestSkillInstallation(ctx context.Context, req contracts.Ag
 	if req.AgentDefinition != nil {
 		agentID = req.AgentDefinition.ID
 	}
-	questions := []chatInputRequestQuestion{{ID: "install", Question: fmt.Sprintf("Install missing dependencies for %s?", manifest.Identity.Skill), Options: []chatInputRequestOption{{Label: "Install dependencies", Description: "Download and use these tools on the machine hosting OpenVibely."}, {Label: "Not now", Description: "Continue without installing these dependencies."}}}}
+	names := make([]string, 0, len(manifest.Dependencies))
+	for _, dependency := range manifest.Dependencies {
+		name := dependency.Name
+		if name != "" {
+			name = strings.ToUpper(name[:1]) + name[1:]
+		}
+		names = append(names, name)
+	}
+	tools := strings.Join(names, ", ")
+	if tools == "" {
+		tools = "tools"
+	}
+	questions := []chatInputRequestQuestion{{ID: "install", Question: fmt.Sprintf("Install %s to use the %s skill?", tools, strings.ReplaceAll(manifest.Identity.Skill, "_", " ")), Options: []chatInputRequestOption{{Label: "Install dependencies"}, {Label: "Not now"}}}}
 	pending, err := h.chatInputRequests.create(task.ProjectID, req.ExecID, questions, &persistence.ChatInstallationRequest{ToolCallID: contracts.ToolCallIDFromContext(ctx), ToolArguments: skilldeps.SkillViewArguments(ctx), Manifest: raw, AgentID: agentID, ChatMode: string(req.ChatMode)})
 	if err != nil {
 		return err
