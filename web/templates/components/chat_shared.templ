@@ -468,7 +468,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var lastRenderedSourceLength = 0;
 							var largeStreamRenderThreshold = 100 * 1024;
 							// Coalesce updates of every size to reduce repaint frequency.
-							var streamRenderInterval = 100;
+							var streamRenderInterval = 50;
 							function renderBufferedOutput(force, yieldLarge) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
@@ -968,7 +968,7 @@ templ ChatStreamingResumeInitScript() {
 					var lastRenderedSourceLength = cumulativeContent.length;
 					var largeStreamRenderThreshold = 100 * 1024;
 					// Pace repaints below frame rate; see renderBufferedOutput.
-					var streamRenderInterval = 100;
+					var streamRenderInterval = 50;
 					function renderCumulativeContent(force, yieldLarge) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
