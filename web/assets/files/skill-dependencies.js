@@ -48,13 +48,6 @@
   return response.json();
  }
  function details(root, manifest) {
-  for (const dep of manifest.dependencies || []) {
-   const pkg = dep.packages?.[manifest.platform];
-   let host = 'Local installation';
-   if (pkg?.url) { try { host = new URL(pkg.url).host; } catch (_) { host = 'Invalid source URL'; } }
-   const name = dep.name.charAt(0).toUpperCase() + dep.name.slice(1);
-   root.append(element('p', name + ' ' + dep.version + ' · ' + host, 'text-sm opacity-70'));
-  }
   const expansion = element('details');
   expansion.append(element('summary', 'Download details', 'cursor-pointer text-sm'));
   for (const dep of manifest.dependencies || []) {
