@@ -102,6 +102,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				method="post"
 				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
 				hx-swap="none"
+                hx-indicator="#edit-project-save-progress"
 			>
 				@ProjectSettingsTabs("edit-project")
 <div data-project-tab-content>
@@ -207,8 +208,12 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 							onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')"
 						>Delete Project</button>
 					}
-					<button type="button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
-					<button type="submit" class="btn btn-primary">Save</button>
+					<button type="button" id="edit-project-cancel-button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
+					<button type="submit" id="edit-project-save-button" class="btn btn-primary">
+ <span id="edit-project-save-progress" class="loading loading-spinner loading-sm htmx-indicator" aria-hidden="true"></span>
+ <span class="edit-project-save-label">Save</span>
+ <span class="edit-project-save-busy-label hidden" role="status">Saving...</span>
+ </button>
 				</div>
 			</form>
 		</div>
@@ -245,6 +250,29 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			var savedRepoPath = input && input.value;
 			var savedRepoURL = githubInput && githubInput.value;
 			var savedRepoSource = repoSourceSelect && repoSourceSelect.value;
+            var editForm = m && m.querySelector('form[hx-put]');
+            var saveButton = m && m.querySelector('#edit-project-save-button');
+            var cancelButton = m && m.querySelector('#edit-project-cancel-button');
+            function setSaveBusy(busy) {
+                if (!saveButton) return;
+                var busyLabel = saveButton.querySelector('.edit-project-save-busy-label');
+                if (busy) {
+                    var cloning = repoSourceSelect && repoSourceSelect.value === 'github' &&
+                        (savedRepoSource !== 'github' || (githubInput && githubInput.value.trim() !== (savedRepoURL || '').trim()));
+                    busyLabel.textContent = cloning ? 'Cloning repository...' : 'Saving...';
+                }
+                saveButton.disabled = busy;
+                if (cancelButton) cancelButton.disabled = busy;
+                saveButton.querySelector('.edit-project-save-label').classList.toggle('hidden', busy);
+                busyLabel.classList.toggle('hidden', !busy);
+            }
+            if (editForm) {
+                editForm.addEventListener('htmx:beforeRequest', function() { setSaveBusy(true); });
+                ['htmx:afterRequest', 'htmx:sendError', 'htmx:abort', 'htmx:timeout'].forEach(function(eventName) {
+                    editForm.addEventListener(eventName, function() { setSaveBusy(false); });
+                });
+            }
+
 			function updateHealthVisibility() {
 				if (!healthStatus) return;
 				healthStatus.classList.toggle('hidden',
@@ -505,7 +533,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					if (createButton) createButton.disabled = !!isBusy;
 					if (cancelButton) cancelButton.disabled = !!isBusy;
 					if (createLabel) createLabel.classList.toggle('hidden', !!isBusy);
-					if (createBusyLabel) createBusyLabel.classList.toggle('hidden', !isBusy);
+					if (createBusyLabel) {
+                        if (isBusy) createBusyLabel.textContent = repoSourceSelect && repoSourceSelect.value === 'github' ? 'Cloning repository...' : 'Creating...';
+                        createBusyLabel.classList.toggle('hidden', !isBusy);
+                    }
 				}
 
 				function updatePathPreview() {
@@ -659,8 +690,8 @@ templ ProjectSettingsTabs(prefix string) {
  <style>
   #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }
   :is(#edit_project_modal, #new_project_modal) .modal-action > button[type="submit"] { min-width: 6rem; }
-  #new-project-create-progress { display: none; }
-  #new-project-create-progress.htmx-request { display: inline-block; }
+  :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }
+  :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }
   [data-project-tab-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; }
   [data-project-repo-fields][hidden] { display: none !important; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
