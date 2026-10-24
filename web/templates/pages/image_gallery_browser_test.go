@@ -234,7 +234,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.click(`[data-image-name="message.svg"]`)
 		b.waitFor("failed image", `document.querySelector('[data-gallery-status]').textContent`, "Image unavailable")
 		b.evaluate(`document.querySelector('[data-image-name="message.svg"]').closest('[data-image-gallery-group]').remove();'removed'`)
-		b.waitFor("navigation removes stale preview", `String(document.getElementById('image-gallery').open)`, "false")
+		b.waitFor("removing opener preserves preview", `String(document.getElementById('image-gallery').open)`, "true")
+		b.evaluate(`window.dispatchEvent(new PopStateEvent("popstate")); "away"`)
+		b.waitFor("history navigation closes preview", `String(document.getElementById('image-gallery').open)`, "false")
 	})
 	runComposerFocusCDP(t, chrome, server.URL+"/new?tab=attachments", "draft-gallery", func(b *composerFocusCDP) {
 		b.waitFor("composer loaded", `String(!!document.getElementById('task-thread-form-file-input') && typeof window['task-thread-formClearAttachments']==='function')`, "true")
