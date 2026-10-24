@@ -26,16 +26,29 @@ type liveCommand struct {
 	Offset    int    `json:"offset"`
 }
 type liveFrame struct {
-	ID     string `json:"id,omitempty"`
-	Event  string `json:"event"`
-	Data   any    `json:"data,omitempty"`
-	Start  int    `json:"start,omitempty"`
-	Offset int    `json:"offset,omitempty"`
+	// Internal owner identity prevents an old worker's terminal frame from
+	// retiring a replacement that reused the same wire ID.
+	subscription *liveSubscription
+	ID           string `json:"id,omitempty"`
+	Event        string `json:"event"`
+	Data         any    `json:"data,omitempty"`
+	Start        int    `json:"start,omitempty"`
+	Offset       int    `json:"offset,omitempty"`
 }
 
 type liveSubscription struct {
 	id   string
 	stop context.CancelFunc
+}
+
+func retireLiveFrameSubscription(subscriptions map[string]*liveSubscription, frame liveFrame) {
+	if frame.Event != "retry" && frame.Event != "done" && frame.Event != "error" {
+		return
+	}
+	if owner := frame.subscription; owner != nil && subscriptions[frame.ID] == owner {
+		owner.stop()
+		delete(subscriptions, frame.ID)
+	}
 }
 
 // LiveWebSocket uses the normal session middleware and additionally checks the
@@ -186,6 +199,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 						return false
 					}
 					f.ID = cmd.ID
+					f.subscription = subscription
 					return send(f)
 				}
 				if cmd.Op == "execution" {
@@ -195,6 +209,9 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				}
 			}(cmd)
 		case f := <-out:
+			// A client can retry as soon as this frame reaches the socket. Retire
+			// its owner first; the worker's finished notification may arrive later.
+			retireLiveFrameSubscription(subscriptions, f)
 			if !writeFrame(f) {
 				return nil
 			}
