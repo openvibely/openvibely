@@ -269,7 +269,7 @@ func TestInstallationSharedQuestionsLiveAndCancelled(t *testing.T) {
 					if decision == "revoke skill access" {
 						platform := runtime.GOOS + "/" + runtime.GOARCH
 						manager := skilldeps.Manager{CacheDir: cache, Platform: platform, Client: server.Client()}
-						dependency := skilldeps.Dependency{Name: "fixture", Version: "1", HealthCheck: []string{"--version"}, Packages: map[string]skilldeps.Package{platform: {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("#!/bin/sh\nexit 0\n"))), Format: "raw", Executable: "fixture"}}}
+						dependency := skilldeps.Dependency{Name: "fixture", Version: "1.0.0", HealthCheck: []string{"--version"}, Packages: map[string]skilldeps.Package{platform: {URL: server.URL, SHA256: fmt.Sprintf("%x", sha256.Sum256([]byte("#!/bin/sh\nexit 0\n"))), Format: "raw", Executable: "fixture"}}}
 						_, err := manager.ResolveWithInstallPrompt(ctx, skilldeps.SkillIdentity{Skill: "fixture"}, []skilldeps.Dependency{dependency}, prompt)
 						done <- err
 						return
@@ -449,8 +449,8 @@ func TestInstallationLateResultMatchesLiveToolResult(t *testing.T) {
 				original := createExec(t, h, task.ID, model.ID, func(ex *models.Execution) { ex.Status = models.ExecFailed })
 				var next *models.Execution
 				manifest := skilldeps.InstallationRequest{Identity: skilldeps.SkillIdentity{ProjectID: project.ID, Skill: "fixture"}, Platform: "linux/amd64", Dependencies: []skilldeps.Dependency{
-					{Name: "already-installed", Version: "1"},
-					{Name: "fixture", Version: "1", EnvironmentVariable: "FIXTURE_PATH", HealthCheck: []string{"--version"}, Packages: map[string]skilldeps.Package{"linux/amd64": {URL: "https://example.com/fixture", SHA256: strings.Repeat("a", 64), Format: "raw", Executable: "fixture"}}},
+					{Name: "already-installed", Version: "1.0.0"},
+					{Name: "fixture", Version: "1.0.0", EnvironmentVariable: "FIXTURE_PATH", HealthCheck: []string{"--version"}, Packages: map[string]skilldeps.Package{"linux/amd64": {URL: "https://example.com/fixture", SHA256: strings.Repeat("a", 64), Format: "raw", Executable: "fixture"}}},
 				}}
 				raw, _ := json.Marshal(manifest)
 				args := json.RawMessage(`{"handle":"fixture","file_path":"scripts/help.md"}`)
@@ -504,7 +504,7 @@ func TestInstallationLateResultMatchesLiveToolResult(t *testing.T) {
 					case "new dependency":
 						dependency.Name = "other"
 					case "version":
-						dependency.Version = "2"
+						dependency.Version = "2.0.0"
 					case "URL":
 						pkg.URL = "https://other.example/fixture"
 					case "hash":
