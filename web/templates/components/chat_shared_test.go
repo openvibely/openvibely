@@ -4303,7 +4303,7 @@ func TestRenderStreamingContent_PersistentThinkingState(t *testing.T) {
 	if !strings.Contains(content, "window._thinkingOpenStates") {
 		t.Error("should initialize window._thinkingOpenStates for persistent thinking state storage")
 	}
-	if !strings.Contains(content, "if (!window._thinkingOpenStates) window._thinkingOpenStates = {};") {
+	if !strings.Contains(content, "if (!(window._thinkingOpenStates instanceof Map)) window._thinkingOpenStates = new Map();") {
 		t.Error("should initialize window._thinkingOpenStates with executable JavaScript, not inside a comment")
 	}
 
@@ -4318,13 +4318,54 @@ func TestRenderStreamingContent_PersistentThinkingState(t *testing.T) {
 	}
 
 	// Should restore from persistent store when local states are empty (after morph DOM replacement)
-	if !strings.Contains(content, "prevThinkingStates = window._thinkingOpenStates[containerKey]") {
+	if !strings.Contains(content, "prevThinkingStates = window._thinkingOpenStates.get(containerKey)") {
 		t.Error("should restore thinking states from persistent store when DOM elements were replaced by morph")
 	}
 
 	// Should update persistent store on user toggle events
 	if !strings.Contains(content, "addEventListener('toggle'") {
 		t.Error("should add toggle event listener to update persistent state when user expands/collapses")
+	}
+}
+
+func TestThinkingOpenStatesAreBoundedAndReleasedPerExecution(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("requires node")
+	}
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "if (!(window._thinkingOpenStates instanceof Map))")
+	end := strings.Index(content, "window.invalidateToolOutputLineCapacity")
+	if start < 0 || end < start {
+		t.Fatal("could not isolate thinking state store")
+	}
+	script := `const assert = require('assert'); global.window = {};
+` + content[start:end] + `
+const store = window._thinkingOpenStates;
+for (let i = 0; i < 2100; i++) window.rememberThinkingOpenStates(String(i), [true]);
+assert.equal(store.size, 2000);
+assert.ok(!store.has('0') && !store.has('99') && store.has('100'), 'oldest keys must be evicted first, including numeric keys');
+window.rememberThinkingOpenStates('100', [false]);
+window.rememberThinkingOpenStates('new', [true]);
+assert.ok(store.has('100') && !store.has('101'), 'touching a key must protect it from eviction');
+store.clear();
+window.rememberThinkingOpenStates('exec:a', [true]);
+window.rememberThinkingOpenStates('stream-a:tail:5', [true]);
+window.rememberThinkingOpenStates('stream-ab', [true]);
+window.rememberThinkingOpenStates('pos:0', [true]);
+window._toolOutputStateOwners.set('a', new Set(['stream-a', 'pos:0']));
+window.releaseToolOutputState('a');
+assert.deepEqual(Array.from(store.keys()).sort(), ['pos:0', 'stream-ab'], 'release must drop only its own keys and keep shared positional keys');
+window.releaseToolOutputState();
+assert.equal(window._thinkingOpenStates.size, 0);
+`
+	cmd := exec.Command(node, "-e", script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("thinking state store: %v\n%s", err, out)
 	}
 }
 

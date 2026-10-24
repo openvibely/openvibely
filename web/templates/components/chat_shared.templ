@@ -4534,32 +4534,36 @@ templ ChatAutoScrollScript() {
 				};
 
 			// Persistent stores survive streaming rerenders and HTMX morph replacement.
-			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
+			if (!(window._thinkingOpenStates instanceof Map)) window._thinkingOpenStates = new Map();
 			if (!window._toolOutputRowStates) window._toolOutputRowStates = {};
 			if (!window._toolOutputStateOwners) window._toolOutputStateOwners = new Map();
 			window.releaseToolOutputState = function(executionID) {
 				if (executionID == null) {
 					window._toolOutputRowStates = {};
-					window._thinkingOpenStates = {};
+					window._thinkingOpenStates.clear();
 					window._toolOutputStateOwners.clear();
 					return;
 				}
-				delete window._thinkingOpenStates['exec:' + executionID];
+				window._thinkingOpenStates.delete('exec:' + executionID);
 				var prefixes = window._toolOutputStateOwners.get(executionID);
 				if (!prefixes) return;
-				[window._toolOutputRowStates, window._thinkingOpenStates].forEach(function(states) {
-					Object.keys(states).forEach(function(key) {
-						for (var prefix of prefixes) if (key === prefix || key.startsWith(prefix + ':')) { delete states[key]; break; }
-					});
+				Object.keys(window._toolOutputRowStates).forEach(function(key) {
+					for (var prefix of prefixes) if (key.startsWith(prefix + ':')) { delete window._toolOutputRowStates[key]; break; }
 				});
+				// Positional keys are shared across threads; the LRU cap bounds them instead.
+				var thinkingPrefixes = Array.from(prefixes).filter(function(prefix) { return prefix.indexOf('pos:') !== 0; });
+				if (thinkingPrefixes.length) {
+					Array.from(window._thinkingOpenStates.keys()).forEach(function(key) {
+						for (var prefix of thinkingPrefixes) if (key === prefix || key.startsWith(prefix + ':')) { window._thinkingOpenStates.delete(key); break; }
+					});
+				}
 				window._toolOutputStateOwners.delete(executionID);
 			};
 			window.rememberThinkingOpenStates = function(key, states) {
 				var store = window._thinkingOpenStates;
-				delete store[key];
-				store[key] = states;
-				var keys = Object.keys(store);
-				for (var i = 0; i < keys.length - 2000; i++) delete store[keys[i]];
+				store.delete(key);
+				store.set(key, states);
+				if (store.size > 2000) store.delete(store.keys().next().value);
 			};
 			window.invalidateToolOutputLineCapacity = function() {
 				window._toolOutputCapacityCache = null;
@@ -5419,8 +5423,8 @@ templ ChatAutoScrollScript() {
 					window.rememberThinkingOpenStates(containerKey, prevThinkingStates.slice());
 				}
 			// If no local states found (DOM was replaced by morph), restore from persistent store
-			if (prevThinkingStates.length === 0 && containerKey && window._thinkingOpenStates[containerKey]) {
-					prevThinkingStates = window._thinkingOpenStates[containerKey];
+			if (prevThinkingStates.length === 0 && containerKey && window._thinkingOpenStates.has(containerKey)) {
+					prevThinkingStates = window._thinkingOpenStates.get(containerKey);
 				}
 
 			// Remove pre-wrap styling from streaming container since we're creating
