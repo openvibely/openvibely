@@ -180,7 +180,7 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
    down(hours[9]);up();
    check(count()===0 && hourCount()===1,'time selection replaces day selection');
    check(root.querySelectorAll('.drop-zone.schedule-day-selected').length===7,'hour highlights every displayed date');
-   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip hour(s)','hour action label');
+   check(toolbar.querySelector('[data-calendar-action="skip"]').textContent==='Skip','hour action label');
    down(hours[14],{metaKey:true});up();
    check(hourCount()===2,'Command-click adds nonadjacent hour');
    down(hours[9],{ctrlKey:true});up();
