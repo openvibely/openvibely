@@ -293,14 +293,15 @@ templ analyticsContent(currentProject *models.Project) {
 				(function() {
 				window._analyticsGeneration = (window._analyticsGeneration || 0) + 1;
 				const analyticsGeneration = window._analyticsGeneration;
-				// Destroy any charts from a previous analytics page visit
+				// Dispose the previous page before installing its replacement.
+                if (window._analyticsAbortController) window._analyticsAbortController.abort();
+                // Fallback for charts created before a lifecycle controller was installed.
 				if (window._analyticsCharts) {
 					Object.values(window._analyticsCharts).forEach(function(c) {
 						try { c.destroy(); } catch(e) {}
 					});
 				}
 					window._analyticsCharts = {};
-					if (window._analyticsAbortController) window._analyticsAbortController.abort();
 					window._analyticsAbortController = new AbortController();
 					if (window._analyticsDataAbortController) window._analyticsDataAbortController.abort();
 
@@ -318,6 +319,14 @@ templ analyticsContent(currentProject *models.Project) {
                         themeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-color-theme']});
                         eventSignal.addEventListener('abort', function() { themeObserver.disconnect(); }, {once:true});
 						setupAnalyticsPreview();
+                        // Restore any preview canvas before destroying its chart.
+                        eventSignal.addEventListener('abort', function() {
+                            Object.keys(charts).forEach(destroyChart);
+                        }, {once: true});
+                        document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
+                            const element = event.detail && event.detail.elt;
+                            if (element && (element === dataEl || element.contains(dataEl))) leaveAnalytics();
+                        }, {signal: eventSignal});
 						function setupAnalyticsPreview() {
 						 const dialog = document.createElement('dialog');
 						 dialog.setAttribute('data-analytics-preview', '');
