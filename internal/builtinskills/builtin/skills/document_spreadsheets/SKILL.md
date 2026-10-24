@@ -48,11 +48,36 @@ dependencies:
     environment_variable: DOCUMENT_SOFFICE
     health_check: [--headless, --version]
     packages:
+      darwin/amd64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/mac/x86_64/LibreOffice_26.8.1_MacOS_x86-64.dmg
+        sha256: 4c7464313a529e9074400cbcdc894fc40ac4ef9421ded03b16b5a78d12cb155e
+        format: dmg
+        executable: LibreOffice.app/Contents/MacOS/soffice
       darwin/arm64:
         url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/mac/aarch64/LibreOffice_26.8.1_MacOS_aarch64.dmg
         sha256: ca074e0b13571efb30a31fc531c5f95e997030637325e5d5de92d67aefdf0dfc
         format: dmg
         executable: LibreOffice.app/Contents/MacOS/soffice
+      linux/amd64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/x86_64/LibreOffice_26.8.1_Linux_x86-64_deb.tar.gz
+        sha256: 30903df3b9f61360d9660cd707de48cd2831469114492a5008ed58a0ac77d044
+        format: libreoffice-deb
+        executable: program/soffice
+      linux/arm64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/aarch64/LibreOffice_26.8.1_Linux_aarch64_deb.tar.gz
+        sha256: 1b069c20dd237f6decad3ea02cb02f39fdf458b03d09c2a9facb7b9b71e6a27a
+        format: libreoffice-deb
+        executable: program/soffice
+      windows/amd64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/win/x86_64/LibreOffice_26.8.1_Win_x86-64.msi
+        sha256: c6298b10cfa1748bcbedad94c62ce771e240e5021bfd6d7a967cd571b04b5312
+        format: libreoffice-msi
+        executable: program/soffice.exe
+      windows/arm64:
+        url: https://download.documentfoundation.org/libreoffice/stable/26.8.1/win/aarch64/LibreOffice_26.8.1_Win_aarch64.msi
+        sha256: 97c2173752325af1da3d8731f41c8e09a7c4ad491cf55d9b1069fadb5668e6d7
+        format: libreoffice-msi
+        executable: program/soffice.exe
 ---
 
 # Spreadsheets documents

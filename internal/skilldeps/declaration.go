@@ -70,12 +70,18 @@ func Validate(deps []Dependency) error {
 				return fmt.Errorf("dependency %s requires SHA-256", d.Name)
 			}
 			switch p.Format {
-			case "raw", "zip", "tar.gz", "dmg":
+			case "raw", "zip", "tar.gz", "dmg", "libreoffice-deb", "libreoffice-msi":
 			default:
 				return fmt.Errorf("unsupported package format %q", p.Format)
 			}
 			if p.Format == "dmg" && !strings.HasPrefix(platform, "darwin/") {
 				return fmt.Errorf("DMG requires darwin")
+			}
+			if p.Format == "libreoffice-deb" && (!strings.HasPrefix(platform, "linux/") || p.Executable != "program/soffice") {
+				return fmt.Errorf("LibreOffice DEB bundle requires linux and program/soffice")
+			}
+			if p.Format == "libreoffice-msi" && (!strings.HasPrefix(platform, "windows/") || p.Executable != "program/soffice.exe") {
+				return fmt.Errorf("LibreOffice MSI requires windows and program/soffice.exe")
 			}
 			if !safeRelative(p.Executable) {
 				return fmt.Errorf("invalid executable path for %s", d.Name)
