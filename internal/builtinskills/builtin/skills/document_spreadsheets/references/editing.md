@@ -88,7 +88,7 @@ Use a `tab-color` operation with a six-digit RGB `color`; an empty string clears
 {"edits":[{"operation":"tab-color","sheet":"Summary","color":"4472C4"}]}
 ```
 
-Run with `paperworks workbook-edit input.xlsx --spec edits.json --output updated.xlsx`. This operation is available in the pinned RC5 release.
+Run with `paperworks workbook-edit input.xlsx --spec edits.json --output updated.xlsx`. This operation is available in the pinned RC6 release.
 
 ## Add a sensitivity table to an existing workbook (after RC4)
 
@@ -96,4 +96,4 @@ Use `workbook-edit` with `add-data-table`. Set up the model inputs, output formu
 ```json
 {"edits":[{"operation":"add-data-table","sheet":"Model","data_table":{"range":"E3:F4","input1":"B1","input2":"B2"}}]}
 ```
-Here `E3:F4` is the result body, `D2` holds the output formula, `E2:F2` holds row trials, and `D3:D4` holds column trials. `input1` is the row-input cell and `input2` the column-input cell on the same sheet. The command rejects occupied result cells, merges, structured tables and existing formula-range overlaps. It writes a native definition, not calculated results: recalculate the output, inspect the table values, and verify selected scenarios independently. This operation is available in the pinned RC5 release.
+Here `E3:F4` is the result body, `D2` holds the output formula, `E2:F2` holds row trials, and `D3:D4` holds column trials. `input1` is the row-input cell and `input2` the column-input cell on the same sheet. The command rejects occupied result cells, merges, structured tables and existing formula-range overlaps. It writes a native definition, not calculated results: recalculate the output, inspect the table values, and verify selected scenarios independently. This operation is available in the pinned RC6 release.

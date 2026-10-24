@@ -9,33 +9,33 @@ skill:
     description: Read, create, and edit PowerPoint PPTX slide decks with text, images, tables, and charts.
 dependencies:
   - name: paperworks
-    version: 0.0.0-rc5
+    version: 0.0.0-rc6
     environment_variable: PAPERWORKS
     health_check: [version]
     packages:
       darwin/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc5/paperworks-darwin-amd64.zip
-        sha256: 2512cbd3fcfe5c98cf8ade7e84f0a59d6f45b8fe42568429b28ad230c04f1f38
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-darwin-amd64.zip
+        sha256: ea3fb6fd752b1b7694d09d90949a3765ec60ef4cf7bb1f43c9af66f1278d1e99
         format: zip
         executable: paperworks
       darwin/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc5/paperworks-darwin-arm64.zip
-        sha256: bec1b70a509b411e4b3beadadde3bdf57ec76cb2cff12e90386986279b9662b2
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-darwin-arm64.zip
+        sha256: 4ad9daf595d90f02518a6169e7a51a43ddcb7838530d7265193bc20da6a93ef3
         format: zip
         executable: paperworks
       linux/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc5/paperworks-linux-amd64.zip
-        sha256: d4d99b87c934353003c87b62e38502f7ee412a9527d6ebbb70f72eae3654fd8e
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-linux-amd64.zip
+        sha256: aa23df030e248fc507b7305e6f42953150849167228f51031632a121bcb26a31
         format: zip
         executable: paperworks
       linux/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc5/paperworks-linux-arm64.zip
-        sha256: 3d3123095efde079af66ce9fff29e7c3d1f94ff93dcc14938344c169d3231c3d
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-linux-arm64.zip
+        sha256: dc3c0347b8f73f75c44e151ab2f9f4052f34455243e37881b464adfedfecf722
         format: zip
         executable: paperworks
       windows/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc5/paperworks-windows-amd64.zip
-        sha256: d27415607f3cd4b5cfe36021d800f8e4da4c77fc050ff873140fd68252772cef
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-windows-amd64.zip
+        sha256: 3ff7644dd15a1162a3437f1aa2a00b45b05b7219e76d71e1475301d616c7fcac
         format: zip
         executable: paperworks.exe
   - name: libreoffice

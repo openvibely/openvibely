@@ -1,6 +1,6 @@
 # Advanced slide controls
 
-These controls are available in the pinned Paperworks **0.0.0-rc5** release.
+These controls are available in the pinned Paperworks **0.0.0-rc6** release.
 Use `schema create-pptx` and `schema slide-edit` for the supported fields.
 
 All edit examples below go inside `{"edits":[...]}` and run with

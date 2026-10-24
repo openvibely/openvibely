@@ -235,10 +235,10 @@ JSON
 
 The two shapes in this new deck receive IDs `2` and `3`. For a supplied deck, inspect actual slide-local IDs; do not assume creation order or use shape names as IDs. These rectangles use site 3 (right) and site 1 (left); connection-site indices depend on shape geometry. `start`/`end` store native attachments, while the connector box supplies its initial geometry. `tail` puts the arrow at the end/target; `head` puts it at the start. Open the PNG with `view_image` to verify endpoints and direction. Check attachments in the saved package or presentation application as well; a line touching a shape is not proof of an attachment.
 
-### Connector endpoints in builds after RC5
+### Connector endpoints (RC6)
 
-RC5 accepts `straight`, `elbow`, and `curved` with explicit endpoint site indices.
-Newer builds also accept `elbow2`, `elbow3`, `elbow4`, and `elbow5` and expose
+RC6 accepts `straight`, `elbow`, and `curved` with explicit endpoint site indices.
+It also accepts `elbow2`, `elbow3`, `elbow4`, and `elbow5` and exposes
 `slide-edit` operation `connector`:
 
 ```json
@@ -256,7 +256,7 @@ sites are top=0, left=2, bottom=4, right=6; side names avoid having to specify
 these manually. Explicit site indices remain unchanged. Set its geometry
 separately, inspect saved attachments and view the rendered result.
 
-### Internal text links in builds after RC5
+### Internal text links (RC6)
 
 Structured text runs and `run-format` can use
 `link:{"uri":"ppt/slides/slide2.xml","is_external":false}` instead of
@@ -267,11 +267,10 @@ An empty `link:{}` removes the link.
 For navigation without a fixed slide target, use
 `link:{"action":"ppaction://hlinkshowjump?jump=nextslide"}`. Supported jumps
 also include `previousslide`, `firstslide`, `lastslide`, `endshow`, and
-`lastslideviewed`; program/macro actions are rejected. Verify the runtime schema
-first: RC5 does not expose `link`. Inspect saved relationships and check click
+`lastslideviewed`; program/macro actions are rejected. RC6 exposes `link`. Inspect saved relationships and check click
 behavior in PowerPoint; a PNG does not verify interactive links.
 
-### Add masters and layouts in builds after RC5
+### Add masters and layouts (RC6)
 
 After confirming `schema deck-edit` exposes these fields, use:
 
@@ -295,9 +294,9 @@ color map/background, instead of `placeholders`. Relationship-dependent assets
 are rejected; a master resource's layout list is replaced with a registered
 blank layout. Adding or assigning a layout does not relocate existing slide
 content. Inspect native relationships and placeholders, then render every slide
-affected by inheritance changes. These operations are not in pinned RC5.
+affected by inheritance changes. These operations are included in pinned RC6.
 
-### Populate layout placeholders in builds after RC5
+### Populate layout placeholders (RC6)
 
 After assigning a layout, use `deck-edit` to create its missing slide-local
 content placeholders:
@@ -322,9 +321,8 @@ Use the actual slot index, geometry and styling, not guessed values. Title and
 centered-title share a title slot; other content slots match by index (default 0).
 
 This does not invent a layout from master furniture or resize existing content.
-Render and inspect the affected slides after filling. Confirm the installed
-build exposes this operation before use; pinned RC5 does not include it.
+Render and inspect the affected slides after filling. This operation is included in pinned RC6.
 
-### Reassign an existing layout's master (after RC5)
+### Reassign an existing layout's master (RC6)
 
-Use `deck-edit` with `{"edits":[{"operation":"set-layout-master","part":"ppt/slideLayouts/slideLayout1.xml","parent_part":"ppt/slideMasters/brand.xml"}]}`. Inspect the actual existing part names first. This moves the layout's relationship and both masters' registrations, preserving layout content and slide assignments. It affects every slide sharing that layout: render and inspect inherited fonts, colors and backgrounds. Broken/ambiguous registrations fail. This operation is not in pinned RC5.
+Use `deck-edit` with `{"edits":[{"operation":"set-layout-master","part":"ppt/slideLayouts/slideLayout1.xml","parent_part":"ppt/slideMasters/brand.xml"}]}`. Inspect the actual existing part names first. This moves the layout's relationship and both masters' registrations, preserving layout content and slide assignments. It affects every slide sharing that layout: render and inspect inherited fonts, colors and backgrounds. Broken/ambiguous registrations fail. This operation is included in pinned RC6.
