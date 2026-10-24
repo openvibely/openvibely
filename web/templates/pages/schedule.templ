@@ -1715,7 +1715,12 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					if (!elt || (elt !== root && !elt.contains(root))) return;
 					document.body.removeEventListener('htmx:beforeCleanupElement', stopScheduleInterval);
 					clearInterval(intervalId);
-					if (window._schedIntervalId === intervalId) window._schedIntervalId = null;
+					if (window._schedIntervalId === intervalId) {
+						window._schedIntervalId = null;
+						calendarRoot = null;
+						timeline = null;
+						selectedScheduleCards.clear();
+					}
 				});
 			})(document.currentScript && document.currentScript.closest('#schedule-content'), window._schedIntervalId);
 

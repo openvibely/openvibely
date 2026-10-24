@@ -611,22 +611,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			}
 		</div>
 		<!-- Inline review JavaScript -->
+		@diffFileStateScript()
 		<script>
-			// Session-level state for diff file expand/collapse, scoped by viewer and capped LRU.
-			if (!window.diffFileStateBucket) {
-				window._diffFileState = window._diffFileState || {};
-				window.diffFileStateBucket = function() {
-					var viewer = document.getElementById('diff-viewer');
-					var key = viewer ? (viewer.dataset.stateKey || 'default') : 'default';
-					var bucket = window._diffFileState[key] || {};
-					delete window._diffFileState[key];
-					window._diffFileState[key] = bucket;
-					var keys = Object.keys(window._diffFileState);
-					for (var i = 0; i < keys.length - 50; i++) delete window._diffFileState[keys[i]];
-					return bucket;
-				};
-			}
-			var diffFileStateBucket = window.diffFileStateBucket;
 
 			function toggleDiffFile(idx) {
 				var inlineBody = document.getElementById('diff-body-' + idx);
@@ -1822,22 +1808,8 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision
 					color: var(--ov-diff-del-fg);
 				}
 			</style>
+		@diffFileStateScript()
 		<script>
-				// Session-level state for diff file expand/collapse, scoped by viewer and capped LRU.
-				if (!window.diffFileStateBucket) {
-					window._diffFileState = window._diffFileState || {};
-					window.diffFileStateBucket = function() {
-						var viewer = document.getElementById('diff-viewer');
-						var key = viewer ? (viewer.dataset.stateKey || 'default') : 'default';
-						var bucket = window._diffFileState[key] || {};
-						delete window._diffFileState[key];
-						window._diffFileState[key] = bucket;
-						var keys = Object.keys(window._diffFileState);
-						for (var i = 0; i < keys.length - 50; i++) delete window._diffFileState[keys[i]];
-						return bucket;
-					};
-				}
-				var diffFileStateBucket = window.diffFileStateBucket;
 
 			function toggleDiffFile(idx) {
 				var inlineBody = document.getElementById('diff-body-' + idx);
@@ -2852,4 +2824,25 @@ func shouldDefaultExpand(fileCount int) bool {
 func diffContentRevision(diff string, comments []models.ReviewComment) string {
  commentJSON, _ := json.Marshal(comments)
  return fmt.Sprintf("%x-%x", sha256.Sum256([]byte(diff)), sha256.Sum256(commentJSON))
+}
+
+// Shared by both diff viewer variants.
+templ diffFileStateScript() {
+	<script>
+			// Session-level state for diff file expand/collapse, scoped by viewer and capped LRU.
+			if (!window.diffFileStateBucket) {
+				window._diffFileState = window._diffFileState || {};
+				window.diffFileStateBucket = function() {
+					var viewer = document.getElementById('diff-viewer');
+					var key = viewer ? (viewer.dataset.stateKey || 'default') : 'default';
+					var bucket = window._diffFileState[key] || {};
+					delete window._diffFileState[key];
+					window._diffFileState[key] = bucket;
+					var keys = Object.keys(window._diffFileState);
+					for (var i = 0; i < keys.length - 50; i++) delete window._diffFileState[keys[i]];
+					return bucket;
+				};
+			}
+			var diffFileStateBucket = window.diffFileStateBucket;
+	</script>
 }

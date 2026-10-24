@@ -1990,31 +1990,21 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						_stopFileChangesSSE();
 					};
 
-				var _taskDetailBeforeSwapHandler = function(evt) {
-					var target = evt.detail && evt.detail.target;
-					if (!target) return;
-						if (target.id === 'main-content' || target.id === 'task-detail-content') {
-							_stopFileChangesSSE();
-							window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
-							window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
-							window.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
-						}
-				};
-
 				// Cancelled swaps never clean up elements; replacement scripts run before this fires.
 				var _taskDetailRoot = (document.currentScript && document.currentScript.closest('#task-detail-content')) || document.getElementById('task-detail-content');
 				var _taskDetailCleanupHandler = function(evt) {
 					var elt = evt.detail && evt.detail.elt;
 					if (!elt || !_taskDetailRoot || (elt !== _taskDetailRoot && !elt.contains(_taskDetailRoot))) return;
 					document.body.removeEventListener('htmx:beforeCleanupElement', _taskDetailCleanupHandler);
+					_stopFileChangesSSE();
+					_taskDetailRoot = null;
 					window.removeEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
-					document.body.removeEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
 					document.body.removeEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
 					document.removeEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
 					window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
 					window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
 					window.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
-					if (window._taskDetailFileChangesHandlers && window._taskDetailFileChangesHandlers.beforeSwap === _taskDetailBeforeSwapHandler) window._taskDetailFileChangesHandlers = null;
+					if (window._taskDetailFileChangesHandlers && window._taskDetailFileChangesHandlers.cleanup === _taskDetailCleanupHandler) window._taskDetailFileChangesHandlers = null;
 				};
 
 				// Block event-triggered changes refreshes while Changes tab is not active.
@@ -2057,7 +2047,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 
 					window._taskDetailFileChangesHandlers = {
 						beforeUnload: _taskDetailBeforeUnloadHandler,
-						beforeSwap: _taskDetailBeforeSwapHandler,
 						beforeRequest: _taskDetailBeforeRequestHandler,
 						afterSettle: _taskDetailAfterSettleHandler,
 						fileChangeEvent: _taskDetailFileChangeEventHandler,
@@ -2067,7 +2056,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						};
 
 						document.body.addEventListener('htmx:beforeCleanupElement', _taskDetailCleanupHandler);
-						window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);					document.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
+						window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
 					document.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
 					document.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
 					window.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
