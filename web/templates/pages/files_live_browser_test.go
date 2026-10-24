@@ -68,9 +68,9 @@ func TestBrowserFunctional_PublishedFileRefreshesTaskPanel(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/test", "files-live", func(b *composerFocusCDP) {
 		b.waitFor("initial files load", `String(!!window.OVFileViewer && !!window.openVibelyDependencyApprovalsInstalled && document.querySelector('[data-task-files]')?.classList.contains('htmx-settling')===false && document.querySelector('#attachment-list')?.textContent.includes('No files yet.'))`, "true")
 		b.evaluate(`const execution=document.createElement('div');execution.dataset.executionPair='true';execution.dataset.execId='dependency-test';document.body.append(execution);fetch('/emit',{method:'POST',body:JSON.stringify({type:'skill_dependency_progress',dependency_name:'paperworks',exec_id:'dependency-test',phase:'downloading',message:'paperworks: downloading'})});'sent'`)
-		b.waitFor("dependency setup progress", `String(document.querySelector('[data-skill-dependency-status]')?.textContent.includes('paperworks: downloading'))`, "true")
+		b.waitFor("dependency setup progress", `String(document.querySelector('[data-exec-id="dependency-test"] [data-skill-dependency-status="paperworks"]')?.textContent.includes('Downloading Paperworks…'))`, "true")
 		b.evaluate(`fetch('/emit',{method:'POST',body:JSON.stringify({type:'skill_dependency_progress',dependency_name:'paperworks',exec_id:'other',phase:'failed',message:'other: failed'})});'sent'`)
-		b.waitFor("unrelated dependency ignored", `String(document.querySelector('[data-skill-dependency-status]')?.textContent.includes('paperworks: downloading'))`, "true")
+		b.waitFor("unrelated dependency ignored", `String(document.querySelector('[data-exec-id="dependency-test"] [data-skill-dependency-status="paperworks"]')?.textContent.includes('Downloading Paperworks…'))`, "true")
 		b.evaluate(`fetch('/emit',{method:'POST',body:JSON.stringify({type:'skill_dependency_progress',dependency_name:'paperworks',exec_id:'dependency-test',phase:'ready',message:'paperworks: ready'})});'sent'`)
 		b.waitFor("dependency progress cleared", `String(!document.querySelector('[data-skill-dependency-status]'))`, "true")
 		published.Store(true)
