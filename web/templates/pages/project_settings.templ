@@ -689,6 +689,8 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 templ ProjectSettingsTabs(prefix string) {
  <style>
   #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }
+  :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }
+  :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }
   :is(#edit_project_modal, #new_project_modal) .modal-action > button[type="submit"] { min-width: 6rem; }
   :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }
   :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }

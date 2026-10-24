@@ -242,7 +242,7 @@ func TestBrowserFunctional_ProjectSubmitProgress(t *testing.T) {
 				}
 				dialog := NewProjectDialog(nil, true, 4)
 				if tc.mode != "new" {
-					project := &models.Project{ID: "test", Name: "Test", RepoPath: "/tmp/project", IsDefault: true}
+					project := &models.Project{ID: "test", Name: "Test", RepoPath: "/tmp/project"}
 					if tc.mode == "edit-remote" {
 						project.RepoURL = "https://github.com/acme/new"
 					}
@@ -263,6 +263,22 @@ func TestBrowserFunctional_ProjectSubmitProgress(t *testing.T) {
 				for _, status := range []int{http.StatusBadRequest, http.StatusOK} {
 					b.evaluate(`submitForm.requestSubmit();'ok'`)
 					b.waitFor("busy label and spinner", fmt.Sprintf(`String(submitButton.disabled && submitButton.innerText.trim()===%q && submitSpinner.getBoundingClientRect().width>0 && getComputedStyle(submitSpinner).opacity==='1' && submitForm.querySelector('[id$="-cancel-button"]').disabled)`, tc.label), "true")
+					for _, viewport := range []struct{ width, height int }{{1280, 900}, {390, 640}, {320, 640}} {
+						b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": viewport.width, "height": viewport.height, "deviceScaleFactor": 1, "mobile": false}, nil)
+						result := b.evaluate(`(() => {
+                            const footer=submitForm.querySelector('.modal-action');
+                            const bounds=footer.getBoundingClientRect();
+                            for (const button of footer.querySelectorAll('button')) {
+                                const r=button.getBoundingClientRect();
+                                if(r.left < Math.max(0,bounds.left)-1 || r.right > Math.min(innerWidth,bounds.right)+1 || r.bottom > innerHeight+1) return 'button outside footer or viewport: '+button.textContent.trim();
+                            }
+                            if(document.querySelector('dialog[open] .modal-box').scrollWidth > innerWidth) return 'horizontal overflow';
+                            return 'ok';
+                        })()`)
+						if result != "ok" {
+							t.Errorf("%dx%d: %s", viewport.width, viewport.height, result)
+						}
+					}
 					responses <- status
 					b.waitFor("idle button restored", `String(!submitButton.disabled && submitSpinner.getBoundingClientRect().width===0 && Math.abs(submitButton.getBoundingClientRect().width-normalWidth)<1 && !submitForm.querySelector('[id$="-cancel-button"]').disabled)`, "true")
 				}
