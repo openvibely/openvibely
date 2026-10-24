@@ -25,6 +25,11 @@ type wheel struct {
 }
 
 func main() {
+	started := time.Now()
+	stage := func(message string) {
+		log.Printf("[native-test] %s %s", time.Since(started).Round(time.Millisecond), message)
+	}
+	stage("host entry")
 	target, err := url.Parse(os.Args[len(os.Args)-1])
 	if err != nil || target.Scheme != "http" || target.Hostname() != "127.0.0.1" {
 		log.Fatal("expected loopback fixture URL")
@@ -34,7 +39,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
+	stage("before application.New")
 	app := application.New(application.Options{Name: "Native chat regression", Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true}})
+	stage("after application.New")
 	endpoint := "http://" + listener.Addr().String() + "/wheel"
 	bridge := fmt.Sprintf(`window.nativeTestInput={postMessage(data){return fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(r=>{if(!r.ok)return r.text().then(message=>{throw Error('Native input failed: '+r.status+' '+message)});if(data.count)window._nativeBurstDone=true}).catch(e=>{fetch('/browser-result?status='+encodeURIComponent(String(e)));throw e})}};`, endpoint)
 	// URL-backed Wails windows do not consistently apply Options.JS (WebView2
@@ -49,7 +56,9 @@ func main() {
 	if response.StatusCode != http.StatusNoContent {
 		log.Fatalf("register native bridge: %s", response.Status)
 	}
+	stage("bridge registered; before window creation")
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "native-chat-test", Title: "Native chat regression", URL: target.String(), Width: 1280, Height: 800, Windows: application.WindowsWindow{WebView2CompositionHosting: true}})
+	stage("after window creation")
 	var input sync.Mutex
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") != target.Scheme+"://"+target.Host {
@@ -113,6 +122,7 @@ func main() {
 		}
 	}()
 	defer server.Close()
+	stage("before app.Run")
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}

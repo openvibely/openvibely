@@ -29,6 +29,7 @@ func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 	}
 	_, e, _ := setupTestHandler(t)
 	results := make(chan string, 1)
+	runnerStarted := make(chan struct{}, 1)
 	var stageMu sync.Mutex
 	lastStage := "waiting for document runner"
 	started := time.Now()
@@ -140,6 +141,10 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
 			lastStage = body.String()
 			stageMu.Unlock()
 			record("stage " + body.String())
+			select {
+			case runnerStarted <- struct{}{}:
+			default:
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -178,21 +183,42 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
 		e.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Native WebKit startup can consume almost 30 seconds on Linux CI before
+	// the first document request. Give the scenario its own unchanged budget,
+	// starting when its runner executes, rather than at process launch.
+	const startupTimeout = 60 * time.Second
+	const scenarioTimeout = 30 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout+scenarioTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/models")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr
 	require.NoError(t, startHandlerBrowserProcess(cmd))
+	record("host process started; waiting for document runner")
 	var outcome string
+	startupTimer := time.NewTimer(startupTimeout)
 	select {
 	case outcome = <-results:
+	case <-runnerStarted:
+		record("document runner started; scenario budget 30s")
+		scenarioTimer := time.NewTimer(scenarioTimeout)
+		select {
+		case outcome = <-results:
+		case <-scenarioTimer.C:
+			stageMu.Lock()
+			outcome = "scenario timeout: " + lastStage
+			stageMu.Unlock()
+		case <-ctx.Done():
+			outcome = "host deadline exceeded during scenario"
+		}
+		scenarioTimer.Stop()
+	case <-startupTimer.C:
+		outcome = "startup timeout: document runner did not start within 60s"
 	case <-ctx.Done():
-		stageMu.Lock()
-		outcome = "timeout: " + lastStage
-		stageMu.Unlock()
+		outcome = "host deadline exceeded during startup"
 	}
+	startupTimer.Stop()
 	if outcome != "pass" {
 		// A JavaScript heartbeat can stop when WebKit's event loop hangs. Capture
 		// process state from outside that loop before terminating the test host.
