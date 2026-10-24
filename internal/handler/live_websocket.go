@@ -29,6 +29,7 @@ type liveFrame struct {
 	// Internal owner identity prevents an old worker's terminal frame from
 	// retiring a replacement that reused the same wire ID.
 	subscription *liveSubscription
+	finished     bool   // Internal queue marker; never written to the socket.
 	ID           string `json:"id,omitempty"`
 	Event        string `json:"event"`
 	Data         any    `json:"data,omitempty"`
@@ -37,18 +38,27 @@ type liveFrame struct {
 }
 
 type liveSubscription struct {
-	id   string
 	stop context.CancelFunc
 }
 
-func retireLiveFrameSubscription(subscriptions map[string]*liveSubscription, frame liveFrame) {
-	if frame.Event != "retry" && frame.Event != "done" && frame.Event != "error" {
-		return
+// dispatchLiveFrame runs only on the socket loop. Completion shares the output
+// queue so it cannot overtake a worker's final output. Cancelled/replaced owners
+// are filtered at delivery time, including frames queued before cancellation.
+func dispatchLiveFrame(subscriptions map[string]*liveSubscription, frame liveFrame, write func(liveFrame) bool) bool {
+	if owner := frame.subscription; owner != nil {
+		if subscriptions[frame.ID] != owner {
+			return true
+		}
+		if frame.finished || frame.Event == "retry" || frame.Event == "done" || frame.Event == "error" {
+			// Retire before writing: the client can retry immediately on receipt.
+			owner.stop()
+			delete(subscriptions, frame.ID)
+		}
 	}
-	if owner := frame.subscription; owner != nil && subscriptions[frame.ID] == owner {
-		owner.stop()
-		delete(subscriptions, frame.ID)
+	if frame.finished {
+		return true
 	}
+	return write(frame)
 }
 
 // LiveWebSocket uses the normal session middleware and additionally checks the
@@ -128,8 +138,6 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		}
 	}()
 	subscriptions := make(map[string]*liveSubscription)
-	// Completed workers are retired without ending the connection.
-	finished := make(chan *liveSubscription, 128)
 	defer func() {
 		for _, subscription := range subscriptions {
 			subscription.stop()
@@ -151,11 +159,6 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case subscription := <-finished:
-			if subscriptions[subscription.id] == subscription {
-				subscription.stop()
-				delete(subscriptions, subscription.id)
-			}
 		case cmd := <-commands:
 			if !authorized() {
 				return nil
@@ -185,14 +188,13 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				continue
 			}
 			subctx, stop := context.WithCancel(ctx)
-			subscription := &liveSubscription{id: cmd.ID, stop: stop}
+			subscription := &liveSubscription{stop: stop}
 			subscriptions[cmd.ID] = subscription
 			go func(cmd liveCommand) {
 				defer func() {
-					select {
-					case finished <- subscription:
-					case <-ctx.Done():
-					}
+					// Use the connection queue even after subctx is cancelled.
+					// Ownership checks discard obsolete completion markers.
+					send(liveFrame{ID: cmd.ID, subscription: subscription, finished: true})
 				}()
 				emit := func(f liveFrame) bool {
 					if subctx.Err() != nil {
@@ -209,10 +211,7 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				}
 			}(cmd)
 		case f := <-out:
-			// A client can retry as soon as this frame reaches the socket. Retire
-			// its owner first; the worker's finished notification may arrive later.
-			retireLiveFrameSubscription(subscriptions, f)
-			if !writeFrame(f) {
+			if !dispatchLiveFrame(subscriptions, f, writeFrame) {
 				return nil
 			}
 		case <-ticker.C:
