@@ -104,7 +104,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				hx-swap="none"
 			>
 				@ProjectSettingsTabs("edit-project")
-<div style="height: 55vh; overflow-y: auto;" data-project-tab-content>
+<div data-project-tab-content>
 				<section id="edit-project-general" role="tabpanel" aria-labelledby="edit-project-general-tab" data-project-panel="general">
 
 				<div class="form-control mb-3">
@@ -392,7 +392,7 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 					hx-indicator="#new-project-create-progress"
 				>
 				@ProjectSettingsTabs("new-project")
-<div style="height: 58vh; overflow-y: auto;" data-project-tab-content>
+<div data-project-tab-content>
 <section id="new-project-general" role="tabpanel" aria-labelledby="new-project-general-tab" data-project-panel="general">
 <div class="form-control mb-3">
 					<label class="label"><span class="label-text">Name</span></label>
@@ -657,6 +657,8 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 
 templ ProjectSettingsTabs(prefix string) {
  <style>
+  #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }
+  [data-project-tab-content] { height: min(44rem, calc(100dvh - 17rem)); overflow-y: auto; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
   [data-project-panel="general"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }
   [data-project-panel="general"] .flex > .btn { flex-shrink: 0; }

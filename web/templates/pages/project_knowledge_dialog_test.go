@@ -76,7 +76,7 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "project-tab-height-"+mode, func(b *composerFocusCDP) {
 				b.waitFor("dialog ready", `String(document.readyState === 'complete' && document.querySelector('dialog').open)`, "true")
-				for _, viewport := range []struct{ width, height int }{{1280, 900}, {390, 640}} {
+				for _, viewport := range []struct{ width, height int }{{1728, 1080}, {1280, 900}, {1280, 640}, {390, 640}} {
 					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": viewport.width, "height": viewport.height, "deviceScaleFactor": 1, "mobile": false}, nil)
 					result := b.evaluate(`(() => {
 					 const box = document.querySelector('.modal-box');
@@ -84,6 +84,7 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					 const content = box.querySelector('[data-project-tab-content]');
 					 const before = box.getBoundingClientRect();
 					 const footerBefore = footer.getBoundingClientRect();
+					 if (footerBefore.bottom > innerHeight || before.top < 0) return 'modal actions outside viewport ' + JSON.stringify({box:before.toJSON(),footer:footerBefore.toJSON(),content:content.getBoundingClientRect().toJSON(),scroll:content.scrollHeight});
 					 for (const tab of ['knowledge', 'general', 'knowledge', 'general']) {
 					   box.querySelector('[data-project-tab="' + tab + '"]').click();
 					   if (tab === 'general') {
@@ -98,6 +99,7 @@ func TestBrowserFunctional_ProjectDialogStableTabHeight(t *testing.T) {
 					     }
 					     if (Math.abs(w.height - document.getElementById('standard-modal-input').getBoundingClientRect().height) > 1) return 'controls differ from standard modal height';
 					     if (content.scrollWidth > content.clientWidth) return 'controls overflow';
+					     if (innerWidth > 640 && innerHeight >= 900 && (content.scrollHeight > content.clientHeight || Math.max(m.bottom, w.bottom) > content.getBoundingClientRect().bottom)) return 'defaults require desktop scrolling';
 					   }
 					   if (box.querySelector('thead th').textContent !== 'Resource') return 'missing resource heading';
 					   const after = box.getBoundingClientRect();
