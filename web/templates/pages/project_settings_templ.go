@@ -281,27 +281,27 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div style=\"height: 60vh; overflow-y: auto;\" data-project-tab-content><section id=\"edit-project-general\" role=\"tabpanel\" aria-labelledby=\"edit-project-general-tab\" data-project-panel=\"general\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" name=\"name\" class=\"input input-bordered input-sm\" required value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div style=\"height: 60vh; overflow-y: auto;\" data-project-tab-content><section id=\"edit-project-general\" role=\"tabpanel\" aria-labelledby=\"edit-project-general-tab\" data-project-panel=\"general\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" name=\"name\" class=\"input input-bordered\" required value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 100, Col: 103}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 100, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <textarea name=\"description\" class=\"textarea textarea-bordered textarea-sm\" rows=\"2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <textarea name=\"description\" class=\"textarea textarea-bordered\" rows=\"2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(project.Description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 104, Col: 111}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 104, Col: 99}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
@@ -312,7 +312,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 			return templ_7745c5c3_Err
 		}
 		if localRepoPathEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<select id=\"edit-project-repo-source\" name=\"repo_source\" class=\"select select-bordered select-sm\"><option value=\"local\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<select id=\"edit-project-repo-source\" name=\"repo_source\" class=\"select select-bordered\"><option value=\"local\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -342,7 +342,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<select id=\"edit-project-repo-source\" name=\"repo_source\" class=\"select select-bordered select-sm\"><option value=\"local\" selected>Local Path (existing)</option> <option value=\"github\">GitHub URL</option></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Switch to GitHub URL to configure a remote repository, or keep the existing local path.</span></label>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<select id=\"edit-project-repo-source\" name=\"repo_source\" class=\"select select-bordered\"><option value=\"local\" selected>Local Path (existing)</option> <option value=\"github\">GitHub URL</option></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Switch to GitHub URL to configure a remote repository, or keep the existing local path.</span></label>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -356,27 +356,27 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 			return templ_7745c5c3_Err
 		}
 		if localRepoPathEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div id=\"edit-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path</span></label><div class=\"flex gap-2\"><input type=\"text\" id=\"edit-project-repo-path\" name=\"repo_path\" class=\"input input-bordered input-sm flex-1\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div id=\"edit-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path</span></label><div class=\"flex gap-2\"><input type=\"text\" id=\"edit-project-repo-path\" name=\"repo_path\" class=\"input input-bordered flex-1\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.RepoPath)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 131, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 131, Col: 131}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" placeholder=\"/path/to/repo\"> <button type=\"button\" id=\"edit-project-browse-btn\" class=\"btn btn-outline btn-sm self-center\">Choose Folder</button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Use native folder picker when available. If unavailable, paste an absolute path manually.</span></label><p id=\"edit-project-picker-feedback\" class=\"text-xs text-base-content/70 hidden\"></p></div><div id=\"edit-project-github-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"edit-project-repo-url\" name=\"repo_url\" class=\"input input-bordered input-sm\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" placeholder=\"/path/to/repo\"> <button type=\"button\" id=\"edit-project-browse-btn\" class=\"btn btn-outline self-center\">Choose Folder</button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Use native folder picker when available. If unavailable, paste an absolute path manually.</span></label><p id=\"edit-project-picker-feedback\" class=\"text-xs text-base-content/70 hidden\"></p></div><div id=\"edit-project-github-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"edit-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.RepoURL)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 145, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 145, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -387,14 +387,14 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 				return templ_7745c5c3_Err
 			}
 		} else if projectRepoSource(project) == "github" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"edit-project-repo-url\" name=\"repo_url\" class=\"input input-bordered input-sm\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"edit-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.RepoURL)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 151, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 151, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 			if templ_7745c5c3_Err != nil {
@@ -418,20 +418,20 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\"><div id=\"edit-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path (current local)</span></label> <input type=\"text\" class=\"input input-bordered input-sm\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\"><div id=\"edit-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path (current local)</span></label> <input type=\"text\" class=\"input input-bordered\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.RepoPath)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 158, Col: 87}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 158, Col: 78}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" readonly> <label class=\"label\"><span class=\"label-text-alt opacity-70\">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label></div><div id=\"edit-project-github-fields\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"edit-project-repo-url\" name=\"repo_url\" class=\"input input-bordered input-sm\" placeholder=\"https://github.com/owner/repo\"> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage.</span></label></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" readonly> <label class=\"label\"><span class=\"label-text-alt opacity-70\">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label></div><div id=\"edit-project-github-fields\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"edit-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\"> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage.</span></label></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -544,12 +544,12 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div style=\"height: 60vh; overflow-y: auto;\" data-project-tab-content><section id=\"new-project-general\" role=\"tabpanel\" aria-labelledby=\"new-project-general-tab\" data-project-panel=\"general\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"new-project-name\" name=\"name\" class=\"input input-bordered input-sm\" required placeholder=\"My Project\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <textarea name=\"description\" class=\"textarea textarea-bordered textarea-sm\" rows=\"2\" placeholder=\"Project description\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Source</span></label> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div style=\"height: 60vh; overflow-y: auto;\" data-project-tab-content><section id=\"new-project-general\" role=\"tabpanel\" aria-labelledby=\"new-project-general-tab\" data-project-panel=\"general\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"new-project-name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Project\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <textarea name=\"description\" class=\"textarea textarea-bordered\" rows=\"2\" placeholder=\"Project description\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Source</span></label> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if localRepoPathEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<select id=\"new-project-repo-source\" name=\"repo_source\" class=\"select select-bordered select-sm\"><option value=\"local\" selected>Local Path</option> <option value=\"github\">GitHub URL</option></select>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<select id=\"new-project-repo-source\" name=\"repo_source\" class=\"select select-bordered\"><option value=\"local\" selected>Local Path</option> <option value=\"github\">GitHub URL</option></select>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -564,12 +564,12 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 			return templ_7745c5c3_Err
 		}
 		if localRepoPathEnabled {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div id=\"new-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path</span></label><div class=\"flex gap-2\"><input type=\"text\" id=\"new-project-repo-path\" name=\"repo_path\" class=\"input input-bordered input-sm flex-1\" placeholder=\"/path/to/repo\"> <button type=\"button\" id=\"new-project-browse-btn\" class=\"btn btn-outline btn-sm self-center\">Choose Folder</button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Use native folder picker when available. If unavailable, paste an absolute path manually.</span></label><p id=\"new-project-picker-feedback\" class=\"text-xs text-base-content/70 hidden\"></p></div><div id=\"new-project-github-fields\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered input-sm\" placeholder=\"https://github.com/owner/repo\"> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div><div id=\"new-project-create-dir-wrapper\" class=\"form-control mb-2\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" id=\"new-project-create-dir\" name=\"create_directory\" value=\"true\" class=\"checkbox checkbox-sm checkbox-primary\"> <span class=\"label-text\">Create directory if it doesn't exist</span></label></div><div id=\"new-project-path-preview\" class=\"mb-4 hidden\"><div class=\"text-xs text-base-content/60 bg-base-200 rounded-lg px-3 py-2\"><span class=\"font-medium\">Will create:</span> <code id=\"new-project-path-preview-text\" class=\"ml-1 break-all\"></code></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div id=\"new-project-local-fields\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Repository Path</span></label><div class=\"flex gap-2\"><input type=\"text\" id=\"new-project-repo-path\" name=\"repo_path\" class=\"input input-bordered flex-1\" placeholder=\"/path/to/repo\"> <button type=\"button\" id=\"new-project-browse-btn\" class=\"btn btn-outline self-center\">Choose Folder</button></div><label class=\"label\"><span class=\"label-text-alt opacity-70\">Use native folder picker when available. If unavailable, paste an absolute path manually.</span></label><p id=\"new-project-picker-feedback\" class=\"text-xs text-base-content/70 hidden\"></p></div><div id=\"new-project-github-fields\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\"> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div><div id=\"new-project-create-dir-wrapper\" class=\"form-control mb-2\"><label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" id=\"new-project-create-dir\" name=\"create_directory\" value=\"true\" class=\"checkbox checkbox-sm checkbox-primary\"> <span class=\"label-text\">Create directory if it doesn't exist</span></label></div><div id=\"new-project-path-preview\" class=\"mb-4 hidden\"><div class=\"text-xs text-base-content/60 bg-base-200 rounded-lg px-3 py-2\"><span class=\"font-medium\">Will create:</span> <code id=\"new-project-path-preview-text\" class=\"ml-1 break-all\"></code></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered input-sm\" placeholder=\"https://github.com/owner/repo\" required> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">GitHub URL</span></label> <input type=\"url\" id=\"new-project-repo-url\" name=\"repo_url\" class=\"input input-bordered\" placeholder=\"https://github.com/owner/repo\" required> <label class=\"label\"><span class=\"label-text-alt opacity-60\">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -940,7 +940,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "\" name=\"default_agent_config_id\" class=\"select select-bordered select-sm\"><option value=\"\">Global default</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "\" name=\"default_agent_config_id\" class=\"select select-bordered\"><option value=\"\">Global default</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1092,7 +1092,7 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, " step=\"1\" placeholder=\"Inherit\" class=\"input input-bordered input-sm\" data-tooltip-disabled> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, " step=\"1\" placeholder=\"Inherit\" class=\"input input-bordered\" data-tooltip-disabled> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
