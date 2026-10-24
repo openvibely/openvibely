@@ -135,7 +135,7 @@ func chatLinkOpeningBrowserFixture(t *testing.T, baseHTML string) string {
 		t.Fatal("could not isolate production desktop external-link bridge")
 	}
 	desktopEnd := desktopScriptEnd + len("</script>")
-	return `<!DOCTYPE html><html lang="en" data-openvibely-runtime="web" data-runtime="web"><head><meta charset="UTF-8"><title>Chat links</title></head><body><script>` +
+	return `<!DOCTYPE html><html lang="en" data-openvibely-runtime="web" data-runtime="web"><head><meta charset="UTF-8"><title>Chat links</title><script src="/static/vendor/marked.min.js" data-ov-asset="marked"></script><script src="/static/file-math-parser.js" data-ov-math-parser></script></head><body><script>` +
 		baseHTML[markdownStart:markdownStart+markdownEnd] +
 		`</script>` +
 		baseHTML[desktopStart:desktopStart+desktopEnd] +
@@ -177,6 +177,45 @@ func chatLinkOpeningBrowserRunner() string {
 	  }
 	  function anchor(name) { return document.querySelector('#fixture a[data-case="' + name + '"]'); }
 	  (async function() {
+	    var publishedURL = '/files/707b783cc80fc7c3f59e907220b226d0?project_id=301ebd410bafc3adf718022dbed7466d';
+	    var sources = [
+	      '[Download](<' + publishedURL + '>)',
+	      '[Download](' + publishedURL + ')',
+	      '[Download](<' + publishedURL + '> "PDF")',
+	      '[Download][pdf]\n\n[pdf]:\n  <' + publishedURL + '>',
+	      '> [Download][pdf]\n>\n> [pdf]: <' + publishedURL + '>',
+	      '![Preview](<' + publishedURL + '>)'
+	    ];
+	    function checkPublishedLinks(root, expected) {
+	      var links = root.querySelectorAll('a, img');
+	      if (links.length !== expected) fail('wrong published link count: ' + links.length);
+	      links.forEach(function(link) {
+	        var url = link.getAttribute(link.tagName === 'IMG' ? 'src' : 'href');
+	        if (url !== publishedURL) fail('broken published URL: ' + url);
+	        if (new URL(url, 'wails://localhost/tasks/task-id').pathname !== publishedURL.split('?')[0]) fail('task-relative URL');
+	      });
+	    }
+	    sources.forEach(function(source) {
+	      var root = document.createElement('div');
+	      root.innerHTML = window.renderChatMarkdown(source);
+	      checkPublishedLinks(root, 1);
+	    });
+	    var malformed = '](<img src="https://example.test/tracker.png">';
+	    var safety = document.createElement('div');
+	    safety.innerHTML = window.renderChatMarkdown(malformed);
+	    if (safety.querySelector('img') || safety.textContent.trim() !== malformed) fail('malformed link became HTML');
+	    safety.innerHTML = window.renderChatMarkdown('[bad](<javascript:alert(1)>)');
+	    if (safety.querySelector('a[href]')) fail('unsafe destination survived sanitizer');
+	    safety.innerHTML = window.renderChatMarkdown(String.fromCharCode(96) + sources[0] + String.fromCharCode(96));
+	    if (safety.querySelector('a') || !safety.querySelector('code')) fail('code example became a link');
+	    var svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="2"/></svg>';
+	    safety.innerHTML = window.renderChatMarkdown(svg);
+	    if (safety.querySelector('svg') || !safety.querySelector('code.language-svg') || safety.querySelector('code').textContent.trim() !== svg) fail('SVG preview source regressed');
+	    var large = ('padding paragraph\n\n').repeat(4000) + sources.join('\n\n') + '\n\n' + malformed;
+	    var fragment = await window.renderChatMarkdownAsync(large, {});
+	    if (!window._markdownWorkerURL || !fragment || typeof fragment === 'string') fail('large Markdown worker did not render');
+	    checkPublishedLinks(fragment, sources.length);
+	    if (!fragment.textContent.includes(malformed)) fail('worker failed to preserve literal HTML');
 	    var webOpened = [];
 	    var originalOpen = window.open;
 	    window.open = function(url, target, features) { webOpened.push([String(url), String(target || ''), String(features || '')]); return { opener: null }; };

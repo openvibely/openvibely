@@ -604,6 +604,8 @@ const linkCases = [
   '[Download](<' + publishedURL + '> "PDF")',
   '[Download][pdf]\n\n[pdf]: <' + publishedURL + '>',
   '![Preview](<' + publishedURL + '>)',
+  '[Download][pdf]\n\n[pdf]:\n  <' + publishedURL + '>',
+  '> [Download][pdf]\n>\n> [pdf]: <' + publishedURL + '>',
 ];
 for (const source of linkCases) {
   const html = window.renderChatMarkdown(source);
@@ -616,6 +618,8 @@ for (const source of linkCases) {
     }
   }
 }
+const malformed = '](<img src="https://example.test/tracker.png">';
+if (window.renderChatMarkdown(malformed).includes('<img ')) throw new Error('Malformed link became HTML');
 const mixed = window.renderChatMarkdown(linkCases[0] + '\n<img src=x onerror=alert(1)>');
 if (mixed.includes('<img src=x')) throw new Error('Raw HTML escaping regressed');
 const code = window.renderChatMarkdown(String.fromCharCode(96) + linkCases[0] + String.fromCharCode(96));
@@ -700,11 +704,11 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		"secondCodeWorker.onmessage({ data: { ranges: [{ start: 1, end: 2 }] } });\n" +
 		"const markdownOwner = {}; const firstMarkdown = window.renderChatMarkdownAsync(large, markdownOwner); const firstMarkdownWorker = workers[workers.length - 1];\n" +
 		"const markdownWorkerSource = lastBlob.parts.join(''); let importedURL = '', workerPost = null; const workerScope = { postMessage: function(value) { workerPost = value; } };\n" +
-		"new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { if(url.includes('marked.min.js'))importedURL = url; }, { setOptions: function() {}, parse: function(value) { return value; } });\n" +
+		"workerScope.marked = require('../../static/dist/vendor/marked.min.js'); new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { if(url.includes('marked.min.js'))importedURL = url; }, workerScope.marked);\n" +
 		"workerScope.onmessage({ data: 'outside <img src=x>\\n```html\\n<img src=y>\\n```' });\n" +
-		"if (importedURL !== 'http://127.0.0.1:8080/static/vendor/marked.min.js?v=0123456789ab' || !workerPost || workerPost.error || workerPost.html.indexOf('outside &lt;img src=x>') === -1 || workerPost.html.indexOf('<img src=y>') === -1) throw new Error('generated Markdown worker did not execute safely');\n" +
-		"const ThreadWorker = require('worker_threads').Worker; const threadWorkerSource = \"const {parentPort}=require('worker_threads');var self=globalThis;self.postMessage=function(value){parentPort.postMessage(value);};\" + markdownWorkerSource.replace(/importScripts\\([^;]+\\);/g, \"var marked={setOptions:function(){},parse:function(value){return value;}};\") + \";parentPort.on('message',function(data){self.onmessage({data:data});});\";\n" +
-		"const threadWorker = new ThreadWorker(threadWorkerSource, { eval: true }); const threadResult = new Promise(function(resolve, reject) { threadWorker.once('message', function(value) { threadWorker.terminate(); if (!value || value.error || value.html.indexOf('outside &lt;img src=thread>') === -1) reject(new Error('real worker thread returned unsafe output')); else resolve(true); }); threadWorker.once('error', reject); }); threadWorker.postMessage('outside <img src=thread>');\n" +
+		"if (importedURL !== 'http://127.0.0.1:8080/static/vendor/marked.min.js?v=0123456789ab' || !workerPost || workerPost.error || workerPost.html.indexOf('outside &lt;img src=x&gt;') === -1 || workerPost.html.indexOf('&lt;img src=y&gt;') === -1) throw new Error('generated Markdown worker did not execute safely');\n" +
+		"const ThreadWorker = require('worker_threads').Worker; const threadWorkerSource = \"const {parentPort}=require('worker_threads');var self=globalThis;self.postMessage=function(value){parentPort.postMessage(value);};\" + markdownWorkerSource.replace(/importScripts\\([^;]+\\);/g, \"var marked=self.marked=require(\" + JSON.stringify(require.resolve('../../static/dist/vendor/marked.min.js')) + \");\") + \";parentPort.on('message',function(data){self.onmessage({data:data});});\";\n" +
+		"const threadWorker = new ThreadWorker(threadWorkerSource, { eval: true }); const threadResult = new Promise(function(resolve, reject) { threadWorker.once('message', function(value) { threadWorker.terminate(); if (!value || value.error || value.html.indexOf('outside &lt;img src=thread&gt;') === -1) reject(new Error('real worker thread returned unsafe output')); else resolve(true); }); threadWorker.once('error', reject); }); threadWorker.postMessage('outside <img src=thread>');\n" +
 		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
 		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
 		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
