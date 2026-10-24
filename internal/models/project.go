@@ -46,10 +46,11 @@ type ProjectWorkerCapacity struct {
 type RepoPathHealthStatus string
 
 const (
-	RepoPathHealthNone    RepoPathHealthStatus = "none"
-	RepoPathHealthHealthy RepoPathHealthStatus = "healthy"
-	RepoPathHealthMissing RepoPathHealthStatus = "missing"
-	RepoPathHealthUnknown RepoPathHealthStatus = "unknown"
+	RepoPathHealthNone         RepoPathHealthStatus = "none"
+	RepoPathHealthHealthy      RepoPathHealthStatus = "healthy"
+	RepoPathHealthMissing      RepoPathHealthStatus = "missing"
+	RepoPathHealthUnknown      RepoPathHealthStatus = "unknown"
+	RepoPathHealthNotDirectory RepoPathHealthStatus = "not_directory"
 )
 
 type ProjectRepoPathHealth struct {
