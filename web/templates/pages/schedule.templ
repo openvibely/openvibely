@@ -1098,22 +1098,25 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				})();
 
 			// Handle duplicate task title errors for scheduled task form
-			document.body.addEventListener('htmx:responseError', function(event) {
-				if (event.detail.target && event.detail.target.id === 'schedule-content') {
-					const xhr = event.detail.xhr;
-					if (xhr.status === 409) {
-						event.preventDefault();
-						const titleInput = document.getElementById('sched-task-title-input');
-						const titleError = document.getElementById('sched-title-error');
-						const titleErrorMessage = document.getElementById('sched-title-error-message');
-						if (titleInput && titleError && titleErrorMessage) {
-							titleInput.classList.add('input-error');
-							titleErrorMessage.textContent = xhr.responseText || 'A task with this name already exists in this project';
-							titleError.classList.remove('hidden');
+			if (!window._scheduleTitleErrorHandlerAttached) {
+				window._scheduleTitleErrorHandlerAttached = true;
+				document.body.addEventListener('htmx:responseError', function(event) {
+					if (event.detail.target && event.detail.target.id === 'schedule-content') {
+						const xhr = event.detail.xhr;
+						if (xhr.status === 409) {
+							event.preventDefault();
+							const titleInput = document.getElementById('sched-task-title-input');
+							const titleError = document.getElementById('sched-title-error');
+							const titleErrorMessage = document.getElementById('sched-title-error-message');
+							if (titleInput && titleError && titleErrorMessage) {
+								titleInput.classList.add('input-error');
+								titleErrorMessage.textContent = xhr.responseText || 'A task with this name already exists in this project';
+								titleError.classList.remove('hidden');
+							}
 						}
 					}
-				}
-			});
+				});
+			}
 
 			// Clear error on typing in scheduled task title
 			document.getElementById('sched-task-title-input')?.addEventListener('input', function() {
@@ -1704,6 +1707,18 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			// Guard against duplicate intervals on HTMX swaps (inline script re-executes)
 			if (window._schedIntervalId) clearInterval(window._schedIntervalId);
 			window._schedIntervalId = setInterval(updateNowIndicator, 60000);
+			if (!window._schedIntervalCleanupBound) {
+				window._schedIntervalCleanupBound = true;
+				document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var target = event.detail && event.detail.target;
+					if (!target || target.id !== 'main-content' || !window._schedIntervalId) return;
+					clearInterval(window._schedIntervalId);
+					window._schedIntervalId = null;
+					calendarRoot = null;
+					timeline = null;
+					selectedScheduleCards.clear();
+				});
+			}
 
 			// Update after HTMX loads new content into the DOM.
 			// htmx:load fires on newly-inserted elements and bubbles correctly,

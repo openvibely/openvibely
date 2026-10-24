@@ -328,6 +328,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						}
 					}
 
+					if (window._kanbanListenersCleanup) window._kanbanListenersCleanup();
 					// Listen to events dispatched by the sidebar's shared SSE connection
 					window.addEventListener('sse-task-event', handleTaskEvent);
 					window.addEventListener('sse-live-connected', handleSSEReconnected);
@@ -342,24 +343,30 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						document.addEventListener('task-pointer-dragend', handleDragEnd);					// 'close' does not bubble; capture phase picks it up from <dialog>.
 					document.addEventListener('close', handleDialogClose, true);
 
+					function cleanupKanbanListeners() {
+						if (window._kanbanListenersCleanup === cleanupKanbanListeners) window._kanbanListenersCleanup = null;
+						document.body.removeEventListener('htmx:beforeSwap', cleanupKanbanListenersOnNavigation);
+						window.removeEventListener('sse-task-event', handleTaskEvent);
+						window.removeEventListener('sse-live-connected', handleSSEReconnected);
+						window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
+						window.removeEventListener('kanban-move-started', handleKanbanMoveStarted);
+						window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
+						document.body.removeEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);
+						document.body.removeEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
+						document.body.removeEventListener('htmx:beforeSwap', handleBackgroundRefreshBeforeSwap);
+						document.removeEventListener('visibilitychange', handleVisibilityChange);
+						document.removeEventListener('dragend', handleDragEnd, true);
+						document.removeEventListener('drop', handleDragEnd, true);
+						document.removeEventListener('task-pointer-dragend', handleDragEnd);
+						document.removeEventListener('close', handleDialogClose, true);
+						if (refreshTimeout) clearTimeout(refreshTimeout);
+					}
+					function cleanupKanbanListenersOnNavigation(event) {
+						if (event.detail.target && event.detail.target.id === 'main-content') cleanupKanbanListeners();
+					}
 					// Clean up listeners when navigating away via HTMX
-					document.body.addEventListener('htmx:beforeSwap', function(event) {
-						if (event.detail.target && event.detail.target.id === 'main-content') {
-							window.removeEventListener('sse-task-event', handleTaskEvent);
-							window.removeEventListener('sse-live-connected', handleSSEReconnected);
-								window.removeEventListener('kanban-menu-opened', handleKanbanMenuOpened);
-								window.removeEventListener('kanban-move-started', handleKanbanMoveStarted);
-								window.removeEventListener('kanban-refresh-unblocked', flushPendingRefresh);
-								document.body.removeEventListener('htmx:beforeRequest', handleBackgroundRefreshBeforeRequest);							document.body.removeEventListener('htmx:afterRequest', handleBackgroundRefreshAfterRequest);
-							document.body.removeEventListener('htmx:beforeSwap', handleBackgroundRefreshBeforeSwap);
-							document.removeEventListener('visibilitychange', handleVisibilityChange);
-							document.removeEventListener('dragend', handleDragEnd, true);
-							document.removeEventListener('drop', handleDragEnd, true);
-							document.removeEventListener('task-pointer-dragend', handleDragEnd);
-							document.removeEventListener('close', handleDialogClose, true);
-							if (refreshTimeout) clearTimeout(refreshTimeout);
-						}
-					});
+					document.body.addEventListener('htmx:beforeSwap', cleanupKanbanListenersOnNavigation);
+					window._kanbanListenersCleanup = cleanupKanbanListeners;
 				})();
 
 			</script>
