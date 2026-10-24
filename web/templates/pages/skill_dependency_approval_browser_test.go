@@ -79,6 +79,7 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 				t.Fatalf("unexpected technical copy %q", unwanted)
 			}
 		}
+		browser.waitFor("no dependency subheading", `document.querySelector('[data-skill-dependency-details]')?.children.length === 1 && document.querySelector('[data-skill-dependency-details]')?.firstElementChild.tagName === 'DETAILS' ? 'ready' : 'waiting'`, "ready")
 		browser.waitFor("details collapsed", `document.querySelector('[data-skill-dependency-details] details')?.open === false ? 'closed' : 'open'`, "closed")
 		for _, phase := range []struct{ stage, label string }{{"downloading", "Downloading Example…"}, {"preparing", "Installing Example…"}, {"checking executable", "Checking Example…"}} {
 			payload, _ := json.Marshal(map[string]string{"type": "skill_dependency_progress", "exec_id": "execution", "dependency_name": "example", "phase": phase.stage})
