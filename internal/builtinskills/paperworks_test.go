@@ -48,6 +48,23 @@ func TestPaperworksSkillPackages(t *testing.T) {
 				t.Fatalf("%s: invalid %s release package: %+v", name, platform, pkg)
 			}
 		}
+		office := dependencies[1]
+		if office.Version != "26.8.1" || office.EnvironmentVariable != "DOCUMENT_SOFFICE" || len(office.Packages) != len(platforms) {
+			t.Fatalf("%s: incomplete LibreOffice platform configuration", name)
+		}
+		for _, platform := range platforms {
+			pkg, ok := office.Packages[platform]
+			wantFormat, wantExecutable := "dmg", "LibreOffice.app/Contents/MacOS/soffice"
+			if strings.HasPrefix(platform, "linux/") {
+				wantFormat, wantExecutable = "libreoffice-deb", "program/soffice"
+			}
+			if strings.HasPrefix(platform, "windows/") {
+				wantFormat, wantExecutable = "libreoffice-msi", "program/soffice.exe"
+			}
+			if !ok || pkg.Format != wantFormat || pkg.Executable != wantExecutable {
+				t.Fatalf("%s: invalid LibreOffice %s package: %+v", name, platform, pkg)
+			}
+		}
 		data = documentSkillText(t, root, name)
 		for _, old := range []string{"document_check.py", "uv run", "pip install", "equation.cjs", "document_native.py", "word_edit.py", "```python", "npm install", "DOCUMENT_JAVA"} {
 			if strings.Contains(string(data), old) {
