@@ -1,5 +1,11 @@
 # Project Setup User Guide
 
+## Skills and Memory Permissions
+
+In project settings, **Skills & Memory** controls skill and memory reads and writes independently. New projects allow skill reads and memory reads/writes, while skill writes are off. **Allow global skill writes** is separate and requires skill writes. Existing projects retain their previous permissions.
+
+For a managed GitHub project whose local repository is missing, use **Re-clone** in project settings to recover it. Local-path projects require an existing valid repository directory.
+
 Use this guide to create and configure projects in OpenVibely.
 
 ## What A Project Is

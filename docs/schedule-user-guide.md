@@ -1,5 +1,7 @@
 # Schedule User Guide
 
+Conversation tasks can also be scheduled. They use normal worker admission and capacity limits when the schedule fires.
+
 Use `/schedule` to manage time-based task execution in a weekly calendar view.
 
 ## What This Page Is For
