@@ -324,3 +324,7 @@ centered-title share a title slot; other content slots match by index (default 0
 This does not invent a layout from master furniture or resize existing content.
 Render and inspect the affected slides after filling. Confirm the installed
 build exposes this operation before use; pinned RC5 does not include it.
+
+### Reassign an existing layout's master (after RC5)
+
+Use `deck-edit` with `{"edits":[{"operation":"set-layout-master","part":"ppt/slideLayouts/slideLayout1.xml","parent_part":"ppt/slideMasters/brand.xml"}]}`. Inspect the actual existing part names first. This moves the layout's relationship and both masters' registrations, preserving layout content and slide assignments. It affects every slide sharing that layout: render and inspect inherited fonts, colors and backgrounds. Broken/ambiguous registrations fail. This operation is not in pinned RC5.
