@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,8 +55,8 @@ func TestBaseDisablesRootModalScrollbarGutters(t *testing.T) {
 	if !strings.Contains(html, ":root:has(:is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open]))") {
 		t.Fatal("base layout must override DaisyUI's higher-specificity open-modal scrollbar gutter rule")
 	}
-	if !strings.Contains(html, "DaisyUI uses width: 100%") || !strings.Contains(html, "fading close frame in the same viewport coordinate space. */\n\t\t\t\t\twidth: 100vw;") {
-		t.Fatal("native modal width must use viewport units so Chrome retains its horizontal center while leaving the top layer")
+	if !regexp.MustCompile(`(?s)dialog\.modal\s*\{[^}]*\bwidth:\s*100vw;`).MatchString(html) {
+		t.Fatal("native modal width must use viewport units to retain horizontal centering")
 	}
 }
 
@@ -379,7 +380,6 @@ func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
 		t.Fatal("history cleanup must remove Models URLs including query and fragment variants")
 	}
 }
-
 
 func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
 	var buf bytes.Buffer

@@ -97,7 +97,7 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 			request: func() *http.Request {
 				return httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project, nil)
 			},
-			want: []string{global.Name, projectAgent.Name, "No Agent"},
+			want: []string{global.Name, disabled.Name, cardTask.Title},
 		},
 		{
 			name: "main content HTMX",
@@ -107,7 +107,24 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 				req.Header.Set("HX-Target", "main-content")
 				return req
 			},
-			want: []string{global.Name, projectAgent.Name, "No Agent"},
+			want: []string{global.Name, disabled.Name, cardTask.Title},
+		},
+		{
+			name: "new task full page",
+			request: func() *http.Request {
+				return httptest.NewRequest(http.MethodGet, "/tasks/new?project_id="+project, nil)
+			},
+			want: []string{global.Name, projectAgent.Name, "No agent"},
+		},
+		{
+			name: "new task HTMX",
+			request: func() *http.Request {
+				req := httptest.NewRequest(http.MethodGet, "/tasks/new?project_id="+project, nil)
+				req.Header.Set("HX-Request", "true")
+				req.Header.Set("HX-Target", "main-content")
+				return req
+			},
+			want: []string{global.Name, projectAgent.Name, "No agent"},
 		},
 		{
 			name: "board only HTMX",
@@ -151,15 +168,15 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 		})
 	}
 
-	fullReq := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project, nil)
+	fullReq := httptest.NewRequest(http.MethodGet, "/tasks/new?project_id="+project, nil)
 	fullRec := httptest.NewRecorder()
 	e.ServeHTTP(fullRec, fullReq)
 	body := fullRec.Body.String()
-	if strings.Contains(body, `value="`+foreign.ID+`"`) || strings.Contains(body, `value="`+disabled.ID+`"`) {
+	if strings.Contains(body, `data-value="`+foreign.ID+`"`) || strings.Contains(body, `data-value="`+disabled.ID+`"`) {
 		t.Fatalf("new Task selector includes unavailable Agent: %s", body)
 	}
-	globalPosition := strings.Index(body, `value="`+global.ID+`"`)
-	projectPosition := strings.Index(body, `value="`+projectAgent.ID+`"`)
+	globalPosition := strings.Index(body, `data-value="`+global.ID+`"`)
+	projectPosition := strings.Index(body, `data-value="`+projectAgent.ID+`"`)
 	if globalPosition < 0 || projectPosition < 0 || globalPosition > projectPosition {
 		t.Fatalf("Task selector did not retain name ordering: global=%d project=%d", globalPosition, projectPosition)
 	}

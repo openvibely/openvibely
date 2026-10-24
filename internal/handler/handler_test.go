@@ -2523,11 +2523,11 @@ func TestHandler_HomeRedirectsToChat(t *testing.T) {
 	}
 }
 
-func TestHandler_TasksPage_RendersCategoryDrivenSwarmPlannerCopy(t *testing.T) {
+func TestHandler_NewTaskPage_RendersCategoryDrivenSwarmPlannerCopy(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Tasks Swarm UI Project")
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/new?project_id="+project.ID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	assertCode(t, rec, http.StatusOK)
