@@ -179,32 +179,105 @@ func TestLiveWebSocketReconnectReplayAndIndependentWindows(t *testing.T) {
 	restarted.next(t, "restart", "done")
 }
 
-// Exercise the ordering that used to depend on whether the main loop selected
-// the worker's finished notification before a client retried the same ID.
-func TestLiveTerminalFrameRetiresOnlyItsOwner(t *testing.T) {
+// The writer callback models an immediate retry upon receiving a terminal frame,
+// before the old worker's completion marker is consumed. No scheduler luck or
+// sleeps are needed to exercise the ordering at the actual dispatch boundary.
+func TestLiveTerminalFrameRetiresBeforeDelivery(t *testing.T) {
 	for _, event := range []string{"retry", "done", "error"} {
 		t.Run(event, func(t *testing.T) {
 			ctx, stop := context.WithCancel(context.Background())
 			defer stop()
-			owner := &liveSubscription{id: "run", stop: stop}
+			owner := &liveSubscription{stop: stop}
 			subscriptions := map[string]*liveSubscription{"run": owner}
-			retireLiveFrameSubscription(subscriptions, liveFrame{ID: "run", Event: "message", subscription: owner})
-			require.Same(t, owner, subscriptions["run"])
-			require.NoError(t, ctx.Err())
-			terminal := liveFrame{ID: "run", Event: event, subscription: owner}
-			retireLiveFrameSubscription(subscriptions, terminal)
-			require.NotContains(t, subscriptions, "run")
-			require.ErrorIs(t, ctx.Err(), context.Canceled)
 			replacementCtx, replacementStop := context.WithCancel(context.Background())
 			defer replacementStop()
-			replacement := &liveSubscription{id: "run", stop: replacementStop}
-			subscriptions["run"] = replacement
-			// A delayed terminal frame from the prior worker cannot cancel a retry.
-			retireLiveFrameSubscription(subscriptions, terminal)
+			replacement := &liveSubscription{stop: replacementStop}
+			var delivered []string
+			write := func(f liveFrame) bool {
+				delivered = append(delivered, f.Event)
+				if f.Event == event {
+					require.NotContains(t, subscriptions, "run", "retry must be accepted as soon as the frame is delivered")
+					require.ErrorIs(t, ctx.Err(), context.Canceled)
+					subscriptions["run"] = replacement
+				}
+				return true
+			}
+			require.True(t, dispatchLiveFrame(subscriptions, liveFrame{ID: "run", Event: event, subscription: owner}, write))
+			// Old completion and queued frames must neither retire the replacement
+			// nor leak through to its client-side subscription.
+			for _, f := range []liveFrame{
+				{ID: "run", subscription: owner, finished: true},
+				{ID: "run", subscription: owner, Event: "message"},
+				{ID: "run", subscription: owner, Event: event},
+			} {
+				require.True(t, dispatchLiveFrame(subscriptions, f, write))
+			}
 			require.Same(t, replacement, subscriptions["run"])
 			require.NoError(t, replacementCtx.Err())
+			require.True(t, dispatchLiveFrame(subscriptions, liveFrame{ID: "run", Event: "message", subscription: replacement}, write))
+			require.Equal(t, []string{event, "message"}, delivered)
 		})
 	}
+}
+
+func TestLiveCancelledOwnerFramesAreDiscarded(t *testing.T) {
+	for _, reuseID := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reuse=%v", reuseID), func(t *testing.T) {
+			ctx, stop := context.WithCancel(context.Background())
+			defer stop()
+			owner := &liveSubscription{stop: stop}
+			subscriptions := map[string]*liveSubscription{"run": owner}
+			out := make(chan liveFrame, 6)
+			for _, event := range []string{"message", "reset", "subscribed", "retry", "done", "error"} {
+				out <- liveFrame{ID: "run", Event: event, subscription: owner}
+			}
+			close(out)
+			// Process unsubscribe/re-subscribe before draining the queued frames.
+			stop()
+			delete(subscriptions, "run")
+			replacementCtx, replacementStop := context.WithCancel(context.Background())
+			defer replacementStop()
+			replacement := &liveSubscription{stop: replacementStop}
+			if reuseID {
+				subscriptions["run"] = replacement
+			}
+			for f := range out {
+				require.True(t, dispatchLiveFrame(subscriptions, f, func(f liveFrame) bool {
+					t.Fatalf("cancelled owner frame reached socket: %s", f.Event)
+					return false
+				}))
+			}
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+			if reuseID {
+				require.Same(t, replacement, subscriptions["run"])
+				require.NoError(t, replacementCtx.Err())
+			}
+		})
+	}
+}
+
+func TestLiveCompletedWorkerDrainsOutputBeforeRetirement(t *testing.T) {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	owner := &liveSubscription{stop: stop}
+	subscriptions := map[string]*liveSubscription{"run": owner}
+	out := make(chan liveFrame, 3)
+	// A worker may finish before the socket loop drains any of its output.
+	out <- liveFrame{ID: "run", Event: "message", Data: "first", subscription: owner}
+	out <- liveFrame{ID: "run", Event: "message", Data: "last", subscription: owner}
+	out <- liveFrame{ID: "run", subscription: owner, finished: true}
+	close(out)
+	var delivered []any
+	for f := range out {
+		require.True(t, dispatchLiveFrame(subscriptions, f, func(f liveFrame) bool {
+			require.NoError(t, ctx.Err(), "completion must not overtake output")
+			delivered = append(delivered, f.Data)
+			return true
+		}))
+	}
+	require.Equal(t, []any{"first", "last"}, delivered)
+	require.Empty(t, subscriptions)
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
 func TestLiveWebSocketGapRecoveryAndTerminalFailure(t *testing.T) {
