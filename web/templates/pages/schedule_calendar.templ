@@ -211,8 +211,7 @@ templ ScheduleCalendarScript() {
     var applicable = dates.size || hours.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;
     var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
     root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) {
-     var mixedDates = (dates.size || hours.size) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'skip'); }) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'restore'); });
-     button.textContent = mixedDates && action === 'skip' ? 'Skip remaining' : mixedDates && action === 'restore' ? 'Unskip skipped' : label;
+     button.textContent = label;
      button.hidden = !applicable;
      if (button.parentElement.tagName === 'LI') button.parentElement.hidden = !applicable;
      button.disabled = busy || !applicable;
