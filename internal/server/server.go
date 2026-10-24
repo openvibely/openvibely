@@ -448,6 +448,16 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	if cfg == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
+	stopProfiling, err := startProfiling(os.Getenv("OPENVIBELY_PPROF_PORT"))
+	if err != nil {
+		return nil, err
+	}
+	profilingStarted := false
+	defer func() {
+		if !profilingStarted {
+			stopProfiling()
+		}
+	}()
 	cfg.NormalizeForMode()
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
@@ -1303,6 +1313,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		}
 		close(shutdownOnce)
 		applog.Infof("shutting down...")
+		stopProfiling()
 		srvCancel()
 		oauthRefreshSvc.Stop()
 		stopUpdateCoordinatorChecks(updateCoordinator)
@@ -1341,6 +1352,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		}
 	}()
 
+	profilingStarted = true
 	return &Instance{
 		BoundAddr:         boundAddr,
 		BaseURL:           baseURL,
