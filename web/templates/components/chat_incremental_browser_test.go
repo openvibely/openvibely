@@ -386,8 +386,8 @@ func TestBrowserPerformance_IncrementalChatRendering(t *testing.T) {
     });
    };
    // Same production coalescer in both cases; the baseline uses 250 ms and
-   // full-content rendering, whereas the incremental path uses 100 ms.
-   const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 100);
+   // full-content rendering, whereas the incremental path uses 50 ms.
+   const input = makeMeasuredStream(stream, mode === 'baseline' ? 250 : 50);
    window.streamPhase = size+' bytes / '+mode+' / receiving';
    window.streamDiagnostic = () => ({phase:window.streamPhase, ready:document.readyState, visibility:document.visibilityState, coalescer:input.state(), arrivals:arrivals.length, visible:latencies.length, pendingPaints, workerReplies:window.streamWorkerReplies});
    const start = performance.now();
