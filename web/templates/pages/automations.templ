@@ -653,7 +653,12 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					});
 				}
 				state.timer = setInterval(function() {
-					if (document.visibilityState === 'visible' && document.getElementById('automation-live')) {
+					if (!document.getElementById('automation-live')) {
+						clearInterval(state.timer);
+						state.timer = null;
+						return;
+					}
+					if (document.visibilityState === 'visible') {
 						window.openVibelyAutomationLiveRefresh('GET');
 					}
 				}, 20000);

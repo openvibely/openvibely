@@ -593,15 +593,18 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 				personality_modal.close();
 			}
 
-			// Close modal after successful HTMX swap
-			document.body.addEventListener('htmx:afterSwap', function(event) {
-				if (event.detail.target && event.detail.target.id === 'personality-section') {
-					var modal = document.getElementById('personality_modal');
-					if (modal && modal.open) {
-						modal.close();
+			if (!window._personalityModalCloseBound) {
+				window._personalityModalCloseBound = true;
+				// Close modal after successful HTMX swap
+				document.body.addEventListener('htmx:afterSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'personality-section') {
+						var modal = document.getElementById('personality_modal');
+						if (modal && modal.open) {
+							modal.close();
+						}
 					}
-				}
-			});
+				});
+			}
 		</script>
 	</div>
 }

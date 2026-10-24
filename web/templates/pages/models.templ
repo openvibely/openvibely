@@ -3058,21 +3058,24 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 			}
 		</script>
 		<script>
-				// Close modal after successful HTMX form submission
-				document.body.addEventListener('htmx:afterSwap', function(event) {
-					if (event.detail.target && event.detail.target.id === 'models-container') {
-						var modal = document.getElementById('new_model_modal');
-						if (modal && modal.open) {
-							cancelOpenAICompatibleDiscovery();
-							modal.close();
+				if (!window._modelsPageHandlersBound) {
+					window._modelsPageHandlersBound = true;
+					// Close modal after successful HTMX form submission
+					document.body.addEventListener('htmx:afterSwap', function(event) {
+						if (event.detail.target && event.detail.target.id === 'models-container') {
+							var modal = document.getElementById('new_model_modal');
+							if (modal && modal.open) {
+								cancelOpenAICompatibleDiscovery();
+								modal.close();
+							}
 						}
-					}
-				});
-				document.body.addEventListener('htmx:responseError', function(event) {
-					var form = document.getElementById('model_form');
-					if (!form || !event.detail || event.detail.elt !== form) return;
-					showModelFormError(modelSaveErrorMessage(event.detail.xhr));
-				});
+					});
+					document.body.addEventListener('htmx:responseError', function(event) {
+						var form = document.getElementById('model_form');
+						if (!form || !event.detail || event.detail.elt !== form) return;
+						showModelFormError(modelSaveErrorMessage(event.detail.xhr));
+					});
+				}
 				document.getElementById('model_form').addEventListener('invalid', function(event) {
 					var field = event.target;
                     var form = document.getElementById('model_form');

@@ -509,11 +509,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						<script>
 							// Handle edit form duplicate errors
 							(function() {
-								var formEl = document.currentScript.closest('#task-detail-edit').querySelector('form');
-								var taskId = formEl.id.replace('edit-task-form-', '');
+								if (window._taskEditDuplicateErrorBound) return;
+								window._taskEditDuplicateErrorBound = true;
 								document.body.addEventListener('htmx:responseError', function(event) {
-									var formId = 'edit-task-form-' + taskId;
-									if (event.detail.elt && event.detail.elt.id === formId) {
+									var elt = event.detail.elt;
+									if (elt && elt.id && elt.id.indexOf('edit-task-form-') === 0) {
+										var taskId = elt.id.slice('edit-task-form-'.length);
 										var xhr = event.detail.xhr;
 										if (xhr.status === 409) {
 											event.preventDefault();
@@ -1995,6 +1996,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
 							window.removeEventListener('sse-task-event', _taskDetailTaskEventHandler);
 							window.removeEventListener('sse-live-connected', _taskDetailLiveConnectedHandler);
+						}
+						if (target.id === 'main-content') {
+							window.removeEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
+							document.body.removeEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
+							document.body.removeEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
+							document.removeEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
+							if (window._taskDetailFileChangesHandlers && window._taskDetailFileChangesHandlers.beforeSwap === _taskDetailBeforeSwapHandler) window._taskDetailFileChangesHandlers = null;
 						}
 				};
 

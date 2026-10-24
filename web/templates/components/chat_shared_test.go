@@ -4313,7 +4313,7 @@ func TestRenderStreamingContent_PersistentThinkingState(t *testing.T) {
 	}
 
 	// Should save to persistent store when local states are found
-	if !strings.Contains(content, "window._thinkingOpenStates[containerKey] = prevThinkingStates.slice()") {
+	if !strings.Contains(content, "window.rememberThinkingOpenStates(containerKey, prevThinkingStates.slice())") {
 		t.Error("should persist thinking states to window._thinkingOpenStates when local states exist")
 	}
 

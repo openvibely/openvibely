@@ -4540,15 +4540,26 @@ templ ChatAutoScrollScript() {
 			window.releaseToolOutputState = function(executionID) {
 				if (executionID == null) {
 					window._toolOutputRowStates = {};
+					window._thinkingOpenStates = {};
 					window._toolOutputStateOwners.clear();
 					return;
 				}
+				delete window._thinkingOpenStates['exec:' + executionID];
 				var prefixes = window._toolOutputStateOwners.get(executionID);
 				if (!prefixes) return;
-				Object.keys(window._toolOutputRowStates).forEach(function(key) {
-					for (var prefix of prefixes) if (key.startsWith(prefix + ':')) { delete window._toolOutputRowStates[key]; break; }
+				[window._toolOutputRowStates, window._thinkingOpenStates].forEach(function(states) {
+					Object.keys(states).forEach(function(key) {
+						for (var prefix of prefixes) if (key === prefix || key.startsWith(prefix + ':')) { delete states[key]; break; }
+					});
 				});
 				window._toolOutputStateOwners.delete(executionID);
+			};
+			window.rememberThinkingOpenStates = function(key, states) {
+				var store = window._thinkingOpenStates;
+				delete store[key];
+				store[key] = states;
+				var keys = Object.keys(store);
+				for (var i = 0; i < keys.length - 2000; i++) delete store[keys[i]];
 			};
 			window.invalidateToolOutputLineCapacity = function() {
 				window._toolOutputCapacityCache = null;
@@ -4895,7 +4906,7 @@ templ ChatAutoScrollScript() {
 					state.tail._chatStreamStateKey = _thinkingStateKey(container) + ':tail:' + state.offset;
 					state.tail._chatToolStateKey = _thinkingStateKey(container);
 					state.tail._chatThinkingOwner = container;
-					if (remainingThinkingStates.length) window._thinkingOpenStates[state.tail._chatStreamStateKey] = remainingThinkingStates;
+					if (remainingThinkingStates.length) window.rememberThinkingOpenStates(state.tail._chatStreamStateKey, remainingThinkingStates);
 					rendered = await window.renderStreamingContent(state.tail, suffix.slice(boundary), yieldBetweenBatches, { offset: state.renderOffset, ordinal: state.ordinal });
 				}
 				return rendered !== false && container._incrementalChat === state && state.generation === generation;
@@ -5375,11 +5386,11 @@ templ ChatAutoScrollScript() {
 			function persistThinkingStates() {
 				if (!container.isConnected) return;
 				var states = Array.from(container.querySelectorAll('details.stream-thinking'), function(d) { return d.open; });
-				if (containerKey && states.length) window._thinkingOpenStates[containerKey] = states;
+				if (containerKey && states.length) window.rememberThinkingOpenStates(containerKey, states);
 				var owner = container._chatThinkingOwner;
 				if (owner && owner.contains(container)) {
 					var ownerKey = _thinkingStateKey(owner);
-					if (ownerKey) window._thinkingOpenStates[ownerKey] = Array.from(owner.querySelectorAll('details.stream-thinking'), function(d) { return d.open; });
+					if (ownerKey) window.rememberThinkingOpenStates(ownerKey, Array.from(owner.querySelectorAll('details.stream-thinking'), function(d) { return d.open; }));
 				}
 			}
 			var prevThinkingStates = [];
@@ -5405,7 +5416,7 @@ templ ChatAutoScrollScript() {
 				window._toolOutputRowStates[persistentStateKey] = persistentState;
 			});
 			if (containerKey && prevThinkingStates.length > 0) {
-					window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
+					window.rememberThinkingOpenStates(containerKey, prevThinkingStates.slice());
 				}
 			// If no local states found (DOM was replaced by morph), restore from persistent store
 			if (prevThinkingStates.length === 0 && containerKey && window._thinkingOpenStates[containerKey]) {

@@ -2287,6 +2287,8 @@ templ settingsContent(view ChannelsSettingsView) {
 				appSection.style.display = isAppMode ? '' : 'none';
 			}
 
+				if (!window._settingsPageHandlersBound) {
+				window._settingsPageHandlersBound = true;
 				// Close modal and refresh after successful save
 				document.body.addEventListener('htmx:afterRequest', function(event) {
 					var detail = event.detail || {};
@@ -2330,6 +2332,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					params.agent_ids = selectedWebhookAgentIDs.join(',');
 					event.detail.parameters = params;
 				});
+				}
 
 			setTimeout(function() {
 				const modeSelect = document.getElementById('github_auth_mode');
