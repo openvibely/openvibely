@@ -268,7 +268,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		for _, themeID := range []string{"rose-pine-dawn", "github-light", "tokyo-night", "vscode-light-modern"} {
 			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `'); document.querySelector('#inspector-tab-details').setAttribute('aria-selected', 'true'); 'ok'`)
 			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 0, "y": 0}, nil)
-			browser.waitFor(themeID+" copy hidden without hover", `window.computed('#theme-copy', 'opacity')`, "0")
+			// Touch/coarse-pointer devices keep copy controls visible.
+			browser.waitFor(themeID+" copy visibility without hover", `String(window.computed('#theme-copy', 'opacity') === (matchMedia('(hover: hover) and (pointer: fine)').matches ? '0' : '1'))`, "true")
 			browser.waitFor(themeID+" copy normal", `window.matches('#theme-copy', 'color', 'var(--ov-text)')`, "ok")
 			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 240, "y": 415}, nil)
 			browser.waitFor(themeID+" copy hover background", `window.matches('#theme-copy', 'backgroundColor', 'var(--ov-hover-bg)')`, "ok")
