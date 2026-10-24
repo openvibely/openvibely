@@ -210,10 +210,9 @@ templ ScheduleCalendarScript() {
    ['skip','restore','pause','resume'].forEach(function(action) {
     var applicable = dates.size || hours.size ? (action === 'skip' || action === 'restore') && !state.paused && selectedIntervals().some(function(run) { return dateIntervalEligible(run, action); }) : eligibleCards(action).length > 0;
     var label = {skip:'Skip',restore:'Unskip',pause:'Pause',resume:'Resume'}[action];
-    var noun = dates.size ? 'day(s)' : hours.size ? 'hour(s)' : (action === 'skip' || action === 'restore') ? 'run(s)' : 'schedule(s)';
     root.querySelectorAll('[data-calendar-action="' + action + '"]').forEach(function(button) {
      var mixedDates = (dates.size || hours.size) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'skip'); }) && selectedIntervals().some(function(run) { return dateIntervalEligible(run, 'restore'); });
-     button.textContent = mixedDates && action === 'skip' ? 'Skip remaining run(s)' : mixedDates && action === 'restore' ? 'Unskip skipped run(s)' : label + ' ' + noun;
+     button.textContent = mixedDates && action === 'skip' ? 'Skip remaining' : mixedDates && action === 'restore' ? 'Unskip skipped' : label;
      button.hidden = !applicable;
      if (button.parentElement.tagName === 'LI') button.parentElement.hidden = !applicable;
      button.disabled = busy || !applicable;
@@ -362,10 +361,10 @@ templ ScheduleCalendarScript() {
  templ ScheduleSelectionToolbar() {
   <div id="schedule-selection-toolbar" class="flex items-center gap-2 text-xs" aria-hidden="true" role="toolbar" aria-label="Selected schedules, dates, or hours">
    <span data-selection-count aria-live="polite"></span>
-   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip run(s)</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip run(s)</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause schedule(s)</button>
-   <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume schedule(s)</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="skip">Skip</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="restore">Unskip</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="pause">Pause</button>
+   <button type="button" class="btn btn-xs" data-calendar-action="resume">Resume</button>
    <button type="button" class="btn btn-xs btn-ghost" data-calendar-action="clear" aria-label="Clear selection" title="Clear selection (Esc)" aria-keyshortcuts="Escape">×</button>
   </div>
 }
