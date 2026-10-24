@@ -65,22 +65,30 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 		hx-preserve="true"
 	>
 		<div class="card-body gap-4 p-4">
- if len(req.Installation)>0 {
-<section data-skill-dependency-details="true"></section>
-}
 			for i, q := range req.Questions {
 				<fieldset class={ chatInputQuestionClass(i) } data-chat-input-question-id={ q.ID } data-chat-input-question-index={ fmt.Sprintf("%d", i) }>
 					<legend class="text-xl font-semibold leading-snug">{ chatInputQuestionLegend(q, i) }</legend>
+                    if len(req.Installation)>0 {
+                        <section data-skill-dependency-details="true"></section>
+                    }
 					for j, opt := range q.Options {
 						<div class={ chatInputOptionClass } style="--btn-focus-scale: 1" role="button" tabindex="0" data-chat-input-option="true" data-question-id={ q.ID } data-option-label={ opt.Label } aria-pressed="false">
 							<span class="flex min-w-0 flex-col items-start">
 								<span class="flex min-w-0 flex-wrap items-center gap-2">
-									<span class="font-medium">{ opt.Label }</span>
+									<span class="font-medium">
+                                        if len(req.Installation)>0 && opt.Label == "Install dependencies" {
+                                            Install and continue
+                                        } else {
+                                            { opt.Label }
+                                        }
+                                    </span>
 									if j == 0 && len(req.Installation)==0 {
 										<span class="chat-input-recommended-badge">Recommended</span>
 									}
 								</span>
-								<span class="text-xs opacity-70 whitespace-normal">{ opt.Description }</span>
+								if len(req.Installation)==0 && opt.Description != "" {
+                                    <span class="text-xs opacity-70 whitespace-normal">{ opt.Description }</span>
+                                }
 							</span>
 						</div>
 					}

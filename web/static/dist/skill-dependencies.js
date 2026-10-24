@@ -13,7 +13,20 @@
    status.setAttribute('role', 'status');
    root.append(status);
   }
-  status.textContent = update.phase === 'failed' ? update.message + '. See the skill result for details.' : 'Preparing tool — ' + update.message;
+  const name = update.dependency_name.charAt(0).toUpperCase() + update.dependency_name.slice(1);
+  status.className = 'flex items-center gap-2 text-sm py-2';
+  status.replaceChildren();
+  if (update.phase === 'failed') {
+   status.textContent = name + ' installation failed. See the skill result for details.';
+  } else {
+   const spinner = document.createElement('span');
+   spinner.className = 'loading loading-spinner loading-sm text-primary';
+   spinner.setAttribute('aria-hidden', 'true');
+   const label = document.createElement('span');
+   const action = update.phase === 'downloading' ? 'Downloading' : update.phase === 'preparing' ? 'Installing' : 'Checking';
+   label.textContent = action + ' ' + name + '…';
+   status.append(spinner, label);
+  }
  });
 })();
 
@@ -35,18 +48,25 @@
   return response.json();
  }
  function details(root, manifest) {
-  root.append(element('strong', 'Requires external tools'));
-  root.append(element('p', 'These binaries run on the machine hosting OpenVibely. Review their sources before allowing them. SHA-256 checks detect changed downloads; they do not prove trust.'));
   for (const dep of manifest.dependencies || []) {
    const pkg = dep.packages?.[manifest.platform];
-   let host = 'Local override only';
+   let host = 'Local installation';
    if (pkg?.url) { try { host = new URL(pkg.url).host; } catch (_) { host = 'Invalid source URL'; } }
-   root.append(element('p', dep.name + ' — ' + dep.version + ' — ' + host));
-   const expansion = element('details');
-   expansion.append(element('summary', 'Details for ' + manifest.platform));
-   expansion.append(element('pre', JSON.stringify({url:pkg?.url || null,sha256:pkg?.sha256 || null,format:pkg?.format || null,executable:pkg?.executable || null,health_check:dep.health_check},null,2), 'whitespace-pre-wrap break-all text-xs'));
-   root.append(expansion);
+   const name = dep.name.charAt(0).toUpperCase() + dep.name.slice(1);
+   root.append(element('p', name + ' ' + dep.version + ' · ' + host, 'text-sm opacity-70'));
   }
+  const expansion = element('details');
+  expansion.append(element('summary', 'Download details', 'cursor-pointer text-sm'));
+  for (const dep of manifest.dependencies || []) {
+   const pkg = dep.packages?.[manifest.platform];
+   const fields = element('dl', undefined, 'text-sm space-y-1 py-2');
+   for (const [label, value] of [['Tool', dep.name], ['Download URL', pkg?.url], ['Version', dep.version], ['Platform', manifest.platform], ['SHA-256', pkg?.sha256], ['Executable', pkg?.executable]]) {
+    if (!value) continue;
+    fields.append(element('dt', label, 'font-medium'), element('dd', value, 'break-all opacity-70'));
+   }
+   expansion.append(fields);
+  }
+  root.append(expansion);
  }
  window.renderSkillDependencyDetails = function(root, manifest) {
   if (!root) return;
