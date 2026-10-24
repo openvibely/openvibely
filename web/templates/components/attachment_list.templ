@@ -3,6 +3,8 @@ package components
 import (
 	"fmt"
 	"net/url"
+ "path/filepath"
+ "strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -41,8 +43,12 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
    <input type="file" name="files" multiple class="hidden" aria-label="Select attachments" onchange="this.form.requestSubmit()"/>
    <span class="htmx-indicator text-sm" role="status">Uploading…</span>
   </form>
-  <div data-task-files={ taskID } data-project-id={ projectID } hx-get={ TaskAttachmentUploadURL(taskID, projectID) } hx-trigger="load, taskAttachmentsChanged from:body, taskFilesChanged" hx-target="#attachment-list" hx-swap="outerHTML">
-  @AttachmentListOnly(attachments, projectID)
+  <div data-task-files={ taskID } data-project-id={ projectID } hx-get={ TaskAttachmentUploadURL(taskID, projectID) } hx-trigger={ taskFilesTriggers(ctx, taskID, projectID) } hx-target="#attachment-list" hx-swap="outerHTML">
+  if files, loaded := taskFilesSnapshot(ctx, taskID, projectID); loaded {
+   @TaskFilesList(attachments, projectID, [][]models.ChatAttachment{files.Messages}, files.Generated)
+  } else {
+   @AttachmentListOnly(attachments, projectID)
+  }
   </div>
  </div>
 }
@@ -64,6 +70,35 @@ templ ImageAttachmentRow(fileName string, fileSize int64, mediaType, downloadURL
   </a>
   if deleteURL != "" {
   <button type="button" class="btn btn-ghost btn-xs text-error shrink-0" aria-label={ "Remove " + fileName } hx-delete={ deleteURL } hx-target={ target } hx-swap="outerHTML">×</button>
+  }
+ </div>
+}
+
+func attachmentExtension(name string) string {
+ ext := strings.TrimPrefix(filepath.Ext(name), ".")
+ if ext == "" { return "FILE" }
+ return strings.ToUpper(ext)
+}
+
+templ AttachmentGridTile(fileName string, fileSize int64, mediaType, downloadURL, deleteURL, target string) {
+ <div class="attachment-grid-tile">
+  <a href={ templ.SafeURL(downloadURL) } class="attachment-grid-open" target="_blank" rel="noopener" title={ fileName + " · " + FormatFileSize(fileSize) } aria-label={ fileName } data-image-name={ fileName }
+   if IsImageMediaType(mediaType) || FilePreviewKind(fileName)=="video" {
+    data-image-gallery-item=""
+    data-media-kind={ FilePreviewKind(fileName) }
+   } else {
+    data-file-preview=""
+   }
+  >
+   if IsImageMediaType(mediaType) {
+    <img src={ templ.SafeURL(FileURLMode(downloadURL,"thumbnail")) } alt={ fileName } loading="lazy"/>
+   } else {
+    <span class="attachment-grid-name">{ fileName }</span>
+    <span class="attachment-grid-extension">{ attachmentExtension(fileName) }</span>
+   }
+  </a>
+  if deleteURL != "" {
+   <button type="button" class="attachment-grid-remove" aria-label={ "Remove " + fileName } hx-delete={ deleteURL } hx-target={ target } hx-swap="outerHTML">×</button>
   }
  </div>
 }
@@ -94,25 +129,40 @@ templ AttachmentListOnly(attachments []models.Attachment, projectID string, mess
 }
 
 templ TaskFilesList(attachments []models.Attachment, projectID string, messageGroups [][]models.ChatAttachment, generated []models.GeneratedFile) {
-	<div id="attachment-list" class="space-y-2" data-image-gallery-group="">
+	<div id="attachment-list" class="attachment-grid" data-image-gallery-group="">
+ <style>
+ .attachment-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+ .attachment-grid > p { grid-column:1 / -1; }
+ .attachment-grid-tile { position:relative; min-width:0; aspect-ratio:1; border:1px solid color-mix(in srgb,currentColor 15%,transparent); border-radius:8px; overflow:hidden; background:color-mix(in srgb,currentColor 3%,transparent); }
+ .attachment-grid .attachment-grid-open { cursor:pointer; display:flex; flex-direction:column; justify-content:space-between; gap:8px; width:100%; height:100%; padding:10px; min-width:0; text-align:left; }
+ #attachment-list a.attachment-grid-open[data-image-gallery-item]:has(> img) { position:absolute; inset:0; width:100%; padding:0; }
+ .attachment-grid-open img { position:absolute; inset:0; display:block; width:100%; height:100%; object-fit:cover; }
+ .attachment-grid-name { font-size:12px; line-height:1.35; overflow:hidden; overflow-wrap:anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; }
+ .attachment-grid-extension { align-self:flex-start; max-width:100%; overflow:hidden; text-overflow:ellipsis; font-size:10px; line-height:1.5; border-radius:4px; padding:1px 5px; background:color-mix(in srgb,currentColor 9%,transparent); }
+ .attachment-grid-tile:hover, .attachment-grid-tile:focus-within { border-color:color-mix(in srgb,currentColor 35%,transparent); background:color-mix(in srgb,currentColor 7%,transparent); }
+ .attachment-grid-remove { position:absolute; top:2px; right:2px; width:22px; height:22px; border-radius:50%; background:var(--fallback-b1, #272d35); color:white; opacity:0; cursor:pointer; }
+ .attachment-grid-tile:hover .attachment-grid-remove, .attachment-grid-tile:focus-within .attachment-grid-remove { opacity:1; }
+ .attachment-grid-tile:has(.attachment-grid-remove) .attachment-grid-name { padding-right:12px; }
+ @media (hover:none) { .attachment-grid-remove { opacity:1; } }
+ </style>
 		if len(attachments) == 0 && len(generated) == 0 && (len(messageGroups) == 0 || len(messageGroups[0]) == 0) {
 			<p class="text-sm opacity-50">No files yet.</p>
 		} else {
 			for _, att := range attachments {
 				if att.ExecutionID == "" {
-					@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
+					@AttachmentGridTile(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
 				} else {
-					@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), "", "")
+					@AttachmentGridTile(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), "", "")
 				}
 			}
 		}
         for _, messages := range messageGroups {
             for _, att := range messages {
-                @ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, MessageAttachmentDownloadURL(att, projectID), "", "")
+                @AttachmentGridTile(att.FileName, att.FileSize, att.MediaType, MessageAttachmentDownloadURL(att, projectID), "", "")
             }
         }
         for _, file := range generated {
-            @ImageAttachmentRow(file.FileName, file.FileSize, file.MediaType, "/files/"+url.PathEscape(file.ID)+"?project_id="+url.QueryEscape(projectID), "", "")
+            @AttachmentGridTile(file.FileName, file.FileSize, file.MediaType, "/files/"+url.PathEscape(file.ID)+"?project_id="+url.QueryEscape(projectID), "", "")
         }
 	</div>
 }

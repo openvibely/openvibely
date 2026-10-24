@@ -318,10 +318,9 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.typeText("Send the image")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("sent image remains in saved panel", `String(!!document.querySelector('#attachment-list [data-image-name="draft.svg"]') && !document.getElementById('draft-panel-attachments'))`, "true")
-		b.waitFor("consistent attachment spacing", `String(getComputedStyle(document.querySelector('#attachment-list .attachment-gallery-open')).gap===window.draftRowSpacing)`, "true")
-		b.waitFor("file thumbnail uses standard content inset", `String(Math.abs(document.querySelector("#attachment-list .attachment-gallery-open img").getBoundingClientRect().top-document.querySelector("#attachment-list").getBoundingClientRect().top-4)<1)`, "true")
-
-		b.waitFor("saved file row aligns with panel rows", `String((function(){var row=document.querySelector('#attachment-list .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#attachment-list').getBoundingClientRect(), list=document.querySelector('#attachment-list').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#attachment-list img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
+		// Saved attachments intentionally switch from composer rows to the details grid.
+		b.waitFor("saved image fills square grid tile", `String((()=>{const tile=document.querySelector('#attachment-list .attachment-grid-tile').getBoundingClientRect(),img=document.querySelector('#attachment-list .attachment-grid-open img').getBoundingClientRect();return Math.abs(tile.width-tile.height)<1 && Math.abs(img.width-(tile.width-2))<1 && Math.abs(img.height-(tile.height-2))<1})())`, "true")
+		b.waitFor("saved grid aligns with panel", `String(Math.abs(document.querySelector('#attachment-list .attachment-grid-tile').getBoundingClientRect().left-document.querySelector('#attachment-list').getBoundingClientRect().left)<1)`, "true")
 		b.click("#attachment-list [data-image-gallery-item]")
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
 		b.evaluate(`window.oldAttachmentList=document.getElementById('attachment-list');htmx.ajax('GET','/tasks/created/attachments',{target:'#attachment-list',swap:'outerHTML'});'refresh'`)
