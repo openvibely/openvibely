@@ -298,6 +298,9 @@ type ExecutionReplay struct {
 }
 
 type ExecutionStore interface {
+	// SaveConversationReplay encodes history once, persists metadata, and returns
+	// the encoded snapshot only after a successful write.
+	SaveConversationReplay(ctx context.Context, id string, history any, metadata models.ExecutionReplayMessage) (string, error)
 	ExecutionOutputStore
 	ReadOutputAfter(ctx context.Context, id string, offset int) (*ExecutionReplay, error)
 	GetExecutionTaskID(ctx context.Context, id string) (string, error)
