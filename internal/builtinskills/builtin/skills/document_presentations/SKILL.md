@@ -9,33 +9,33 @@ skill:
     description: Read, create, and edit PowerPoint PPTX slide decks with text, images, tables, and charts.
 dependencies:
   - name: paperworks
-    version: 0.0.0-rc6
+    version: 0.0.0-rc7
     environment_variable: PAPERWORKS
     health_check: [version]
     packages:
       darwin/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-darwin-amd64.zip
-        sha256: ea3fb6fd752b1b7694d09d90949a3765ec60ef4cf7bb1f43c9af66f1278d1e99
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-darwin-amd64.zip
+        sha256: db27fb6bdf28426d4d5110b47ec51a5d395d99f598b7bf2250e2cb827dc27cd1
         format: zip
         executable: paperworks
       darwin/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-darwin-arm64.zip
-        sha256: 4ad9daf595d90f02518a6169e7a51a43ddcb7838530d7265193bc20da6a93ef3
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-darwin-arm64.zip
+        sha256: 2a3ae0d076363aa8c47014556a4c1f2265d948923e14ab275f9a9128627d186c
         format: zip
         executable: paperworks
       linux/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-linux-amd64.zip
-        sha256: aa23df030e248fc507b7305e6f42953150849167228f51031632a121bcb26a31
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-linux-amd64.zip
+        sha256: b284b0ba013a09645157e4bd4bc5ff6938114e2415dc85644600749a1fb845d6
         format: zip
         executable: paperworks
       linux/arm64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-linux-arm64.zip
-        sha256: dc3c0347b8f73f75c44e151ab2f9f4052f34455243e37881b464adfedfecf722
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-linux-arm64.zip
+        sha256: 1e2ce5ead1e1f3195859be195e2e96d94bb55e6b2ba490fb7b7459fdd455df32
         format: zip
         executable: paperworks
       windows/amd64:
-        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc6/paperworks-windows-amd64.zip
-        sha256: 3ff7644dd15a1162a3437f1aa2a00b45b05b7219e76d71e1475301d616c7fcac
+        url: https://github.com/openvibely/openvibely-paperworks/releases/download/v0.0.0-rc7/paperworks-windows-amd64.zip
+        sha256: 35a6f259722c76e4fc6c13fb6410c98ca2aed60a96a02420c91830e43cd34fe7
         format: zip
         executable: paperworks.exe
   - name: libreoffice
@@ -54,7 +54,7 @@ dependencies:
 
 ## Local helpers
 
-`skill_view` supplies executable paths in its `environment` map. Export `PAPERWORKS` and, when supplied, `DOCUMENT_SOFFICE` to those paths. Run commands where the executables and input files are accessible; quote paths.
+`skill_view` supplies executable paths in its `environment` map. Set `PAPERWORKS` to the supplied executable path or invoke that path directly. Paperworks discovers LibreOffice through `DOCUMENT_SOFFICE`, system installations, or OV’s cache; set `DOCUMENT_SOFFICE` only to override discovery. Run commands where the executables and input files are accessible; quote paths.
 
 The loader runs the executable health check. Use `"$PAPERWORKS" capabilities` to discover commands and `"$PAPERWORKS" help COMMAND` for arguments when needed. Reuse this information until the runtime changes or a command fails. PPTX rendering and embedded-workbook recalculation require LibreOffice. Rendering can differ from PowerPoint.
 
@@ -93,7 +93,7 @@ Read the references relevant to the current operation before running its command
 | Edit chart inputs/series or create hierarchical charts and histograms | [references/charts.md](references/charts.md) |
 | List, add, reply to or resolve native review comments | [references/comments.md](references/comments.md) |
 | Validate any created or edited deck before delivery | [references/validation.md](references/validation.md) |
-| RC5 slide controls, text paint, table sizing and chart formatting | [references/advanced-slide-controls.md](references/advanced-slide-controls.md) |
+| Slide controls, text paint, table sizing and chart formatting | [references/advanced-slide-controls.md](references/advanced-slide-controls.md) |
 
 References inherit the working-file and verification rules in this skill. Examples that start from `example.*` use the fixture in `references/creation.md`; for real edits, use the actual input and inspected identifiers. Do not create the example fixture during an ordinary user edit.
 
