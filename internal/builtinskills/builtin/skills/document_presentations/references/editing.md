@@ -249,9 +249,11 @@ Newer builds also accept `elbow2`, `elbow3`, `elbow4`, and `elbow5` and expose
 ```
 Check the runtime's schema before using this operation. Omitted endpoints/kind
 retain their values. `side` accepts `top`, `left`, `bottom`, `right`, or `auto`
-for unrotated, unflipped rectangles, rounded rectangles and diamonds; otherwise
+for unrotated, unflipped rectangles, rounded rectangles, diamonds and ellipses; otherwise
 supply an inspected `site`. Automatic selection faces the other endpoint's
-center; it does not move the connector or avoid obstacles. Set its geometry
+center; it does not move the connector or avoid obstacles. Ellipse cardinal
+sites are top=0, left=2, bottom=4, right=6; side names avoid having to specify
+these manually. Explicit site indices remain unchanged. Set its geometry
 separately, inspect saved attachments and view the rendered result.
 
 ### Internal text links in builds after RC5
