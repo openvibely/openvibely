@@ -129,6 +129,10 @@ Use `"$PAPERWORKS" inspect input.pdf` for page counts and form fields, and `"$PA
 
 Render the selected copy with `"$PAPERWORKS" render selected.pdf --output preview --max-pixels 1600` into a new directory. Do not treat extracted text as evidence of appearance, reading order, or chart contents.
 
+## Inspect PDF fonts (after RC5)
+
+With a build exposing `pdf-fonts`, use `"$PAPERWORKS" pdf-fonts input.pdf` to identify fonts before matching existing PDF lettering. It returns a JSON array such as `[{"name":"Helvetica","embedded":false,"pages":[1]}]`. Pages are one-based; results group matching font names and embedding status. Names retain subset prefixes. The command inspects page text objects, including nested Form XObjects; it does not enumerate unused font resources or annotation appearances, identify outlined/rasterized lettering, or prove which substitute font a viewer uses. Render and check the result visually. This command is not in pinned RC5; do not assume `pdffonts` or Poppler is installed.
+
 ## Create and edit
 
 Use `"$PAPERWORKS" create-pdf --spec document.json --output new.pdf`. Choose one top-level mode: `flow.blocks` for flowing reports, `pages` for fixed ASCII/form layouts, or `canvas` for embedded fonts and vector artwork.
