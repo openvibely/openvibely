@@ -78,6 +78,11 @@ templ projectRepoPathHealth(health models.ProjectRepoPathHealth, remote bool) {
 <span>Folder not found. Choose its new location or restore the folder.</span>
 }
 		</span>
+	} else if health.Status == models.RepoPathHealthNotDirectory {
+		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-error" data-repo-path-health="not_directory" role="status">
+			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>
+			<span>{ health.Message } { health.Guidance }</span>
+		</span>
 	} else if health.Status == models.RepoPathHealthUnknown {
 		<span id="edit-project-repo-path-health" class="inline-flex items-center gap-1 text-xs text-error" data-repo-path-health="unknown" role="status">
 			<svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6"/></svg>

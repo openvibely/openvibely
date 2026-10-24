@@ -1930,6 +1930,26 @@ func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
 		}
 	})
 
+	for _, repoURL := range []string{"", "https://github.com/openvibely/example"} {
+		t.Run("regular file is not a folder/"+repoURL, func(t *testing.T) {
+			repoPath := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(repoPath, []byte("not a directory"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			body := renderDialog(t, &models.Project{Name: "File Path", RepoPath: repoPath, RepoURL: repoURL})
+			if !strings.Contains(body, `data-repo-path-health="not_directory"`) || strings.Contains(body, `data-repo-path-health="healthy"`) {
+				t.Fatal("regular files must show not-directory status, never healthy")
+			}
+			guidance := "Not a folder. Choose a directory."
+			if repoURL != "" {
+				guidance = "Not a folder. Restore the repository folder or re-clone the repository."
+			}
+			if !strings.Contains(body, guidance) {
+				t.Fatalf("missing guidance %q", guidance)
+			}
+		})
+	}
+
 	t.Run("missing local path shows mount guidance", func(t *testing.T) {
 		repoPath := filepath.Join(t.TempDir(), "missing-local")
 		body := renderDialog(t, &models.Project{Name: "Missing Local", RepoPath: repoPath})
