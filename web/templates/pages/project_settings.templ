@@ -299,7 +299,10 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						return;
 					}
 					if (!payload.selected) {
-						setPickerFeedback('No folder selected. You can paste an absolute path manually.', false);
+						if (pickerFeedback) {
+							pickerFeedback.textContent = '';
+							pickerFeedback.classList.add('hidden');
+						}
 						return;
 					}
 					if (!isAbsolutePath(payload.path)) {
@@ -552,7 +555,10 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 						return;
 					}
 					if (!payload.selected) {
-						setPickerFeedback('No folder selected. You can paste an absolute path manually.', false);
+						if (pickerFeedback) {
+							pickerFeedback.textContent = '';
+							pickerFeedback.classList.add('hidden');
+						}
 						return;
 					}
 					if (!isAbsolutePath(payload.path)) {
