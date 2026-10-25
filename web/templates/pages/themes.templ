@@ -36,20 +36,9 @@ templ ThemesContent(catalog []themes.Theme) {
 		</div>
 		<section class="mb-8" data-display-prefs>
 			<h3 class="text-lg font-semibold mb-1">Layout</h3>
-			<p class="text-sm opacity-70 mb-3">How the sidebar, task list and page are arranged.</p>
-			<div class="grid gap-4 sm:grid-cols-2 max-w-2xl mb-4">
-				@layoutCard("unified", "Unified", "Task list and page joined as one surface, with compact one-line task rows.")
-				@layoutCard("floating", "Floating", "Task list and page as separate rounded panels on the frame, with compact one-line task rows.")
-			</div>
+			<p class="text-sm opacity-70 mb-3">How the task list sits next to the page.</p>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
-				<div class="flex items-center justify-between gap-4">
-					<span class="text-sm font-medium">Edge<span class="block text-xs font-normal opacity-60">Run the sidebar, task list and page straight off the bottom and right edges of the window.</span></span>
-					<div class="join" role="group" aria-label="Edge">
-						for _, opt := range [][2]string{{"on", "On"}, {"off", "Off"}} {
-							<button type="button" class="btn btn-sm join-item" data-display-pref="edge" data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">{ opt[1] }</button>
-						}
-					</div>
-				</div>
+				@displayToggle("layout", "Task list", "unified", "Unified", "floating", "Floating")
 			</div>
 			<h3 class="text-lg font-semibold mb-1">Conversation</h3>
 			<p class="text-sm opacity-70 mb-3">Applies to chat and task threads in every layout.</p>
@@ -88,12 +77,6 @@ templ ThemesContent(catalog []themes.Theme) {
 				function refreshDisplayPrefs() {
 					var display = window.openVibelyDisplay;
 					if (!display) return;
-					document.querySelectorAll('[data-layout-card]').forEach(function(card) {
-						var active = card.getAttribute('data-layout-id') === display.get('layout');
-						card.setAttribute('aria-pressed', active ? 'true' : 'false');
-						card.classList.toggle('border-primary', active);
-						card.querySelectorAll('[data-layout-active-badge]').forEach(function(badge) { badge.classList.toggle('hidden', !active); });
-					});
 					document.querySelectorAll('[data-board-columns-card]').forEach(function(card) {
 						var active = card.getAttribute('data-board-columns-id') === display.get('columns');
 						card.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -260,54 +243,6 @@ func previewSyntaxStyle(theme themes.Theme, key string) string {
 	return "color:" + previewColor(theme, "syntax", key, previewColor(theme, "syntax", "foreground", "#d4d4d4"))
 }
 
-templ layoutCard(id, name, description string) {
-	<button
-		type="button"
-		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-		data-layout-card
-		data-layout-id={ id }
-		aria-pressed="false"
-		onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay('layout', this.getAttribute('data-layout-id'))"
-	>
-		<div class="card-body gap-3 p-4">
-			<div class="flex items-center justify-between">
-				<span class="font-semibold">{ name }</span>
-				<span class="badge badge-primary badge-sm hidden" data-layout-active-badge>Active</span>
-			</div>
-			<div style="display:flex;gap:4px;height:84px;padding:6px;border-radius:10px;background:oklch(var(--bc) / .07)" aria-hidden="true">
-				<div style="width:10px;border-radius:4px;background:oklch(var(--bc) / .12)"></div>
-				if id == "unified" {
-					<div style="flex:1;display:flex;overflow:hidden;border-radius:8px;background:oklch(var(--b1))">
-						<div style="width:32%;display:flex;flex-direction:column;gap:4px;padding:6px;border-right:1px solid oklch(var(--bc) / .1)">
-							<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .22);"></div>
-							<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-							<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-						</div>
-						<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px">
-							<div style="height:8px;width:28px;border-radius:3px;background:oklch(var(--bc) / .22);align-self:flex-end;margin-right:12%;border-radius:6px"></div>
-							<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-							<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-							<div style="height:12px;width:76%;border-radius:3px;background:oklch(var(--bc) / .22);margin-top:auto;border-radius:6px"></div>
-						</div>
-					</div>
-				} else {
-					<div style="width:30%;display:flex;flex-direction:column;gap:4px;padding:6px;border-radius:8px;background:oklch(var(--b1))">
-						<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .22);"></div>
-						<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-						<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-					</div>
-					<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;border-radius:8px;background:oklch(var(--b1))">
-						<div style="height:8px;width:28px;border-radius:6px;background:oklch(var(--bc) / .22);align-self:flex-end;margin-right:12%"></div>
-						<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-						<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
-						<div style="height:12px;width:76%;border-radius:6px;background:oklch(var(--bc) / .22);margin-top:auto"></div>
-					</div>
-				}
-			</div>
-			<p class="text-xs opacity-70">{ description }</p>
-		</div>
-	</button>
-}
 
 templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabel string) {
 	<div class="flex items-center justify-between gap-4">
