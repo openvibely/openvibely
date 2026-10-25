@@ -113,7 +113,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function apply() {
 						var prefs = {};
 						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles') }; } catch (_) {}
-						root.setAttribute('data-layout', prefs.layout === 'classic' ? 'classic' : 'unified');
+						root.setAttribute('data-layout', prefs.layout === 'split' ? 'split' : 'unified');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
 						var active = desktop || wide.matches;
@@ -123,7 +123,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'classic'] },
+						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] }
 					};
@@ -3144,7 +3144,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
 				html[data-shell-frame][data-layout="unified"] #task-list-panel[style*="--superellipse-clip"],
-				html[data-shell-frame][data-layout="classic"] #sidebar.sidebar-aside[style*="--superellipse-clip"],
+				html[data-shell-frame][data-layout="split"] #sidebar.sidebar-aside[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }

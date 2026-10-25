@@ -38,6 +38,13 @@ func paletteSpecs() []paletteSpec {
 			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#E6E6E6", "comment": "#7A7A7A", "title": "#82AAFF"},
 		},
 		{
+			id: "openvibely-layered", name: "OpenVibely Layered", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
+			canvas: "#15191E", column: "#1D232A", surface: "#232A33", raised: "#2A323C", text: "#C8CED8", muted: "#8F98A6", accent: "#7480FF", codeBg: "#191E24",
+			shellRail: "#191E24", shellRowSelected: "#2E3353",
+			info: "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
+			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#C8CED8", "comment": "#6B7480", "title": "#82AAFF"},
+		},
+		{
 			id: "openvibely-slate", name: "OpenVibely Slate", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
 			canvas: "#1E2329", column: "#16191E", surface: "#252B34", raised: "#2B323C", text: "#D5DAE1", muted: "#949CA8", accent: "#7480FF", codeBg: "#181C21",
 			shellRail: "#1A1E23", shellRowSelected: "#2E3353",
