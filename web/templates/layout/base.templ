@@ -3109,10 +3109,16 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
-				html[data-shell-frame] .sidebar-aside[style*="--superellipse-clip"],
-				html[data-shell-frame] .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0; clip-path: var(--superellipse-clip); }
-				html[data-shell-frame] .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] [role="tab"] { border-radius: 0; }
+				html[data-shell-frame] #sidebar.sidebar-aside[style*="--superellipse-clip"],
+				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
+				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
+				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
 
+				html[data-shell-frame] #task-details-panel[style*="--superellipse-clip"] { clip-path: var(--superellipse-clip); }
+				html[data-shell-frame] #task-details-panel { right: var(--shell-gap); bottom: var(--shell-gap); background-color: var(--shell-page) !important; border-color: oklch(var(--bc) / .08); }
+				html[data-shell-frame] #task-details-panel[data-overlay="true"] { inset: var(--task-panel-top, 0px) var(--shell-gap) var(--shell-gap) auto; width: calc(100% - var(--rail-width) - var(--shell-gap)); }
+				html[data-shell-frame] #task-detail-content[data-inspector-docked="true"] { padding-right: calc(var(--task-panel-reserved-width) + var(--shell-gap)); }
+				html[data-shell-frame] #task-detail-content[data-inspector-overlay="true"] #task-details-opener { right: var(--shell-gap); }
 				html[data-shell-frame] .chat-bubble-user-msg,
 				html[data-shell-frame] .chat-bubble-assistant-msg { --chat-user-bg: oklch(var(--b1)); background-color: oklch(var(--b1)) !important; }
 				html[data-shell-frame] .chat-input-container { background-color: oklch(var(--b1)) !important; }
@@ -5373,10 +5379,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								function shape(el) {
 									var w = el.clientWidth, h = el.clientHeight;
 									if (!w || !h) return;
-									var r = Math.min(w / 2, h / 2, el.id === 'main-content' ? 28 : el.id === 'sidebar' ? 22 : 17);
+									var inspector = el.id === 'task-details-panel';
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector ? 28 : el.id === 'sidebar' ? 22 : 17);
+									var radii = inspector ? [r, r, 0, 0] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
-									corners.forEach(function(c) {
+									corners.forEach(function(c, index) {
+										if (!radii[index]) { pts.push((c[0] + r * Math.sign(Math.round(Math.cos(c[2] + Math.PI / 4) * 2))).toFixed(2) + 'px ' + (c[1] + r * Math.sign(Math.round(Math.sin(c[2] + Math.PI / 4) * 2))).toFixed(2) + 'px'); return; }
 										for (var i = 0; i <= 24; i++) {
 											var a = c[2] + i * Math.PI / 48, x = Math.cos(a), y = Math.sin(a);
 											pts.push((c[0] + r * Math.sign(x) * Math.sqrt(Math.abs(x))).toFixed(2) + 'px ' + (c[1] + r * Math.sign(y) * Math.sqrt(Math.abs(y))).toFixed(2) + 'px');
@@ -5388,7 +5397,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								var observer = new ResizeObserver(function(entries) { entries.forEach(function(e) { shape(e.target); }); });
 								var seen = new WeakSet();
 								function attach() {
-									document.querySelectorAll('#main-content, #sidebar, .desktop-project-tab').forEach(function(el) {
+									document.querySelectorAll('#main-content, #sidebar, .desktop-project-tab, #task-details-panel').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);
