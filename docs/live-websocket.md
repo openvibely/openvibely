@@ -122,6 +122,16 @@ existence and execution/task membership in that project. Browser upgrades requir
 an exact scheme/host origin match. Missing, opaque, and foreign browser origins
 are rejected. Reverse proxies must forward WebSocket upgrades and preserve the
 public Host and request scheme, as used by the existing HTTP deployment.
+The origin check maps proxy-reported `ws`/`wss` schemes (including Traefik's
+`X-Forwarded-Proto`) to `http`/`https`, matching browser page origins without
+allowing foreign hosts or secure/insecure scheme mismatches.
+
+If Chat and task output appears only after refreshing behind a reverse proxy,
+inspect the browser Network panel for `/events/ws`. A successful handshake returns
+101; a 403 with `invalid WebSocket origin` indicates a host/scheme mismatch.
+OpenVibely 0.10.0 compared the proxy scheme literally, rejecting Traefik's `wss`
+against an `https` origin. Deploy an OpenVibely image containing this normalization
+fix; redeploying an unchanged hosted control plane does not fix that comparison.
 
 Wails documents use a custom asset protocol that cannot proxy an HTTP upgrade.
 They POST to `/events/native-ticket` through the authenticated native asset proxy
