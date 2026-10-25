@@ -3048,9 +3048,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				#task-list-header { display: none; }
 				html[data-shell-frame] #task-list-header { display: flex; align-items: center; gap: 4px; position: absolute; left: var(--rail-width); width: calc(var(--task-list-width, 300px) - 8px); top: 0; height: 100%; padding: 0 4px 0 0; --wails-draggable: drag; }
 				html[data-shell-frame] #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; width: calc(var(--rail-width) + var(--task-list-width, 300px) - 88px); }
-				#task-list-header button, #task-list-header a { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; color: inherit; opacity: .8; --wails-draggable: no-drag; }
-				#task-list-header button:hover, #task-list-header a:hover { opacity: 1; background: oklch(var(--bc) / .1); }
-				#task-list-search-toggle[aria-expanded="true"] { background: oklch(var(--p) / .22); opacity: 1; }
+				#task-list-header button, #task-list-header a { --wails-draggable: no-drag; }
+								#task-list-search-toggle[aria-expanded="true"] { background: oklch(var(--p) / .22); opacity: 1; }
 				.task-list-toggle-fill { fill: currentColor; }
 				html.task-list-collapsed .task-list-toggle-fill { fill: none; }
 				.task-list-brand { font-size: 14px; font-weight: 500; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
@@ -3109,12 +3108,17 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .desktop-project-tab:not([data-selected="true"])::after { top: 50%; }
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
-				@supports (corner-shape: squircle) {
-					html[data-shell-frame] body > .drawer > .drawer-content,
-					html[data-shell-frame] .sidebar-aside,
-					html[data-shell-frame] .desktop-project-tab,
-					html[data-shell-frame] .desktop-project-tab [role="tab"] { corner-shape: squircle; }
-				}
+				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
+				html[data-shell-frame] .sidebar-aside[style*="--superellipse-clip"],
+				html[data-shell-frame] .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0; clip-path: var(--superellipse-clip); }
+				html[data-shell-frame] .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] [role="tab"] { border-radius: 0; }
+
+				html[data-shell-frame] .chat-bubble-user-msg,
+				html[data-shell-frame] .chat-bubble-assistant-msg { --chat-user-bg: oklch(var(--b1)); background-color: oklch(var(--b1)) !important; }
+				html[data-shell-frame] .chat-input-container { background-color: oklch(var(--b1)) !important; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] .chat-bubble-user-msg,
+				html[data-shell-frame][data-ov-theme-layer="custom"] .chat-bubble-assistant-msg { --chat-user-bg: var(--ov-surface); background-color: var(--ov-surface) !important; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] .chat-input-container { background-color: var(--ov-surface) !important; }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
@@ -5363,6 +5367,39 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								}
 								syncShellFrameRail();
 								document.addEventListener('openvibely:shell-frame-change', syncShellFrameRail);
+						})();
+						(function() {
+								// x^4 + y^4 = 1 superellipse corners; pixel radii keep long edges straight.
+								function shape(el) {
+									var w = el.clientWidth, h = el.clientHeight;
+									if (!w || !h) return;
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' ? 28 : el.id === 'sidebar' ? 22 : 17);
+									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
+									var pts = [];
+									corners.forEach(function(c) {
+										for (var i = 0; i <= 24; i++) {
+											var a = c[2] + i * Math.PI / 48, x = Math.cos(a), y = Math.sin(a);
+											pts.push((c[0] + r * Math.sign(x) * Math.sqrt(Math.abs(x))).toFixed(2) + 'px ' + (c[1] + r * Math.sign(y) * Math.sqrt(Math.abs(y))).toFixed(2) + 'px');
+										}
+									});
+									el.style.setProperty('--superellipse-clip', 'polygon(' + pts.join(',') + ')');
+								}
+								if (typeof ResizeObserver === 'undefined') return;
+								var observer = new ResizeObserver(function(entries) { entries.forEach(function(e) { shape(e.target); }); });
+								var seen = new WeakSet();
+								function attach() {
+									document.querySelectorAll('#main-content, #sidebar, .desktop-project-tab').forEach(function(el) {
+										if (seen.has(el)) return;
+										seen.add(el);
+										shape(el);
+										observer.observe(el);
+									});
+								}
+								attach();
+								document.addEventListener('DOMContentLoaded', attach);
+								document.body.addEventListener('htmx:afterSettle', attach);
+								var tabs = document.getElementById('desktop-project-titlebar');
+								if (tabs) new MutationObserver(attach).observe(tabs, { childList: true, subtree: true });
 						})();
 					</script>
 			</div>
