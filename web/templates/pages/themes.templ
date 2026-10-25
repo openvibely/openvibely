@@ -41,6 +41,7 @@ templ ThemesContent(catalog []themes.Theme) {
 				@layoutCard("split", "Split", "Task list sits on the frame next to a separate rounded page, with two-line task rows.")
 				@layoutCard("unified", "Unified", "Task list and page joined as one surface, with compact one-line task rows.")
 				@layoutCard("stacked", "Stacked", "Tasks as cards down the side; the open task joins the page like a tab.")
+				@layoutCard("edge", "Edge", "Floating task list, with the list and page running straight off the bottom and right edges.")
 				@layoutCard("floating", "Floating", "Task list and page as separate rounded panels on the frame, with compact one-line task rows.")
 			</div>
 			<h3 class="text-lg font-semibold mb-1">Conversation</h3>
@@ -273,6 +274,18 @@ templ layoutCard(id, name, description string) {
 							<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
 							<div style="height:12px;width:76%;border-radius:3px;background:oklch(var(--bc) / .22);margin-top:auto;border-radius:6px"></div>
 						</div>
+					</div>
+				} else if id == "edge" {
+					<div style="width:30%;display:flex;flex-direction:column;gap:4px;padding:6px;margin-bottom:-6px;border-radius:8px 8px 0 0;background:oklch(var(--b1))">
+						<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .22);"></div>
+						<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
+						<div style="height:5px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
+					</div>
+					<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;margin:0 -6px -6px 0;border-radius:8px 0 0 0;background:oklch(var(--b1))">
+						<div style="height:8px;width:28px;border-radius:6px;background:oklch(var(--bc) / .22);align-self:flex-end;margin-right:12%"></div>
+						<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
+						<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
+						<div style="height:12px;width:76%;border-radius:6px;background:oklch(var(--bc) / .22);margin-top:auto"></div>
 					</div>
 				} else if id == "floating" {
 					<div style="width:30%;display:flex;flex-direction:column;gap:4px;padding:6px;border-radius:8px;background:oklch(var(--b1))">
