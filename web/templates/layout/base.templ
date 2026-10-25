@@ -112,9 +112,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep') }; } catch (_) {}
-						root.setAttribute('data-layout', ['split', 'floating', 'stacked', 'edge', 'edgeunified'].indexOf(prefs.layout) !== -1 ? prefs.layout : 'unified');
-						root.setAttribute('data-surface-step', prefs.step === 'on' || prefs.step === 'off' ? prefs.step : 'theme');
+						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), edge: localStorage.getItem('openvibely.edge') }; } catch (_) {}
+						root.setAttribute('data-layout', prefs.layout === 'floating' || prefs.layout === 'edge' ? 'floating' : 'unified');
+						root.setAttribute('data-edge', prefs.edge === 'off' ? 'off' : 'on');
+						root.setAttribute('data-surface-step', prefs.step === 'off' ? 'off' : 'on');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
 						root.setAttribute('data-board-columns', ['inset', 'tint', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
@@ -125,9 +126,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating', 'stacked', 'edge', 'edgeunified'] },
+						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'floating'] },
+						edge: { key: 'openvibely.edge', attr: 'data-edge', values: ['on', 'off'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
-						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['theme', 'on', 'off'] },
+						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['on', 'off'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
 						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint', 'tintstrip'] }
 					};
@@ -3050,15 +3052,15 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					min-height: 0; padding: 0 8px var(--shell-gap) 0;
 					color: inherit;
 				}
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="edgeunified"]) #task-list-panel { padding: 8px 8px 0; margin-bottom: var(--shell-gap); background-color: var(--shell-rail); border-right: 1px solid var(--shell-divider); }
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="edgeunified"]):not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+				html[data-shell-frame][data-layout="unified"] #task-list-panel { padding: 8px 8px 0; margin-bottom: var(--shell-gap); background-color: var(--shell-rail); border-right: 1px solid var(--shell-divider); }
+				html[data-shell-frame][data-layout="unified"]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 				html[data-shell-frame][data-layout="floating"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) var(--shell-gap) 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius); }
-				html[data-shell-frame][data-layout="edge"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) 0 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius) var(--shell-page-radius) 0 0; }
-				html[data-shell-frame][data-layout="edge"] #main-content { margin: 0 !important; border-radius: var(--shell-page-radius) 0 0 0; }
-				html[data-shell-frame][data-layout="edgeunified"] #task-list-panel { margin-bottom: 0; border-radius: var(--shell-page-radius) 0 0 0; }
-				html[data-shell-frame][data-layout="edgeunified"] #main-content { margin: 0 !important; border-radius: 0; }
-				html[data-shell-frame][data-layout="edgeunified"].task-list-collapsed #main-content { border-radius: var(--shell-page-radius) 0 0 0; }
-				html[data-shell-frame]:is([data-layout="edge"], [data-layout="edgeunified"]) .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
+				html[data-shell-frame][data-layout="floating"][data-edge="on"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) 0 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius) var(--shell-page-radius) 0 0; }
+				html[data-shell-frame][data-layout="floating"][data-edge="on"] #main-content { margin: 0 !important; border-radius: var(--shell-page-radius) 0 0 0; }
+				html[data-shell-frame][data-layout="unified"][data-edge="on"] #task-list-panel { margin-bottom: 0; border-radius: var(--shell-page-radius) 0 0 0; }
+				html[data-shell-frame][data-layout="unified"][data-edge="on"] #main-content { margin: 0 !important; border-radius: 0; }
+				html[data-shell-frame][data-edge="on"].task-list-collapsed #main-content { border-radius: var(--shell-page-radius) 0 0 0; }
+				html[data-shell-frame][data-edge="on"] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 				.task-list-search { padding: 0 4px 10px; }
@@ -3074,29 +3076,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				.task-list-meta { display: block; font-size: 11px; opacity: .55; margin-top: 2px; }
 				.task-list-time { display: none; }
-				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
-				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
-				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) .task-list-meta { display: none; }
-				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
-				.task-list-chip { display: none; }
-				html[data-layout="stacked"] #task-list-panel { padding-right: 0; }
-				html[data-layout="stacked"] #task-list-groups { scrollbar-width: none; }
-				html[data-layout="stacked"] #task-list-groups::-webkit-scrollbar { display: none; }
-				html[data-layout="stacked"] .task-list-row { position: relative; align-items: flex-start; padding: 11px 12px; margin: 0 8px 6px 0; border-radius: 12px; background: var(--shell-card); border: 1px solid oklch(var(--bc) / .06); }
-				html[data-layout="stacked"] .task-list-row:hover { background: color-mix(in srgb, var(--shell-card) 92%, oklch(var(--bc))); }
-				html[data-layout="stacked"] .task-list-row[aria-current="page"] { background: var(--shell-page); border-color: var(--shell-page); margin-right: 0; border-radius: 12px 0 0 12px; }
-				html[data-layout="stacked"] .task-list-row[aria-current="page"]::before,
-				html[data-layout="stacked"] .task-list-row[aria-current="page"]::after { content: ""; position: absolute; right: -1px; width: 12px; height: 12px; pointer-events: none; }
-				html[data-layout="stacked"] .task-list-row[aria-current="page"]::before { top: -13px; border-bottom-right-radius: 12px; box-shadow: 4px 4px 0 4px var(--shell-page); }
-				html[data-layout="stacked"] .task-list-row[aria-current="page"]::after { bottom: -13px; border-top-right-radius: 12px; box-shadow: 4px -4px 0 4px var(--shell-page); }
-				html[data-layout="stacked"] .task-list-meta { display: none; }
-				html[data-layout="stacked"] .task-list-time { display: block; grid-column: 2; grid-row: 2; font-size: 11px; opacity: .55; margin-top: 2px; }
-				html[data-layout="stacked"] .task-list-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0 10px; }
-				html[data-layout="stacked"] .task-list-dot { grid-row: 1 / 3; }
-				html[data-layout="stacked"] .task-list-chip { display: block; grid-column: 3; grid-row: 1; align-self: start; flex-shrink: 0; font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 999px; border: 1px solid oklch(var(--bc) / .15); opacity: .7; white-space: nowrap; }
-				html[data-layout="stacked"] .task-list-chip.running { color: oklch(var(--p)); border-color: oklch(var(--p) / .45); opacity: 1; }
-				html[data-layout="stacked"] .task-list-chip.completed { color: oklch(var(--su)); border-color: oklch(var(--su) / .4); opacity: 1; }
-				html[data-layout="stacked"] .task-list-chip.failed { color: oklch(var(--er)); border-color: oklch(var(--er) / .4); opacity: 1; }
+				html .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
+				html .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
+				html .task-list-meta { display: none; }
+				html .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
 				.task-list-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: oklch(var(--bc) / .4); }
 				.task-list-dot.running { background: oklch(var(--p)); box-shadow: 0 0 0 3px oklch(var(--p) / .18); }
 				.task-list-dot.completed { background: oklch(var(--su)); }
@@ -3156,8 +3139,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					border-radius: var(--shell-rail-radius);
 					transition: none;
 				}
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) .sidebar-aside.sidebar-collapsed,
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
+				html[data-shell-frame] .sidebar-aside.sidebar-collapsed,
+				html[data-shell-frame] body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-header { display: none !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner { padding: 8px 0 !important; scrollbar-width: none; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
@@ -3177,7 +3160,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					padding-left: calc(var(--rail-width) + var(--task-list-width, 300px)) !important;
 					--project-tab-selected: var(--shell-page);
 				}
-				html[data-shell-frame]:is([data-layout="floating"], [data-layout="edge"]) #desktop-project-titlebar { padding-left: calc(var(--rail-width) + var(--task-list-width, 300px) + var(--shell-gap)) !important; }
+				html[data-shell-frame][data-layout="floating"] #desktop-project-titlebar { padding-left: calc(var(--rail-width) + var(--task-list-width, 300px) + var(--shell-gap)) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: calc(var(--rail-width) + 44px) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }
@@ -3195,8 +3178,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"], [data-layout="edgeunified"]) #task-list-panel[style*="--superellipse-clip"],
-				html[data-shell-frame]:is([data-layout="split"], [data-layout="stacked"]) #sidebar.sidebar-aside[style*="--superellipse-clip"],
+				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
@@ -5485,11 +5467,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									if (!w || !h) return;
 									var inspector = el.id === 'task-details-panel';
 									var layout = document.documentElement.getAttribute('data-layout');
-									var unified = layout === 'unified' || layout === 'edgeunified';
+									var unified = layout === 'unified';
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
 									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
-									var edge = layout === 'edge' || layout === 'edgeunified';
+									var edge = document.documentElement.getAttribute('data-edge') === 'on';
 									var radii = edge && joined ? [0, 0, 0, 0] : edge && unified && list ? [0, 0, 0, r] : inspector || joined ? [r, r, 0, 0] : list && unified ? [0, 0, r, r] : edge && list ? [r, 0, 0, r] : edge && el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
@@ -5516,7 +5498,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								attach();
 								document.addEventListener('DOMContentLoaded', attach);
 								document.body.addEventListener('htmx:afterSettle', attach);
-								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout'] });
+								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout', 'data-edge'] });
 								var tabs = document.getElementById('desktop-project-titlebar');
 								if (tabs) new MutationObserver(attach).observe(tabs, { childList: true, subtree: true });
 						})();
