@@ -20,9 +20,8 @@
     }
     return new XMLSerializer().serializeToString(root);
   }
-  // A gallery owns fresh URLs independently of the transcript row's lifetime.
-  window.createChatSVGPreview = function(element) {
-    const source = element?.closest('.chat-svg-preview')?.querySelector('pre > code.language-svg')?.textContent;
+  // Preview resources depend on a source snapshot, never on a live transcript node.
+  window.createChatSVGPreview = function(source) {
     if (!source) return null;
     const safe = imageSource(source);
     if (!safe) return null;

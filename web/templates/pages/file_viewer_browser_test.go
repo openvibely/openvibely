@@ -177,9 +177,29 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.evaluate(`window.robotSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 260" width="240" height="260" role="img" aria-label="Friendly robot"><g stroke="#243449" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M120 45V25"/><circle cx="120" cy="18" r="9" fill="#ffcc66"/><rect x="45" y="48" width="150" height="105" rx="24" fill="#8bd3ff"/><circle cx="88" cy="90" r="12" fill="#243449"/><circle cx="152" cy="90" r="12" fill="#243449"/><path d="M92 120Q120 144 148 120" fill="none"/><rect x="65" y="165" width="110" height="60" rx="15" fill="#8bd3ff"/><circle cx="120" cy="194" r="10" fill="#ffcc66"/><path d="M65 182L35 200M175 182L210 155" fill="none"/><path d="M90 225V245H75M150 225V245H165" fill="none"/></g></svg>'; window.svgChat = document.createElement('div'); svgChat.className='chat-markdown'; document.body.append(svgChat); svgChat.innerHTML=window.renderChatMarkdown(robotSVG); 'ok'`)
 		b.waitFor("robot SVG decoded", `String(!!svgChat.querySelector('img')?.naturalWidth)`, "true")
 		b.waitFor("SVG is isolated with source and download", `String(!svgChat.querySelector('svg') && svgChat.querySelector('details code').textContent.trim()===robotSVG && !!svgChat.querySelector('a[download]'))`, "true")
+		b.evaluate(`var sibling=document.createElement('a');sibling.href='/fixture/data.json';sibling.dataset.filePreview='';sibling.textContent='JSON';svgChat.querySelector('.chat-svg-preview').append(sibling);window.oldSVGLink=svgChat.querySelector('[data-image-gallery-item]');window.oldSVGURL=oldSVGLink.href;'ok'`)
 		b.click(".chat-svg-preview [data-image-gallery-item]")
 		b.waitFor("SVG gallery", `String(document.getElementById('image-gallery').open && !!document.querySelector('[data-gallery-image]').naturalWidth)`, "true")
+		b.click("[data-gallery-next]")
+		b.waitFor("neighbor opens before background remount", `String(!!document.querySelector('[data-json-tree]'))`, "true")
+		b.evaluate(`svgChat.remove();'ok'`)
+		b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('detached'))))`)
+		if got := b.evaluateAwait(`fetch(oldSVGURL).then(()=> 'still live',()=> 'revoked')`); got != "revoked" {
+			t.Fatal("detached thumbnail URL was not revoked: " + got)
+		}
+		b.evaluate(`document.body.append(svgChat);'ok'`)
+		b.waitFor("background remount replaces SVG figure", `String(!!svgChat.querySelector('img')?.naturalWidth && svgChat.querySelector('[data-image-gallery-item]')!==oldSVGLink && !oldSVGLink.closest('.chat-svg-preview').querySelector('code'))`, "true")
+		b.click("[data-gallery-prev]")
+		b.waitFor("gallery snapshot survives moved SVG source", `String(!!document.querySelector('[data-gallery-image]')?.naturalWidth && document.querySelector('[data-gallery-image]').src!==oldSVGURL && document.querySelector('[data-gallery-count]').textContent==='1 / 2')`, "true")
+		b.evaluate(`window.snapshotSVGURL=document.querySelector('[data-gallery-image]').src;window.snapshotSVGDownload=document.querySelector('[data-gallery-download]').href;'ok'`)
+		if got := b.evaluateAwait(`fetch(snapshotSVGDownload).then(r=>r.text()).then(text=>String(text.trim()===robotSVG))`); got != "true" {
+			t.Fatal("original SVG download did not survive remount: " + got)
+		}
 		b.click("[data-gallery-close]")
+		b.waitFor("remounted SVG gallery closes", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href'))`, "true")
+		if got := b.evaluateAwait(`Promise.all([snapshotSVGURL,snapshotSVGDownload].map(url=>fetch(url).then(()=>false,()=>true))).then(results=>String(results.every(Boolean)))`); got != "true" {
+			t.Fatal("gallery SVG resources were not released: " + got)
+		}
 		b.evaluate("svgChat.innerHTML=window.renderChatMarkdown('```svg\\n'+robotSVG+'\\n```'); 'ok'")
 		b.waitFor("fenced SVG decoded", `String(!!svgChat.querySelector('img')?.naturalWidth)`, "true")
 		b.evaluate(`svgChat.innerHTML=window.renderChatMarkdown(robotSVG.slice(0,-6)); 'ok'`)
