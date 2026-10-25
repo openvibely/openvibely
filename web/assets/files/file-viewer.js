@@ -73,6 +73,17 @@
    const retry=document.createElement('button');retry.textContent='Retry';retry.onclick=()=>show(index);content.append(status,retry);
   }
  }
+ // Models for cold/offscreen rows contain Markdown, not enhanced file links.
+ function modelFileLinks(model){
+  const source=model.segments.filter(segment=>segment.type==='text'||segment.type==='thinking').map(segment=>segment.content||'').join('');
+  if(!source.includes('/files/')||!window.renderChatMarkdown)return [];
+  const template=document.createElement('template');template.innerHTML=window.renderChatMarkdown(source);
+  return Array.from(template.content.querySelectorAll('a[href]')).filter(link=>{
+   let url;try{url=new URL(link.href,location.href)}catch{return false}
+   if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return false;
+   link.dataset.filePreview='';return true;
+  });
+ }
  function open(url,trigger,event){
   if (!dialog.contains(trigger)) {
    const root=trigger?.closest('#task-detail-content,#chat-page-root');
@@ -88,7 +99,8 @@
   if(conversation){
    group=conversation;
    const seen=new Set();
-   links=Array.from(conversation.querySelectorAll(selector)).filter(link=>{const key=linkIdentity(link);if(seen.has(key))return false;seen.add(key);return true});
+   const candidates=window.queryChatVirtualElements?window.queryChatVirtualElements(conversation,selector,modelFileLinks):Array.from(conversation.querySelectorAll(selector));
+   links=candidates.filter(link=>{const key=linkIdentity(link);if(seen.has(key))return false;seen.add(key);return true});
   }
   // Expand buttons are not file links; match their URL to the original attachment.
   const at=links.findIndex(link=>linkIdentity(link)===identity(url));

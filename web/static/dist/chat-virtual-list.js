@@ -463,6 +463,31 @@
     window.captureChatVirtualData = function (root) {
         return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(Boolean);
     };
+    // Query transcript content in display order without mounting offscreen rows.
+    // Unrendered models can be projected by the caller into lightweight elements.
+    window.queryChatVirtualElements = function (root, selector, projectModel) {
+        const rows = new Map(), found = [];
+        lists.forEach(list => {
+            if (!root.contains(list.messages) && !list.messages.contains(root)) return;
+            collect(list);
+            list.rows.forEach(row => {
+                rows.set(row.placeholder, row);
+                if (row.node) rows.set(row.node, row);
+            });
+        });
+        function visit(node, expanded) {
+            const row = !expanded && rows.get(node);
+            if (row) {
+                if (row.lazy && !row.ready) found.push(...projectModel(row.model));
+                else if (row.node) visit(row.node, true);
+                return;
+            }
+            if (node.matches(selector)) found.push(node);
+            for (const child of node.children) visit(child, false);
+        }
+        visit(root, false);
+        return found;
+    };
     window.materializeVirtualChatRows = function (root, options) {
         const restored = [], pending = [], anchors = [], scrollRestores = [];
         lists.forEach(list => {
