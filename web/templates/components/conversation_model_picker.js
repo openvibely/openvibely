@@ -819,7 +819,12 @@
     "submit",
     (e) => {
       const btn = e.target.querySelector(".chat-model-select");
-      if (!btn || !state(btn) || btn._ovResubmit) return;
+      if (!btn || !state(btn)) return;
+      if (btn._ovResubmit) {
+        // The event owns this snapshot until HTMX starts (or drops) this send.
+        e._chatSubmissionPayload = e.target._chatNextSubmissionPayload;
+        return;
+      }
       const s = state(btn);
       if (!taskEndpoint(btn)) return;
       e.preventDefault();
@@ -833,15 +838,13 @@
       // The composer temporarily installs a steering fallback payload, then
       // restores the newer draft synchronously. Preserve the selected model
       // and effort too, since either can change while the save completes.
-      const payload = {
-        ...(form._chatNextSubmissionPayload || {
-          message: message?.value || "",
-          attachmentSessionID: attachment?.value || "",
-        }),
-        modelID: model?.value || "",
-        reasoningEffort: effort?.value || "",
-      };
-      const waitingForEffort = s.loading;
+      const capturedEffort = form._chatNextSubmissionPayload?.reasoningEffort !== undefined;
+      const payload = form._captureChatSubmission(form._chatNextSubmissionPayload);
+      payload.managedModelSelection = true;
+      // This attempt owns the captured snapshot while settings load. Do not
+      // leave it on the form for a later Send if loading or saving fails.
+      form._chatNextSubmissionPayload = null;
+      const waitingForEffort = s.loading && !capturedEffort;
       const ready = s.ready;
       const pending = s.pending;
       Promise.resolve(ready)
@@ -873,8 +876,26 @@
           form.append(managedSelection);
           btn._ovResubmit = true;
           try {
-            form.requestSubmit(submitter);
+            // Model settings may finish loading after polling replaces the
+            // send button. Only reuse a submitter still owned by this form.
+            // Older desktop WebViews use the composer's synthetic-submit path.
+            if (typeof form.requestSubmit === "function") {
+              const liveSubmitter =
+                submitter?.form === form && submitter.type === "submit"
+                  ? submitter
+                  : form.querySelector('button[type="submit"],input[type="submit"]');
+              form.requestSubmit(liveSubmitter || undefined);
+            } else {
+              form.dispatchEvent(
+                new Event("submit", { bubbles: true, cancelable: true }),
+              );
+            }
           } finally {
+            // Queued sends retain the snapshot on their triggering event.
+            // Clear the temporary handoff even when submission fails or is
+            // cancelled, without clearing a newer submission's snapshot.
+            if (form._chatNextSubmissionPayload === payload)
+              form._chatNextSubmissionPayload = null;
             btn._ovResubmit = false;
             managedSelection.remove();
             if (message) message.value = draft;
@@ -886,6 +907,7 @@
         .catch((err) => {
           window.ovModelPicker.open(btn);
           status.textContent = err.message;
+          form._chatSubmissionFailed?.(payload);
         });
     },
     true,

@@ -94,6 +94,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png?v=2"/>
 			<title>{ documentTitle(title) }</title>
 			<meta id="ov-theme-catalog" data-catalog={ themes.RuntimeCatalogJSON() }/>
+			<script id="file-drop-navigation-guard">
+				// Every full page load needs this guard, including pages without a composer.
+				// Bubble after local drop handlers so upload targets keep handling their files.
+				if (!window._fileDropNavigationGuardInstalled) {
+					window._fileDropNavigationGuardInstalled = true;
+					document.addEventListener('drop', function(e) {
+						if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') !== -1) e.preventDefault();
+					});
+				}
+			</script>
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
 				(function() {
