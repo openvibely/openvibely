@@ -380,10 +380,169 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  await trigger._ovModelState.pending;
  assert(stored.b==='medium'&&posts.at(-1)==='default','default effort saves against the project model');
 
+ // Desktop WebViews without requestSubmit enter through the composer's fallback.
+ form._chatNextSubmissionPayload=null;
+ window.ovModelPicker.close(false);
+ const nativeRequestSubmit=form.requestSubmit;
+ form.requestSubmit=undefined;
+ let desktopSend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();desktopSend=new FormData(form);},{once:true});
+ message.value='desktop follow-up';message.dispatchEvent(new Event('input',{bubbles:true}));
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(40);
+ assert(desktopSend?.get('message')==='desktop follow-up','desktop fallback sends after model settings are ready');
+ assert(panel.hidden,'desktop fallback must not open the models menu');
+ form.requestSubmit=nativeRequestSubmit;
+
+ // Polling can replace the submitter while the picker waits for settings.
+ form._chatNextSubmissionPayload=null;
+ let releaseSettings;
+ trigger._ovModelState.pending=new Promise(resolve=>{releaseSettings=resolve;});
+ let replacedButtonSend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();replacedButtonSend=new FormData(form);},{once:true});
+ message.value='follow-up after button replacement';
+ const oldButton=form.querySelector('button[type=submit]');
+ form.requestSubmit(oldButton);
+ oldButton.replaceWith(oldButton.cloneNode(true));
+ releaseSettings();await wait(40);
+ assert(replacedButtonSend?.get('message')==='follow-up after button replacement','send survives composer button replacement');
+ assert(panel.hidden,'button replacement must not open the models menu');
+
+ // A failed handoff must not replay its message or attachments on the next Send.
+ form._chatNextSubmissionPayload=null;
+ message.value='failed original';attachment.value='failed-attachment';
+ nativeRequestSubmit.call(form);
+ form.requestSubmit=()=>{throw Error('simulated submission failure');};
+ await wait(40);
+ assert(message.value==='failed original'&&attachment.value==='failed-attachment','failed handoff preserves visible draft');
+ assert(!form._chatNextSubmissionPayload,'failed handoff clears its internal snapshot');
+ assert(!form.querySelector('[name=model_selection_managed]')&&!trigger._ovResubmit,'failed handoff clears submission guards');
+ form.requestSubmit=nativeRequestSubmit;
+ window.ovModelPicker.close(false);
+ let retrySend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();retrySend=new FormData(form);},{once:true});
+ message.value='corrected follow-up';attachment.value='corrected-attachment';
+ form.requestSubmit();await wait(40);
+ assert(retrySend?.get('message')==='corrected follow-up'&&retrySend?.get('attachment_session_id')==='corrected-attachment','retry sends edited text and attachments');
+ assert(!form._chatNextSubmissionPayload,'cancelled submission also clears its internal snapshot');
+
+ // A steering snapshot is consumed even if settings fail before resubmission.
+ form._chatNextSubmissionPayload={message:'old steering message',attachmentSessionID:'old-steering-attachment',fallbackFromSteer:true};
+ trigger._ovModelState.error='simulated settings failure';
+ message.value='current visible draft';
+ form.requestSubmit();await wait(150);
+ assert(!form._chatNextSubmissionPayload,'settings failure clears captured steering snapshot');
+ assert(message.value==='current visible draft','settings failure preserves newer draft');
+
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
  </script></body></html>`)
 	}))
 	defer srv.Close()
 	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "task picker persistence", 400, 800, 25*time.Second)
+}
+
+func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
+	chrome := testChromePath(t)
+	var content bytes.Buffer
+	agents := []models.LLMConfig{
+		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
+		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
+	}
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var records []map[string]string
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/tasks/t/thread/model", "/ui/model-favorites":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{}`)
+		case "/stop":
+			fmt.Fprint(w, `stopped`)
+		case "/release":
+			releaseOnce.Do(func() { close(release) })
+		case "/records":
+			mu.Lock()
+			defer mu.Unlock()
+			_ = json.NewEncoder(w).Encode(records)
+		case "/send":
+			_ = r.ParseForm()
+			record := make(map[string]string)
+			for key := range r.PostForm {
+				record[key] = r.PostForm.Get(key)
+			}
+			mu.Lock()
+			records = append(records, record)
+			first := len(records) == 1
+			mu.Unlock()
+			if first {
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			fmt.Fprint(w, `<div>accepted</div>`)
+		default:
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script></head><body data-test-result="pending"><div id="messages"></div>`+content.String()+`<div id="browser-result"></div><script>
+(async()=>{
+ const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,20));
+ const until=async(fn)=>{for(let i=0;i<200;i++){if(fn())return;await wait();}throw Error('timed out');};
+ try {
+ const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]');
+ const picker=form.querySelector('.chat-model-select');await picker._ovModelState.ready;
+ const completed=[];let stopped=false;
+ assert(form.querySelector('[aria-label="Stop response"]').getAttribute('hx-sync')==='this:drop','rendered Stop has an independent request scope');
+ form.addEventListener('htmx:afterRequest',e=>{if(e.detail.elt===form)completed.push({message:e.detail.xhr._chatSubmittedMessage,attachment:e.detail.xhr._chatSubmittedAttachmentSession,fallback:e.detail.xhr._chatSubmittedFallbackFromSteer});else if(e.detail.elt.getAttribute('aria-label')==='Stop response')stopped=true;});
+ message.value='first';message.dispatchEvent(new Event('input',{bubbles:true}));form.requestSubmit();
+ let records=[];for(let i=0;i<200;i++){records=await (await fetch('/records')).json();if(records?.length)break;await wait();}
+ assert(records?.length===1,'first request is held in flight');
+ // Simulate a rejected steering request falling back to a normal send.
+ form._chatNextSubmissionPayload={message:'queued follow-up',attachmentSessionID:'queued-attachment',fallbackFromSteer:true};
+ message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';
+ let handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
+ form.requestSubmit();await until(()=>handedOff);
+ // A later send must not replace the waiting steering fallback.
+ message.value='third message';attachment.value='third-attachment';model.value='b';effort.value='medium';
+ handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
+ form.requestSubmit();await until(()=>handedOff);
+ // Rebuilt Stop controls must still run while sends are waiting.
+ message.value='';message.dispatchEvent(new Event('input',{bubbles:true}));
+ form.querySelector('[aria-label="Stop response"]').click();await until(()=>stopped);
+ assert(completed.length===0,'Stop completes independently of the held send');
+ message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';
+ message.dispatchEvent(new Event('input',{bubbles:true}));
+ await fetch('/release');await until(()=>completed.length>=2);
+ records=await (await fetch('/records')).json();
+ assert(records[1]?.message==='queued follow-up','later send must not drop the waiting follow-up');
+ await until(()=>completed.length===3);
+ records=await (await fetch('/records')).json();
+ assert(records.length===3,'all three sends reach the server exactly once');
+ const sent=records[1];
+ assert(sent.message==='queued follow-up','queued request must not send the newer draft: '+sent.message);
+ assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
+ assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
+ assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
+ assert(records[2].message==='third message'&&records[2].attachment_session_id==='third-attachment'&&records[2].agent_id==='b'&&records[2].reasoning_effort==='medium'&&records[2].model_selection_managed==='1','third send retains its own snapshot');
+ assert(completed[2].message==='third message'&&completed[2].fallback===false,'third send retains independent completion metadata');
+ assert(message.value==='unsent newer draft'&&attachment.value==='newer-attachment'&&model.value==='b'&&effort.value==='low','completion preserves newer draft and settings');
+ assert(!form._chatNextSubmissionPayload,'no stale snapshot on the form');
+ document.body.dataset.testResult='pass';
+ }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);await fetch('/release');}
+})();</script></body></html>`)
+		}
+	}))
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		srv.Close()
+	}()
+	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "queued model picker snapshot", 1000, 800, 25*time.Second)
 }

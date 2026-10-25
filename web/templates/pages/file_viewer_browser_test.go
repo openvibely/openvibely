@@ -177,9 +177,29 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.evaluate(`window.robotSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 260" width="240" height="260" role="img" aria-label="Friendly robot"><g stroke="#243449" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M120 45V25"/><circle cx="120" cy="18" r="9" fill="#ffcc66"/><rect x="45" y="48" width="150" height="105" rx="24" fill="#8bd3ff"/><circle cx="88" cy="90" r="12" fill="#243449"/><circle cx="152" cy="90" r="12" fill="#243449"/><path d="M92 120Q120 144 148 120" fill="none"/><rect x="65" y="165" width="110" height="60" rx="15" fill="#8bd3ff"/><circle cx="120" cy="194" r="10" fill="#ffcc66"/><path d="M65 182L35 200M175 182L210 155" fill="none"/><path d="M90 225V245H75M150 225V245H165" fill="none"/></g></svg>'; window.svgChat = document.createElement('div'); svgChat.className='chat-markdown'; document.body.append(svgChat); svgChat.innerHTML=window.renderChatMarkdown(robotSVG); 'ok'`)
 		b.waitFor("robot SVG decoded", `String(!!svgChat.querySelector('img')?.naturalWidth)`, "true")
 		b.waitFor("SVG is isolated with source and download", `String(!svgChat.querySelector('svg') && svgChat.querySelector('details code').textContent.trim()===robotSVG && !!svgChat.querySelector('a[download]'))`, "true")
+		b.evaluate(`var sibling=document.createElement('a');sibling.href='/fixture/data.json';sibling.dataset.filePreview='';sibling.textContent='JSON';svgChat.querySelector('.chat-svg-preview').append(sibling);window.oldSVGLink=svgChat.querySelector('[data-image-gallery-item]');window.oldSVGURL=oldSVGLink.href;'ok'`)
 		b.click(".chat-svg-preview [data-image-gallery-item]")
 		b.waitFor("SVG gallery", `String(document.getElementById('image-gallery').open && !!document.querySelector('[data-gallery-image]').naturalWidth)`, "true")
+		b.click("[data-gallery-next]")
+		b.waitFor("neighbor opens before background remount", `String(!!document.querySelector('[data-json-tree]'))`, "true")
+		b.evaluate(`svgChat.remove();'ok'`)
+		b.evaluateAwait(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('detached'))))`)
+		if got := b.evaluateAwait(`fetch(oldSVGURL).then(()=> 'still live',()=> 'revoked')`); got != "revoked" {
+			t.Fatal("detached thumbnail URL was not revoked: " + got)
+		}
+		b.evaluate(`document.body.append(svgChat);'ok'`)
+		b.waitFor("background remount replaces SVG figure", `String(!!svgChat.querySelector('img')?.naturalWidth && svgChat.querySelector('[data-image-gallery-item]')!==oldSVGLink && !oldSVGLink.closest('.chat-svg-preview').querySelector('code'))`, "true")
+		b.click("[data-gallery-prev]")
+		b.waitFor("gallery snapshot survives moved SVG source", `String(!!document.querySelector('[data-gallery-image]')?.naturalWidth && document.querySelector('[data-gallery-image]').src!==oldSVGURL && document.querySelector('[data-gallery-count]').textContent==='1 / 2')`, "true")
+		b.evaluate(`window.snapshotSVGURL=document.querySelector('[data-gallery-image]').src;window.snapshotSVGDownload=document.querySelector('[data-gallery-download]').href;'ok'`)
+		if got := b.evaluateAwait(`fetch(snapshotSVGDownload).then(r=>r.text()).then(text=>String(text.trim()===robotSVG))`); got != "true" {
+			t.Fatal("original SVG download did not survive remount: " + got)
+		}
 		b.click("[data-gallery-close]")
+		b.waitFor("remounted SVG gallery closes", `String(!document.getElementById('image-gallery').open && !document.querySelector('[data-gallery-download]').hasAttribute('href'))`, "true")
+		if got := b.evaluateAwait(`Promise.all([snapshotSVGURL,snapshotSVGDownload].map(url=>fetch(url).then(()=>false,()=>true))).then(results=>String(results.every(Boolean)))`); got != "true" {
+			t.Fatal("gallery SVG resources were not released: " + got)
+		}
 		b.evaluate("svgChat.innerHTML=window.renderChatMarkdown('```svg\\n'+robotSVG+'\\n```'); 'ok'")
 		b.waitFor("fenced SVG decoded", `String(!!svgChat.querySelector('img')?.naturalWidth)`, "true")
 		b.evaluate(`svgChat.innerHTML=window.renderChatMarkdown(robotSVG.slice(0,-6)); 'ok'`)
@@ -208,6 +228,73 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.click(".file-html-canvas button")
 		b.waitFor("expanded generated artifact", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html')`, "true")
 		b.click("[data-file-close]")
+		for _, scope := range []string{"task-detail-content", "chat-page-root"} {
+			b.evaluate(fmt.Sprintf(`var scope=document.createElement('div');scope.id=%q;document.body.append(scope);var before=document.createElement('div');before.innerHTML='<a data-file-preview href="/fixture/data.json">JSON</a>';scope.append(before);var message=document.createElement('div');message.className='chat-markdown';message.append(document.getElementById('generated'),document.querySelector('.file-html-canvas'));scope.append(message);var after=document.createElement('div');after.innerHTML='<a data-file-preview href="/fixture/math.md">Math</a><a data-file-preview href="/files/abcdef?download=1">Duplicate HTML</a>';scope.append(after);'ok'`, scope))
+			for _, entry := range []string{".file-html-canvas button", "#generated"} {
+				b.click(entry)
+				b.waitFor("HTML opens within conversation attachments", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html' && document.querySelector('[data-gallery-count]').textContent==='2 / 3')`, "true")
+				b.click("[data-gallery-prev]")
+				b.waitFor("previous attachment from HTML", `String(!!document.querySelector('[data-json-tree]') && document.querySelector('[data-gallery-count]').textContent==='1 / 3')`, "true")
+				b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
+				b.waitFor("keyboard returns to HTML", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html')`, "true")
+				b.click("[data-gallery-next]")
+				b.waitFor("next attachment from HTML", `String(!!document.querySelector('[data-file-markdown]') && document.querySelector('[data-gallery-count]').textContent==='3 / 3' && document.querySelector('[data-gallery-next]').disabled)`, "true")
+				b.click("[data-gallery-close]")
+			}
+			b.evaluate(`document.body.append(document.getElementById('generated'),document.querySelector('.file-html-canvas'));scope.remove();'ok'`)
+		}
+		b.evaluateAwait(`window.queryChatVirtualElements ? Promise.resolve('ready') : new Promise(resolve=>{var script=document.createElement('script');script.src='/static/chat-virtual-list.js';script.onload=()=>resolve('ready');document.head.append(script)})`)
+		for _, scope := range []string{"task-detail-content", "chat-page-root"} {
+			b.evaluate(fmt.Sprintf(`
+var virtualScope=document.createElement('div');virtualScope.id=%q;
+virtualScope.style.cssText='position:fixed;inset:100px;z-index:10';document.body.append(virtualScope);
+var messages=document.createElement('div');messages.id=virtualScope.id==='chat-page-root'?'chat-messages':'task-thread-messages';
+messages.style.cssText='height:300px;overflow:auto';messages.dataset.transcriptHydrating='true';virtualScope.append(messages);
+messages.innerHTML='<div data-execution-pair data-exec-status="completed"><div class="chat-markdown" id="offscreen-file"><a data-file-preview href="/fixture/math.md">Math</a></div></div><div style="height:5000px"></div><div id="cold-files"></div><div style="height:5000px"></div><a id="visible-file" data-file-preview href="/fixture/data.json">JSON</a>';
+messages.querySelector('[data-execution-pair]').insertAdjacentHTML('beforeend','<div class="stream-tool">Row</div>'.repeat(45));
+document.getElementById('offscreen-file').insertAdjacentHTML('beforeend',window.renderChatMarkdown(robotSVG));
+window.coldFileRenders=0;
+window.installChatVirtualRows(document.getElementById('cold-files'),{models:[{kind:'text',segments:[{type:'text',content:'Paragraph text.\n\n'.repeat(6000)+'[Generated](/files/abcdef) and `+"`[Code](/files/deadbeef)`"+`'}]}]},()=>{window.coldFileRenders++});
+window.savedAsyncMarkdown=window.renderChatMarkdownAsync;window.savedSyncMarkdown=window.renderChatMarkdown;
+window.largeExtractionCalls=0;
+window.renderChatMarkdown=function(text){if(text.length>=64*1024)throw Error('Large extraction must not run synchronously');return savedSyncMarkdown(text)};
+window.renderChatMarkdownAsync=function(text){
+ if(text.length<64*1024)return savedAsyncMarkdown(text);
+ largeExtractionCalls++;
+ return savedAsyncMarkdown(text).then(rendered=>new Promise(resolve=>{window.releaseFileExtraction=()=>resolve(rendered)}));
+};'ok'`, scope))
+			b.waitFor("SVG thumbnail decoded before virtualization", `String(!!document.querySelector('#offscreen-file img')?.naturalWidth)`, "true")
+			b.evaluate(`window.detachedSVGURL=document.querySelector('#offscreen-file img').src;messages.removeAttribute('data-transcript-hydrating');messages.scrollTop=messages.scrollHeight;window.refreshVirtualChatRows(messages);'ok'`)
+			b.waitFor("offscreen attachment detached", `String(!document.getElementById('offscreen-file') && !!document.querySelector('#cold-files [data-virtual-chat-row]') && coldFileRenders===0)`, "true")
+			b.evaluate(`window.fileScrollBefore=messages.scrollTop;'ok'`)
+			b.click("#visible-file")
+			b.waitFor("requested file opens before large extraction finishes", `String(!!document.querySelector('[data-json-tree]') && document.getElementById('image-gallery').open && largeExtractionCalls===1 && typeof releaseFileExtraction==='function')`, "true")
+			b.click("[data-gallery-close]")
+			b.evaluate(`releaseFileExtraction();'ok'`)
+			b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),0))`)
+			b.waitFor("late extraction cannot reopen gallery", `String(!document.getElementById('image-gallery').open)`, "true")
+			b.click("#visible-file")
+			b.waitFor("virtual attachments included in order and extraction cached", `String(!!document.querySelector('[data-json-tree]') && document.querySelector('[data-gallery-count]').textContent==='4 / 4' && largeExtractionCalls===1)`, "true")
+			b.click("[data-gallery-prev]")
+			b.waitFor("unrendered HTML attachment opens", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html' && document.querySelector('[data-gallery-count]').textContent==='3 / 4')`, "true")
+			b.click("[data-gallery-prev]")
+			b.waitFor("detached SVG attachment opens with fresh resource", `String(!!document.querySelector('[data-gallery-image]')?.naturalWidth && document.querySelector('[data-gallery-image]').src!==detachedSVGURL && document.querySelector('[data-gallery-count]').textContent==='2 / 4')`, "true")
+			b.evaluate(`window.gallerySVGURL=document.querySelector('[data-gallery-image]').src;window.gallerySVGDownload=document.querySelector('[data-gallery-download]').href;'ok'`)
+			if got := b.evaluateAwait(`fetch(gallerySVGDownload).then(r=>r.text()).then(text=>String(text.trim()===robotSVG))`); got != "true" {
+				t.Fatal("SVG original download was not preserved: " + got)
+			}
+			b.click("[data-gallery-prev]")
+			b.waitFor("detached attachment opens", `String(!!document.querySelector('[data-file-markdown]') && document.querySelector('[data-gallery-count]').textContent==='1 / 4')`, "true")
+			if got := b.evaluateAwait(`Promise.all([gallerySVGURL,gallerySVGDownload].map(url=>fetch(url).then(()=>false,()=>true))).then(results=>String(results.every(Boolean)))`); got != "true" {
+				t.Fatal("gallery SVG URLs were not released: " + got)
+			}
+			b.waitFor("gallery leaves virtualization and scroll intact", `String(!document.getElementById('offscreen-file') && !!document.querySelector('#cold-files [data-virtual-chat-row]') && coldFileRenders===0 && messages.scrollTop===fileScrollBefore)`, "true")
+			b.click("[data-gallery-close]")
+			b.evaluate(`messages.scrollTop=0;window.refreshVirtualChatRows(messages);'ok'`)
+			b.waitFor("remounted SVG thumbnail has fresh URL", `String(!!document.querySelector('#offscreen-file img')?.naturalWidth && document.querySelector('#offscreen-file img').src!==detachedSVGURL)`, "true")
+			b.evaluate(`window.renderChatMarkdownAsync=savedAsyncMarkdown;window.renderChatMarkdown=savedSyncMarkdown;delete window.releaseFileExtraction;virtualScope.remove();'ok'`)
+		}
+
 		b.click("#json")
 		b.waitFor("exact JSON number", `String(document.querySelector('[data-json-tree]')?.textContent.includes('12345678901234567890'))`, "true")
 		b.click("[data-file-close]")
