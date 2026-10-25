@@ -3,7 +3,6 @@ package layout
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -69,10 +68,6 @@ func taskListStatusLabel(task models.Task) string {
 	return "Pending"
 }
 
-func taskListChipClass(task models.Task) string {
-	return strings.Replace(taskListDotClass(task), "task-list-dot", "task-list-chip", 1)
-}
-
 func taskListAge(t time.Time) string {
 	d := time.Since(t)
 	switch {
@@ -114,7 +109,6 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 						<span class="task-list-meta">{ taskListStatusLabel(task) }</span>
 					</span>
 					<time class="task-list-time" datetime={ task.UpdatedAt.Format(time.RFC3339) } title={ task.UpdatedAt.Format("Jan 2, 2006 3:04 PM") }>{ taskListAge(task.UpdatedAt) }</time>
-					<span class={ taskListChipClass(task) }>{ taskListStatusLabel(task) }</span>
 				</a>
 			}
 		</details>
