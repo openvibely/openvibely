@@ -29,7 +29,7 @@ func TestBrowserFunctional_StreamingMath(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "streaming-math", func(b *composerFocusCDP) {
-		b.waitFor("renderer", `typeof window.renderLiveChatContent`, "function")
+		b.waitFor("streaming fixture ready", `String(document.readyState !== 'loading' && typeof window.renderLiveChatContent === 'function' && !!document.getElementById('math-stream'))`, "true")
 		b.evaluateAwait(`(async()=>{window.mathSource='Bayes: \\(P(A \\mid B)=\\frac{P(B \\mid A)P(A)}{P(B)}\\).';await window.renderLiveChatContent(document.getElementById('math-stream'),window.mathSource);return 'ready'})()`)
 		b.waitFor("styled equation", `String(!!document.querySelector('#math-stream [data-math-ready="true"] .katex'))`, "true")
 		result := b.evaluateAwait(`(async()=>{
