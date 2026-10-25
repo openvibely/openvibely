@@ -3125,10 +3125,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// A user may type or attach a steering update while an earlier send is still in flight.
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
-						var payload = form._chatNextSubmissionPayload || null;
+						var triggeringEvent = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;
+						var payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || null;
 						form._chatNextSubmissionPayload = null;
 						var request = event.detail.xhr || {};
-						request._chatSubmittedIntent = form.getAttribute('data-submit-intent') || 'normal';
+						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
 						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
 						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
 								request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');

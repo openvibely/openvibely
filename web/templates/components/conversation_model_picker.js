@@ -815,11 +815,29 @@
   document.addEventListener("htmx:beforeCleanupElement", (e) => {
     if (active && e.detail?.elt?.contains(active)) close(false);
   });
+  // HTMX retains the triggering event when a request is queued. Restore its
+  // captured values at serialization time, not from the then-current draft.
+  document.addEventListener("htmx:configRequest", (e) => {
+    const payload = e.detail?.triggeringEvent?._chatSubmissionPayload;
+    if (!payload) return;
+    Object.assign(e.detail.parameters, {
+      message: payload.message,
+      attachment_session_id: payload.attachmentSessionID,
+      agent_id: payload.modelID,
+      reasoning_effort: payload.reasoningEffort,
+      model_selection_managed: "1",
+    });
+  });
   document.addEventListener(
     "submit",
     (e) => {
       const btn = e.target.querySelector(".chat-model-select");
-      if (!btn || !state(btn) || btn._ovResubmit) return;
+      if (!btn || !state(btn)) return;
+      if (btn._ovResubmit) {
+        // The event owns this snapshot until HTMX starts (or drops) this send.
+        e._chatSubmissionPayload = e.target._chatNextSubmissionPayload;
+        return;
+      }
       const s = state(btn);
       if (!taskEndpoint(btn)) return;
       e.preventDefault();
@@ -840,6 +858,7 @@
         }),
         modelID: model?.value || "",
         reasoningEffort: effort?.value || "",
+        submitIntent: form.getAttribute("data-submit-intent") || "normal",
       };
       // This attempt owns the captured snapshot while settings load. Do not
       // leave it on the form for a later Send if loading or saving fails.
@@ -891,9 +910,9 @@
               );
             }
           } finally {
-            // HTMX normally consumes this during beforeRequest. A thrown or
-            // cancelled submit must discard it too, without clearing a newer
-            // snapshot installed by another submission.
+            // Queued sends retain the snapshot on their triggering event.
+            // Clear the temporary handoff even when submission fails or is
+            // cancelled, without clearing a newer submission's snapshot.
             if (form._chatNextSubmissionPayload === payload)
               form._chatNextSubmissionPayload = null;
             btn._ovResubmit = false;

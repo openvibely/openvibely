@@ -441,3 +441,91 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 	defer srv.Close()
 	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "task picker persistence", 400, 800, 25*time.Second)
 }
+
+func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
+	chrome := testChromePath(t)
+	var content bytes.Buffer
+	agents := []models.LLMConfig{
+		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
+		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
+	}
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var records []map[string]string
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/tasks/t/thread/model", "/ui/model-favorites":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{}`)
+		case "/release":
+			releaseOnce.Do(func() { close(release) })
+		case "/records":
+			mu.Lock()
+			defer mu.Unlock()
+			_ = json.NewEncoder(w).Encode(records)
+		case "/send":
+			_ = r.ParseForm()
+			record := make(map[string]string)
+			for key := range r.PostForm {
+				record[key] = r.PostForm.Get(key)
+			}
+			mu.Lock()
+			records = append(records, record)
+			first := len(records) == 1
+			mu.Unlock()
+			if first {
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			fmt.Fprint(w, `<div>accepted</div>`)
+		default:
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script></head><body data-test-result="pending"><div id="messages"></div>`+content.String()+`<div id="browser-result"></div><script>
+(async()=>{
+ const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,20));
+ const until=async(fn)=>{for(let i=0;i<200;i++){if(fn())return;await wait();}throw Error('timed out');};
+ try {
+ const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]');
+ const picker=form.querySelector('.chat-model-select');await picker._ovModelState.ready;
+ const completed=[];
+ form.addEventListener('htmx:afterRequest',e=>{if(e.detail.elt===form)completed.push({message:e.detail.xhr._chatSubmittedMessage,attachment:e.detail.xhr._chatSubmittedAttachmentSession,fallback:e.detail.xhr._chatSubmittedFallbackFromSteer});});
+ message.value='first';form.requestSubmit();
+ let records=[];for(let i=0;i<200;i++){records=await (await fetch('/records')).json();if(records?.length)break;await wait();}
+ assert(records?.length===1,'first request is held in flight');
+ // Simulate a rejected steering request falling back to a normal send.
+ form._chatNextSubmissionPayload={message:'queued follow-up',attachmentSessionID:'queued-attachment',fallbackFromSteer:true};
+ message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';
+ let handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
+ form.requestSubmit();await until(()=>handedOff);
+ message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';
+ await fetch('/release');await until(()=>completed.length===2);
+ records=await (await fetch('/records')).json();
+ assert(records.length===2,'exactly two requests');
+ const sent=records[1];
+ assert(sent.message==='queued follow-up','queued request must not send the newer draft: '+sent.message);
+ assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
+ assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
+ assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
+ assert(message.value==='unsent newer draft'&&attachment.value==='newer-attachment'&&model.value==='b'&&effort.value==='low','completion preserves newer draft and settings');
+ assert(!form._chatNextSubmissionPayload,'no stale snapshot on the form');
+ document.body.dataset.testResult='pass';
+ }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);await fetch('/release');}
+})();</script></body></html>`)
+		}
+	}))
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		srv.Close()
+	}()
+	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "queued model picker snapshot", 1000, 800, 25*time.Second)
+}
