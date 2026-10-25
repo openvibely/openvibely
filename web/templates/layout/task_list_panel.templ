@@ -6,7 +6,10 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/taskstate"
 )
+
+const taskListGroupLimit = 7
 
 type TaskListGroup struct {
 	Label string
@@ -32,42 +35,6 @@ func TaskListGroups(tasks []models.Task) []TaskListGroup {
 	return groups
 }
 
-func taskListDotClass(task models.Task) string {
-	switch task.Status {
-	case models.StatusRunning, models.StatusQueued:
-		return "task-list-dot running"
-	case models.StatusCompleted:
-		return "task-list-dot completed"
-	case models.StatusFailed:
-		return "task-list-dot failed"
-	}
-	if task.Category == models.CategoryScheduled {
-		return "task-list-dot scheduled"
-	}
-	return "task-list-dot"
-}
-
-func taskListStatusLabel(task models.Task) string {
-	switch task.Status {
-	case models.StatusRunning:
-		return "Running"
-	case models.StatusQueued:
-		return "Queued"
-	case models.StatusCompleted:
-		return "Completed"
-	case models.StatusFailed:
-		return "Failed"
-	case models.StatusCancelled:
-		return "Cancelled"
-	case models.StatusBlocked:
-		return "Blocked"
-	}
-	if task.Category == models.CategoryScheduled {
-		return "Scheduled"
-	}
-	return "Pending"
-}
-
 func taskListAge(t time.Time) string {
 	d := time.Since(t)
 	switch {
@@ -91,25 +58,34 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 	}
 	for _, group := range groups {
 		<details class="task-list-group" open data-task-list-group={ group.Label }>
-			<summary>{ group.Label }<span>{ strconv.Itoa(len(group.Tasks)) }</span></summary>
-			for _, task := range group.Tasks {
+			<summary>
+				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+				<span class="task-list-group-label">{ group.Label }</span>
+				<span class="task-list-count">{ strconv.Itoa(len(group.Tasks)) }</span>
+			</summary>
+			for i, task := range group.Tasks {
 				<a
 					class="task-list-row"
 					data-task-list-row={ task.ID }
 					data-task-list-title={ task.Title }
+					data-task-list-extra?={ i >= taskListGroupLimit }
+					data-task-list-age={ taskListAge(task.UpdatedAt) }
+					data-task-list-updated={ task.UpdatedAt.Format("Jan 2, 2006 3:04 PM") }
 					href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)) }
 					hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
 					hx-target="#main-content"
 					hx-swap="innerHTML"
 					hx-push-url="true"
 				>
-					<span class={ taskListDotClass(task) } aria-hidden="true"></span>
-					<span class="task-list-copy">
-						<strong>{ task.Title }</strong>
-						<span class="task-list-meta">{ taskListStatusLabel(task) }</span>
-					</span>
-					<time class="task-list-time" datetime={ task.UpdatedAt.Format(time.RFC3339) } title={ task.UpdatedAt.Format("Jan 2, 2006 3:04 PM") }>{ taskListAge(task.UpdatedAt) }</time>
+					@taskstate.Icon(task)
+					<span class="task-list-title">{ task.Title }</span>
+					if task.Prompt != "" {
+						<template data-task-list-prompt>{ task.Prompt }</template>
+					}
 				</a>
+			}
+			if len(group.Tasks) > taskListGroupLimit {
+				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>{ fmt.Sprintf("Show %d more", len(group.Tasks)-taskListGroupLimit) }</button>
 			}
 		</details>
 	}
@@ -180,6 +156,7 @@ templ TaskListPanel(currentProjectID string) {
 						row.hidden = !match; if (match) visible++;
 					});
 					group.hidden = visible === 0;
+					group.toggleAttribute('data-searching', !!q);
 				});
 			}
 			function syncActiveRow() {
@@ -223,7 +200,106 @@ templ TaskListPanel(currentProjectID string) {
 				e.preventDefault(); setWidth(w, true);
 			});
 
-			document.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { filter(); syncActiveRow(); } });
+			var groupStateKey = 'openvibely.taskListGroups';
+			var groupState = {};
+			try { groupState = JSON.parse(localStorage.getItem(groupStateKey) || '{}') || {}; } catch (_) {}
+			function saveGroupState() { try { localStorage.setItem(groupStateKey, JSON.stringify(groupState)); } catch (_) {} }
+			function syncMore(group) {
+				var btn = group.querySelector('.task-list-more');
+				if (btn) btn.textContent = group.hasAttribute('data-expanded') ? 'Show less' : 'Show ' + btn.getAttribute('data-task-list-more') + ' more';
+			}
+			function restoreGroups() {
+				groups.querySelectorAll('.task-list-group').forEach(function(group) {
+					var st = groupState[group.getAttribute('data-task-list-group')] || {};
+					group.open = !st.closed;
+					group.toggleAttribute('data-expanded', !!st.expanded);
+					syncMore(group);
+				});
+			}
+			groups.addEventListener('toggle', function(e) {
+				var group = e.target;
+				if (!group.classList || !group.classList.contains('task-list-group')) return;
+				var label = group.getAttribute('data-task-list-group');
+				groupState[label] = Object.assign({}, groupState[label], { closed: !group.open });
+				saveGroupState();
+			}, true);
+			groups.addEventListener('click', function(e) {
+				var btn = e.target.closest('.task-list-more');
+				if (!btn) return;
+				var group = btn.closest('.task-list-group');
+				var expanded = !group.hasAttribute('data-expanded');
+				group.toggleAttribute('data-expanded', expanded);
+				var label = group.getAttribute('data-task-list-group');
+				groupState[label] = Object.assign({}, groupState[label], { expanded: expanded });
+				saveGroupState();
+				syncMore(group);
+			});
+
+			var hoverCard = document.createElement('div');
+			hoverCard.className = 'task-list-hovercard ov-menu';
+			hoverCard.setAttribute('role', 'tooltip');
+			hoverCard.hidden = true;
+			document.body.appendChild(hoverCard);
+			var hoverTimer = null, hoverRow = null;
+			function hideHoverCard() { clearTimeout(hoverTimer); hoverRow = null; hoverCard.hidden = true; }
+			function showHoverCard(row) {
+				hoverCard.replaceChildren();
+				var head = document.createElement('div'); head.className = 'task-list-hovercard-head';
+				var icon = row.querySelector('[data-task-state-icon]');
+				if (icon) head.appendChild(icon.cloneNode(true));
+				var title = document.createElement('strong'); title.textContent = row.getAttribute('data-task-list-title') || '';
+				head.appendChild(title);
+				hoverCard.appendChild(head);
+				var prompt = row.querySelector('template[data-task-list-prompt]');
+				if (prompt && prompt.content.textContent.trim()) {
+					var p = document.createElement('p'); p.className = 'task-list-hovercard-prompt'; p.textContent = prompt.content.textContent.trim();
+					hoverCard.appendChild(p);
+				}
+				var meta = document.createElement('div'); meta.className = 'task-list-hovercard-meta';
+				var state = icon ? (icon.getAttribute('aria-label') || '').replace(/^Task state:\s*/, '') : '';
+				meta.textContent = (state ? state + ' · ' : '') + 'Updated ' + (row.getAttribute('data-task-list-updated') || '');
+				hoverCard.appendChild(meta);
+				hoverCard.hidden = false;
+				var r = row.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();
+				var top = Math.max(8, Math.min(r.top - 4, window.innerHeight - hoverCard.offsetHeight - 8));
+				hoverCard.style.left = Math.round(panelRect.right + 8) + 'px';
+				hoverCard.style.top = Math.round(top) + 'px';
+			}
+			groups.addEventListener('mouseover', function(e) {
+				var row = e.target.closest('[data-task-list-row]');
+				if (row === hoverRow) return;
+				clearTimeout(hoverTimer);
+				hoverRow = row;
+				if (!row) { hoverCard.hidden = true; return; }
+				hoverTimer = setTimeout(function() { if (hoverRow === row && row.isConnected) showHoverCard(row); }, hoverCard.hidden ? 450 : 60);
+			});
+			groups.addEventListener('mouseleave', hideHoverCard);
+			groups.addEventListener('scroll', hideHoverCard, { passive: true });
+			groups.addEventListener('click', hideHoverCard);
+
+			var refreshTimer = null;
+			function refreshSoon(delay) {
+				clearTimeout(refreshTimer);
+				refreshTimer = setTimeout(function() { if (window.htmx) htmx.trigger(groups, 'taskListRefresh'); }, delay);
+			}
+			function currentProjectID() {
+				var m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);
+				return m ? decodeURIComponent(m[1]) : '';
+			}
+			window.addEventListener('sse-task-event', function(e) {
+				var data = e.detail || {};
+				if (data.project_id && data.project_id !== currentProjectID()) return;
+				refreshSoon(300);
+			});
+			window.addEventListener('sse-live-connected', function() { refreshSoon(300); });
+			document.body.addEventListener('htmx:afterRequest', function(e) {
+				var cfg = e.detail && e.detail.requestConfig;
+				if (!cfg || !e.detail.successful || cfg.verb === 'get' || e.detail.target === groups) return;
+				if (/^\/(tasks|thread-inputs|executions)\b/.test(cfg.path || '')) refreshSoon(150);
+			});
+
+			document.body.addEventListener('htmx:beforeSwap', function(e) { if (e.detail.target === groups) hideHoverCard(); });
+			document.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { restoreGroups(); filter(); syncActiveRow(); } });
 			document.body.addEventListener('htmx:afterSettle', syncActiveRow);
 			window.addEventListener('popstate', syncActiveRow);
 			window.addEventListener('resize', function() { setWidth(currentWidth(), false); });
