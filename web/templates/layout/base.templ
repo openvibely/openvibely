@@ -3093,6 +3093,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Kanban columns used the new page color; lift them onto the chrome color. */
 				html[data-shell-frame] .kanban-column { background-color: var(--shell-chrome); }
 				html[data-shell-frame][data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-kanban-column-bg); }
+				html[data-color-theme="openvibely-layered"] .chat-input-container:focus-within { border-color: var(--ov-focus) !important; }
 
 				/* Compact icon rail */
 				html[data-shell-frame] .drawer-side { height: calc(100dvh - var(--project-titlebar-height, 46px)); z-index: auto; }
