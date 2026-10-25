@@ -78,6 +78,9 @@ func registerPlatformWindowControls(app *application.App, window *application.We
 		}
 	})
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		application.InvokeAsync(func() { C.ovInstallLinuxCaption(window.NativeWindow()) })
+		application.InvokeAsync(func() {
+			C.ovEnableLinuxWebFileDrops(window.NativeWindow(), C.uint(window.ID()))
+			C.ovInstallLinuxCaption(window.NativeWindow())
+		})
 	})
 }
