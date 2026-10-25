@@ -40,14 +40,15 @@
   const name=element?.dataset.imageName||element?.dataset.fileName||element?.textContent.trim()||'File preview';
   let preview=raw;
   if(kind){const u=new URL(raw,location.href);if(u.origin===location.origin&&/\/(attachments|files)\//.test(u.pathname))preview=mode(raw,kind==='video'?'raw':'thumbnail')}
-  return {element,raw,url:preview,kind,name,download:original(raw)};
+  const svgSource=element?.closest('.chat-svg-preview')?.querySelector('pre > code.language-svg')?.textContent;
+  return {element,raw,url:preview,kind,name,download:original(raw),svgSource};
  }
  async function show(at){
   if(at<0||at>=items.length)return;
   index=at;const item=items[index],id=++ticket;controller?.abort();controller=new AbortController();
   if(dialog.contains(document.activeElement))dialog.focus({preventScroll:true});
   clear();
-  svgPreview=window.createChatSVGPreview?.(item.element);
+  svgPreview=window.createChatSVGPreview?.(item.svgSource);
   const display=svgPreview?{...item,url:svgPreview.url,download:svgPreview.download}:item;
   currentKind=item.kind;previewKind(currentKind);title.textContent=item.name;download.href=display.download;download.download=item.name;download.hidden=false;
   dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
