@@ -113,7 +113,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function apply() {
 						var prefs = {};
 						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns') }; } catch (_) {}
-						root.setAttribute('data-layout', ['split', 'floating', 'stacked'].indexOf(prefs.layout) !== -1 ? prefs.layout : 'unified');
+						root.setAttribute('data-layout', ['split', 'floating', 'stacked', 'edge'].indexOf(prefs.layout) !== -1 ? prefs.layout : 'unified');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
 						root.setAttribute('data-board-columns', ['inset', 'tint', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
@@ -124,7 +124,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating', 'stacked'] },
+						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating', 'stacked', 'edge'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
 						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint', 'tintstrip'] }
@@ -3051,6 +3051,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-layout="unified"] #task-list-panel { padding: 8px 8px 0; margin-bottom: var(--shell-gap); background-color: var(--shell-rail); border-right: 1px solid var(--shell-divider); }
 				html[data-shell-frame][data-layout="unified"]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 				html[data-shell-frame][data-layout="floating"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) var(--shell-gap) 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius); }
+				html[data-shell-frame][data-layout="edge"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) 0 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius) var(--shell-page-radius) 0 0; }
+				html[data-shell-frame][data-layout="edge"] #main-content { margin: 0 !important; border-radius: var(--shell-page-radius) 0 0 0; }
+				html[data-shell-frame][data-layout="edge"] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 				.task-list-search { padding: 0 4px 10px; }
@@ -3066,10 +3069,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				.task-list-meta { display: block; font-size: 11px; opacity: .55; margin-top: 2px; }
 				.task-list-time { display: none; }
-				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
-				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
-				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-meta { display: none; }
-				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
+				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
+				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
+				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) .task-list-meta { display: none; }
+				html:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
 				.task-list-chip { display: none; }
 				html[data-layout="stacked"] #task-list-panel { padding-right: 0; }
 				html[data-layout="stacked"] #task-list-groups { scrollbar-width: none; }
@@ -3148,8 +3151,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					border-radius: var(--shell-rail-radius);
 					transition: none;
 				}
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) .sidebar-aside.sidebar-collapsed,
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
+				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) .sidebar-aside.sidebar-collapsed,
+				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-header { display: none !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner { padding: 8px 0 !important; scrollbar-width: none; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
@@ -3186,7 +3189,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
-				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) #task-list-panel[style*="--superellipse-clip"],
+				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"], [data-layout="edge"]) #task-list-panel[style*="--superellipse-clip"],
 				html[data-shell-frame]:is([data-layout="split"], [data-layout="stacked"]) #sidebar.sidebar-aside[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
@@ -5473,7 +5476,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
 									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
-									var radii = inspector || joined ? [r, r, 0, 0] : list && unified ? [0, 0, r, r] : [r, r, r, r];
+									var edge = document.documentElement.getAttribute('data-layout') === 'edge';
+								var radii = inspector || joined ? [r, r, 0, 0] : list && unified ? [0, 0, r, r] : edge && list ? [r, 0, 0, r] : edge && el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
 									corners.forEach(function(c, index) {
