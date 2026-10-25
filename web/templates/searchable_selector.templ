@@ -368,7 +368,17 @@ templ searchableSelectorScript() {
             listen(document, 'pointerdown', trackBreadcrumbHover, true);
             listen(document, 'pointerout', function(event) { if (!event.relatedTarget) clearBreadcrumbHover(); }, true);
             listen(window, 'blur', clearBreadcrumbHover);
-            listen(document, 'pointerdown', function(event) { var root = rootFor(event.target); if (root) root.__selectorKeyboard = false; });
+            listen(document, 'pointerdown', function(event) {
+                var root = rootFor(event.target);
+                if (!root) return;
+                root.__selectorKeyboard = false;
+                // Keep the pressed option alive through mouse/touch release. A
+                // search response replacing it here would swallow the click.
+                if (event.button === 0 && event.target.closest('[data-searchable-selector-option]') && !root.hasAttribute('data-searchable-selector-local')) {
+                    var search = nodes(root).search;
+                    if (search && window.htmx) htmx.trigger(search, 'htmx:abort');
+                }
+            });
             listen(document, 'pointermove', function(event) {
                 var root = rootFor(event.target); if (!root) return;
                 var option = event.target.closest('[data-searchable-selector-option]');

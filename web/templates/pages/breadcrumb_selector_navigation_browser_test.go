@@ -179,7 +179,16 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function(){ return dialog().open && options().length>0; }, 'Chat-origin Task selector');
     setSearch('two');
     await waitFor(function(){ return options().some(function(option){return option.textContent.indexOf('Task Two')>=0;}); }, 'Chat-origin Task search');
-    options().filter(function(option){ return option.textContent.indexOf('Task Two')>=0; })[0].click();
+    // A refresh arriving between pointer press and release must not remove the
+    // option under the pointer and swallow the eventual click.
+    var pressedOption=options().filter(function(option){ return option.textContent.indexOf('Task Two')>=0; })[0];
+    setSearch('slow');
+    await waitCount('taskSlow',2,'refresh before pointer press');
+    pressedOption.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,isPrimary:true}));
+    await new Promise(resolve=>setTimeout(resolve,450));
+    if(!pressedOption.isConnected) fail('task option replaced between pointerdown and click');
+    pressedOption.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,isPrimary:true}));
+    pressedOption.click();
     await waitFor(function(){ return route('task', 'task-two'); }, 'Chat-origin Task switch');
     var chatParams = new URLSearchParams(location.search);
     if (location.pathname!='/tasks/task-two' || chatParams.get('project_id')!=='project-browser' || chatParams.get('tab')!=='details' || chatParams.get('from')!=='chat') fail('Task switch lost Chat context: '+location.href);
@@ -238,7 +247,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (document.title!=='Automation Two - OpenVibely') fail('Automation Edit switch did not update title');
 
     var finalCounts=await counts();
-	    if (finalCounts.taskSlow!==1 || finalCounts.taskTwo!==2 || finalCounts.taskScheduleOrigin<3 || finalCounts.taskChatOrigin<2) fail('unexpected Task search request counts or missing preserved origins: '+JSON.stringify(finalCounts));    document.body.setAttribute('data-test-result', 'pass');
+	    if (finalCounts.taskSlow!==2 || finalCounts.taskTwo!==2 || finalCounts.taskScheduleOrigin<3 || finalCounts.taskChatOrigin<2) fail('unexpected Task search request counts or missing preserved origins: '+JSON.stringify(finalCounts));    document.body.setAttribute('data-test-result', 'pass');
     await report('pass', '');
   })().catch(async function(error) {
     var message=String(error && error.stack || error);
