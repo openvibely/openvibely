@@ -2991,9 +2991,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 				/* ===== Shell frame: chrome surrounds an inset navigation rail and page. ===== */
 				html[data-shell-frame] {
-					--shell-chrome: #13171C;
-					--shell-page: #1C2128;
-					--shell-card: #252B34;
+					--shell-chrome: #1D1D1D;
+					--shell-rail: #151515;
+					--shell-page: #111111;
+					--shell-card: #2B2B2B;
+					--shell-code: #222222;
+					--shell-row-selected: #262626;
 					--rail-width: 64px;
 					--task-list-width: 300px;
 					--shell-gap: 10px;
@@ -3001,8 +3004,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-rail-radius: 22px;
 					--shell-tab-radius: 17px;
 				}
-				html[data-shell-frame][data-theme="light"] { --shell-chrome: #ECECEE; --shell-page: #FBFBFC; --shell-card: #F1F2F5; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); --shell-card: var(--ov-surface); }
+				html[data-shell-frame][data-theme="light"] { --shell-chrome: #EDEDED; --shell-rail: #F7F7F7; --shell-page: #FFFFFF; --shell-card: #F3F3F3; --shell-code: #F7F7F7; --shell-row-selected: #E2E2E2; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); --shell-rail: var(--ov-content-bg); --shell-card: var(--ov-surface); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-hover); }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;
@@ -3032,7 +3035,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-group > summary::-webkit-details-marker { display: none; }
 				.task-list-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; margin: 1px 0; border: 1px solid transparent; border-radius: 10px; text-decoration: none; color: inherit; }
 				.task-list-row:hover { background: oklch(var(--bc) / .07); }
-				.task-list-row[aria-current="page"] { background: rgba(116, 128, 255, .14); border-color: rgba(116, 128, 255, .55); }
+				.task-list-row[aria-current="page"] { background: var(--shell-row-selected, oklch(var(--bc) / .1)); }
 				.task-list-copy { min-width: 0; flex: 1; }
 				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				.task-list-meta { display: none; }
@@ -3070,7 +3073,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					width: calc(var(--rail-width) - 2 * var(--shell-gap)) !important;
 					height: calc(100dvh - var(--project-titlebar-height, 46px) - var(--shell-gap)) !important;
 					margin: 0 var(--shell-gap) var(--shell-gap);
-					background-color: var(--shell-page) !important;
+					background-color: var(--shell-rail) !important;
 					border: 0 !important;
 					border-radius: var(--shell-rail-radius);
 					transition: none;
@@ -3124,6 +3127,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .chat-bubble-user-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
 				html[data-shell-frame] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; padding-left: 0; padding-right: 0; }
 				html[data-shell-frame] .chat-input-container { background-color: var(--shell-card) !important; }
+				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
+				html[data-shell-frame][data-theme="dark"] #main-content { --tw-text-opacity: 1; color: #E6E6E6; }
 				html[data-shell-frame] .chat-bubble-assistant-msg::before,
 				html[data-shell-frame] .chat-bubble-assistant-msg::after { display: none !important; }
 			</style>
