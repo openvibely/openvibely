@@ -112,8 +112,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns') }; } catch (_) {}
+						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep') }; } catch (_) {}
 						root.setAttribute('data-layout', ['split', 'floating', 'stacked', 'edge', 'edgeunified'].indexOf(prefs.layout) !== -1 ? prefs.layout : 'unified');
+						root.setAttribute('data-surface-step', prefs.step === 'on' || prefs.step === 'off' ? prefs.step : 'theme');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
 						root.setAttribute('data-board-columns', ['inset', 'tint', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
@@ -126,6 +127,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var displayPrefs = {
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating', 'stacked', 'edge', 'edgeunified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
+						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['theme', 'on', 'off'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
 						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint', 'tintstrip'] }
 					};
@@ -3211,7 +3213,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::before,
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::after { display: none !important; }
 				html[data-thread-width="focused"] :is(#task-thread-messages, #chat-messages) > *, html[data-thread-width="focused"] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
-				html[data-thread-width="focused"] :is(#task-thread-messages, #chat-messages) { padding-left: 24px; padding-right: 24px; }
+				html[data-thread-width="focused"] :is(#task-thread-messages, #chat-messages) { padding-left: 28px; padding-right: 24px; }
+				html[data-thread-width="focused"] #main-content :is(#chat-page-root, #task-thread-view) .chat-input-shadow-gutter { padding-left: 0; padding-right: 0; }
 				html[data-thread-width="focused"] .chat-execution-pair { display: flex; flex-direction: column; }
 				html[data-thread-width="focused"] .chat-bubble-user-msg { align-self: flex-end; max-width: 75%; width: fit-content; padding: 10px 16px !important; border-radius: 18px !important; border: 0 !important; }
 				html[data-thread-width="focused"] .chat-bubble-user-msg::before,
@@ -3220,6 +3223,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-thread-width="focused"] .chat-input-container { border-radius: 22px !important; border: 1px solid var(--shell-divider, oklch(var(--bc) / .08)) !important; box-shadow: none !important; }
 				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
 				html[data-shell-frame] #main-content .chat-input-shadow-gutter { padding-bottom: 14px; }
+				html[data-shell-frame][data-surface-step="off"] { --shell-card: oklch(var(--b1)) !important; }
+				html[data-shell-frame][data-surface-step="off"][data-ov-theme-layer="custom"] { --shell-card: var(--ov-surface) !important; }
+				html[data-shell-frame][data-surface-step="on"] { --shell-card: color-mix(in srgb, oklch(var(--b1)) 94%, oklch(var(--bc))) !important; }
+				html[data-shell-frame][data-surface-step="on"][data-color-theme="openvibely-dark"][data-theme="dark"] { --shell-card: oklch(25.3267% 0.015896 252.417568) !important; }
+				html[data-shell-frame][data-surface-step="on"][data-ov-theme-layer="custom"] { --shell-card: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text, oklch(var(--bc)))) !important; }
 				html[data-shell-frame][data-color-theme="openvibely-dark"][data-theme="dark"] { --b1: 23.2607% 0.013807 253.100675; --shell-card: oklch(25.3267% 0.015896 252.417568); }
 			</style>
 			<script>
