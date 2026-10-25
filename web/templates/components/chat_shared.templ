@@ -1490,6 +1490,7 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 			type="button"
 			class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0"
 			hx-post={ stopEndpoint }
+			hx-sync="this:drop"
 			hx-swap="none"
 			data-tooltip-disabled
 			aria-label="Stop response"
@@ -1521,6 +1522,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			method="post"
 			novalidate
 			hx-post={ config.PostEndpoint }
+			hx-sync="this:queue all"
 			hx-target={ "#" + config.TargetID }
 			hx-swap="beforeend"
 			data-input-id={ config.InputID }
@@ -2044,6 +2046,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									if (kind === 'stop') {
 										button.type = 'button';
 										button.setAttribute('hx-post', stopEndpoint);
+										// Stop must remain independent of the composer's send queue.
+										button.setAttribute('hx-sync', 'this:drop');
 										button.setAttribute('hx-swap', 'none');
 										button.title = 'Stop response';
 										button.setAttribute('aria-label', 'Stop response');

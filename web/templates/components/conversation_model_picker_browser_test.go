@@ -449,7 +449,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
 		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
 	}
-	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -465,6 +465,8 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		case "/tasks/t/thread/model", "/ui/model-favorites":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)
+		case "/stop":
+			fmt.Fprint(w, `stopped`)
 		case "/release":
 			releaseOnce.Do(func() { close(release) })
 		case "/records":
@@ -497,9 +499,10 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  try {
  const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]');
  const picker=form.querySelector('.chat-model-select');await picker._ovModelState.ready;
- const completed=[];
- form.addEventListener('htmx:afterRequest',e=>{if(e.detail.elt===form)completed.push({message:e.detail.xhr._chatSubmittedMessage,attachment:e.detail.xhr._chatSubmittedAttachmentSession,fallback:e.detail.xhr._chatSubmittedFallbackFromSteer});});
- message.value='first';form.requestSubmit();
+ const completed=[];let stopped=false;
+ assert(form.querySelector('[aria-label="Stop response"]').getAttribute('hx-sync')==='this:drop','rendered Stop has an independent request scope');
+ form.addEventListener('htmx:afterRequest',e=>{if(e.detail.elt===form)completed.push({message:e.detail.xhr._chatSubmittedMessage,attachment:e.detail.xhr._chatSubmittedAttachmentSession,fallback:e.detail.xhr._chatSubmittedFallbackFromSteer});else if(e.detail.elt.getAttribute('aria-label')==='Stop response')stopped=true;});
+ message.value='first';message.dispatchEvent(new Event('input',{bubbles:true}));form.requestSubmit();
  let records=[];for(let i=0;i<200;i++){records=await (await fetch('/records')).json();if(records?.length)break;await wait();}
  assert(records?.length===1,'first request is held in flight');
  // Simulate a rejected steering request falling back to a normal send.
@@ -507,15 +510,29 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';
  let handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
  form.requestSubmit();await until(()=>handedOff);
+ // A later send must not replace the waiting steering fallback.
+ message.value='third message';attachment.value='third-attachment';model.value='b';effort.value='medium';
+ handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
+ form.requestSubmit();await until(()=>handedOff);
+ // Rebuilt Stop controls must still run while sends are waiting.
+ message.value='';message.dispatchEvent(new Event('input',{bubbles:true}));
+ form.querySelector('[aria-label="Stop response"]').click();await until(()=>stopped);
+ assert(completed.length===0,'Stop completes independently of the held send');
  message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';
- await fetch('/release');await until(()=>completed.length===2);
+ message.dispatchEvent(new Event('input',{bubbles:true}));
+ await fetch('/release');await until(()=>completed.length>=2);
  records=await (await fetch('/records')).json();
- assert(records.length===2,'exactly two requests');
+ assert(records[1]?.message==='queued follow-up','later send must not drop the waiting follow-up');
+ await until(()=>completed.length===3);
+ records=await (await fetch('/records')).json();
+ assert(records.length===3,'all three sends reach the server exactly once');
  const sent=records[1];
  assert(sent.message==='queued follow-up','queued request must not send the newer draft: '+sent.message);
  assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
  assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
  assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
+ assert(records[2].message==='third message'&&records[2].attachment_session_id==='third-attachment'&&records[2].agent_id==='b'&&records[2].reasoning_effort==='medium'&&records[2].model_selection_managed==='1','third send retains its own snapshot');
+ assert(completed[2].message==='third message'&&completed[2].fallback===false,'third send retains independent completion metadata');
  assert(message.value==='unsent newer draft'&&attachment.value==='newer-attachment'&&model.value==='b'&&effort.value==='low','completion preserves newer draft and settings');
  assert(!form._chatNextSubmissionPayload,'no stale snapshot on the form');
  document.body.dataset.testResult='pass';
