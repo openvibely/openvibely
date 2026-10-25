@@ -1,12 +1,12 @@
 # Lifecycle Hooks and Skills User Guide
 
-Lifecycle hooks are system steps that run around normal task execution. They help OpenVibely select skills, prepare task context, and learn from completed work.
+The main task model selects relevant skills and memories from the available indexes during execution. Lifecycle hooks are optional supporting steps for context, goal evaluation, and learning.
 
 They do not replace the main task. The normal task still runs as the selected/default agent.
 
 ## Task Flow
 
-A task run follows this shape:
+A task run can include enabled hooks in this order:
 
 ```text
 route_task
@@ -17,12 +17,12 @@ route_task
 
 What each step does:
 
-- `route_task` selects which skills should be available for this task.
+- `route_task` is an optional custom routing hook; built-in Skill Curator routing has been removed.
 - `before_run` can add extra context before the main task runs.
 - Normal task execution runs the task prompt with the selected/default agent.
 - `after_complete` observes the result and can improve skills afterward.
 
-Lifecycle hook implementation skills, such as Skill Curator's `route_task`, must come from the lifecycle agent that owns the hook. Task skills are separate and come from the current task's skill scope.
+Lifecycle hook implementation skills come from the lifecycle agent that owns the hook. Task skills are separate and come from the current task's skill scope. The main model chooses skills without a separate built-in routing call.
 
 ## Lifecycle View (Task Details)
 
@@ -37,15 +37,20 @@ Use the Refresh button to pull updated hook state while a task is still running.
 
 ## Skill Curator
 
-Skill Curator is the built-in system agent that owns the lifecycle skills used for skill selection and learning.
+Skill Curator maintains the skill library. Its after-complete learning hook is disabled by default; it can be enabled in the agent's lifecycle settings when automatic learning is wanted.
 
 Common Skill Curator lifecycle skills:
 
-- `route_task`: chooses skills for the current task.
 - `observe_task_for_learning`: reviews completed tasks and decides whether skills should be improved.
 - `maintain_skill_library`: runs scheduled skill-library maintenance.
 
-Skill Curator can read skill indexes and selected skill files during routing. After a task completes, it can update skills through scoped write tools.
+When enabled and permitted, after-complete learning can update skills through scoped write tools. Scheduled library maintenance remains available independently.
+
+## Project Permissions and Dependencies
+
+Project settings → **Skills & Memory** controls reading and writing skills and memories separately. New projects allow reading skills and reading/writing memories, but disable skill writes. Global skill writes require a separate switch and enabled skill writes. Existing projects retain their previous permissions.
+
+Built-in document skills support Word documents, PDFs, spreadsheets, and presentations. When a selected skill needs a missing dependency, OpenVibely asks for approval before installing it and shows installation progress. Once installation succeeds, the pending skill request resumes.
 
 ## Goal Agent
 
@@ -104,11 +109,10 @@ Paths:
 Flow for a task with no assigned agent:
 
 ```text
-route_task sees standalone skills
--> route_task selects standalone skills
--> normal task receives selected standalone skill context
--> normal task can call skill_view for selected standalone skills
--> after_complete can improve standalone skills with skill_manage
+main model sees the standalone skill index
+-> main model selects and reads relevant skills with skill_view
+-> normal task uses the skill instructions
+-> permitted skill writes can improve standalone skills with skill_manage
 ```
 
 Use standalone skills for knowledge that should help many agents, many tasks, or future no-agent tasks.
@@ -127,15 +131,13 @@ Paths:
 Flow for a task assigned to an agent:
 
 ```text
-route_task sees that assigned agent's skills
--> route_task selects agent-owned skills
--> normal task runs as the assigned agent
--> normal task receives selected agent-owned skill context
--> normal task can call skill_view for selected agent-owned skills
--> after_complete can improve that assigned agent's skills with agent_skill_manage
+normal task runs as the assigned agent
+-> main model sees that agent's skill index
+-> main model selects and reads relevant agent-owned skills
+-> permitted writes can improve that agent's skills with agent_skill_manage
 ```
 
-The router does not mix standalone skills into assigned-agent routing. It only sees the assigned agent's skill index.
+Assigned-agent selection uses the assigned agent's skill scope; no-agent tasks use standalone skills.
 
 Use agent-owned skills for behavior that is specific to that agent's role, workflow, or private responsibilities.
 
@@ -173,7 +175,7 @@ Examples:
 
 ## Learning After Completion
 
-`observe_task_for_learning` runs after the normal task finishes.
+When enabled, `observe_task_for_learning` runs after the normal task finishes. It is disabled by default.
 
 It receives learning context that includes:
 
@@ -210,8 +212,7 @@ Flow:
 ```text
 scheduled task fires
 -> assigned agent is Skill Curator
--> route_task sees Skill Curator's own skills
--> route_task should select maintain_skill_library
+-> main model selects maintain_skill_library from Skill Curator's skills
 -> normal task runs as Skill Curator
 -> maintain_skill_library manages standalone skills and non-system agent-owned skills
 ```
@@ -220,10 +221,8 @@ This scheduled task maintains standalone skills and non-system agent-owned skill
 
 ## System Memory Consolidation
 
-`System: Memory Curator` is the built-in on-disk agent under `internal/builtinskills/builtin/agents/memory_curator/`. It owns task-turn memory lifecycle skills plus scheduled consolidation:
+`System: Memory Curator` is the built-in on-disk agent under `internal/builtinskills/builtin/agents/memory_curator/`. It maintains scheduled consolidation. Main task models select and update memories themselves, subject to project permissions.
 
-- `memory_curator/recall_memory` runs at `before_run` and returns a compact `context_block` with relevant memories for the task turn.
-- `memory_curator/update_memory` runs at `after_complete` and updates durable managed memory when the completed task transcript contains memory-worthy facts.
 - `memory_curator/consolidate_memory` runs through the visible `System: Memory Consolidation` scheduled task assigned to Memory Curator.
 
 Scheduled consolidation flow:
@@ -231,7 +230,7 @@ Scheduled consolidation flow:
 ```text
 scheduled memory task fires
 -> assigned agent is System: Memory Curator
--> route_task selects consolidate_memory from the Memory Curator agent's indexed skills
+-> main model selects consolidate_memory from the Memory Curator agent's indexed skills
 -> normal task runs as Memory Curator with scoped memory file tools
 ```
 
