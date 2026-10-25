@@ -611,6 +611,13 @@ func (s *MCPServer) call(ctx context.Context, method string, params interface{})
 	for k, v := range s.headers {
 		httpReq.Header.Set(k, v)
 	}
+	if method == "tools/call" {
+		// A failed response does not mean the remote action did not happen.
+		// Disable body replay for both the retry helper and net/http (including
+		// 307/308 redirects and transport retries with idempotency headers).
+		// A JSON-RPC ID alone is not a server-side deduplication contract.
+		httpReq.GetBody = nil
+	}
 	httpResp, err := httpretry.DoRequest(s.httpClient, httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("MCP HTTP request failed: %w", err)
