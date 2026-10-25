@@ -2,7 +2,7 @@ package components
 
 // This node is preserved during thread morphs; the workspace controller owns its compact JSON projection.
 templ TaskChangeActivity(taskID string) {
-	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" class="flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" hidden>
+	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" class="flex min-h-8 items-center gap-3 rounded-lg px-3 py-1.5 text-sm text-base-content/80" hidden>
 		<button type="button" class="task-change-summary" data-review-changes onclick="window.taskWorkspace.openChanges()">
 			<svg class="task-change-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2h12l4 4v16H4z"/><path d="M8 10h8M12 6v8M8 17h8"/></svg>
 			<span class="task-change-summary-text" data-change-summary aria-live="polite">
