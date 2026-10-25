@@ -380,6 +380,34 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  await trigger._ovModelState.pending;
  assert(stored.b==='medium'&&posts.at(-1)==='default','default effort saves against the project model');
 
+ // Desktop WebViews without requestSubmit enter through the composer's fallback.
+ form._chatNextSubmissionPayload=null;
+ window.ovModelPicker.close(false);
+ const nativeRequestSubmit=form.requestSubmit;
+ form.requestSubmit=undefined;
+ let desktopSend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();desktopSend=new FormData(form);},{once:true});
+ message.value='desktop follow-up';message.dispatchEvent(new Event('input',{bubbles:true}));
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(40);
+ assert(desktopSend?.get('message')==='desktop follow-up','desktop fallback sends after model settings are ready');
+ assert(panel.hidden,'desktop fallback must not open the models menu');
+ form.requestSubmit=nativeRequestSubmit;
+
+ // Polling can replace the submitter while the picker waits for settings.
+ form._chatNextSubmissionPayload=null;
+ let releaseSettings;
+ trigger._ovModelState.pending=new Promise(resolve=>{releaseSettings=resolve;});
+ let replacedButtonSend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();replacedButtonSend=new FormData(form);},{once:true});
+ message.value='follow-up after button replacement';
+ const oldButton=form.querySelector('button[type=submit]');
+ form.requestSubmit(oldButton);
+ oldButton.replaceWith(oldButton.cloneNode(true));
+ releaseSettings();await wait(40);
+ assert(replacedButtonSend?.get('message')==='follow-up after button replacement','send survives composer button replacement');
+ assert(panel.hidden,'button replacement must not open the models menu');
+
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
  </script></body></html>`)

@@ -873,7 +873,20 @@
           form.append(managedSelection);
           btn._ovResubmit = true;
           try {
-            form.requestSubmit(submitter);
+            // Model settings may finish loading after polling replaces the
+            // send button. Only reuse a submitter still owned by this form.
+            // Older desktop WebViews use the composer's synthetic-submit path.
+            if (typeof form.requestSubmit === "function") {
+              const liveSubmitter =
+                submitter?.form === form && submitter.type === "submit"
+                  ? submitter
+                  : form.querySelector('button[type="submit"],input[type="submit"]');
+              form.requestSubmit(liveSubmitter || undefined);
+            } else {
+              form.dispatchEvent(
+                new Event("submit", { bubbles: true, cancelable: true }),
+              );
+            }
           } finally {
             btn._ovResubmit = false;
             managedSelection.remove();
