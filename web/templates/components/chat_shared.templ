@@ -2120,6 +2120,47 @@ templ ChatInputForm(config ChatInputFormConfig) {
                                 consumeShortcutModifierVisual();
                             }, {signal: modifierAbort.signal});
                             window.addEventListener('blur', consumeShortcutModifierVisual, {signal: modifierAbort.signal});
+						// Each send owns its values while HTMX waits for the form's queue.
+						// The picker uses this same capture before awaiting model settings.
+						form._captureChatSubmission = function(payload, intent) {
+							var fields = new FormData(form);
+							var parameters = Object.create(null);
+							fields.forEach(function(value, name) {
+								if (Object.prototype.hasOwnProperty.call(parameters, name)) {
+									parameters[name] = [].concat(parameters[name], value);
+								} else parameters[name] = value;
+							});
+							var snapshot = Object.assign({
+								message: messageInput ? messageInput.value : '',
+								attachmentSessionID: sessionInput ? sessionInput.value : '',
+								modelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,
+								reasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,
+								submitIntent: form.getAttribute('data-submit-intent') || 'normal'
+							}, payload || {});
+							snapshot.parameters = Object.assign(parameters, snapshot.parameters || {});
+							if (intent) snapshot.submitIntent = intent;
+							return snapshot;
+						};
+						form.addEventListener('submit', function(event) {
+							if (event.target !== form) return;
+							event._chatSubmissionPayload = form._captureChatSubmission(event._chatSubmissionPayload || form._chatNextSubmissionPayload);
+							form._chatNextSubmissionPayload = null;
+						}, true);
+						form.addEventListener('htmx:configRequest', function(event) {
+							if (event.detail.elt !== form) return;
+							var sourceEvent = event.detail.triggeringEvent;
+							var payload = sourceEvent && sourceEvent._chatSubmissionPayload;
+							if (!payload) return;
+							var parameters = event.detail.parameters;
+							Object.assign(parameters, payload.parameters || {}, {
+								message: payload.message,
+								attachment_session_id: payload.attachmentSessionID
+							});
+							if (payload.modelID !== undefined) parameters.agent_id = payload.modelID;
+							if (payload.reasoningEffort !== undefined) parameters.reasoning_effort = payload.reasoningEffort;
+							if (payload.expectedTurnID !== undefined) parameters.expected_turn_id = payload.expectedTurnID;
+							if (payload.managedModelSelection) parameters.model_selection_managed = '1';
+						});
 						function safeSubmit() {
 							var submitBtn = currentSubmitButton();
 									if (typeof form.requestSubmit === 'function') {
@@ -2135,11 +2176,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (submittedMessage.trim() === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
 									var expectedTurnInput = form.querySelector('input[name="expected_turn_id"]');
-									payload = payload || {
+									payload = form._captureChatSubmission(payload || {
 										message: messageInput ? messageInput.value : '',
 										attachmentSessionID: sessionInput ? sessionInput.value : '',
 										expectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''
-									};
+									}, 'steer');
 									var signature = JSON.stringify([payload.message, payload.attachmentSessionID, payload.expectedTurnID]);
 									if (steerRequestInFlight) {
 										if (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;
@@ -2160,8 +2201,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
 									steerRequestInFlight = true;
 									steerFallbackPending = false;
+									var steeringEvent = new Event('chat:steer');
+									steeringEvent._chatSubmissionPayload = payload;
 									var options = {
 									source: form,
+									event: steeringEvent,
 									target: '#pending-thread-inputs',
 									swap: form.getAttribute('hx-swap') || 'beforeend'
 								};
@@ -2174,13 +2218,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 										}
 									try {
 										var steerRequest = htmx.ajax('POST', endpoint, options);
-										if (steerRequest && typeof steerRequest.then === 'function') {
-											steerRequest.then(finishSteerRequest, finishSteerRequest);
+										// HTMX resolves queued ajax promises before sending the request.
+										// Release steering only on its actual afterRequest event.
+										if (steerRequest && typeof steerRequest.catch === 'function') {
+											steerRequest.catch(function() {});
 										}
 									} catch (error) {
 										finishSteerRequest();
 										throw error;
 									} finally {
+										if (form._chatNextSubmissionPayload === payload) form._chatNextSubmissionPayload = null;
 										if (restorePayloadValues) {
 											if (messageInput) messageInput.value = visibleMessageBeforePayload;
 											if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
@@ -3133,6 +3180,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						var payload = (triggeringEvent && triggeringEvent._chatSubmissionPayload) || form._chatNextSubmissionPayload || null;
 						form._chatNextSubmissionPayload = null;
 						var request = event.detail.xhr || {};
+						request._chatSubmittedPayload = payload;
 						request._chatSubmittedIntent = (payload && payload.submitIntent) || form.getAttribute('data-submit-intent') || 'normal';
 						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
 						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
@@ -3182,13 +3230,15 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							steerFallbackPending = false;
 							setTimeout(finishSteerRequest, 0);
 						}
+						if (completedIntent === 'steer' && !replayAsNormal) setTimeout(finishSteerRequest, 0);
 						if (replayAsNormal) {
 							setTimeout(function() {
-								submitComposer(normalPostEndpoint, 'normal', {
+								submitComposer(normalPostEndpoint, 'normal', Object.assign({}, request._chatSubmittedPayload || {}, {
 									message: submittedMessage,
 									attachmentSessionID: submittedAttachmentSession,
-									fallbackFromSteer: true
-								});
+									fallbackFromSteer: true,
+									submitIntent: 'normal'
+								}));
 							}, 0);
 						}
 					});		})();
