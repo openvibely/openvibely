@@ -225,6 +225,14 @@ templ TaskListPanel(currentProjectID string) {
 				saveGroupState();
 			}, true);
 			groups.addEventListener('click', function(e) {
+				if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+				var row = e.target.closest('[data-task-list-row]');
+				if (!row || window.location.pathname !== '/tasks/' + row.getAttribute('data-task-list-row')) return;
+				if (!document.querySelector('#main-content #task-thread-view')) return;
+				e.preventDefault();
+				e.stopPropagation();
+			}, true);
+			groups.addEventListener('click', function(e) {
 				var btn = e.target.closest('.task-list-more');
 				if (!btn) return;
 				var group = btn.closest('.task-list-group');
