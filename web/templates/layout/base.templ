@@ -3087,8 +3087,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-hovercard-prompt { margin-top: 6px; font-size: 12px; line-height: 17px; color: oklch(var(--bc) / .7); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; word-break: break-word; }
 				.task-list-hovercard-meta { margin-top: 8px; font-size: 11px; color: oklch(var(--bc) / .5); }
 				.task-list-empty { padding: 16px 10px; font-size: 12px; opacity: .6; }
-				#task-list-divider { position: absolute; right: -3px; top: 8px; bottom: 24px; width: 8px; cursor: col-resize; touch-action: none; z-index: 5; }
-				#task-list-divider:hover::after, #task-list-divider:focus-visible::after, html.task-list-resizing #task-list-divider::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: oklch(var(--p)); }
+				#task-list-divider { display: none; }
+				html[data-shell-frame] body > .drawer > .drawer-content { position: relative; }
+				html[data-shell-frame]:not(.task-list-collapsed) #task-list-divider { display: block; position: absolute; left: calc(var(--task-list-width) - 4px); top: 8px; bottom: 24px; width: 8px; cursor: col-resize; touch-action: none; z-index: 5; }
+				html[data-shell-frame][data-layout="floating"]:not(.task-list-collapsed) #task-list-divider { left: calc(var(--task-list-width) + var(--shell-gap) / 2 - 4px); top: 0; bottom: var(--shell-gap); }
+				#task-list-divider:hover::after, #task-list-divider:focus-visible::after, html.task-list-resizing #task-list-divider::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: oklch(var(--bc) / .28); }
 				html.task-list-resizing, html.task-list-resizing * { cursor: col-resize !important; user-select: none !important; }
 				/* Header controls anchored to the task list column. */
 				#task-list-header { display: none; }
