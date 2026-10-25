@@ -402,7 +402,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var21 = []any{"task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details")}
+			var templ_7745c5c3_Var21 = []any{"task-tab-panel task-details-scroll-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details")}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var21...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
