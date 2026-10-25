@@ -270,7 +270,7 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 		if htmx {
 			rec = htmxGet(e, "/tasks/"+task.ID+"?tab=details")
 		} else {
-			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=details", nil)
 			rec = httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
 		}

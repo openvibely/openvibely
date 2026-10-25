@@ -278,5 +278,5 @@ window.addEventListener('DOMContentLoaded',function(){
 	stopHandlerBrowserProcess(cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
 	require.EqualValues(t, 2, warmRequests.Load(), "both returns should request an embedded thread")
-	require.EqualValues(t, 1, threadRequests.Load(), "only the initial cold visit should fetch the lazy thread")
+	require.Zero(t, threadRequests.Load(), "a full page load embeds the thread")
 }

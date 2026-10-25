@@ -34,9 +34,9 @@ templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComment
 	</div>
 }
 
-templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment, initialThread ...templ.Component) {
 	@layout.Base(task.Title, projects, task.ProjectID) {
-		@TaskDetailContent(task, goal, metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments)
+		@TaskDetailContent(task, goal, metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments, initialThread...)
 	}
 }
 
