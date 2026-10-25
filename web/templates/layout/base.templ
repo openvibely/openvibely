@@ -112,9 +112,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), edge: localStorage.getItem('openvibely.edge') }; } catch (_) {}
+						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep') }; } catch (_) {}
 						root.setAttribute('data-layout', prefs.layout === 'floating' || prefs.layout === 'edge' ? 'floating' : 'unified');
-						root.setAttribute('data-edge', prefs.edge === 'off' ? 'off' : 'on');
 						root.setAttribute('data-surface-step', prefs.step === 'off' ? 'off' : 'on');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
@@ -127,7 +126,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					apply();
 					var displayPrefs = {
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'floating'] },
-						edge: { key: 'openvibely.edge', attr: 'data-edge', values: ['on', 'off'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['on', 'off'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
@@ -3052,15 +3050,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					min-height: 0; padding: 0 8px var(--shell-gap) 0;
 					color: inherit;
 				}
-				html[data-shell-frame][data-layout="unified"] #task-list-panel { padding: 8px 8px 0; margin-bottom: var(--shell-gap); background-color: var(--shell-rail); border-right: 1px solid var(--shell-divider); }
-				html[data-shell-frame][data-layout="unified"]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
-				html[data-shell-frame][data-layout="floating"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) var(--shell-gap) 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius); }
-				html[data-shell-frame][data-layout="floating"][data-edge="on"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) 0 0; background-color: var(--shell-rail); border-radius: var(--shell-page-radius) var(--shell-page-radius) 0 0; }
-				html[data-shell-frame][data-layout="floating"][data-edge="on"] #main-content { margin: 0 !important; border-radius: var(--shell-page-radius) 0 0 0; }
-				html[data-shell-frame][data-layout="unified"][data-edge="on"] #task-list-panel { margin-bottom: 0; border-radius: var(--shell-page-radius) 0 0 0; }
-				html[data-shell-frame][data-layout="unified"][data-edge="on"] #main-content { margin: 0 !important; border-radius: 0; }
-				html[data-shell-frame][data-edge="on"].task-list-collapsed #main-content { border-radius: var(--shell-page-radius) 0 0 0; }
-				html[data-shell-frame][data-edge="on"] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
+				html[data-shell-frame] #task-list-panel { padding: 8px 8px 0; background-color: var(--shell-rail); }
+				html[data-shell-frame] #main-content { margin: 0 !important; border-radius: var(--shell-page-radius) 0 0 0; }
+				html[data-shell-frame][data-layout="unified"] #task-list-panel { border-right: 1px solid var(--shell-divider); border-radius: var(--shell-page-radius) 0 0 0; }
+				html[data-shell-frame][data-layout="unified"]:not(.task-list-collapsed) #main-content { border-radius: 0; }
+				html[data-shell-frame][data-layout="floating"] #task-list-panel { margin-right: var(--shell-gap); border-radius: var(--shell-page-radius) var(--shell-page-radius) 0 0; }
+				html[data-shell-frame] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 				.task-list-search { padding: 0 4px 10px; }
@@ -5471,8 +5466,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
 									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
-									var edge = document.documentElement.getAttribute('data-edge') === 'on';
-									var radii = edge && joined ? [0, 0, 0, 0] : edge && unified && list ? [0, 0, 0, r] : inspector || joined ? [r, r, 0, 0] : list && unified ? [0, 0, r, r] : edge && list ? [r, 0, 0, r] : edge && el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
+									var radii = joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
 									corners.forEach(function(c, index) {
@@ -5498,7 +5492,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								attach();
 								document.addEventListener('DOMContentLoaded', attach);
 								document.body.addEventListener('htmx:afterSettle', attach);
-								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout', 'data-edge'] });
+								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout'] });
 								var tabs = document.getElementById('desktop-project-titlebar');
 								if (tabs) new MutationObserver(attach).observe(tabs, { childList: true, subtree: true });
 						})();
