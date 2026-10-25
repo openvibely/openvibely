@@ -111,12 +111,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var desktop = root.getAttribute('data-openvibely-runtime') === 'desktop';
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
+						var classic = false;
+						try { classic = localStorage.getItem('openvibely.layout') === 'classic'; } catch (_) {}
+						root.setAttribute('data-layout', classic ? 'classic' : 'focused');
 						var active = desktop || wide.matches;
 						if (active === root.hasAttribute('data-shell-frame')) return;
 						root.toggleAttribute('data-shell-frame', active);
 						document.dispatchEvent(new CustomEvent('openvibely:shell-frame-change', { detail: { active: active } }));
 					}
 					apply();
+					window.openVibelyLayout = {
+						get: function() { return root.getAttribute('data-layout'); },
+						set: function(layout) {
+							try { localStorage.setItem('openvibely.layout', layout === 'classic' ? 'classic' : 'focused'); } catch (_) {}
+							root.setAttribute('data-layout', layout === 'classic' ? 'classic' : 'focused');
+							document.dispatchEvent(new CustomEvent('openvibely:layout-change'));
+						}
+					};
 					if (wide.addEventListener) wide.addEventListener('change', apply);
 					else if (wide.addListener) wide.addListener(apply);
 				})();
@@ -2991,13 +3002,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 				/* ===== Shell frame: chrome surrounds an inset navigation rail and page. ===== */
 				html[data-shell-frame] {
-					--shell-chrome: #1D1D1D;
-					--shell-rail: #151515;
-					--shell-page: #111111;
-					--shell-card: #2B2B2B;
-					--shell-code: #222222;
-					--shell-row-selected: #262626;
-					--shell-divider: #1F1F1F;
+					--shell-chrome: #191E24;
+					--shell-page: #15191E;
+					--shell-rail: var(--shell-page);
+					--shell-card: oklch(var(--b1));
+					--shell-code: oklch(var(--b2));
+					--shell-row-selected: oklch(var(--p) / .22);
+					--shell-divider: oklch(var(--bc) / .08);
 					--rail-width: 64px;
 					--task-list-width: 300px;
 					--shell-gap: 10px;
@@ -3005,8 +3016,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-rail-radius: 22px;
 					--shell-tab-radius: 17px;
 				}
-				html[data-shell-frame][data-theme="light"] { --shell-chrome: #EDEDED; --shell-rail: #F7F7F7; --shell-page: #FFFFFF; --shell-card: #F3F3F3; --shell-code: #F7F7F7; --shell-row-selected: #E2E2E2; --shell-divider: #E4E4E4; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); --shell-rail: var(--ov-content-bg); --shell-card: var(--ov-surface); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-hover); --shell-divider: var(--ov-subtle-border); }
+				html[data-shell-frame][data-theme="light"] { --shell-chrome: #F5F5F5; --shell-page: #E8E8E8; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-shell-chrome, var(--ov-kanban-column-bg)); --shell-page: var(--ov-shell-page, var(--ov-content-bg)); --shell-rail: var(--ov-shell-rail, var(--shell-page)); --shell-card: var(--ov-shell-card, var(--ov-surface)); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-shell-row-selected, var(--ov-accent-tint)); --shell-divider: var(--ov-subtle-border); }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;
@@ -3023,13 +3034,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #task-list-panel {
 					position: relative; display: flex; flex-direction: column;
 					width: var(--task-list-width); flex: 0 0 var(--task-list-width);
-					min-height: 0; padding: 8px 8px 0;
-					margin-bottom: var(--shell-gap);
-					background-color: var(--shell-rail);
-					border-right: 1px solid var(--shell-divider);
+					min-height: 0; padding: 0 8px var(--shell-gap) 0;
 					color: inherit;
 				}
-				html[data-shell-frame]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+				html[data-shell-frame][data-layout="focused"] #task-list-panel { padding: 8px 8px 0; margin-bottom: var(--shell-gap); background-color: var(--shell-rail); border-right: 1px solid var(--shell-divider); }
+				html[data-shell-frame][data-layout="focused"]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 				.task-list-search { padding: 0 4px 10px; }
@@ -3038,13 +3047,17 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-group { margin-bottom: 12px; }
 				.task-list-group > summary { list-style: none; display: flex; justify-content: space-between; padding: 6px 10px; font-size: 11px; letter-spacing: .4px; opacity: .6; cursor: pointer; user-select: none; }
 				.task-list-group > summary::-webkit-details-marker { display: none; }
-				.task-list-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; margin: 1px 0; border: 1px solid transparent; border-radius: 10px; text-decoration: none; color: inherit; }
+				.task-list-row { display: flex; gap: 10px; padding: 9px 10px; margin: 2px 0; border-radius: 12px; text-decoration: none; color: inherit; }
 				.task-list-row:hover { background: oklch(var(--bc) / .07); }
-				.task-list-row[aria-current="page"] { background: var(--shell-row-selected, oklch(var(--bc) / .1)); }
+				.task-list-row[aria-current="page"] { background: oklch(var(--p) / .22); }
 				.task-list-copy { min-width: 0; flex: 1; }
 				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-				.task-list-meta { display: none; }
-				.task-list-time { flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
+				.task-list-meta { display: block; font-size: 11px; opacity: .55; margin-top: 2px; }
+				.task-list-time { display: none; }
+				html[data-layout="focused"] .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
+				html[data-layout="focused"] .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
+				html[data-layout="focused"] .task-list-meta { display: none; }
+				html[data-layout="focused"] .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
 				.task-list-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: oklch(var(--bc) / .4); }
 				.task-list-dot.running { background: oklch(var(--p)); box-shadow: 0 0 0 3px oklch(var(--p) / .18); }
 				.task-list-dot.completed { background: oklch(var(--su)); }
@@ -3078,11 +3091,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					width: calc(var(--rail-width) - 2 * var(--shell-gap)) !important;
 					height: calc(100dvh - var(--project-titlebar-height, 46px) - var(--shell-gap)) !important;
 					margin: 0 var(--shell-gap) var(--shell-gap);
-					background-color: transparent !important;
+					background-color: var(--shell-page) !important;
 					border: 0 !important;
 					border-radius: var(--shell-rail-radius);
 					transition: none;
 				}
+				html[data-shell-frame][data-layout="focused"] .sidebar-aside.sidebar-collapsed,
+				html[data-shell-frame][data-layout="focused"] body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-header { display: none !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner { padding: 8px 0 !important; scrollbar-width: none; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
@@ -3119,7 +3134,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
-				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
+				html[data-shell-frame][data-layout="focused"] #task-list-panel[style*="--superellipse-clip"],
+				html[data-shell-frame][data-layout="classic"] #sidebar.sidebar-aside[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
@@ -3129,21 +3145,19 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #task-details-panel[data-overlay="true"] { inset: var(--task-panel-top, 0px) var(--shell-gap) var(--shell-gap) auto; width: calc(100% - var(--rail-width) - var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-docked="true"] { padding-right: calc(var(--task-panel-reserved-width) + var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-overlay="true"] #task-details-opener { right: var(--shell-gap); }
-				html[data-shell-frame] .chat-bubble-user-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
-				html[data-shell-frame] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; padding-left: 0; padding-right: 0; }
+				html[data-shell-frame] .chat-bubble-user-msg,
+				html[data-shell-frame] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
 				html[data-shell-frame] .chat-input-container { background-color: var(--shell-card) !important; }
-				html[data-shell-frame] :is(#task-thread-messages, #chat-messages) > * , html[data-shell-frame] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
-				html[data-shell-frame] :is(#task-thread-messages, #chat-messages) { padding-left: 24px; padding-right: 24px; }
-				html[data-shell-frame] .chat-execution-pair { display: flex; flex-direction: column; }
-				html[data-shell-frame] .chat-bubble-user-msg { align-self: flex-end; max-width: 75%; width: fit-content; padding: 10px 16px !important; border-radius: 18px !important; border: 0 !important; }
-				html[data-shell-frame] .chat-bubble-user-msg::before, html[data-shell-frame] .chat-bubble-user-msg::after { display: none !important; }
-				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) > .text-xs.font-semibold:first-child { display: none; }
-				html[data-shell-frame] .chat-bubble-assistant-msg { padding-top: 4px !important; padding-bottom: 4px !important; }
-				html[data-shell-frame] .chat-input-container { border-radius: 22px !important; border: 1px solid var(--shell-divider) !important; box-shadow: none !important; }
-				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
-				html[data-shell-frame][data-theme="dark"] #main-content { --tw-text-opacity: 1; color: #E6E6E6; }
-				html[data-shell-frame] .chat-bubble-assistant-msg::before,
-				html[data-shell-frame] .chat-bubble-assistant-msg::after { display: none !important; }
+				html[data-shell-frame][data-layout="focused"] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; padding: 4px 0 !important; }
+				html[data-shell-frame][data-layout="focused"] :is(#task-thread-messages, #chat-messages) > *, html[data-shell-frame][data-layout="focused"] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
+				html[data-shell-frame][data-layout="focused"] :is(#task-thread-messages, #chat-messages) { padding-left: 24px; padding-right: 24px; }
+				html[data-shell-frame][data-layout="focused"] .chat-execution-pair { display: flex; flex-direction: column; }
+				html[data-shell-frame][data-layout="focused"] .chat-bubble-user-msg { align-self: flex-end; max-width: 75%; width: fit-content; padding: 10px 16px !important; border-radius: 18px !important; border: 0 !important; }
+				html[data-shell-frame][data-layout="focused"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg)::before,
+				html[data-shell-frame][data-layout="focused"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg)::after { display: none !important; }
+				html[data-shell-frame][data-layout="focused"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) > .text-xs.font-semibold:first-child { display: none; }
+				html[data-shell-frame][data-layout="focused"] .chat-input-container { border-radius: 22px !important; border: 1px solid var(--shell-divider) !important; box-shadow: none !important; }
+				html[data-shell-frame][data-layout="focused"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
@@ -5399,9 +5413,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var w = el.clientWidth, h = el.clientHeight;
 									if (!w || !h) return;
 									var inspector = el.id === 'task-details-panel';
+									var focused = document.documentElement.getAttribute('data-layout') === 'focused';
 									var list = el.id === 'task-list-panel';
-									var joined = el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
-									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : 17);
+									var joined = focused && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
 									var radii = inspector || joined ? [r, r, 0, 0] : list ? [0, 0, r, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
@@ -5418,7 +5433,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								var observer = new ResizeObserver(function(entries) { entries.forEach(function(e) { shape(e.target); }); });
 								var seen = new WeakSet();
 								function attach() {
-									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, #task-details-panel').forEach(function(el) {
+									document.querySelectorAll('#main-content, #task-list-panel, #sidebar, .desktop-project-tab, #task-details-panel').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);
@@ -5428,7 +5443,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								attach();
 								document.addEventListener('DOMContentLoaded', attach);
 								document.body.addEventListener('htmx:afterSettle', attach);
-								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame'] });
+								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout'] });
 								var tabs = document.getElementById('desktop-project-titlebar');
 								if (tabs) new MutationObserver(attach).observe(tabs, { childList: true, subtree: true });
 						})();

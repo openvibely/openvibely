@@ -14,6 +14,7 @@ type paletteSpec struct {
 	text                             string
 	muted, accent, link, codeBg      string
 	tabDivider                       string
+	shellRail, shellRowSelected      string
 	info, success, warning, error    string
 	syntax                           map[string]string
 }
@@ -29,6 +30,20 @@ func PaletteThemes() []Theme {
 
 func paletteSpecs() []paletteSpec {
 	return []paletteSpec{
+		{
+			id: "openvibely-graphite", name: "OpenVibely Graphite", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
+			canvas: "#111111", column: "#1D1D1D", surface: "#2B2B2B", raised: "#2B2B2B", text: "#E6E6E6", muted: "#9A9A9A", accent: "#7C83F7", codeBg: "#222222",
+			shellRail: "#151515", shellRowSelected: "#262626",
+			info: "#6EA8FE", success: "#4CC38A", warning: "#E5B454", error: "#F07178",
+			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#E6E6E6", "comment": "#7A7A7A", "title": "#82AAFF"},
+		},
+		{
+			id: "openvibely-slate", name: "OpenVibely Slate", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
+			canvas: "#1E2329", column: "#16191E", surface: "#252B34", raised: "#2B323C", text: "#D5DAE1", muted: "#949CA8", accent: "#7480FF", codeBg: "#181C21",
+			shellRail: "#1A1E23", shellRowSelected: "#2E3353",
+			info: "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
+			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#D5DAE1", "comment": "#6B7480", "title": "#82AAFF"},
+		},
 		{
 			id: "openvibely-midnight", name: "OpenVibely Midnight", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
 			canvas: "#0E1217", column: "#080A0D", surface: "#141A21", raised: "#1B232C", text: "#CDD6E0", muted: "#8A97A6", accent: "#2EC4B6",
@@ -177,6 +192,12 @@ func paletteTheme(spec paletteSpec) Theme {
 		css["--ov-project-tab-divider"] = spec.tabDivider
 	}
 	css["--ov-accent-tint"] = accentTintColor(spec.accent)
+	if spec.shellRail != "" {
+		css["--ov-shell-rail"] = spec.shellRail
+	}
+	if spec.shellRowSelected != "" {
+		css["--ov-shell-row-selected"] = spec.shellRowSelected
+	}
 	css["--ov-daisy-primary"], css["--ov-daisy-primary-content"] = daisyPrimaryColors(link, spec.canvas)
 	kind := KindLight
 	if dark {
