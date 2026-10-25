@@ -37,9 +37,10 @@ templ ThemesContent(catalog []themes.Theme) {
 		<section class="mb-8" data-display-prefs>
 			<h3 class="text-lg font-semibold mb-1">Layout</h3>
 			<p class="text-sm opacity-70 mb-3">How the sidebar, task list and page are arranged.</p>
-			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-6xl mb-6">
+			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl mb-6">
 				@layoutCard("split", "Split", "Task list sits on the frame next to a separate rounded page, with two-line task rows.")
 				@layoutCard("unified", "Unified", "Task list and page joined as one surface, with compact one-line task rows.")
+				@layoutCard("stacked", "Stacked", "Tasks as cards down the side; the open task joins the page like a tab.")
 				@layoutCard("floating", "Floating", "Task list and page as separate rounded panels on the frame, with compact one-line task rows.")
 			</div>
 			<h3 class="text-lg font-semibold mb-1">Conversation</h3>
@@ -284,6 +285,17 @@ templ layoutCard(id, name, description string) {
 						<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
 						<div style="height:5px;width:76%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
 						<div style="height:12px;width:76%;border-radius:6px;background:oklch(var(--bc) / .22);margin-top:auto"></div>
+					</div>
+				} else if id == "stacked" {
+					<div style="width:30%;display:flex;flex-direction:column;gap:4px;padding:2px 0">
+						<div style="height:12px;border-radius:4px;margin-right:4px;background:oklch(var(--bc) / .12);"></div>
+						<div style="height:12px;border-radius:4px 0 0 4px;background:oklch(var(--b1));"></div>
+						<div style="height:12px;border-radius:4px;margin-right:4px;background:oklch(var(--bc) / .12);"></div>
+					</div>
+					<div style="flex:1;display:flex;flex-direction:column;gap:4px;padding:6px;border-radius:8px;background:oklch(var(--b1))">
+						<div style="height:14px;width:100%;border-radius:3px;background:oklch(var(--bc) / .22);"></div>
+						<div style="height:14px;width:100%;border-radius:3px;background:oklch(var(--bc) / .12);"></div>
+						<div style="height:12px;width:100%;border-radius:3px;background:oklch(var(--bc) / .22);margin-top:auto"></div>
 					</div>
 				} else {
 					<div style="width:26%;display:flex;flex-direction:column;gap:4px;padding:2px">

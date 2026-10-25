@@ -113,7 +113,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function apply() {
 						var prefs = {};
 						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns') }; } catch (_) {}
-						root.setAttribute('data-layout', prefs.layout === 'split' || prefs.layout === 'floating' ? prefs.layout : 'unified');
+						root.setAttribute('data-layout', ['split', 'floating', 'stacked'].indexOf(prefs.layout) !== -1 ? prefs.layout : 'unified');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
 						root.setAttribute('data-board-columns', ['inset', 'tint', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
@@ -124,7 +124,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating'] },
+						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating', 'stacked'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
 						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint', 'tintstrip'] }
@@ -3070,6 +3070,25 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
 				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-meta { display: none; }
 				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
+				.task-list-chip { display: none; }
+				html[data-layout="stacked"] #task-list-panel { padding-right: 0; }
+				html[data-layout="stacked"] #task-list-groups { scrollbar-width: none; }
+				html[data-layout="stacked"] #task-list-groups::-webkit-scrollbar { display: none; }
+				html[data-layout="stacked"] .task-list-row { position: relative; align-items: flex-start; padding: 11px 12px; margin: 0 8px 6px 0; border-radius: 12px; background: var(--shell-card); border: 1px solid oklch(var(--bc) / .06); }
+				html[data-layout="stacked"] .task-list-row:hover { background: color-mix(in srgb, var(--shell-card) 92%, oklch(var(--bc))); }
+				html[data-layout="stacked"] .task-list-row[aria-current="page"] { background: var(--shell-page); border-color: var(--shell-page); margin-right: 0; border-radius: 12px 0 0 12px; }
+				html[data-layout="stacked"] .task-list-row[aria-current="page"]::before,
+				html[data-layout="stacked"] .task-list-row[aria-current="page"]::after { content: ""; position: absolute; right: -1px; width: 12px; height: 12px; pointer-events: none; }
+				html[data-layout="stacked"] .task-list-row[aria-current="page"]::before { top: -13px; border-bottom-right-radius: 12px; box-shadow: 4px 4px 0 4px var(--shell-page); }
+				html[data-layout="stacked"] .task-list-row[aria-current="page"]::after { bottom: -13px; border-top-right-radius: 12px; box-shadow: 4px -4px 0 4px var(--shell-page); }
+				html[data-layout="stacked"] .task-list-meta { display: none; }
+				html[data-layout="stacked"] .task-list-time { display: block; grid-column: 2; grid-row: 2; font-size: 11px; opacity: .55; margin-top: 2px; }
+				html[data-layout="stacked"] .task-list-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0 10px; }
+				html[data-layout="stacked"] .task-list-dot { grid-row: 1 / 3; }
+				html[data-layout="stacked"] .task-list-chip { display: block; grid-column: 3; grid-row: 1; align-self: start; flex-shrink: 0; font-size: 10px; line-height: 16px; padding: 0 7px; border-radius: 999px; border: 1px solid oklch(var(--bc) / .15); opacity: .7; white-space: nowrap; }
+				html[data-layout="stacked"] .task-list-chip.running { color: oklch(var(--p)); border-color: oklch(var(--p) / .45); opacity: 1; }
+				html[data-layout="stacked"] .task-list-chip.completed { color: oklch(var(--su)); border-color: oklch(var(--su) / .4); opacity: 1; }
+				html[data-layout="stacked"] .task-list-chip.failed { color: oklch(var(--er)); border-color: oklch(var(--er) / .4); opacity: 1; }
 				.task-list-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: oklch(var(--bc) / .4); }
 				.task-list-dot.running { background: oklch(var(--p)); box-shadow: 0 0 0 3px oklch(var(--p) / .18); }
 				.task-list-dot.completed { background: oklch(var(--su)); }
@@ -3168,7 +3187,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
 				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) #task-list-panel[style*="--superellipse-clip"],
-				html[data-shell-frame][data-layout="split"] #sidebar.sidebar-aside[style*="--superellipse-clip"],
+				html[data-shell-frame]:is([data-layout="split"], [data-layout="stacked"]) #sidebar.sidebar-aside[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
