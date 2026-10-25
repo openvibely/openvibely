@@ -101,6 +101,7 @@ templ TaskListPanel(currentProjectID string) {
 			hx-get={ fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID) }
 			hx-trigger="load, taskListRefresh from:body, every 15s"
 			hx-swap="innerHTML"
+			hx-sync="this:replace"
 			hx-push-url="false"
 		></div>
 		<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
@@ -257,7 +258,7 @@ templ TaskListPanel(currentProjectID string) {
 				}
 				var meta = document.createElement('div'); meta.className = 'task-list-hovercard-meta';
 				var state = icon ? (icon.getAttribute('aria-label') || '').replace(/^Task state:\s*/, '') : '';
-				meta.textContent = (state ? state + ' · ' : '') + 'Updated ' + (row.getAttribute('data-task-list-updated') || '');
+				meta.textContent = (state ? state + ' · ' : '') + 'Updated ' + (row.getAttribute('data-task-list-age') || '') + (row.getAttribute('data-task-list-age') === 'now' ? '' : ' ago');
 				hoverCard.appendChild(meta);
 				hoverCard.hidden = false;
 				var r = row.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();
@@ -295,7 +296,9 @@ templ TaskListPanel(currentProjectID string) {
 			document.body.addEventListener('htmx:afterRequest', function(e) {
 				var cfg = e.detail && e.detail.requestConfig;
 				if (!cfg || !e.detail.successful || cfg.verb === 'get' || e.detail.target === groups) return;
-				if (/^\/(tasks|thread-inputs|executions)\b/.test(cfg.path || '')) refreshSoon(150);
+				if (!/^\/(tasks|thread-inputs|executions)\b/.test(cfg.path || '')) return;
+				refreshSoon(150);
+				setTimeout(function() { refreshSoon(0); }, 1500);
 			});
 
 			document.body.addEventListener('htmx:beforeSwap', function(e) { if (e.detail.target === groups) hideHoverCard(); });
