@@ -3,6 +3,36 @@
 #include <gtk/gtk.h>
 #include "window_controls_linux.h"
 
+#if GTK_MAJOR_VERSION < 4
+static void ovEnableWebFileDrops(GtkWidget *widget, gpointer window_id) {
+ // Wails v3 beta.34 installs two GTK3 handlers when EnableFileDrop is false.
+ // They consume OS file drags before WebKit can dispatch HTML drag/drop events.
+ // Remove only those window-owned handlers; retain WebKit's class handlers
+ // and any handlers belonging to other callers. Native Wails file drops stay
+ // disabled: the composer uploads browser File objects through its usual path.
+ if (g_type_is_a(G_OBJECT_TYPE(widget), g_type_from_name("WebKitWebView"))) {
+  const char *signals[] = {"drag-drop", "drag-motion"};
+  for (guint i = 0; i < G_N_ELEMENTS(signals); i++) {
+   guint signal_id = g_signal_lookup(signals[i], G_OBJECT_TYPE(widget));
+   g_signal_handlers_disconnect_matched(widget, G_SIGNAL_MATCH_ID | G_SIGNAL_MATCH_DATA,
+     signal_id, 0, NULL, NULL, window_id);
+  }
+  return;
+ }
+ if (GTK_IS_CONTAINER(widget)) gtk_container_forall(GTK_CONTAINER(widget), ovEnableWebFileDrops, window_id);
+}
+#endif
+
+void ovEnableLinuxWebFileDrops(void *window, unsigned int window_id) {
+#if GTK_MAJOR_VERSION < 4
+ if (window) ovEnableWebFileDrops(GTK_WIDGET(window), GUINT_TO_POINTER(window_id));
+#else
+ // Wails' GTK4 disableDND is already a no-op; WebKit owns HTML file drops.
+ (void)window;
+ (void)window_id;
+#endif
+}
+
 typedef struct {
  GtkWidget *window, *left, *right, *overlay;
  guint pending_frames;

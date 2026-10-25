@@ -20,6 +20,26 @@ static void settle(void) {
 }
 #if GTK_MAJOR_VERSION < 4
 static void collect_child(GtkWidget *child,gpointer data) { *(GList**)data=g_list_append(*(GList**)data,child); }
+static gboolean block_file_drag(GtkWidget *widget, GdkDragContext *context, gint x, gint y, guint time, gpointer data) {
+ return TRUE;
+}
+static int check_web_file_drops(GtkWidget *window, GtkWidget *content) {
+ // Reproduce the pinned Wails GTK3 disableDND registration on a real WebKit
+ // widget, and ensure only the main window's blocking handlers are removed.
+ gpointer owner = GUINT_TO_POINTER(1);
+ gulong drop = g_signal_connect(content, "drag-drop", G_CALLBACK(block_file_drag), owner);
+ gulong motion = g_signal_connect(content, "drag-motion", G_CALLBACK(block_file_drag), owner);
+ gulong other = g_signal_connect(content, "drag-drop", G_CALLBACK(block_file_drag), GUINT_TO_POINTER(2));
+ ovEnableLinuxWebFileDrops(window, 1);
+ if (g_signal_handler_is_connected(content, drop) || g_signal_handler_is_connected(content, motion) ||
+     !g_signal_handler_is_connected(content, other)) {
+  g_printerr("HTML file drop handlers were not restored selectively\n");
+  return 29;
+ }
+ g_signal_handler_disconnect(content, other);
+ ovEnableLinuxWebFileDrops(window, 1); // Safe if called again.
+ return 0;
+}
 #endif
 static GtkWidget *find_button(GtkWidget *root, const char *style) {
 #if GTK_MAJOR_VERSION < 4
@@ -134,6 +154,10 @@ int main(int argc,char **argv) {
  g_object_set(gtk_settings_get_default(),"gtk-decoration-layout",":minimize,maximize,close",NULL);
  ovSetLinuxCaptionHidden(window, 1);
  ovInstallLinuxCaption(window);
+#if GTK_MAJOR_VERSION < 4
+ int drop_result = check_web_file_drops(window, content);
+ if (drop_result) return drop_result;
+#endif
  gtk_window_present(GTK_WINDOW(window)); settle();
  gint64 load_deadline = g_get_monotonic_time() + 10 * G_TIME_SPAN_SECOND;
  while (!content_loaded && g_get_monotonic_time() < load_deadline) {
