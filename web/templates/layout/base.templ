@@ -3092,6 +3092,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] body > .drawer > .drawer-content > .navbar { display: none; }
 				/* Kanban columns used the new page color; lift them onto the chrome color. */
 				html[data-shell-frame] .kanban-column { background-color: var(--shell-chrome); }
+				html[data-shell-frame][data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-kanban-column-bg); }
 
 				/* Compact icon rail */
 				html[data-shell-frame] .drawer-side { height: calc(100dvh - var(--project-titlebar-height, 46px)); z-index: auto; }
