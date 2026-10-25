@@ -47,11 +47,12 @@ templ TaskDetailPanel() {
 		#task-panel-divider:hover::after, #task-panel-divider[data-resizing]::after { opacity:.45; }
 		#task-panel-divider:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
 		#task-detail-actions { margin-bottom:max(0px, calc(var(--task-actions-bottom, 24px) - 12px)); }
-		#task-inspector-body > .task-tab-panel { min-height:0; }
-		/* Reserve 12px beyond the rows’ 12px highlight padding at both panel edges. */
-		#task-inspector-body { padding-inline:24px; }
-		#task-inspector-body:has(#tab-details:not(.hidden) #task-detail-view) { padding-inline:0; overflow-x:hidden; }
-		#task-detail-view { min-width:0; padding-inline:24px; overflow-x:hidden; overflow-wrap:anywhere; }
+		/* Keep gutters local to each tab, independent of active-tab visibility.
+		   Existing Details owns a separate scrollport and applies its gutter there. */
+		#task-inspector-body { padding-inline:0; overflow-x:hidden; }
+		#task-inspector-body > .task-tab-panel { min-height:0; padding-inline:24px; }
+		#task-inspector-body > .task-details-scroll-panel { padding-inline:0; }
+		#task-detail-view, #task-detail-edit { min-width:0; padding-inline:24px; overflow-x:hidden; overflow-wrap:anywhere; }
 		#tab-details { min-width:0; }
 		#tab-details #task-detail-actions { margin-inline:24px; flex-wrap:wrap; }
 
