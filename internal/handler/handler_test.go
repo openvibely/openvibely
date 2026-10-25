@@ -268,7 +268,7 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 		counter.SetEnabled(true)
 		var rec *httptest.ResponseRecorder
 		if htmx {
-			rec = htmxGet(e, "/tasks/"+task.ID)
+			rec = htmxGet(e, "/tasks/"+task.ID+"?tab=details")
 		} else {
 			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
 			rec = httptest.NewRecorder()
@@ -811,7 +811,7 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 	})
 	counter.Reset()
 	counter.SetEnabled(true)
-	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
+	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID+"?tab=details")
 	counter.SetEnabled(false)
 	assertCode(t, fullPage, http.StatusOK)
 	require.Equal(t, 1, counter.Snapshot().AgentReads)
@@ -1216,8 +1216,8 @@ func TestHandler_GetTask_RunningTask(t *testing.T) {
 	}
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `id="thread-content"`)
-	assertContains(t, rec, "Thread is loading...")
-	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload, expectedExecId)")
+	assertContains(t, rec, `id="task-thread-view"`)
+	assertNotContains(t, rec, "Thread is loading...")
 }
 
 func TestHandler_NewTaskFirstMessage(t *testing.T) {
@@ -1336,7 +1336,7 @@ func TestHandler_GetTask_ThreadTabAliasActivatesThread(t *testing.T) {
 	assertContains(t, rec, `data-initial-tab="chat"`)
 	assertContains(t, rec, `id="tab-chat"`)
 	assertContains(t, rec, "tab-active")
-	assertContains(t, rec, "Thread is loading...")
+	assertContains(t, rec, `id="task-thread-view"`)
 }
 
 func TestHandler_GetTask_CompletedTaskDefaultsToChat(t *testing.T) {
@@ -8852,8 +8852,7 @@ func TestHandler_GetTaskThread_MultiTurnOrdering(t *testing.T) {
 		t.Error("BUG: original prompt should appear BEFORE follow-up")
 	}
 
-	// GetTask now lazy-loads thread content, so /tasks?tab=chat should not eagerly
-	// include full thread transcript in the initial HTML.
+	// The chat tab response embeds the thread so navigation takes one request.
 	req2 := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=chat", nil)
 	req2.Header.Set("HX-Request", "true")
 	rec2 := httptest.NewRecorder()
@@ -8863,11 +8862,8 @@ func TestHandler_GetTaskThread_MultiTurnOrdering(t *testing.T) {
 	c2.SetParamValues(task.ID)
 	h.GetTask(c2)
 	body2 := rec2.Body.String()
-	if !strings.Contains(body2, "Thread is loading...") {
-		t.Error("expected lazy thread loading placeholder in task detail response")
-	}
-	if strings.Contains(body2, "Summary output") || strings.Contains(body2, `id="task-thread-view"`) {
-		t.Error("did not expect eager thread transcript in task detail response")
+	if strings.Contains(body2, "Thread is loading...") || !strings.Contains(body2, `id="task-thread-view"`) {
+		t.Error("expected thread transcript embedded in task detail response")
 	}
 }
 

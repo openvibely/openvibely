@@ -1578,6 +1578,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				/* Compact page navigation, scoped away from dialogs and section headings. */
 				#main-content:has([data-page-header]) { padding-top: 0; }
 				#main-content { padding-bottom: 4px; margin-bottom: 10px; }
+				#main-content[data-page-loading] { display: flex; align-items: center; justify-content: center; }
+				#main-content[data-page-loading] > * { display: none !important; }
+				#main-content[data-page-loading]::after { content: ""; width: 20px; height: 20px; border-radius: 9999px; border: 2px solid oklch(var(--bc) / .5); border-right-color: transparent; animation: ov-page-spin .7s linear infinite; }
+				@keyframes ov-page-spin { to { transform: rotate(360deg); } }
 				#main-content [data-page-header] { min-height: 48px; padding-top: 8px; padding-bottom: 8px; margin-bottom: 0; align-items: center; }
 				#main-content [data-page-header] h2 { display: flex; align-items: center; min-height: 32px; }
 				#main-content h2[data-page-header] { display: flex; }
@@ -4951,7 +4955,25 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                         const previous = currentPageRequest;
                         currentPageRequest = detail.xhr;
                         if (previous && previous !== detail.xhr && previous.readyState !== 4) previous.abort();
-                        if (!event.defaultPrevented && window.showCachedThreadNavigation) window.showCachedThreadNavigation(detail);
+                        const cached = window.showCachedThreadNavigation && window.showCachedThreadNavigation(detail);
+                        const path = new URL(detail.pathInfo?.finalRequestPath || detail.requestConfig?.path || '', location.href).pathname;
+                        if (!cached && detail.requestConfig?.verb === 'get' && /^\/tasks\/[^/]+$/.test(path)) {
+                            detail.target.setAttribute('data-page-loading', '');
+                        }
+                    });
+                    function clearPageLoading() {
+                        const main = document.getElementById('main-content');
+                        if (main) main.removeAttribute('data-page-loading');
+                    }
+                    document.addEventListener('htmx:beforeHistorySave', clearPageLoading);
+                    document.addEventListener('htmx:afterSwap', function(event) {
+                        if (event.detail.target && event.detail.target.id === 'main-content') clearPageLoading();
+                    });
+                    document.addEventListener('htmx:afterRequest', function(event) {
+                        if (event.detail.xhr === currentPageRequest && !event.detail.successful) clearPageLoading();
+                    });
+                    document.addEventListener('htmx:sendAbort', function(event) {
+                        if (event.detail.target && event.detail.target.id === 'main-content' && !currentPageRequest) clearPageLoading();
                     });
                     document.addEventListener('htmx:beforeSwap', function(event) {
                         const detail = event.detail;

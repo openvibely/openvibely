@@ -1274,7 +1274,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// HTMX request: return just the task detail content partial
 	if isHTMX {
-		if c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+		if defaultTab == "chat" || c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
 			return h.getTaskThread(c, data, defaultTab)
 		}
 		return h.renderTaskDetailContentData(c, data, defaultTab)
