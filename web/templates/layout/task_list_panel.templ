@@ -101,7 +101,7 @@ templ TaskListPanel(currentProjectID string) {
 			hx-get={ fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID) }
 			hx-trigger="load, taskListRefresh from:body, every 15s"
 			hx-swap="innerHTML"
-			hx-sync="this:replace"
+			hx-sync="this:queue last"
 			hx-push-url="false"
 		></div>
 	</aside>
@@ -278,17 +278,22 @@ templ TaskListPanel(currentProjectID string) {
 			groups.addEventListener('scroll', hideHoverCard, { passive: true });
 			groups.addEventListener('click', hideHoverCard);
 
-			var refreshTimer = null;
+			var refreshTimer = null, refreshAt = 0;
 			function refreshSoon(delay) {
+				var at = Date.now() + delay;
+				if (refreshTimer && refreshAt <= at) return;
 				clearTimeout(refreshTimer);
-				refreshTimer = setTimeout(function() { if (window.htmx) htmx.trigger(groups, 'taskListRefresh'); }, delay);
+				refreshAt = at;
+				refreshTimer = setTimeout(function() { refreshTimer = null; if (window.htmx) htmx.trigger(groups, 'taskListRefresh'); }, delay);
 			}
 			function currentProjectID() {
 				var m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);
 				return m ? decodeURIComponent(m[1]) : '';
 			}
+			var listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued'];
 			window.addEventListener('sse-task-event', function(e) {
 				var data = e.detail || {};
+				if (listEvents.indexOf(data.type) === -1) return;
 				if (data.project_id && data.project_id !== currentProjectID()) return;
 				refreshSoon(300);
 			});
