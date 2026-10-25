@@ -23,32 +23,32 @@ func themeVisibleInPicker(id string) bool {
 }
 
 templ Themes(projects []models.Project, currentProjectID string, catalog []themes.Theme) {
-	@layout.Base("Themes", projects, currentProjectID) {
+	@layout.Base("Appearance", projects, currentProjectID) {
 		@ThemesContent(catalog)
 	}
 }
 
 templ ThemesContent(catalog []themes.Theme) {
 	<div id="themes-container" data-search-container>
-		@layout.PageTitle("Themes")
+		@layout.PageTitle("Appearance")
 		<div data-page-header class="flex items-center justify-between mb-6">
-			<h2 class="text-2xl font-bold">Themes</h2>
+			<h2 class="text-2xl font-bold">Appearance</h2>
 		</div>
 		<section class="mb-8" data-display-prefs>
 			<h3 class="text-lg font-semibold mb-1">Layout</h3>
 			<p class="text-sm opacity-70 mb-3">How the task list sits next to the page.</p>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
-				@displayToggle("layout", "Task list", "unified", "Unified", "floating", "Floating")
+				@displayToggle("layout", "Task list", "floating", "Floating", "unified", "Unified")
 			</div>
 			<h3 class="text-lg font-semibold mb-1">Conversation</h3>
 			<p class="text-sm opacity-70 mb-3">Applies to chat and task threads in every layout.</p>
 			<div class="flex flex-col gap-3 max-w-2xl">
 				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
-				@displayToggle("bubbles", "Assistant bubbles", "on", "On", "off", "Off")
+				@displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On")
 				<div class="flex items-center justify-between gap-4">
 					<span class="text-sm font-medium">Bubble and composer color step<span class="block text-xs font-normal opacity-60">Lift chat bubbles and the composer one shade above cards.</span></span>
 					<div class="join" role="group" aria-label="Bubble and composer color step">
-						for _, opt := range [][2]string{{"on", "On"}, {"off", "Off"}} {
+						for _, opt := range [][2]string{{"off", "Off"}, {"on", "On"}} {
 							<button type="button" class="btn btn-sm join-item" data-display-pref="step" data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">{ opt[1] }</button>
 						}
 					</div>
@@ -57,9 +57,9 @@ templ ThemesContent(catalog []themes.Theme) {
 			<h3 class="text-lg font-semibold mt-6 mb-1">Task board columns</h3>
 			<p class="text-sm opacity-70 mb-3">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
 			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl">
+				@boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.")
 				@boardColumnsCard("filled", "Filled", "Columns filled with the frame color.")
 				@boardColumnsCard("inset", "Inset cards", "Columns in the card color, cards sunk in the page color.")
-				@boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.")
 				@boardColumnsCard("tintstrip", "Tint + header strip", "Faint tint columns with the frame color behind the heading.")
 			</div>
 		</section>

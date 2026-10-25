@@ -113,11 +113,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function apply() {
 						var prefs = {};
 						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep') }; } catch (_) {}
-						root.setAttribute('data-layout', prefs.layout === 'floating' || prefs.layout === 'edge' ? 'floating' : 'unified');
-						root.setAttribute('data-surface-step', prefs.step === 'off' ? 'off' : 'on');
+						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
+						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
-						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
-						root.setAttribute('data-board-columns', ['inset', 'tint', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
+						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'on' ? 'on' : 'off');
+						root.setAttribute('data-board-columns', ['filled', 'inset', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'tint');
 						var active = desktop || wide.matches;
 						if (active === root.hasAttribute('data-shell-frame')) return;
 						root.toggleAttribute('data-shell-frame', active);
@@ -125,11 +125,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'floating'] },
+						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
-						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['on', 'off'] },
-						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
-						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint', 'tintstrip'] }
+						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
+						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['off', 'on'] },
+						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['tint', 'filled', 'inset', 'tintstrip'] }
 					};
 					window.openVibelyDisplay = {
 						get: function(name) { var p = displayPrefs[name]; return p ? root.getAttribute(p.attr) : null; },
