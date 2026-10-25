@@ -69,8 +69,18 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 	}
 	r := c.Request()
 	native := c.Get(nativeLiveContextKey) == true
+	// Proxies such as Traefik report ws/wss for upgraded requests. Browser
+	// origins still use the page's http/https scheme, including behind TLS
+	// termination. Normalize only the transport scheme, not the supplied origin.
+	scheme := c.Scheme()
+	switch scheme {
+	case "ws":
+		scheme = "http"
+	case "wss":
+		scheme = "https"
+	}
 	origin, err := url.Parse(r.Header.Get("Origin"))
-	if !native && (err != nil || origin == nil || origin.Host != r.Host || origin.Scheme != c.Scheme() || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "") {
+	if !native && (err != nil || origin == nil || origin.Host != r.Host || origin.Scheme != scheme || origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "") {
 		return echo.NewHTTPError(http.StatusForbidden, "invalid WebSocket origin")
 	}
 	limits := h.liveLimits.WithDefaults()
