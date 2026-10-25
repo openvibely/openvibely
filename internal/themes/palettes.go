@@ -42,7 +42,7 @@ func paletteSpecs() []paletteSpec {
 		{
 			id: "openvibely-layered", name: "OpenVibely Layered", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
 			canvas: "#15191E", column: "#1D232A", surface: "#191E24", raised: "#1D232A", text: "#A6ADBB", muted: "#A6ADBB", accent: "#646FE4", link: "#7480FF", codeBg: "#111418",
-			shellChrome: "#1D232A", shellRail: "#191E24", border: "#1D232A",
+			shellChrome: "#1D232A", shellRail: "#191E24", border: "#1D232A", tabDivider: "#3F4652",
 			semanticOverrides: map[string]string{"primaryForeground": "#FFFFFF", "focus": "#7480FF", "buttonFg": "#FFFFFF", "buttonHoverBg": "#646FE4", "buttonHoverFg": "#FFFFFF", "selectionBg": "rgba(100, 111, 228, 0.32)"},
 			info:              "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
 			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#C8CED8", "comment": "#6B7480", "title": "#82AAFF"},
