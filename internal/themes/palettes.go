@@ -15,7 +15,7 @@ type paletteSpec struct {
 	muted, accent, link, codeBg      string
 	tabDivider                       string
 	shellChrome, shellRail           string
-	shellRowSelected                 string
+	shellRowSelected, border         string
 	info, success, warning, error    string
 	syntax                           map[string]string
 }
@@ -41,7 +41,7 @@ func paletteSpecs() []paletteSpec {
 		{
 			id: "openvibely-layered", name: "OpenVibely Layered", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
 			canvas: "#15191E", column: "#1D232A", surface: "#191E24", raised: "#1D232A", text: "#C8CED8", muted: "#8F98A6", accent: "#7480FF", codeBg: "#111418",
-			shellChrome: "#1D232A", shellRail: "#191E24", shellRowSelected: "#2E3353",
+			shellChrome: "#1D232A", shellRail: "#191E24", shellRowSelected: "#2E3353", border: "#1D232A",
 			info: "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
 			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#C8CED8", "comment": "#6B7480", "title": "#82AAFF"},
 		},
@@ -151,8 +151,15 @@ func paletteTheme(spec paletteSpec) Theme {
 			codeBg = mixHex(spec.canvas, spec.text, 0.04)
 		}
 	}
-	border := mixHex(spec.surface, spec.text, 0.10)
+	border := spec.border
+	if border == "" {
+		border = mixHex(spec.surface, spec.text, 0.10)
+	}
 	borderStrong := ensureContrast(mixHex(spec.surface, spec.text, 0.20), []string{raised, codeBg}, 1.5, spec.text)
+	inputBorder := borderStrong
+	if spec.border != "" {
+		inputBorder = spec.border
+	}
 	link := spec.link
 	if link == "" {
 		link = spec.accent
@@ -168,7 +175,7 @@ func paletteTheme(spec paletteSpec) Theme {
 		"text": spec.text, "textMuted": muted, "border": border, "borderStrong": borderStrong,
 		"automationNodeBorder": borderStrong, "automationEdge": ensureContrast(muted, []string{spec.surface}, 3, spec.text), "yamlIndentRail": borderStrong,
 		"primary": spec.accent, "primaryForeground": readableOn(spec.accent), "focus": spec.accent, "link": link,
-		"inputBg": spec.surface, "inputBorder": borderStrong,
+		"inputBg": spec.surface, "inputBorder": inputBorder,
 		"buttonBg": spec.accent, "buttonFg": readableOn(spec.accent), "buttonHoverBg": buttonHover, "buttonHoverFg": readableOn(buttonHover),
 		"buttonSecondaryBg": mixHex(spec.surface, spec.text, 0.08), "buttonSecondaryFg": spec.text,
 		"selectionBg": withAlpha(spec.accent, 0.28), "hoverBg": withAlpha(spec.text, 0.07),
