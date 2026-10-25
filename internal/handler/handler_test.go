@@ -289,6 +289,33 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 
 	checkInitialDetail("HTMX", true)
 	checkInitialDetail("full-page", false)
+
+	// The default thread view embeds only the newest few runs, never the full history.
+	const runBytes = 4*1024 + 64*1024
+	checkInitialThread := func(name string, htmx bool) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		var rec *httptest.ResponseRecorder
+		if htmx {
+			rec = htmxGet(e, "/tasks/"+task.ID)
+		} else {
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+			rec = httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+		}
+		counter.SetEnabled(false)
+
+		assertCode(t, rec, http.StatusOK)
+		assertContains(t, rec, `id="task-thread-view"`)
+		stats := counter.Snapshot()
+		require.Equal(t, 1, stats.ExecutionWindowReads, name)
+		require.Zero(t, stats.UnboundedExecutionHistoryReads, name)
+		require.Less(t, stats.ReadTextBytes, 10*runBytes, name)
+	}
+
+	checkInitialThread("HTMX", true)
+	checkInitialThread("full-page", false)
 }
 
 func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
