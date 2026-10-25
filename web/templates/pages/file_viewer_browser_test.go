@@ -208,6 +208,21 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		b.click(".file-html-canvas button")
 		b.waitFor("expanded generated artifact", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html')`, "true")
 		b.click("[data-file-close]")
+		for _, scope := range []string{"task-detail-content", "chat-page-root"} {
+			b.evaluate(fmt.Sprintf(`var scope=document.createElement('div');scope.id=%q;document.body.append(scope);var before=document.createElement('div');before.innerHTML='<a data-file-preview href="/fixture/data.json">JSON</a>';scope.append(before);var message=document.createElement('div');message.className='chat-markdown';message.append(document.getElementById('generated'),document.querySelector('.file-html-canvas'));scope.append(message);var after=document.createElement('div');after.innerHTML='<a data-file-preview href="/fixture/math.md">Math</a><a data-file-preview href="/files/abcdef?download=1">Duplicate HTML</a>';scope.append(after);'ok'`, scope))
+			for _, entry := range []string{".file-html-canvas button", "#generated"} {
+				b.click(entry)
+				b.waitFor("HTML opens within conversation attachments", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html' && document.querySelector('[data-gallery-count]').textContent==='2 / 3')`, "true")
+				b.click("[data-gallery-prev]")
+				b.waitFor("previous attachment from HTML", `String(!!document.querySelector('[data-json-tree]') && document.querySelector('[data-gallery-count]').textContent==='1 / 3')`, "true")
+				b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
+				b.waitFor("keyboard returns to HTML", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html')`, "true")
+				b.click("[data-gallery-next]")
+				b.waitFor("next attachment from HTML", `String(!!document.querySelector('[data-file-markdown]') && document.querySelector('[data-gallery-count]').textContent==='3 / 3' && document.querySelector('[data-gallery-next]').disabled)`, "true")
+				b.click("[data-gallery-close]")
+			}
+			b.evaluate(`document.body.append(document.getElementById('generated'),document.querySelector('.file-html-canvas'));scope.remove();'ok'`)
+		}
 		b.click("#json")
 		b.waitFor("exact JSON number", `String(document.querySelector('[data-json-tree]')?.textContent.includes('12345678901234567890'))`, "true")
 		b.click("[data-file-close]")
