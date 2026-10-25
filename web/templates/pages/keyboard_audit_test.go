@@ -61,7 +61,14 @@ handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,1);assert.equal(p
 MockHTMLElement.prototype.showPopover=function(){};
 popoverOpen=true;handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,1);assert.equal(popoverQueries,1);
 popoverOpen=false;handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,2);assert.equal(popoverQueries,2);
-body=between(read('../components/chat_shared.templ'),'// Dispose global modifier listeners when this composer is replaced.','\n\t\t\t\t\t\tfunction safeSubmit()');
+// Stop at the last modifier listener, not safeSubmit: submission handlers can
+// live between these blocks and require a full DOM form outside this audit's scope.
+const composer=read('../components/chat_shared.templ');
+const modifierStart='// Dispose global modifier listeners when this composer is replaced.';
+const modifierEnd="window.addEventListener('blur', consumeShortcutModifierVisual, {signal: modifierAbort.signal});";
+assert(composer.indexOf(modifierStart)>=0,'modifier cleanup start missing');
+assert(composer.indexOf(modifierEnd,composer.indexOf(modifierStart))>=0,'modifier cleanup end missing');
+body=between(composer,modifierStart,modifierEnd)+modifierEnd;
 let observer,updates=0;const form={isConnected:true};const document=new EventTarget(),window=new EventTarget();document.body={};
 class Observer{constructor(fn){this.fn=fn;observer=this}observe(){}disconnect(){this.disconnected=true}}
 new Function('form','document','window','MutationObserver','isShortcutModifierKey','updatePrimaryActionModifierVisual','consumeShortcutModifierVisual','shortcutModifierHeld',body)(form,document,window,Observer,()=>true,()=>updates++,()=>updates++,false);
