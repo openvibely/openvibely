@@ -47,6 +47,15 @@ templ ThemesContent(catalog []themes.Theme) {
 				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
 				@displayToggle("bubbles", "Assistant bubbles", "on", "On", "off", "Off")
 			</div>
+			<h3 class="text-lg font-semibold mt-6 mb-1">Task board columns</h3>
+			<p class="text-sm opacity-70 mb-3">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
+			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 max-w-6xl">
+				@boardColumnsCard("filled", "Filled", "Columns filled with the frame color.")
+				@boardColumnsCard("outline", "Outline", "Page-colored columns with a thin frame-colored border.")
+				@boardColumnsCard("strip", "Header strip", "Frame color behind the column heading, column outlined.")
+				@boardColumnsCard("inset", "Inset cards", "Columns filled with the frame color, cards in the page color.")
+				@boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.")
+			</div>
 		</section>
 		<h3 class="text-lg font-semibold mb-3">Theme</h3>
 		@CardSearchInput("themes", "Search themes...")
@@ -67,6 +76,12 @@ templ ThemesContent(catalog []themes.Theme) {
 						card.setAttribute('aria-pressed', active ? 'true' : 'false');
 						card.classList.toggle('border-primary', active);
 						card.querySelectorAll('[data-layout-active-badge]').forEach(function(badge) { badge.classList.toggle('hidden', !active); });
+					});
+					document.querySelectorAll('[data-board-columns-card]').forEach(function(card) {
+						var active = card.getAttribute('data-board-columns-id') === display.get('columns');
+						card.setAttribute('aria-pressed', active ? 'true' : 'false');
+						card.classList.toggle('border-primary', active);
+						card.querySelectorAll('[data-board-columns-active-badge]').forEach(function(badge) { badge.classList.toggle('hidden', !active); });
 					});
 					document.querySelectorAll('[data-display-option]').forEach(function(btn) {
 						var active = display.get(btn.getAttribute('data-display-pref')) === btn.getAttribute('data-display-option');
@@ -284,4 +299,34 @@ templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabe
 			<button type="button" class="btn btn-sm join-item" data-display-pref={ pref } data-display-option={ secondValue } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">{ secondLabel }</button>
 		</div>
 	</div>
+}
+
+templ boardColumnsCard(id, name, description string) {
+	<button
+		type="button"
+		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+		data-board-columns-card
+		data-board-columns-id={ id }
+		aria-pressed="false"
+		onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay('columns', this.getAttribute('data-board-columns-id'))"
+	>
+		<div class="card-body gap-3 p-4">
+			<div class="flex items-center justify-between">
+				<span class="font-semibold">{ name }</span>
+				<span class="badge badge-primary badge-sm hidden" data-board-columns-active-badge>Active</span>
+			</div>
+			<div class="board-columns-preview" data-preview={ id } aria-hidden="true">
+				for i := 0; i < 3; i++ {
+					<div class="bcp-col">
+						<div class="bcp-head"></div>
+						if i != 1 {
+							<div class="bcp-card"></div>
+							<div class="bcp-card"></div>
+						}
+					</div>
+				}
+			</div>
+			<p class="text-xs opacity-70">{ description }</p>
+		</div>
+	</button>
 }

@@ -112,10 +112,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles') }; } catch (_) {}
+						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns') }; } catch (_) {}
 						root.setAttribute('data-layout', prefs.layout === 'split' ? 'split' : 'unified');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
+						root.setAttribute('data-board-columns', ['inset', 'outline', 'strip', 'tint'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
 						var active = desktop || wide.matches;
 						if (active === root.hasAttribute('data-shell-frame')) return;
 						root.toggleAttribute('data-shell-frame', active);
@@ -125,7 +126,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var displayPrefs = {
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
-						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] }
+						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
+						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'outline', 'strip', 'tint'] }
 					};
 					window.openVibelyDisplay = {
 						get: function(name) { var p = displayPrefs[name]; return p ? root.getAttribute(p.attr) : null; },
@@ -3093,6 +3095,24 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Kanban columns used the new page color; lift them onto the chrome color. */
 				html[data-shell-frame] .kanban-column { background-color: var(--shell-chrome); }
 				html[data-shell-frame][data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-kanban-column-bg); }
+				html[data-shell-frame] { --board-column-bg: var(--shell-chrome); }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --board-column-bg: var(--ov-kanban-column-bg); }
+				html[data-shell-frame]:is([data-board-columns="outline"], [data-board-columns="strip"], [data-board-columns="tint"]) .kanban-column { border: 1px solid var(--board-column-bg); }
+				html[data-shell-frame]:is([data-board-columns="outline"], [data-board-columns="strip"]) .kanban-column { background-color: transparent !important; }
+				html[data-shell-frame][data-board-columns="strip"] .kanban-column { padding-top: 0; }
+				html[data-shell-frame][data-board-columns="strip"] .kanban-column > :first-child { background-color: var(--board-column-bg); margin: 0 -0.75rem 0.75rem; padding: 0 0.75rem; height: 3.25rem; min-height: 3.25rem; border-radius: 0.5rem 0.5rem 0 0; }
+				html[data-shell-frame][data-board-columns="tint"] .kanban-column { background-color: color-mix(in srgb, var(--shell-page) 75%, var(--board-column-bg)) !important; }
+				html[data-shell-frame][data-board-columns="inset"] .kanban-column .card { background-color: var(--shell-page) !important; border-color: var(--shell-page) !important; }
+				.board-columns-preview { --bcp-page: var(--shell-page, oklch(var(--b2))); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: var(--shell-card, oklch(var(--b1))); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
+				.bcp-col { display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 6px; background: var(--bcp-frame); }
+				.bcp-head { height: 6px; width: 55%; border-radius: 2px; background: oklch(var(--bc) / .3); }
+				.bcp-card { height: 18px; border-radius: 4px; background: var(--bcp-card); }
+				.board-columns-preview[data-preview="outline"] .bcp-col,
+				.board-columns-preview[data-preview="strip"] .bcp-col { background: transparent; border: 1px solid var(--bcp-frame); }
+				.board-columns-preview[data-preview="strip"] .bcp-col { padding-top: 0; }
+				.board-columns-preview[data-preview="strip"] .bcp-head { width: auto; height: 12px; margin: 0 -4px; border-radius: 5px 5px 0 0; background: var(--bcp-frame); }
+				.board-columns-preview[data-preview="tint"] .bcp-col { background: color-mix(in srgb, var(--bcp-page) 75%, var(--bcp-frame)); border: 1px solid var(--bcp-frame); }
+				.board-columns-preview[data-preview="inset"] .bcp-card { background: var(--bcp-page); }
 
 				/* Compact icon rail */
 				html[data-shell-frame] .drawer-side { height: calc(100dvh - var(--project-titlebar-height, 46px)); z-index: auto; }
