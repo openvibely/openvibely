@@ -113,10 +113,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function apply() {
 						var prefs = {};
 						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns') }; } catch (_) {}
-						root.setAttribute('data-layout', prefs.layout === 'split' ? 'split' : 'unified');
+						root.setAttribute('data-layout', prefs.layout === 'split' || prefs.layout === 'floating' ? prefs.layout : 'unified');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'off' ? 'off' : 'on');
-						root.setAttribute('data-board-columns', ['inset', 'tint'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
+						root.setAttribute('data-board-columns', ['inset', 'tint', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'filled');
 						var active = desktop || wide.matches;
 						if (active === root.hasAttribute('data-shell-frame')) return;
 						root.toggleAttribute('data-shell-frame', active);
@@ -124,10 +124,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split'] },
+						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['unified', 'split', 'floating'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['on', 'off'] },
-						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint'] }
+						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['filled', 'inset', 'tint', 'tintstrip'] }
 					};
 					window.openVibelyDisplay = {
 						get: function(name) { var p = displayPrefs[name]; return p ? root.getAttribute(p.attr) : null; },
@@ -3050,6 +3050,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 				html[data-shell-frame][data-layout="unified"] #task-list-panel { padding: 8px 8px 0; margin-bottom: var(--shell-gap); background-color: var(--shell-rail); border-right: 1px solid var(--shell-divider); }
 				html[data-shell-frame][data-layout="unified"]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+				html[data-shell-frame][data-layout="floating"] #task-list-panel { padding: 8px 8px 0; margin: 0 var(--shell-gap) var(--shell-gap) 0; background-color: var(--shell-page); border-radius: var(--shell-page-radius); }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 				.task-list-search { padding: 0 4px 10px; }
@@ -3065,10 +3066,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				.task-list-meta { display: block; font-size: 11px; opacity: .55; margin-top: 2px; }
 				.task-list-time { display: none; }
-				html[data-layout="unified"] .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
-				html[data-layout="unified"] .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
-				html[data-layout="unified"] .task-list-meta { display: none; }
-				html[data-layout="unified"] .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
+				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-row { align-items: flex-start; padding: 7px 10px; margin: 1px 0; border-radius: 10px; }
+				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
+				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-meta { display: none; }
+				html:is([data-layout="unified"], [data-layout="floating"]) .task-list-time { display: block; flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
 				.task-list-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: oklch(var(--bc) / .4); }
 				.task-list-dot.running { background: oklch(var(--p)); box-shadow: 0 0 0 3px oklch(var(--p) / .18); }
 				.task-list-dot.completed { background: oklch(var(--su)); }
@@ -3099,6 +3100,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-ov-theme-layer="custom"] { --board-column-bg: var(--ov-kanban-column-bg); }
 				html[data-shell-frame][data-board-columns="tint"] .kanban-column { border: 1px solid var(--board-column-bg); }
 				html[data-shell-frame][data-board-columns="tint"] .kanban-column { background-color: color-mix(in srgb, var(--shell-page) 75%, var(--board-column-bg)) !important; }
+				html[data-shell-frame][data-board-columns="tintstrip"] .kanban-column { border: 1px solid var(--board-column-bg); background-color: color-mix(in srgb, var(--shell-page) 75%, var(--board-column-bg)) !important; padding-top: 0; }
+				html[data-shell-frame][data-board-columns="tintstrip"] .kanban-column > :first-child { background-color: var(--board-column-bg); margin: 0 -0.75rem 0.75rem; padding: 0 0.75rem; height: 3.25rem; min-height: 3.25rem; border-radius: 0.5rem 0.5rem 0 0; }
 				html[data-shell-frame][data-board-columns="inset"] .kanban-column { background-color: oklch(var(--b1)) !important; }
 				html[data-shell-frame][data-ov-theme-layer="custom"][data-board-columns="inset"] .kanban-column { background-color: var(--shell-card) !important; }
 				html[data-shell-frame][data-board-columns="inset"] .kanban-column .card { background-color: var(--shell-page) !important; }
@@ -3108,6 +3111,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.bcp-head { height: 6px; width: 55%; border-radius: 2px; background: oklch(var(--bc) / .3); }
 				.bcp-card { height: 18px; border-radius: 4px; background: var(--bcp-card); }
 				.board-columns-preview[data-preview="tint"] .bcp-col { background: color-mix(in srgb, var(--bcp-page) 75%, var(--bcp-frame)); border: 1px solid var(--bcp-frame); }
+				.board-columns-preview[data-preview="tintstrip"] .bcp-col { padding-top: 0; background: color-mix(in srgb, var(--bcp-page) 75%, var(--bcp-frame)); border: 1px solid var(--bcp-frame); }
+				.board-columns-preview[data-preview="tintstrip"] .bcp-head { width: auto; height: 12px; margin: 0 -4px; border-radius: 5px 5px 0 0; background: var(--bcp-frame); }
 				.board-columns-preview[data-preview="inset"] .bcp-col { background: oklch(var(--b1)); }
 				html[data-ov-theme-layer="custom"] .board-columns-preview[data-preview="inset"] .bcp-col { background: var(--bcp-card); }
 				.board-columns-preview[data-preview="inset"] .bcp-card { background: var(--bcp-page); }
@@ -3124,8 +3129,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					border-radius: var(--shell-rail-radius);
 					transition: none;
 				}
-				html[data-shell-frame][data-layout="unified"] .sidebar-aside.sidebar-collapsed,
-				html[data-shell-frame][data-layout="unified"] body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
+				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) .sidebar-aside.sidebar-collapsed,
+				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) body.sidebar-collapsed-pending .sidebar-aside { background-color: transparent !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-header { display: none !important; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner { padding: 8px 0 !important; scrollbar-width: none; }
 				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
@@ -3162,7 +3167,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
-				html[data-shell-frame][data-layout="unified"] #task-list-panel[style*="--superellipse-clip"],
+				html[data-shell-frame]:is([data-layout="unified"], [data-layout="floating"]) #task-list-panel[style*="--superellipse-clip"],
 				html[data-shell-frame][data-layout="split"] #sidebar.sidebar-aside[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
@@ -5449,7 +5454,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
 									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
-									var radii = inspector || joined ? [r, r, 0, 0] : list ? [0, 0, r, r] : [r, r, r, r];
+									var radii = inspector || joined ? [r, r, 0, 0] : list && unified ? [0, 0, r, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
 									corners.forEach(function(c, index) {
