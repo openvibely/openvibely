@@ -112,9 +112,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep') }; } catch (_) {}
+						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
 						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
 						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
+						root.setAttribute('data-tab-style', prefs.tabs === 'attached' ? 'attached' : 'detached');
 						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'on' ? 'on' : 'off');
 						root.setAttribute('data-board-columns', ['filled', 'inset', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'tint');
@@ -128,6 +129,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
+						tabs: { key: 'openvibely.tabStyle', attr: 'data-tab-style', values: ['detached', 'attached'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['off', 'on'] },
 						columns: { key: 'openvibely.boardColumns', attr: 'data-board-columns', values: ['tint', 'filled', 'inset', 'tintstrip'] }
 					};
@@ -3172,22 +3174,28 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }
 				html[data-shell-frame] #desktop-project-titlebar > #sidebar-collapse-btn,
 				html[data-shell-frame] #desktop-project-titlebar .project-bar-brand { display: none !important; }
-				html[data-shell-frame] #desktop-project-tabs { padding: 6px 0 6px 0; align-items: center; gap: 6px; }
-				html[data-shell-frame] .desktop-project-tab { height: 34px; border-radius: var(--shell-tab-radius); }
-				html[data-shell-frame] .desktop-project-tab[data-selected="true"]::before,
-				html[data-shell-frame] .desktop-project-tab[data-selected="true"]::after,
+				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs { padding: 6px 0 6px 0; align-items: center; gap: 6px; }
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab { height: 34px; border-radius: var(--shell-tab-radius); }
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab[data-selected="true"]::before,
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab[data-selected="true"]::after,
 				html[data-shell-frame] .desktop-project-tab [role="tab"][aria-selected="true"]::before { display: none !important; }
-				html[data-shell-frame] .desktop-project-tab [role="tab"],
-				html[data-shell-frame] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { padding: 0 40px 0 16px; border: 0; border-radius: inherit; }
-				html[data-shell-frame] .desktop-project-tab [data-close-project],
-				html[data-shell-frame] .desktop-project-tab:not([data-selected="true"])::after { top: 50%; }
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab [role="tab"],
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { padding: 0 40px 0 16px; border: 0; border-radius: inherit; }
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab [data-close-project],
+				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"])::after { top: 50%; }
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
+				/* Attached tabs flow into the page. The first tab's outer corner must clear the page's rounded top-left. */
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar { --project-tab-contour: transparent; }
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs { padding-left: 10px; }
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"] #desktop-project-tabs,
+				html[data-shell-frame][data-tab-style="attached"].task-list-collapsed #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-3px); }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
 				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
-				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
-				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
-				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
+				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
+				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
+				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
 
 				html[data-shell-frame] #task-details-panel[style*="--superellipse-clip"] { clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #task-details-panel { right: var(--shell-gap); bottom: var(--shell-gap); background-color: var(--shell-page) !important; border-color: oklch(var(--bc) / .08); }
