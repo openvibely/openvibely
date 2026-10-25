@@ -28,6 +28,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -3823,4 +3824,16 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		"task-thread-view",
 		task.ProjectID,
 	))
+}
+
+func (h *Handler) TaskListPanel(c echo.Context) error {
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", "", "")
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks)))
 }

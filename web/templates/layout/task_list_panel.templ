@@ -1,0 +1,238 @@
+package layout
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+type TaskListGroup struct {
+	Label string
+	Tasks []models.Task
+}
+
+func TaskListGroups(tasks []models.Task) []TaskListGroup {
+	order := []models.TaskCategory{models.CategoryActive, models.CategoryBacklog, models.CategoryScheduled, models.CategoryCompleted}
+	labels := map[models.TaskCategory]string{models.CategoryActive: "Active", models.CategoryBacklog: "Backlog", models.CategoryScheduled: "Scheduled", models.CategoryCompleted: "Completed"}
+	byCategory := map[models.TaskCategory][]models.Task{}
+	for _, task := range tasks {
+		if task.ParentTaskID != nil {
+			continue
+		}
+		byCategory[task.Category] = append(byCategory[task.Category], task)
+	}
+	groups := make([]TaskListGroup, 0, len(order))
+	for _, category := range order {
+		if len(byCategory[category]) > 0 {
+			groups = append(groups, TaskListGroup{Label: labels[category], Tasks: byCategory[category]})
+		}
+	}
+	return groups
+}
+
+func taskListDotClass(task models.Task) string {
+	switch task.Status {
+	case models.StatusRunning, models.StatusQueued:
+		return "task-list-dot running"
+	case models.StatusCompleted:
+		return "task-list-dot completed"
+	case models.StatusFailed:
+		return "task-list-dot failed"
+	}
+	if task.Category == models.CategoryScheduled {
+		return "task-list-dot scheduled"
+	}
+	return "task-list-dot"
+}
+
+func taskListStatusLabel(task models.Task) string {
+	switch task.Status {
+	case models.StatusRunning:
+		return "Running"
+	case models.StatusQueued:
+		return "Queued"
+	case models.StatusCompleted:
+		return "Completed"
+	case models.StatusFailed:
+		return "Failed"
+	case models.StatusCancelled:
+		return "Cancelled"
+	case models.StatusBlocked:
+		return "Blocked"
+	}
+	if task.Category == models.CategoryScheduled {
+		return "Scheduled"
+	}
+	return "Pending"
+}
+
+templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
+	if len(groups) == 0 {
+		<div class="task-list-empty">No tasks yet.</div>
+	}
+	for _, group := range groups {
+		<details class="task-list-group" open data-task-list-group={ group.Label }>
+			<summary>{ group.Label }<span>{ strconv.Itoa(len(group.Tasks)) }</span></summary>
+			for _, task := range group.Tasks {
+				<a
+					class="task-list-row"
+					data-task-list-row={ task.ID }
+					data-task-list-title={ task.Title }
+					href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)) }
+					hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
+					hx-target="#main-content"
+					hx-swap="innerHTML"
+					hx-push-url="true"
+				>
+					<span class={ taskListDotClass(task) } aria-hidden="true"></span>
+					<span class="task-list-copy">
+						<strong>{ task.Title }</strong>
+						<span class="task-list-meta">{ taskListStatusLabel(task) }</span>
+					</span>
+				</a>
+			}
+		</details>
+	}
+}
+
+templ TaskListPanel(currentProjectID string) {
+	<aside id="task-list-panel" aria-label="Tasks">
+		<div class="task-list-search" hidden>
+			<input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off"/>
+		</div>
+		<div
+			id="task-list-groups"
+			hx-get={ fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID) }
+			hx-trigger="load, taskListRefresh from:body, every 15s"
+			hx-swap="innerHTML"
+			hx-push-url="false"
+		></div>
+		<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
+	</aside>
+	<script>
+		(function() {
+			var root = document.documentElement;
+			var panel = document.getElementById('task-list-panel');
+			var groups = document.getElementById('task-list-groups');
+			var divider = document.getElementById('task-list-divider');
+			var searchBox = panel.querySelector('.task-list-search');
+			var searchInput = document.getElementById('task-list-search-input');
+			var widthKey = 'openvibely.taskListWidth';
+			var collapsedKey = 'openvibely.taskListCollapsed';
+			var MIN = 200, MAX = 560;
+
+			function clampWidth(w) { return Math.round(Math.max(MIN, Math.min(MAX, w, window.innerWidth - 480))); }
+			function setWidth(w, persist) {
+				var next = clampWidth(w);
+				root.style.setProperty('--task-list-width', next + 'px');
+				divider.setAttribute('aria-valuenow', String(next));
+				if (persist) try { localStorage.setItem(widthKey, String(next)); } catch (_) {}
+			}
+			function currentWidth() { return parseFloat(getComputedStyle(root).getPropertyValue('--task-list-width')) || 300; }
+			try { var saved = parseFloat(localStorage.getItem(widthKey)); if (saved) setWidth(saved, false); } catch (_) {}
+			try { if (localStorage.getItem(collapsedKey) === 'true') root.classList.add('task-list-collapsed'); } catch (_) {}
+
+			function toggleButton() { return document.getElementById('task-list-toggle'); }
+			function syncToggle() {
+				var btn = toggleButton(); if (!btn) return;
+				var collapsed = root.classList.contains('task-list-collapsed');
+				btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+				btn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');
+			}
+			function setCollapsed(collapsed) {
+				root.classList.toggle('task-list-collapsed', collapsed);
+				try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
+				syncToggle();
+			}
+			function openSearch(open) {
+				searchBox.hidden = !open;
+				var btn = document.getElementById('task-list-search-toggle');
+				if (btn) btn.setAttribute('aria-expanded', String(open));
+				if (open) { setCollapsed(false); searchInput.focus(); }
+				else { searchInput.value = ''; filter(); }
+			}
+			function filter() {
+				var q = searchInput.value.trim().toLowerCase();
+				groups.querySelectorAll('.task-list-group').forEach(function(group) {
+					var visible = 0;
+					group.querySelectorAll('[data-task-list-row]').forEach(function(row) {
+						var match = !q || (row.getAttribute('data-task-list-title') || '').toLowerCase().indexOf(q) !== -1;
+						row.hidden = !match; if (match) visible++;
+					});
+					group.hidden = visible === 0;
+				});
+			}
+			function syncActiveRow() {
+				var m = window.location.pathname.match(/^\/tasks\/([^/]+)$/);
+				var id = m ? m[1] : '';
+				groups.querySelectorAll('[data-task-list-row]').forEach(function(row) {
+					if (row.getAttribute('data-task-list-row') === id) row.setAttribute('aria-current', 'page');
+					else row.removeAttribute('aria-current');
+				});
+			}
+
+			document.addEventListener('click', function(e) {
+				if (e.target.closest('#task-list-toggle')) { e.preventDefault(); setCollapsed(!root.classList.contains('task-list-collapsed')); }
+				else if (e.target.closest('#task-list-search-toggle')) { e.preventDefault(); openSearch(searchBox.hidden); }
+			});
+			document.addEventListener('keydown', function(e) {
+				if (!root.hasAttribute('data-shell-frame') || e.defaultPrevented || e.isComposing || e.repeat || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'b') return;
+				e.preventDefault();
+				setCollapsed(!root.classList.contains('task-list-collapsed'));
+			});
+			searchInput.addEventListener('input', filter);
+			searchInput.addEventListener('keydown', function(e) { if (e.key === 'Escape') { e.preventDefault(); openSearch(false); } });
+
+			var drag = null;
+			divider.addEventListener('pointerdown', function(e) {
+				if (e.button !== 0) return;
+				e.preventDefault();
+				drag = { id: e.pointerId, x: e.clientX, width: panel.getBoundingClientRect().width };
+				divider.setPointerCapture(e.pointerId);
+				root.classList.add('task-list-resizing');
+			});
+			divider.addEventListener('pointermove', function(e) { if (drag && e.pointerId === drag.id) setWidth(drag.width + e.clientX - drag.x, false); });
+			function endDrag() { if (!drag) return; drag = null; root.classList.remove('task-list-resizing'); setWidth(currentWidth(), true); }
+			divider.addEventListener('pointerup', endDrag);
+			divider.addEventListener('pointercancel', endDrag);
+			divider.addEventListener('lostpointercapture', endDrag);
+			divider.addEventListener('dblclick', function() { setWidth(300, true); });
+			divider.addEventListener('keydown', function(e) {
+				var w = currentWidth();
+				if (e.key === 'ArrowLeft') w -= 20; else if (e.key === 'ArrowRight') w += 20; else return;
+				e.preventDefault(); setWidth(w, true);
+			});
+
+			document.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { filter(); syncActiveRow(); } });
+			document.body.addEventListener('htmx:afterSettle', syncActiveRow);
+			window.addEventListener('popstate', syncActiveRow);
+			window.addEventListener('resize', function() { setWidth(currentWidth(), false); });
+			document.addEventListener('change', function(e) {
+				if (e.target && e.target.id === 'project-selector' && e.target.value) {
+					groups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(e.target.value));
+					if (window.htmx) { htmx.process(groups); htmx.trigger(groups, 'taskListRefresh'); }
+				}
+			});
+			document.addEventListener('DOMContentLoaded', syncToggle);
+			syncToggle();
+		})();
+	</script>
+}
+
+templ TaskListHeaderControls() {
+	<div id="task-list-header" aria-label="Task list controls">
+		<button type="button" id="task-list-toggle" aria-controls="task-list-panel" aria-expanded="true" aria-label="Collapse task list" title="Toggle task list (⌘B)">
+			<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="task-list-toggle-fill" d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4Z" stroke="none"></path><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg>
+		</button>
+		<span class="task-list-brand">OpenVibely</span>
+		<div class="task-list-actions">
+			<button type="button" id="task-list-search-toggle" aria-expanded="false" aria-label="Search tasks" title="Search tasks">
+				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg>
+			</button>
+			<a id="task-list-new" href="/tasks/new" hx-get="/tasks/new" hx-target="#main-content" hx-push-url="true" aria-label="New task" title="New task">
+				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+			</a>
+		</div>
+	</div>
+}

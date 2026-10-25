@@ -690,6 +690,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						updateSidebarToggleA11y(collapsed);
 
 					function toggleSidebarCollapsed() {
+						if (document.documentElement.hasAttribute('data-shell-frame')) return;
 						sidebar.classList.toggle('sidebar-collapsed');
 						var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
 						try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
@@ -704,7 +705,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar
 					document.addEventListener('keydown', function(e) {
-						if (!e.defaultPrevented && !e.isComposing && !e.repeat && !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+						if (!document.documentElement.hasAttribute('data-shell-frame') && !e.defaultPrevented && !e.isComposing && !e.repeat && !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
 							e.preventDefault();
 							toggleSidebarCollapsed();
 						}
