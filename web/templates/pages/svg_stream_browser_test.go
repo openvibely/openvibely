@@ -29,7 +29,7 @@ func TestBrowserFunctional_StreamingSVGPreview(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "streaming-svg", func(b *composerFocusCDP) {
-		b.waitFor("renderer", `typeof window.renderLiveChatContent`, "function")
+		b.waitFor("streaming fixture ready", `String(document.readyState !== 'loading' && typeof window.renderLiveChatContent === 'function' && !!document.getElementById('math-stream'))`, "true")
 		b.evaluateAwait(`(async()=>{window.svgSource='<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000"><rect width="1000" height="1000" fill="red"/></svg>';await renderLiveChatContent(document.getElementById('math-stream'),svgSource);return 'ready'})()`)
 		b.waitFor("SVG decoded", `String(!!document.querySelector('.chat-svg-preview img')?.naturalWidth)`, "true")
 		b.click(".chat-svg-preview [data-image-gallery-item]")
