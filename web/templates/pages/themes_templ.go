@@ -110,7 +110,7 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = layoutCard("classic", "Classic", "Task list sits on the frame next to a separate rounded page, with two-line task rows.").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layoutCard("split", "Split", "Task list sits on the frame next to a separate rounded page, with two-line task rows.").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
