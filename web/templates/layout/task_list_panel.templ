@@ -99,7 +99,7 @@ templ TaskListPanel(currentProjectID string) {
 		<div
 			id="task-list-groups"
 			hx-get={ fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID) }
-			hx-trigger="load, taskListRefresh from:body, every 15s"
+			hx-trigger="load, taskListRefresh from:body"
 			hx-swap="innerHTML"
 			hx-sync="this:queue last"
 			hx-push-url="false"
