@@ -20,6 +20,16 @@
     }
     return new XMLSerializer().serializeToString(root);
   }
+  // A gallery owns fresh URLs independently of the transcript row's lifetime.
+  window.createChatSVGPreview = function(element) {
+    const source = element?.closest('.chat-svg-preview')?.querySelector('pre > code.language-svg')?.textContent;
+    if (!source) return null;
+    const safe = imageSource(source);
+    if (!safe) return null;
+    const url = URL.createObjectURL(new Blob([safe], {type:'image/svg+xml'}));
+    const download = URL.createObjectURL(new Blob([source], {type:'image/svg+xml'}));
+    return {url, download, dispose() { URL.revokeObjectURL(url); URL.revokeObjectURL(download); }};
+  };
   // Keep completed drawings (and their blob URLs/gallery state) through stream commits.
   window.prepareChatSVG = function(fragment, previous) {
     const saved = new Map();
@@ -36,7 +46,11 @@
   };
   function scan() {
     for (const [figure, urls] of images) {
-      if (!figure.isConnected) { urls.forEach(url => URL.revokeObjectURL(url)); images.delete(figure); }
+      if (!figure.isConnected) {
+        urls.forEach(url => URL.revokeObjectURL(url)); images.delete(figure);
+        const code = figure.querySelector('pre > code.language-svg');
+        if (code) processed.delete(code); // Recreate thumbnail URLs if a virtual row returns.
+      }
     }
     document.querySelectorAll('pre > code.language-svg').forEach(code => {
       if (code.closest('[data-thread-refresh-preview]') || processed.has(code)) return;

@@ -225,19 +225,56 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 		}
 		b.evaluateAwait(`window.queryChatVirtualElements ? Promise.resolve('ready') : new Promise(resolve=>{var script=document.createElement('script');script.src='/static/chat-virtual-list.js';script.onload=()=>resolve('ready');document.head.append(script)})`)
 		for _, scope := range []string{"task-detail-content", "chat-page-root"} {
-			b.evaluate(fmt.Sprintf(`var virtualScope=document.createElement('div');virtualScope.id=%q;virtualScope.style.cssText='position:fixed;inset:100px;z-index:10';document.body.append(virtualScope);var messages=document.createElement('div');messages.id=virtualScope.id==='chat-page-root'?'chat-messages':'task-thread-messages';messages.style.cssText='height:300px;overflow:auto';messages.dataset.transcriptHydrating='true';virtualScope.append(messages);messages.innerHTML='<div data-execution-pair data-exec-status="completed"><div class="chat-markdown" id="offscreen-file"><a data-file-preview href="/fixture/math.md">Math</a></div></div><div style="height:5000px"></div><div id="cold-files"></div><div style="height:5000px"></div><a id="visible-file" data-file-preview href="/fixture/data.json">JSON</a>';messages.querySelector('[data-execution-pair]').insertAdjacentHTML('beforeend','<div class="stream-tool">Row</div>'.repeat(45));window.coldFileRenders=0;window.installChatVirtualRows(document.getElementById('cold-files'),{models:[{kind:'text',segments:[{type:'text',content:'[Generated](/files/abcdef) and `+"`[Code](/files/deadbeef)`"+`'}]}]},()=>{window.coldFileRenders++});messages.removeAttribute('data-transcript-hydrating');messages.scrollTop=messages.scrollHeight;window.refreshVirtualChatRows(messages);'ok'`, scope))
+			b.evaluate(fmt.Sprintf(`
+var virtualScope=document.createElement('div');virtualScope.id=%q;
+virtualScope.style.cssText='position:fixed;inset:100px;z-index:10';document.body.append(virtualScope);
+var messages=document.createElement('div');messages.id=virtualScope.id==='chat-page-root'?'chat-messages':'task-thread-messages';
+messages.style.cssText='height:300px;overflow:auto';messages.dataset.transcriptHydrating='true';virtualScope.append(messages);
+messages.innerHTML='<div data-execution-pair data-exec-status="completed"><div class="chat-markdown" id="offscreen-file"><a data-file-preview href="/fixture/math.md">Math</a></div></div><div style="height:5000px"></div><div id="cold-files"></div><div style="height:5000px"></div><a id="visible-file" data-file-preview href="/fixture/data.json">JSON</a>';
+messages.querySelector('[data-execution-pair]').insertAdjacentHTML('beforeend','<div class="stream-tool">Row</div>'.repeat(45));
+document.getElementById('offscreen-file').insertAdjacentHTML('beforeend',window.renderChatMarkdown(robotSVG));
+window.coldFileRenders=0;
+window.installChatVirtualRows(document.getElementById('cold-files'),{models:[{kind:'text',segments:[{type:'text',content:'Paragraph text.\n\n'.repeat(6000)+'[Generated](/files/abcdef) and `+"`[Code](/files/deadbeef)`"+`'}]}]},()=>{window.coldFileRenders++});
+window.savedAsyncMarkdown=window.renderChatMarkdownAsync;window.savedSyncMarkdown=window.renderChatMarkdown;
+window.largeExtractionCalls=0;
+window.renderChatMarkdown=function(text){if(text.length>=64*1024)throw Error('Large extraction must not run synchronously');return savedSyncMarkdown(text)};
+window.renderChatMarkdownAsync=function(text){
+ if(text.length<64*1024)return savedAsyncMarkdown(text);
+ largeExtractionCalls++;
+ return savedAsyncMarkdown(text).then(rendered=>new Promise(resolve=>{window.releaseFileExtraction=()=>resolve(rendered)}));
+};'ok'`, scope))
+			b.waitFor("SVG thumbnail decoded before virtualization", `String(!!document.querySelector('#offscreen-file img')?.naturalWidth)`, "true")
+			b.evaluate(`window.detachedSVGURL=document.querySelector('#offscreen-file img').src;messages.removeAttribute('data-transcript-hydrating');messages.scrollTop=messages.scrollHeight;window.refreshVirtualChatRows(messages);'ok'`)
 			b.waitFor("offscreen attachment detached", `String(!document.getElementById('offscreen-file') && !!document.querySelector('#cold-files [data-virtual-chat-row]') && coldFileRenders===0)`, "true")
 			b.evaluate(`window.fileScrollBefore=messages.scrollTop;'ok'`)
 			b.click("#visible-file")
-			b.waitFor("virtual attachments included in order", `String(!!document.querySelector('[data-json-tree]') && document.querySelector('[data-gallery-count]').textContent==='3 / 3')`, "true")
+			b.waitFor("requested file opens before large extraction finishes", `String(!!document.querySelector('[data-json-tree]') && document.getElementById('image-gallery').open && largeExtractionCalls===1 && typeof releaseFileExtraction==='function')`, "true")
+			b.click("[data-gallery-close]")
+			b.evaluate(`releaseFileExtraction();'ok'`)
+			b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('settled'),0))`)
+			b.waitFor("late extraction cannot reopen gallery", `String(!document.getElementById('image-gallery').open)`, "true")
+			b.click("#visible-file")
+			b.waitFor("virtual attachments included in order and extraction cached", `String(!!document.querySelector('[data-json-tree]') && document.querySelector('[data-gallery-count]').textContent==='4 / 4' && largeExtractionCalls===1)`, "true")
 			b.click("[data-gallery-prev]")
-			b.waitFor("unrendered HTML attachment opens", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html' && document.querySelector('[data-gallery-count]').textContent==='2 / 3')`, "true")
+			b.waitFor("unrendered HTML attachment opens", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html' && document.querySelector('[data-gallery-count]').textContent==='3 / 4')`, "true")
 			b.click("[data-gallery-prev]")
-			b.waitFor("detached attachment opens", `String(!!document.querySelector('[data-file-markdown]') && document.querySelector('[data-gallery-count]').textContent==='1 / 3')`, "true")
+			b.waitFor("detached SVG attachment opens with fresh resource", `String(!!document.querySelector('[data-gallery-image]')?.naturalWidth && document.querySelector('[data-gallery-image]').src!==detachedSVGURL && document.querySelector('[data-gallery-count]').textContent==='2 / 4')`, "true")
+			b.evaluate(`window.gallerySVGURL=document.querySelector('[data-gallery-image]').src;window.gallerySVGDownload=document.querySelector('[data-gallery-download]').href;'ok'`)
+			if got := b.evaluateAwait(`fetch(gallerySVGDownload).then(r=>r.text()).then(text=>String(text.trim()===robotSVG))`); got != "true" {
+				t.Fatal("SVG original download was not preserved: " + got)
+			}
+			b.click("[data-gallery-prev]")
+			b.waitFor("detached attachment opens", `String(!!document.querySelector('[data-file-markdown]') && document.querySelector('[data-gallery-count]').textContent==='1 / 4')`, "true")
+			if got := b.evaluateAwait(`Promise.all([gallerySVGURL,gallerySVGDownload].map(url=>fetch(url).then(()=>false,()=>true))).then(results=>String(results.every(Boolean)))`); got != "true" {
+				t.Fatal("gallery SVG URLs were not released: " + got)
+			}
 			b.waitFor("gallery leaves virtualization and scroll intact", `String(!document.getElementById('offscreen-file') && !!document.querySelector('#cold-files [data-virtual-chat-row]') && coldFileRenders===0 && messages.scrollTop===fileScrollBefore)`, "true")
 			b.click("[data-gallery-close]")
-			b.evaluate(`virtualScope.remove();'ok'`)
+			b.evaluate(`messages.scrollTop=0;window.refreshVirtualChatRows(messages);'ok'`)
+			b.waitFor("remounted SVG thumbnail has fresh URL", `String(!!document.querySelector('#offscreen-file img')?.naturalWidth && document.querySelector('#offscreen-file img').src!==detachedSVGURL)`, "true")
+			b.evaluate(`window.renderChatMarkdownAsync=savedAsyncMarkdown;window.renderChatMarkdown=savedSyncMarkdown;delete window.releaseFileExtraction;virtualScope.remove();'ok'`)
 		}
+
 		b.click("#json")
 		b.waitFor("exact JSON number", `String(document.querySelector('[data-json-tree]')?.textContent.includes('12345678901234567890'))`, "true")
 		b.click("[data-file-close]")
