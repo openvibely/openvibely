@@ -509,6 +509,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 	}
 
+	messages = repairInterruptedToolCalls(messages)
+
 	var allText strings.Builder
 	hasDurableCompactionState := false
 
