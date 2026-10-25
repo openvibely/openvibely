@@ -841,6 +841,9 @@
         modelID: model?.value || "",
         reasoningEffort: effort?.value || "",
       };
+      // This attempt owns the captured snapshot while settings load. Do not
+      // leave it on the form for a later Send if loading or saving fails.
+      form._chatNextSubmissionPayload = null;
       const waitingForEffort = s.loading;
       const ready = s.ready;
       const pending = s.pending;
@@ -888,6 +891,11 @@
               );
             }
           } finally {
+            // HTMX normally consumes this during beforeRequest. A thrown or
+            // cancelled submit must discard it too, without clearing a newer
+            // snapshot installed by another submission.
+            if (form._chatNextSubmissionPayload === payload)
+              form._chatNextSubmissionPayload = null;
             btn._ovResubmit = false;
             managedSelection.remove();
             if (message) message.value = draft;

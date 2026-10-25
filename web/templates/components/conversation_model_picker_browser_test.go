@@ -408,6 +408,32 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert(replacedButtonSend?.get('message')==='follow-up after button replacement','send survives composer button replacement');
  assert(panel.hidden,'button replacement must not open the models menu');
 
+ // A failed handoff must not replay its message or attachments on the next Send.
+ form._chatNextSubmissionPayload=null;
+ message.value='failed original';attachment.value='failed-attachment';
+ nativeRequestSubmit.call(form);
+ form.requestSubmit=()=>{throw Error('simulated submission failure');};
+ await wait(40);
+ assert(message.value==='failed original'&&attachment.value==='failed-attachment','failed handoff preserves visible draft');
+ assert(!form._chatNextSubmissionPayload,'failed handoff clears its internal snapshot');
+ assert(!form.querySelector('[name=model_selection_managed]')&&!trigger._ovResubmit,'failed handoff clears submission guards');
+ form.requestSubmit=nativeRequestSubmit;
+ window.ovModelPicker.close(false);
+ let retrySend=null;
+ form.addEventListener('submit',event=>{event.preventDefault();retrySend=new FormData(form);},{once:true});
+ message.value='corrected follow-up';attachment.value='corrected-attachment';
+ form.requestSubmit();await wait(40);
+ assert(retrySend?.get('message')==='corrected follow-up'&&retrySend?.get('attachment_session_id')==='corrected-attachment','retry sends edited text and attachments');
+ assert(!form._chatNextSubmissionPayload,'cancelled submission also clears its internal snapshot');
+
+ // A steering snapshot is consumed even if settings fail before resubmission.
+ form._chatNextSubmissionPayload={message:'old steering message',attachmentSessionID:'old-steering-attachment',fallbackFromSteer:true};
+ trigger._ovModelState.error='simulated settings failure';
+ message.value='current visible draft';
+ form.requestSubmit();await wait(150);
+ assert(!form._chatNextSubmissionPayload,'settings failure clears captured steering snapshot');
+ assert(message.value==='current visible draft','settings failure preserves newer draft');
+
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
  </script></body></html>`)
