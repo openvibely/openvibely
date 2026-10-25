@@ -3020,7 +3020,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-rail: var(--shell-page);
 					--shell-card: oklch(var(--b1));
 					--shell-code: oklch(var(--b2));
-					--shell-row-selected: oklch(var(--p) / .22);
+					--shell-row-selected: color-mix(in srgb, oklch(var(--bc)) 10%, transparent);
 					--shell-divider: oklch(var(--bc) / .08);
 					--rail-width: 64px;
 					--task-list-width: 300px;
@@ -3030,7 +3030,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-tab-radius: 17px;
 				}
 				html[data-shell-frame][data-theme="light"] { --shell-chrome: #F5F5F5; --shell-page: #E8E8E8; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-shell-chrome, var(--ov-kanban-column-bg)); --shell-page: var(--ov-shell-page, var(--ov-content-bg)); --shell-rail: var(--ov-shell-rail, var(--shell-page)); --shell-card: var(--ov-shell-card, var(--ov-surface)); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-shell-row-selected, var(--ov-accent-tint)); --shell-divider: var(--ov-subtle-border); }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-shell-chrome, var(--ov-kanban-column-bg)); --shell-page: var(--ov-shell-page, var(--ov-content-bg)); --shell-rail: var(--ov-shell-rail, var(--shell-page)); --shell-card: var(--ov-shell-card, var(--ov-surface)); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent)); --shell-divider: var(--ov-subtle-border); }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;
@@ -3070,7 +3070,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-group-label { flex: 1; }
 				.task-list-count { opacity: .8; }
 				.task-list-row { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin: 1px 0; border-radius: 8px; text-decoration: none; color: inherit; }
-				.task-list-row:hover { background: oklch(var(--bc) / .07); }
+				.task-list-row:hover { background: oklch(var(--bc) / .06); }
 				.task-list-row[aria-current="page"] { background: var(--shell-row-selected); }
 				.task-list-row > :first-child { flex-shrink: 0; }
 				.task-list-row svg { width: 14px; height: 14px; }
@@ -3148,10 +3148,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .menu a { position: relative; opacity: .75; }
 				html[data-shell-frame] .sidebar-aside .menu a:hover { opacity: 1; }
 				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
-				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--p)); }
-				html[data-shell-frame][data-ov-theme-layer="custom"] .sidebar-aside .menu a[aria-current="page"] { color: var(--ov-focus); }
+				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
-				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"]::before { content: ""; position: absolute; left: -2px; top: 9px; bottom: 9px; width: 2px; border-radius: 1px; background: currentColor; }
 				html[data-shell-frame] .sidebar-aside .sidebar-theme-toggle-container { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
 
 				/* Project tab bar shares the chrome color; tabs are detached pills. */
