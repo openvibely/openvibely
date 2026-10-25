@@ -2991,8 +2991,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 				/* ===== Shell frame: chrome surrounds an inset navigation rail and page. ===== */
 				html[data-shell-frame] {
-					--shell-chrome: #191E24;
-					--shell-page: #15191E;
+					--shell-chrome: #13171C;
+					--shell-page: #1C2128;
+					--shell-card: #252B34;
 					--rail-width: 64px;
 					--task-list-width: 300px;
 					--shell-gap: 10px;
@@ -3000,8 +3001,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-rail-radius: 22px;
 					--shell-tab-radius: 17px;
 				}
-				html[data-shell-frame][data-theme="light"] { --shell-chrome: #F5F5F5; --shell-page: #E8E8E8; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); }
+				html[data-shell-frame][data-theme="light"] { --shell-chrome: #ECECEE; --shell-page: #FBFBFC; --shell-card: #F1F2F5; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); --shell-card: var(--ov-surface); }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;
@@ -3029,14 +3030,15 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-group { margin-bottom: 12px; }
 				.task-list-group > summary { list-style: none; display: flex; justify-content: space-between; padding: 6px 10px; font-size: 11px; letter-spacing: .4px; opacity: .6; cursor: pointer; user-select: none; }
 				.task-list-group > summary::-webkit-details-marker { display: none; }
-				.task-list-row { display: flex; gap: 10px; padding: 9px 10px; margin: 2px 0; border-radius: 12px; text-decoration: none; color: inherit; }
+				.task-list-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 10px; margin: 1px 0; border: 1px solid transparent; border-radius: 10px; text-decoration: none; color: inherit; }
 				.task-list-row:hover { background: oklch(var(--bc) / .07); }
-				.task-list-row[aria-current="page"] { background: oklch(var(--p) / .22); }
+				.task-list-row[aria-current="page"] { background: rgba(116, 128, 255, .14); border-color: rgba(116, 128, 255, .55); }
 				.task-list-copy { min-width: 0; flex: 1; }
 				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-				.task-list-meta { display: block; font-size: 11px; opacity: .55; margin-top: 2px; }
+				.task-list-meta { display: none; }
+				.task-list-time { flex-shrink: 0; font-size: 11px; line-height: 19px; opacity: .55; }
 				.task-list-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: oklch(var(--bc) / .4); }
-				.task-list-dot.running { background: oklch(var(--p)); }
+				.task-list-dot.running { background: oklch(var(--p)); box-shadow: 0 0 0 3px oklch(var(--p) / .18); }
 				.task-list-dot.completed { background: oklch(var(--su)); }
 				.task-list-dot.failed { background: oklch(var(--er)); }
 				.task-list-dot.scheduled { background: oklch(var(--wa)); }
@@ -3119,12 +3121,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #task-details-panel[data-overlay="true"] { inset: var(--task-panel-top, 0px) var(--shell-gap) var(--shell-gap) auto; width: calc(100% - var(--rail-width) - var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-docked="true"] { padding-right: calc(var(--task-panel-reserved-width) + var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-overlay="true"] #task-details-opener { right: var(--shell-gap); }
-				html[data-shell-frame] .chat-bubble-user-msg,
-				html[data-shell-frame] .chat-bubble-assistant-msg { --chat-user-bg: oklch(var(--b1)); background-color: oklch(var(--b1)) !important; }
-				html[data-shell-frame] .chat-input-container { background-color: oklch(var(--b1)) !important; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] .chat-bubble-user-msg,
-				html[data-shell-frame][data-ov-theme-layer="custom"] .chat-bubble-assistant-msg { --chat-user-bg: var(--ov-surface); background-color: var(--ov-surface) !important; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] .chat-input-container { background-color: var(--ov-surface) !important; }
+				html[data-shell-frame] .chat-bubble-user-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
+				html[data-shell-frame] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; padding-left: 0; padding-right: 0; }
+				html[data-shell-frame] .chat-input-container { background-color: var(--shell-card) !important; }
+				html[data-shell-frame] .chat-bubble-assistant-msg::before,
+				html[data-shell-frame] .chat-bubble-assistant-msg::after { display: none !important; }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
