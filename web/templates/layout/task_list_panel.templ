@@ -3,6 +3,7 @@ package layout
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -67,6 +68,23 @@ func taskListStatusLabel(task models.Task) string {
 	return "Pending"
 }
 
+func taskListAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return strconv.Itoa(int(d.Minutes())) + "m"
+	case d < 24*time.Hour:
+		return strconv.Itoa(int(d.Hours())) + "h"
+	case d < 7*24*time.Hour:
+		return strconv.Itoa(int(d.Hours()/24)) + "d"
+	case d < 365*24*time.Hour:
+		return strconv.Itoa(int(d.Hours()/(24*7))) + "w"
+	}
+	return strconv.Itoa(int(d.Hours()/(24*365))) + "y"
+}
+
 templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 	if len(groups) == 0 {
 		<div class="task-list-empty">No tasks yet.</div>
@@ -90,6 +108,7 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 						<strong>{ task.Title }</strong>
 						<span class="task-list-meta">{ taskListStatusLabel(task) }</span>
 					</span>
+					<time class="task-list-time" datetime={ task.UpdatedAt.Format(time.RFC3339) } title={ task.UpdatedAt.Format("Jan 2, 2006 3:04 PM") }>{ taskListAge(task.UpdatedAt) }</time>
 				</a>
 			}
 		</details>
