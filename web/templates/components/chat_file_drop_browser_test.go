@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
@@ -17,8 +20,24 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Exercise the guard rendered by the shared layout, even when no composer
+		// is present on a fresh Settings or Alerts document.
+		var page bytes.Buffer
+		if err := layout.Base(r.URL.Path, nil, "").Render(context.Background(), &page); err != nil {
+			t.Error(err)
+			http.Error(w, "render layout", http.StatusInternalServerError)
+			return
+		}
+		guard := regexp.MustCompile(`(?s)<script id="file-drop-navigation-guard">.*?</script>`).FindString(page.String())
+		if guard == "" {
+			t.Error("shared layout is missing the file-drop guard")
+		}
+		composer := ""
+		if r.URL.Path == "/chat" {
+			composer = form.String()
+		}
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<!doctype html><body data-test-result="pending"><div id="chat-messages"></div>%s<div id="browser-result"></div><script>
+		fmt.Fprintf(w, `<!doctype html><head>%s</head><body data-test-result="pending"><div id="chat-messages"></div>%s<div id="browser-result"></div><script>
 (async function() {
  function assert(ok, message) { if (!ok) throw new Error(message); }
  try {
@@ -38,6 +57,11 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   document.body.dispatchEvent(textDrop);
   assert(!textDrop.defaultPrevented, 'plain text drops were blocked');
   var input = document.getElementById('message-input');
+  if (!input) {
+   assert(uploads.length === 0, 'outside drop unexpectedly uploaded');
+   document.body.setAttribute('data-test-result', 'pass');
+   return;
+  }
   var over = new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:transfer});
   input.dispatchEvent(over);
   assert(over.defaultPrevented, 'composer did not accept drop');
@@ -51,8 +75,12 @@ func TestBrowserFunctional_ComposerFileDrops(t *testing.T) {
   document.body.setAttribute('data-test-result', 'fail');
   document.body.setAttribute('data-test-error', error.message);
  }
-})();</script></body>`, form.String())
+})();</script></body>`, guard, composer)
 	}))
 	defer server.Close()
-	runHeadlessChromeFixture(t, chrome, server.URL, "composer file drops", 3000, 20*time.Second)
+	for _, path := range []string{"/settings", "/alerts", "/chat"} {
+		t.Run(path, func(t *testing.T) {
+			runHeadlessChromeFixture(t, chrome, server.URL+path, "file drops on "+path, 3000, 20*time.Second)
+		})
+	}
 }

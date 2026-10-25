@@ -2850,14 +2850,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				});
 			}
 
-			// Keep OS file drops outside a composer from navigating the webview.
-			// Linux desktop lets WebKit deliver these as ordinary HTML drop events.
-			if (!window._chatFileDropGuardInstalled) {
-				window._chatFileDropGuardInstalled = true;
-				document.addEventListener('drop', function(e) {
-					if (e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf('Files') !== -1) e.preventDefault();
-				});
-			}
 
 			// Drag-and-drop
 			var dragCounter = 0;
