@@ -2997,6 +2997,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-card: #2B2B2B;
 					--shell-code: #222222;
 					--shell-row-selected: #262626;
+					--shell-divider: #1F1F1F;
 					--rail-width: 64px;
 					--task-list-width: 300px;
 					--shell-gap: 10px;
@@ -3004,8 +3005,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					--shell-rail-radius: 22px;
 					--shell-tab-radius: 17px;
 				}
-				html[data-shell-frame][data-theme="light"] { --shell-chrome: #EDEDED; --shell-rail: #F7F7F7; --shell-page: #FFFFFF; --shell-card: #F3F3F3; --shell-code: #F7F7F7; --shell-row-selected: #E2E2E2; }
-				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); --shell-rail: var(--ov-content-bg); --shell-card: var(--ov-surface); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-hover); }
+				html[data-shell-frame][data-theme="light"] { --shell-chrome: #EDEDED; --shell-rail: #F7F7F7; --shell-page: #FFFFFF; --shell-card: #F3F3F3; --shell-code: #F7F7F7; --shell-row-selected: #E2E2E2; --shell-divider: #E4E4E4; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); --shell-rail: var(--ov-content-bg); --shell-card: var(--ov-surface); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-hover); --shell-divider: var(--ov-subtle-border); }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;
@@ -3022,9 +3023,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #task-list-panel {
 					position: relative; display: flex; flex-direction: column;
 					width: var(--task-list-width); flex: 0 0 var(--task-list-width);
-					min-height: 0; padding: 0 8px var(--shell-gap) 0;
+					min-height: 0; padding: 8px 8px 0;
+					margin-bottom: var(--shell-gap);
+					background-color: var(--shell-rail);
+					border-right: 1px solid var(--shell-divider);
 					color: inherit;
 				}
+				html[data-shell-frame]:not(.task-list-collapsed) #main-content { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 				.task-list-search { padding: 0 4px 10px; }
@@ -3073,7 +3078,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					width: calc(var(--rail-width) - 2 * var(--shell-gap)) !important;
 					height: calc(100dvh - var(--project-titlebar-height, 46px) - var(--shell-gap)) !important;
 					margin: 0 var(--shell-gap) var(--shell-gap);
-					background-color: var(--shell-rail) !important;
+					background-color: transparent !important;
 					border: 0 !important;
 					border-radius: var(--shell-rail-radius);
 					transition: none;
@@ -3114,7 +3119,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
-				html[data-shell-frame] #sidebar.sidebar-aside[style*="--superellipse-clip"],
+				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[data-selected="true"][style*="--superellipse-clip"] { border-radius: 0 !important; clip-path: var(--superellipse-clip); }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
 				html[data-shell-frame] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
@@ -3127,6 +3132,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .chat-bubble-user-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
 				html[data-shell-frame] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; padding-left: 0; padding-right: 0; }
 				html[data-shell-frame] .chat-input-container { background-color: var(--shell-card) !important; }
+				html[data-shell-frame] :is(#task-thread-messages, #chat-messages) > * , html[data-shell-frame] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
+				html[data-shell-frame] :is(#task-thread-messages, #chat-messages) { padding-left: 24px; padding-right: 24px; }
+				html[data-shell-frame] .chat-execution-pair { display: flex; flex-direction: column; }
+				html[data-shell-frame] .chat-bubble-user-msg { align-self: flex-end; max-width: 75%; width: fit-content; padding: 10px 16px !important; border-radius: 18px !important; border: 0 !important; }
+				html[data-shell-frame] .chat-bubble-user-msg::before, html[data-shell-frame] .chat-bubble-user-msg::after { display: none !important; }
+				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) > .text-xs.font-semibold:first-child { display: none; }
+				html[data-shell-frame] .chat-bubble-assistant-msg { padding-top: 4px !important; padding-bottom: 4px !important; }
+				html[data-shell-frame] .chat-input-container { border-radius: 22px !important; border: 1px solid var(--shell-divider) !important; box-shadow: none !important; }
 				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
 				html[data-shell-frame][data-theme="dark"] #main-content { --tw-text-opacity: 1; color: #E6E6E6; }
 				html[data-shell-frame] .chat-bubble-assistant-msg::before,
@@ -5386,8 +5399,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var w = el.clientWidth, h = el.clientHeight;
 									if (!w || !h) return;
 									var inspector = el.id === 'task-details-panel';
-									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector ? 28 : el.id === 'sidebar' ? 22 : 17);
-									var radii = inspector ? [r, r, 0, 0] : [r, r, r, r];
+									var list = el.id === 'task-list-panel';
+									var joined = el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : 17);
+									var radii = inspector || joined ? [r, r, 0, 0] : list ? [0, 0, r, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
 									corners.forEach(function(c, index) {
@@ -5403,7 +5418,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								var observer = new ResizeObserver(function(entries) { entries.forEach(function(e) { shape(e.target); }); });
 								var seen = new WeakSet();
 								function attach() {
-									document.querySelectorAll('#main-content, #sidebar, .desktop-project-tab, #task-details-panel').forEach(function(el) {
+									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, #task-details-panel').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);
@@ -5413,6 +5428,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								attach();
 								document.addEventListener('DOMContentLoaded', attach);
 								document.body.addEventListener('htmx:afterSettle', attach);
+								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame'] });
 								var tabs = document.getElementById('desktop-project-titlebar');
 								if (tabs) new MutationObserver(attach).observe(tabs, { childList: true, subtree: true });
 						})();
