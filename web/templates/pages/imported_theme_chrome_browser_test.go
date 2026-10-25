@@ -100,6 +100,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	runComposerFocusCDP(t, chrome, server.URL, "imported-theme-chrome", func(browser *composerFocusCDP) {
 		browser.waitFor("theme runtime", `String(!!(window.openVibelyThemes && window.openVibelyThemes.apply))`, "true")
 		browser.waitFor("page body ready", `String(document.readyState !== 'loading' && !!document.getElementById('fixture-hover-card') && !!document.getElementById('desktop-project-titlebar'))`, "true")
+		// Exercise full theme surfaces with assistant bubbles and filled board columns enabled.
+		browser.evaluate(`document.documentElement.setAttribute('data-assistant-bubbles','on'); document.documentElement.setAttribute('data-board-columns','filled'); 'ok'`)
 		// Palette colors must preserve native geometry and fading.
 		browser.evaluate(`document.querySelectorAll('.theme-toggle-pill, .theme-toggle-pill span').forEach(function(el) { el.style.transition = 'none'; });
 		window.toggleGeometry = function() {
@@ -137,16 +139,16 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("theme applied", `document.documentElement.getAttribute('data-color-theme')`, "vscode-kimbie-dark")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
 		browser.waitFor("default dark retains native styling", `document.documentElement.getAttribute('data-ov-theme-layer')`, "native")
-		browser.waitFor("default dark sidebar matches cards", `String(window.computed('#sidebar', 'backgroundColor') === window.computed('#fixture-settings-card', 'backgroundColor'))`, "true")
-		browser.waitFor("default dark sidebar keeps divider", `String(window.computed('#sidebar', 'borderRightColor') !== window.computed('#sidebar', 'backgroundColor') && window.computed('#sidebar', 'borderRightWidth') === '1px')`, "true")
-		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#sidebar", "#1d232a"}, {"#fixture-settings-card", "#1d232a"}, {"#fixture-stats", "#1d232a"}, {"#fixture-menu", "#1d232a"}, {"#fixture-bubble", "#22272e"}, {"#fixture-composer", "#22272e"}} {
+		browser.waitFor("rail stays transparent", `window.computed('#sidebar', 'backgroundColor')`, "rgba(0, 0, 0, 0)")
+		browser.waitFor("rail has no divider", `window.computed('#sidebar', 'borderRightWidth')`, "0px")
+		for _, step := range []struct{ selector, color string }{{"body", "#191e24"}, {"#fixture-settings-card", "#191e24"}, {"#fixture-stats", "#191e24"}, {"#fixture-menu", "#15191e"}, {"#fixture-bubble", "#191e24"}, {"#fixture-composer", "#191e24"}} {
 			browser.waitFor("default dark "+step.selector+" surface", `window.near('`+step.selector+`', 'backgroundColor', '`+step.color+`')`, "ok")
 		}
 		for _, selector := range []string{"#fixture-bubble", "#fixture-composer"} {
 			browser.waitFor("default dark "+selector+" uses card outline without shadow", `(function(){var a=getComputedStyle(document.querySelector('`+selector+`')),b=getComputedStyle(document.querySelector('#fixture-settings-card'));return String(a.borderTopColor===b.borderTopColor&&a.borderTopWidth===b.borderTopWidth&&a.boxShadow==='none');})()`, "true")
 		}
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
-		browser.waitFor("default sidebar restored", `window.near('#sidebar', 'backgroundColor', '#1d232a')`, "ok")
+		browser.waitFor("transparent rail restored", `window.computed('#sidebar', 'backgroundColor')`, "rgba(0, 0, 0, 0)")
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
 
 		browser.evaluate(`document.querySelector('[data-kanban-search]').dataset.open = 'true';'ok'`)
@@ -328,7 +330,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.waitFor(themeID+" empty state surface", `window.matches('[data-search-empty-state]', 'backgroundColor', 'var(--ov-surface)')`, "ok")
 			browser.waitFor(themeID+" empty state message", `window.matches('[data-search-empty-state] p', 'color', 'var(--ov-text-muted)')`, "ok")
 
-			browser.waitFor(themeID+" task panel surface", `window.matches('#task-details-panel', 'backgroundColor', 'var(--ov-surface)')`, "ok")
+			browser.waitFor(themeID+" task panel surface", `window.matches('#task-details-panel', 'backgroundColor', 'var(--shell-page)')`, "ok")
 			browser.waitFor(themeID+" task panel text", `window.matches('#task-details-panel', 'color', 'var(--ov-text)')`, "ok")
 			browser.waitFor(themeID+" selected panel tab", `window.matches('#inspector-tab-details', 'color', 'var(--ov-text)')`, "ok")
 			browser.waitFor(themeID+" inactive panel tab", `window.matches('#inspector-tab-schedules', 'color', 'var(--ov-text-muted)')`, "ok")
@@ -345,8 +347,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 				browser.waitFor(themeID+" recommended fill", `window.matches('.chat-input-recommended-shortcut', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
 				browser.waitFor(themeID+" recommended text", `window.matches('.chat-input-recommended-shortcut', 'color', 'var(--ov-button-fg)')`, "ok")
 			}
-			browser.waitFor(themeID+" thin selected tab", `getComputedStyle(document.querySelector('.desktop-project-tab [aria-selected="true"]'), '::before').borderTopWidth`, "1px")
-			browser.waitFor(themeID+" thin tab baseline", `String(window.computed('#desktop-project-titlebar', 'boxShadow').includes('0px -1px'))`, "true")
+			browser.waitFor(themeID+" detached tab has no connector", `getComputedStyle(document.querySelector('.desktop-project-tab [aria-selected="true"]'), '::before').display`, "none")
+			browser.waitFor(themeID+" titlebar has no baseline", `window.computed('#desktop-project-titlebar', 'boxShadow')`, "none")
 			for _, cardKind := range []string{"search", "task"} {
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 290, "y": 140}, nil)
 				browser.evaluate(`var card = document.getElementById('fixture-hover-card'); card.classList.toggle('cursor-pointer', '` + cardKind + `' === 'search'); card.toggleAttribute('data-search-card', '` + cardKind + `' === 'search');'ok'`)
@@ -373,17 +375,17 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("native theme keeps indigo running state", `window.near('#fixture-running', 'color', '#7480ff')`, "ok")
 		browser.waitFor("native theme keeps indigo primary text", `window.near('#fixture-primary-text', 'color', '#7480ff')`, "ok")
 		browser.waitFor("native theme keeps default selection tint", `window.computed('#schedule-content [data-calendar-day]', 'backgroundColor')`, "rgba(116, 128, 255, 0.16)")
-		browser.waitFor("native theme keeps default task card", `String(document.documentElement.style.getPropertyValue('--ov-kanban-column-bg') === '' && window.computed('#fixture-column-card', 'backgroundColor') !== window.computed('#fixture-column', 'backgroundColor'))`, "true")
+		browser.waitFor("native theme keeps default task card", `String(document.documentElement.style.getPropertyValue('--ov-kanban-column-bg') === '' && window.matches('#fixture-column-card', 'backgroundColor', 'oklch(var(--b1))') === 'ok')`, "true")
 		browser.waitFor("native theme keeps indigo schedule card", `String(window.computed('#fixture-schedule-card', 'backgroundColor').indexOf('var(') === -1 && document.documentElement.style.getPropertyValue('--ov-schedule-task-bg') === '')`, "true")
 		browser.waitFor("native dark task column matches title bar", `String(window.computed('#fixture-column', 'backgroundColor') === window.computed('#desktop-project-titlebar', 'backgroundColor'))`, "true")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-light');'ok'`)
 		browser.waitFor("native light task column matches title bar", `String(window.computed('#fixture-column', 'backgroundColor') === window.computed('#desktop-project-titlebar', 'backgroundColor'))`, "true")
 		browser.evaluate(`window.openVibelyThemes.apply('openvibely-dark');'ok'`)
-		browser.waitFor("native theme menu uses default surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(29, 35, 42)")
+		browser.waitFor("native theme menu uses shell surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(21, 25, 30)")
 		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")
 		for _, property := range []string{"backgroundColor", "borderTopColor"} {
 			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
 		}
-		browser.waitFor("native dark search uses card color", `window.near('.kanban-search', 'backgroundColor', '#1d232a')`, "ok")
+		browser.waitFor("native dark search uses card color", `window.near('.kanban-search', 'backgroundColor', '#191e24')`, "ok")
 	})
 }
