@@ -123,7 +123,10 @@ func TestBrowserFunctional_TaskFilesIncludedOnProjectSwitch(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "files-project-switch", func(b *composerFocusCDP) {
-		b.waitFor("HTMX ready", `String(typeof htmx!=="undefined")`, "true")
+		// HTMX loads in the head, before the body and initial file grid exist.
+		// Wait for parsing and the fixture content before observing requests or switching projects.
+		b.waitFor("initial document parsed", `String(document.readyState !== 'loading' && !!document.body && typeof htmx !== 'undefined')`, "true")
+		b.waitFor("initial project file grid", `document.querySelector('#attachment-list img')?.alt`, "a.png")
 		b.evaluate(`window.fileLoads=0;document.body.addEventListener('htmx:beforeRequest',e=>{if(e.detail.elt.matches('[data-task-files]'))window.fileLoads++});'ready'`)
 		for _, project := range []string{"b", "a", "b", "a"} {
 			b.evaluate(`htmx.ajax('GET','/project?project_id=` + project + `',{target:'#main-content',swap:'innerHTML'});'switch'`)
