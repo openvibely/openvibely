@@ -3831,7 +3831,8 @@ func (h *Handler) TaskListPanel(c echo.Context) error {
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
 	}
-	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", "", "")
+	sortPrefs := getSortPreferences(c)
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 	if err != nil {
 		return err
 	}
