@@ -14,7 +14,8 @@ type paletteSpec struct {
 	text                             string
 	muted, accent, link, codeBg      string
 	tabDivider                       string
-	shellRail, shellRowSelected      string
+	shellChrome, shellRail           string
+	shellRowSelected                 string
 	info, success, warning, error    string
 	syntax                           map[string]string
 }
@@ -39,8 +40,8 @@ func paletteSpecs() []paletteSpec {
 		},
 		{
 			id: "openvibely-layered", name: "OpenVibely Layered", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
-			canvas: "#15191E", column: "#1D232A", surface: "#232A33", raised: "#2A323C", text: "#C8CED8", muted: "#8F98A6", accent: "#7480FF", codeBg: "#191E24",
-			shellRail: "#191E24", shellRowSelected: "#2E3353",
+			canvas: "#15191E", column: "#191E24", surface: "#1D232A", raised: "#222932", text: "#C8CED8", muted: "#8F98A6", accent: "#7480FF", codeBg: "#111418",
+			shellChrome: "#1D232A", shellRail: "#191E24", shellRowSelected: "#2E3353",
 			info: "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
 			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#C8CED8", "comment": "#6B7480", "title": "#82AAFF"},
 		},
@@ -199,6 +200,9 @@ func paletteTheme(spec paletteSpec) Theme {
 		css["--ov-project-tab-divider"] = spec.tabDivider
 	}
 	css["--ov-accent-tint"] = accentTintColor(spec.accent)
+	if spec.shellChrome != "" {
+		css["--ov-shell-chrome"] = spec.shellChrome
+	}
 	if spec.shellRail != "" {
 		css["--ov-shell-rail"] = spec.shellRail
 	}
