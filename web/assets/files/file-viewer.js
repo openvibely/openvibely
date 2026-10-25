@@ -81,15 +81,17 @@
   // Snapshot a list before replacing an in-dialog Files panel.
   group=trigger?.closest('[data-image-gallery-group],[data-files-list],.chat-markdown');
   let links=group?Array.from(group.querySelectorAll(selector)):[];
-  // All entry points in a task share its files, including unsent composer uploads.
-  const task=trigger?.closest('#task-detail-content');
-  const identity=link=>{const url=new URL(link.href||link.dataset.imageUrl||link.dataset.filePreview,location.href);for(const key of ['view','raw','download','thumbnail'])url.searchParams.delete(key);return url.href};
-  if(task){
-   group=task;
+  // All entry points in a conversation share its files, including composer uploads.
+  const conversation=trigger?.closest('#task-detail-content,#chat-page-root');
+  const identity=raw=>{const url=new URL(raw,location.href);for(const key of ['view','raw','download','thumbnail'])url.searchParams.delete(key);return url.href};
+  const linkIdentity=link=>identity(link.href||link.dataset.imageUrl||link.dataset.filePreview);
+  if(conversation){
+   group=conversation;
    const seen=new Set();
-   links=Array.from(task.querySelectorAll(selector)).filter(link=>{const key=identity(link);if(seen.has(key))return false;seen.add(key);return true});
+   links=Array.from(conversation.querySelectorAll(selector)).filter(link=>{const key=linkIdentity(link);if(seen.has(key))return false;seen.add(key);return true});
   }
-  const at=task?links.findIndex(link=>identity(link)===identity(trigger)):links.indexOf(trigger);
+  // Expand buttons are not file links; match their URL to the original attachment.
+  const at=links.findIndex(link=>linkIdentity(link)===identity(url));
   items=at<0?[itemFrom(trigger,url)]:links.map(link=>itemFrom(link));
   if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
   if(!dialog.open)dialog.showModal();show(at<0?0:at);
