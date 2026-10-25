@@ -35,7 +35,11 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		case "/tasks/new":
 			component = NewTask([]models.Project{project}, &project, agents, nil)
 		case "/tasks/details-task":
-			component = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, agents, nil, nil, "details", nil)
+			if r.Header.Get("HX-Request") == "true" {
+				component = TaskDetailContent(task, nil, nil, nil, agents, nil, nil, "details", nil)
+			} else {
+				component = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, agents, nil, nil, "details", nil)
+			}
 		case "/tasks/details-task/detail-status":
 			component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
 		case "/tasks/details-task/details/property":
@@ -80,6 +84,18 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?tab=details", "detail-properties", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("draft details", `String(document.getElementById('task-details-panel') && !document.getElementById('task-details-panel').hidden)`, "true")
+		assertTabGutters := func() {
+			for _, tab := range []string{"details", "schedules", "chaining", "attachments", "lifecycle", "details"} {
+				b.click("#inspector-tab-" + tab)
+				check := fmt.Sprintf(`(function(){var panel=document.getElementById('task-details-panel'),tab=document.getElementById('tab-%s'),content=tab.id==='tab-details'?tab.querySelector('[data-detail-property="priority"]').firstElementChild:tab.firstElementChild;return String(content.checkVisibility() && Math.abs(content.getBoundingClientRect().left-panel.getBoundingClientRect().left-25)<1)})()`, tab)
+				b.waitFor("aligned "+tab+" content", check, "true")
+				b.evaluate(`document.activeElement.blur(); window.dispatchEvent(new Event('blur')); 'blurred'`)
+				b.waitFor("aligned "+tab+" after blur", check, "true")
+				b.evaluate(`window.dispatchEvent(new Event('focus')); 'focused'`)
+				b.waitFor("aligned "+tab+" after focus", check, "true")
+			}
+		}
+		assertTabGutters()
 		b.waitFor("default model label matches composer", `String(document.querySelector('[data-detail-property="agent_id"] [data-property-label]').textContent.trim()==='Default' && document.getElementById('task-thread-form-agent-select').textContent.includes('Default') && document.getElementById('task-thread-form-agent-id').value==='default')`, "true")
 		b.waitFor("property highlight clears panel edges", `(function(){var row=document.querySelector('[data-detail-property="priority"]').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
 		b.waitFor("property highlight inset", `(function(){var row=document.querySelector('[data-detail-property="priority"]'),text=row.firstElementChild;return String(Math.abs(text.getBoundingClientRect().left-row.getBoundingClientRect().left-12)<1 && getComputedStyle(row).paddingRight==='12px')})()`, "true")
@@ -130,11 +146,17 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("pointer outline stays hidden on return", `getComputedStyle(document.getElementById('task-panel-divider')).outlineStyle`, "none")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowLeft"}, nil)
 		b.waitFor("keyboard focus remains visible", `String(!document.getElementById('task-panel-divider').hasAttribute('data-pointer-focus'))`, "true")
-		b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/details-task?tab=details"}, nil)
+		b.evaluate(`window.gutterNavigationSettled=false; window.openVibelyNavigate('/tasks/details-task?tab=details').then(function(){window.gutterNavigationSettled=true}); 'started'`)
+		b.waitFor("in-app task navigation settled", `String(window.gutterNavigationSettled)`, "true")
 		b.waitFor("saved details ready", `String(Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertFooter := func() {
 			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-25)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
 		}
+		assertTabGutters()
+		b.evaluate(`window.beforeGutterReload=true; 'marked'`)
+		b.call("Page.reload", map[string]any{}, nil)
+		b.waitFor("saved details after reload", `String(!window.beforeGutterReload && Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
+		assertTabGutters()
 		assertFooter()
 		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
 		b.waitFor("auto merge saved and directly visible", `String(document.querySelector('#task-auto-merge-panel').tagName === 'SECTION' && document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
