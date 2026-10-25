@@ -3186,7 +3186,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .chat-bubble-user-msg,
 				html[data-shell-frame] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
 				html[data-shell-frame] .chat-input-container { background-color: var(--shell-card) !important; }
-				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; padding-left: 0 !important; padding-right: 0 !important; }
+				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::before,
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::after { display: none !important; }
 				html[data-thread-width="focused"] :is(#task-thread-messages, #chat-messages) > *, html[data-thread-width="focused"] #main-content .chat-input-shadow-gutter { max-width: 820px; margin-left: auto !important; margin-right: auto !important; }
@@ -3205,7 +3205,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-surface-step="on"] { --shell-card: color-mix(in srgb, oklch(var(--b1)) 94%, oklch(var(--bc))) !important; }
 				html[data-shell-frame][data-surface-step="on"][data-color-theme="openvibely-dark"][data-theme="dark"] { --shell-card: oklch(25.3267% 0.015896 252.417568) !important; }
 				html[data-shell-frame][data-surface-step="on"][data-ov-theme-layer="custom"] { --shell-card: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text, oklch(var(--bc)))) !important; }
-				html[data-shell-frame][data-color-theme="openvibely-dark"][data-theme="dark"] { --b1: 23.2607% 0.013807 253.100675; --shell-card: oklch(25.3267% 0.015896 252.417568); }
+				html[data-shell-frame][data-color-theme="openvibely-dark"][data-theme="dark"] { --b1: 23.2607% 0.013807 253.100675; --shell-card: oklch(25.3267% 0.015896 252.417568); --shell-code: #111418; }
+				html[data-theme="dark"][data-color-theme="openvibely-dark"] .stream-tool-body { background: #191E24; border-color: #1D232A; }
+				html[data-theme="dark"][data-color-theme="openvibely-dark"] :is(.stream-tool-body-label, .stream-tool-body-content) { border-top-color: #1D232A; }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
