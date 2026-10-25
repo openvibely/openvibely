@@ -1272,11 +1272,10 @@ func (h *Handler) GetTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] GetTask id=%s defaultTab=%s", taskID, defaultTab)
 
-	// HTMX request: return just the task detail content partial
+	if defaultTab == "chat" || c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+		return h.getTaskThread(c, data, defaultTab)
+	}
 	if isHTMX {
-		if defaultTab == "chat" || c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
-			return h.getTaskThread(c, data, defaultTab)
-		}
 		return h.renderTaskDetailContentData(c, data, defaultTab)
 	}
 
@@ -3672,6 +3671,10 @@ func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, s
 	}
 	if detail != nil {
 		c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), detail.files)))
+		if !isHTMX(c) {
+			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+			return render(c, http.StatusOK, pages.TaskDetailPage(projects, detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
+		}
 		return render(c, http.StatusOK, pages.TaskDetailContent(detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
 	}
 	return render(c, http.StatusOK, thread)
