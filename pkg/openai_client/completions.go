@@ -148,6 +148,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			})
 		}
 	}
+	existingCompletionsHistory = repairInterruptedCompletionsToolCalls(existingCompletionsHistory)
 	var environmentUpdate []CompletionsHistoryMessage
 	if !opts.OmitExecutionEnvironment {
 		before := len(existingCompletionsHistory)
