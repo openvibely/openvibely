@@ -325,6 +325,52 @@ func TestLiveWebSocketRejectsOriginAndUnauthorizedSubscriptions(t *testing.T) {
 	waitForExecutionStreamSubscribers(t, tc.handler.executionStreamHub, 1)
 }
 
+// Traefik reports ws/wss in X-Forwarded-Proto for upgrade requests, while
+// browsers send an HTTP(S) page origin.
+func TestLiveWebSocketForwardedScheme(t *testing.T) {
+	_, server := liveTestServer(t)
+	for _, tt := range []struct {
+		proto, origin string
+		allowed       bool
+	}{
+		{"wss", "https", true},
+		{"ws", "http", true},
+		{"https", "https", true},
+		{"http", "http", true},
+		{"wss", "http", false},
+		{"ws", "https", false},
+		{"wss", "wss", false},
+		{"ws", "ws", false},
+		{"wss", "https://evil.example", false},
+	} {
+		t.Run(tt.proto+"/"+tt.origin, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			origin := tt.origin + "://" + strings.TrimPrefix(server.URL, "http://")
+			if strings.Contains(tt.origin, "://") {
+				origin = tt.origin
+			}
+			conn, response, err := websocket.Dial(ctx, strings.Replace(server.URL, "http", "ws", 1)+"/events/ws", &websocket.DialOptions{HTTPHeader: http.Header{
+				"Origin":            {origin},
+				"X-Forwarded-Proto": {tt.proto},
+			}})
+			if conn != nil {
+				defer conn.CloseNow()
+			}
+			if !tt.allowed {
+				require.Error(t, err)
+				require.NotNil(t, response)
+				require.Equal(t, http.StatusForbidden, response.StatusCode)
+				return
+			}
+			require.NoError(t, err)
+			var frame liveFrame
+			require.NoError(t, wsjson.Read(ctx, conn, &frame))
+			require.Equal(t, "ready", frame.Event)
+		})
+	}
+}
+
 func TestLiveWebSocketScopedNotificationsAndFiles(t *testing.T) {
 	tc, server := liveTestServer(t)
 	exec := createRunningChatStreamExecution(t, tc, "")
