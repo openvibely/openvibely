@@ -50,6 +50,14 @@ templ ThemesContent(catalog []themes.Theme) {
 			<div class="flex flex-col gap-3 max-w-2xl">
 				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
 				@displayToggle("bubbles", "Assistant bubbles", "on", "On", "off", "Off")
+				<div class="flex items-center justify-between gap-4">
+					<span class="text-sm font-medium">Bubble and composer color step<span class="block text-xs font-normal opacity-60">Lift chat bubbles and the composer one shade above cards.</span></span>
+					<div class="join" role="group" aria-label="Bubble and composer color step">
+						for _, opt := range [][2]string{{"theme", "Theme default"}, {"on", "On"}, {"off", "Off"}} {
+							<button type="button" class="btn btn-sm join-item" data-display-pref="step" data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">{ opt[1] }</button>
+						}
+					</div>
+				</div>
 			</div>
 			<h3 class="text-lg font-semibold mt-6 mb-1">Task board columns</h3>
 			<p class="text-sm opacity-70 mb-3">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
