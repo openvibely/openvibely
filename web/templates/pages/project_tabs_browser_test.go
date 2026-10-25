@@ -452,9 +452,12 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				key("Enter", "Enter")
 				browser.waitFor("keyboard switch", `location.search`, "?project_id=p02")
+				browser.evaluate(`window.closedTabShapeReleased=false;window.closedTabShape=document.querySelector('[data-project-tab="p02"]').closest('.desktop-project-tab');window.originalResizeUnobserve=ResizeObserver.prototype.unobserve;ResizeObserver.prototype.unobserve=function(el){if(el===window.closedTabShape)window.closedTabShapeReleased=true;return window.originalResizeUnobserve.call(this,el)};'ready'`)
 				browser.click(`[data-close-project="p02"]`)
 				browser.waitFor("closing active tab chooses neighbor", `location.search`, "?project_id=p03")
 				browser.waitFor("closed tab", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
+				browser.waitFor("closed tab released by corner observer", `String(window.closedTabShapeReleased && !window.closedTabShape.isConnected)`, "true")
+				browser.evaluate(`ResizeObserver.prototype.unobserve=window.originalResizeUnobserve;delete window.originalResizeUnobserve;delete window.closedTabShape;'restored'`)
 				key("Home", "Home")
 				browser.click("#project-selector-trigger")
 				browser.waitFor("full selector", `String(document.getElementById('project-selector-dialog').open)`, "true")
