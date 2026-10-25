@@ -17,11 +17,13 @@ import (
 func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
 	chrome := testChromePath(t)
 	for _, tc := range []struct {
-		name   string
-		taskID string
-		steer  bool
+		name     string
+		taskID   string
+		steer    bool
+		recovery bool
 	}{
 		{name: "chat sends"}, {name: "chat steering", steer: true}, {name: "task steering", taskID: "task", steer: true},
+		{name: "task steering settings recovery", taskID: "task", steer: true, recovery: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var content bytes.Buffer
@@ -32,6 +34,7 @@ func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
 			}
 			var mu sync.Mutex
 			var records []map[string]string
+			modelReads := 0
 			release := make(chan struct{})
 			var once sync.Once
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +42,15 @@ func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
 				case "/htmx.js":
 					w.Header().Set("Content-Type", "text/javascript")
 					_, _ = w.Write(htmx204)
-				case "/ui/model-favorites", "/tasks/task/thread/model":
+				case "/tasks/task/thread/model":
+					modelReads++
+					if tc.recovery && modelReads == 1 {
+						http.Error(w, "temporary settings failure", http.StatusInternalServerError)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `{}`)
+				case "/ui/model-favorites":
 					w.Header().Set("Content-Type", "application/json")
 					fmt.Fprint(w, `{}`)
 				case "/release":
@@ -81,6 +92,21 @@ func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
  const completed=[];
  form.addEventListener('htmx:afterRequest',e=>{if(e.detail.elt===form)completed.push({intent:e.detail.xhr._chatSubmittedIntent,message:e.detail.xhr._chatSubmittedMessage,fallback:e.detail.xhr._chatSubmittedFallbackFromSteer});});
  const send=(text,isSteer=false)=>{message.value=text;message.dispatchEvent(new Event('input',{bubbles:true}));message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,metaKey:isSteer&&message.placeholder.includes('⌘'),ctrlKey:isSteer&&!message.placeholder.includes('⌘')}));};
+ if(`+fmt.Sprint(tc.recovery)+`){
+  const picker=form.querySelector('.chat-model-select');
+  assert(picker._ovModelState.error,'initial settings lookup failed');
+  attachment.value='recovery-attachment';send('recovery message',true);
+  await until(()=>completed.length===1&&!picker._ovModelState.error);
+  assert(message.value==='recovery message'&&attachment.value==='recovery-attachment','blocked fallback preserves draft and attachment');
+  assert(!form._chatNextSubmissionPayload,'blocked fallback clears handoff');
+  send('recovery message');await until(()=>completed.length===2);
+  send('later steering',true);await until(()=>completed.length===4);
+  const records=await(await fetch('/records')).json();
+  assert(JSON.stringify(records.map(r=>[r.path,r.message]))===JSON.stringify([['/steer','recovery message'],['/send','recovery message'],['/steer','later steering'],['/send','later steering']]),'steering resumes after settings recovery: '+JSON.stringify(records));
+  assert(records[1].attachment_session_id==='recovery-attachment','manual retry preserves attachment');
+  assert(completed[3].fallback===true,'later steering retains fallback handling');
+  document.body.dataset.testResult='pass';return;
+ }
  send('first');await until(async()=>((await(await fetch('/records')).json())||[]).length===1);
  attachment.value='second-attachment';model.value='a';effort.value='high';send('second',steer);
  if(steer)send('second',true); // A duplicate while queued must remain deduplicated.

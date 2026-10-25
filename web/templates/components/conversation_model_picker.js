@@ -907,6 +907,7 @@
         .catch((err) => {
           window.ovModelPicker.open(btn);
           status.textContent = err.message;
+          form._chatSubmissionFailed?.(payload);
         });
     },
     true,
