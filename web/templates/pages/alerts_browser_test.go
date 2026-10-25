@@ -62,6 +62,8 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 			return
 		}
 		switch {
+		case r.URL.Path == "/tasks/sidebar":
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/empty.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write([]byte(""))
@@ -503,6 +505,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			return
 		}
 		switch {
+		case r.URL.Path == "/tasks/sidebar":
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
@@ -664,6 +668,8 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 			return
 		}
 		switch {
+		case r.URL.Path == "/tasks/sidebar":
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(getSnapshot()))

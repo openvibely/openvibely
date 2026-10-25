@@ -60,11 +60,12 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 					b.waitFor("mobile navbar visibility", `String(getComputedStyle(document.querySelector('.drawer-content > .navbar')).display !== 'none')`, fmt.Sprint(wantMobile))
 					b.waitFor("sidebar visibility", `String(document.getElementById('sidebar').getBoundingClientRect().right > 0)`, fmt.Sprint(!wantMobile))
 					if desktop {
-						b.evaluate(`document.getElementById('sidebar-collapse-btn').click(); 'ok'`)
-						b.waitFor("compact sidebar", `String(Math.round(document.getElementById('sidebar').getBoundingClientRect().width))`, "56")
-						b.waitFor("sidebar remains in layout", `String(Math.round(document.querySelector('.drawer-content').getBoundingClientRect().left))`, "56")
-						b.evaluate(`document.getElementById('sidebar-collapse-btn').click(); 'ok'`)
-						b.waitFor("expanded sidebar", `String(Math.round(document.getElementById('sidebar').getBoundingClientRect().width))`, "256")
+						b.waitFor("compact rail", `String(Math.round(document.getElementById('sidebar').getBoundingClientRect().width))`, "44")
+						b.waitFor("rail remains in layout", `String(Math.round(document.querySelector('.drawer-content').getBoundingClientRect().left))`, "64")
+						b.evaluate(`document.getElementById('task-list-toggle').click(); 'ok'`)
+						b.waitFor("task list collapsed", `String(document.documentElement.classList.contains('task-list-collapsed') && !document.getElementById('task-list-panel').getClientRects().length)`, "true")
+						b.evaluate(`document.getElementById('task-list-toggle').click(); 'ok'`)
+						b.waitFor("task list restored", `String(!document.documentElement.classList.contains('task-list-collapsed') && !!document.getElementById('task-list-panel').getClientRects().length)`, "true")
 					}
 				}
 			})
