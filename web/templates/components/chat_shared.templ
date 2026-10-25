@@ -2245,6 +2245,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								}
 							}
 							}
+							// A picker failure can end a fallback before HTMX creates a request,
+							// so no afterRequest event will release the steering queue.
+							form._chatSubmissionFailed = function(payload) {
+								if (!payload || !payload.fallbackFromSteer || !steerFallbackPending) return;
+								steerFallbackPending = false;
+								finishSteerRequest();
+							};
 							function finishSteerRequest() {
 								if (steerFallbackPending) return;
 								steerRequestInFlight = false;
