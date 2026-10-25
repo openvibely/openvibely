@@ -815,19 +815,6 @@
   document.addEventListener("htmx:beforeCleanupElement", (e) => {
     if (active && e.detail?.elt?.contains(active)) close(false);
   });
-  // HTMX retains the triggering event when a request is queued. Restore its
-  // captured values at serialization time, not from the then-current draft.
-  document.addEventListener("htmx:configRequest", (e) => {
-    const payload = e.detail?.triggeringEvent?._chatSubmissionPayload;
-    if (!payload) return;
-    Object.assign(e.detail.parameters, {
-      message: payload.message,
-      attachment_session_id: payload.attachmentSessionID,
-      agent_id: payload.modelID,
-      reasoning_effort: payload.reasoningEffort,
-      model_selection_managed: "1",
-    });
-  });
   document.addEventListener(
     "submit",
     (e) => {
@@ -851,19 +838,13 @@
       // The composer temporarily installs a steering fallback payload, then
       // restores the newer draft synchronously. Preserve the selected model
       // and effort too, since either can change while the save completes.
-      const payload = {
-        ...(form._chatNextSubmissionPayload || {
-          message: message?.value || "",
-          attachmentSessionID: attachment?.value || "",
-        }),
-        modelID: model?.value || "",
-        reasoningEffort: effort?.value || "",
-        submitIntent: form.getAttribute("data-submit-intent") || "normal",
-      };
+      const capturedEffort = form._chatNextSubmissionPayload?.reasoningEffort !== undefined;
+      const payload = form._captureChatSubmission(form._chatNextSubmissionPayload);
+      payload.managedModelSelection = true;
       // This attempt owns the captured snapshot while settings load. Do not
       // leave it on the form for a later Send if loading or saving fails.
       form._chatNextSubmissionPayload = null;
-      const waitingForEffort = s.loading;
+      const waitingForEffort = s.loading && !capturedEffort;
       const ready = s.ready;
       const pending = s.pending;
       Promise.resolve(ready)
