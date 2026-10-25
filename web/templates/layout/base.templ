@@ -104,6 +104,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 				}
 			</script>
+			<!-- Wide layouts use the inset rail + page frame; narrow web keeps the drawer sidebar. -->
+			<script id="shell-frame-init">
+				(function() {
+					var root = document.documentElement;
+					var desktop = root.getAttribute('data-openvibely-runtime') === 'desktop';
+					var wide = window.matchMedia('(min-width: 1024px)');
+					function apply() {
+						var active = desktop || wide.matches;
+						if (active === root.hasAttribute('data-shell-frame')) return;
+						root.toggleAttribute('data-shell-frame', active);
+						document.dispatchEvent(new CustomEvent('openvibely:shell-frame-change', { detail: { active: active } }));
+					}
+					apply();
+					if (wide.addEventListener) wide.addEventListener('change', apply);
+					else if (wide.addListener) wide.addListener(apply);
+				})();
+			</script>
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
 				(function() {
@@ -2971,6 +2988,133 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				[data-ov-theme-layer="custom"] .hljs-section { color: var(--ov-syntax-title); }
 				[data-ov-theme-layer="custom"] .hljs-deletion { color: var(--ov-diff-delete-fg); }
 				[data-ov-theme-layer="custom"] .hljs-addition { color: var(--ov-diff-add-fg); }
+
+				/* ===== Shell frame: chrome surrounds an inset navigation rail and page. ===== */
+				html[data-shell-frame] {
+					--shell-chrome: #191E24;
+					--shell-page: #15191E;
+					--rail-width: 64px;
+					--task-list-width: 300px;
+					--shell-gap: 10px;
+					--shell-page-radius: 28px;
+					--shell-rail-radius: 22px;
+					--shell-tab-radius: 17px;
+				}
+				html[data-shell-frame][data-theme="light"] { --shell-chrome: #F5F5F5; --shell-page: #E8E8E8; }
+				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-kanban-column-bg); --shell-page: var(--ov-content-bg); }
+				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
+				html[data-shell-frame] body > .drawer > .drawer-content {
+					display: flex; flex-direction: row;
+					height: 100%;
+					background-color: transparent !important;
+				}
+				html[data-shell-frame] #main-content {
+					flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto;
+					margin: 0 var(--shell-gap) var(--shell-gap) 0 !important;
+					background-color: var(--shell-page) !important;
+					border-radius: var(--shell-page-radius);
+				}
+				#task-list-panel { display: none; }
+				html[data-shell-frame] #task-list-panel {
+					position: relative; display: flex; flex-direction: column;
+					width: var(--task-list-width); flex: 0 0 var(--task-list-width);
+					min-height: 0; padding: 0 8px var(--shell-gap) 0;
+					color: inherit;
+				}
+				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
+				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+				.task-list-search { padding: 0 4px 10px; }
+				.task-list-search input { width: 100%; height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid oklch(var(--bc) / .18); background: var(--shell-page); font-size: 13px; outline: none; }
+				.task-list-search input:focus { border-color: oklch(var(--p)); }
+				.task-list-group { margin-bottom: 12px; }
+				.task-list-group > summary { list-style: none; display: flex; justify-content: space-between; padding: 6px 10px; font-size: 11px; letter-spacing: .4px; opacity: .6; cursor: pointer; user-select: none; }
+				.task-list-group > summary::-webkit-details-marker { display: none; }
+				.task-list-row { display: flex; gap: 10px; padding: 9px 10px; margin: 2px 0; border-radius: 12px; text-decoration: none; color: inherit; }
+				.task-list-row:hover { background: oklch(var(--bc) / .07); }
+				.task-list-row[aria-current="page"] { background: oklch(var(--p) / .22); }
+				.task-list-copy { min-width: 0; flex: 1; }
+				.task-list-copy strong { display: block; font-size: 13.5px; line-height: 19px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+				.task-list-meta { display: block; font-size: 11px; opacity: .55; margin-top: 2px; }
+				.task-list-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: oklch(var(--bc) / .4); }
+				.task-list-dot.running { background: oklch(var(--p)); }
+				.task-list-dot.completed { background: oklch(var(--su)); }
+				.task-list-dot.failed { background: oklch(var(--er)); }
+				.task-list-dot.scheduled { background: oklch(var(--wa)); }
+				.task-list-empty { padding: 16px 10px; font-size: 12px; opacity: .6; }
+				#task-list-divider { position: absolute; right: -3px; top: 8px; bottom: 24px; width: 8px; cursor: col-resize; touch-action: none; z-index: 5; }
+				#task-list-divider:hover::after, #task-list-divider:focus-visible::after, html.task-list-resizing #task-list-divider::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: oklch(var(--p)); }
+				html.task-list-resizing, html.task-list-resizing * { cursor: col-resize !important; user-select: none !important; }
+				/* Header controls anchored to the task list column. */
+				#task-list-header { display: none; }
+				html[data-shell-frame] #task-list-header { display: flex; align-items: center; gap: 4px; position: absolute; left: var(--rail-width); width: calc(var(--task-list-width, 300px) - 8px); top: 0; height: 100%; padding: 0 4px 0 0; --wails-draggable: drag; }
+				html[data-shell-frame] #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; width: calc(var(--rail-width) + var(--task-list-width, 300px) - 88px); }
+				#task-list-header button, #task-list-header a { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; color: inherit; opacity: .8; --wails-draggable: no-drag; }
+				#task-list-header button:hover, #task-list-header a:hover { opacity: 1; background: oklch(var(--bc) / .1); }
+				#task-list-search-toggle[aria-expanded="true"] { background: oklch(var(--p) / .22); opacity: 1; }
+				.task-list-toggle-fill { fill: currentColor; }
+				html.task-list-collapsed .task-list-toggle-fill { fill: none; }
+				.task-list-brand { font-size: 14px; font-weight: 500; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+				.task-list-actions { display: flex; gap: 2px; }
+				html.task-list-collapsed #task-list-header { width: 40px; }
+				html.task-list-collapsed #task-list-header .task-list-brand,
+				html.task-list-collapsed #task-list-header .task-list-actions { display: none; }
+				html[data-shell-frame] body > .drawer > .drawer-content > .navbar { display: none; }
+				/* Kanban columns used the new page color; lift them onto the chrome color. */
+				html[data-shell-frame] .kanban-column { background-color: var(--shell-chrome); }
+
+				/* Compact icon rail */
+				html[data-shell-frame] .drawer-side { height: calc(100dvh - var(--project-titlebar-height, 46px)); z-index: auto; }
+				html[data-shell-frame] .sidebar-aside.sidebar-collapsed,
+				html[data-shell-frame] body.sidebar-collapsed-pending .sidebar-aside {
+					width: calc(var(--rail-width) - 2 * var(--shell-gap)) !important;
+					height: calc(100dvh - var(--project-titlebar-height, 46px) - var(--shell-gap)) !important;
+					margin: 0 var(--shell-gap) var(--shell-gap);
+					background-color: var(--shell-page) !important;
+					border: 0 !important;
+					border-radius: var(--shell-rail-radius);
+					transition: none;
+				}
+				html[data-shell-frame] .sidebar-aside .sidebar-header { display: none !important; }
+				html[data-shell-frame] .sidebar-aside .sidebar-inner { padding: 8px 0 !important; scrollbar-width: none; }
+				html[data-shell-frame] .sidebar-aside .sidebar-inner::-webkit-scrollbar { display: none; }
+				html[data-shell-frame] .sidebar-aside .menu a { position: relative; opacity: .75; }
+				html[data-shell-frame] .sidebar-aside .menu a:hover { opacity: 1; }
+				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
+				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--p)); }
+				html[data-shell-frame][data-ov-theme-layer="custom"] .sidebar-aside .menu a[aria-current="page"] { color: var(--ov-focus); }
+				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
+				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"]::before { content: ""; position: absolute; left: -2px; top: 9px; bottom: 9px; width: 2px; border-radius: 1px; background: currentColor; }
+				html[data-shell-frame] .sidebar-aside .sidebar-theme-toggle-container { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
+
+				/* Project tab bar shares the chrome color; tabs are detached pills. */
+				html[data-shell-frame] #desktop-project-titlebar {
+					background-color: var(--shell-chrome) !important;
+					box-shadow: none !important;
+					padding-left: calc(var(--rail-width) + var(--task-list-width, 300px)) !important;
+					--project-tab-selected: var(--shell-page);
+				}
+				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: calc(var(--rail-width) + 44px) !important; }
+				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px !important; }
+				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }
+				html[data-shell-frame] #desktop-project-titlebar > #sidebar-collapse-btn,
+				html[data-shell-frame] #desktop-project-titlebar .project-bar-brand { display: none !important; }
+				html[data-shell-frame] #desktop-project-tabs { padding: 6px 0 6px 0; align-items: center; gap: 6px; }
+				html[data-shell-frame] .desktop-project-tab { height: 34px; border-radius: var(--shell-tab-radius); }
+				html[data-shell-frame] .desktop-project-tab[data-selected="true"]::before,
+				html[data-shell-frame] .desktop-project-tab[data-selected="true"]::after,
+				html[data-shell-frame] .desktop-project-tab [role="tab"][aria-selected="true"]::before { display: none !important; }
+				html[data-shell-frame] .desktop-project-tab [role="tab"],
+				html[data-shell-frame] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { padding: 0 40px 0 16px; border: 0; border-radius: inherit; }
+				html[data-shell-frame] .desktop-project-tab [data-close-project],
+				html[data-shell-frame] .desktop-project-tab:not([data-selected="true"])::after { top: 50%; }
+				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
+
+				@supports (corner-shape: squircle) {
+					html[data-shell-frame] body > .drawer > .drawer-content,
+					html[data-shell-frame] .sidebar-aside,
+					html[data-shell-frame] .desktop-project-tab,
+					html[data-shell-frame] .desktop-project-tab [role="tab"] { corner-shape: squircle; }
+				}
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
@@ -5178,6 +5322,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			<div class={ "drawer lg:drawer-open h-full", templ.KV("drawer-open", serverRuntimeMode(ctx) == "desktop") }>
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full">
+					@TaskListPanel(currentProjectID)
 					<!-- Navbar (mobile only) -->
 					<div class="navbar bg-base-100 shadow-sm flex-shrink-0 lg:hidden">
 						<div class="flex-none lg:hidden">
@@ -5208,7 +5353,17 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								if (collapsed) {
 									var s = document.getElementById('sidebar');
 									if (s) s.classList.add('sidebar-collapsed');
-								}						})();
+								}
+								function syncShellFrameRail() {
+									var rail = document.getElementById('sidebar');
+									if (!rail) return;
+									var compact = document.documentElement.hasAttribute('data-shell-frame') || document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+									rail.classList.toggle('sidebar-collapsed', compact);
+									document.body.classList.toggle('sidebar-collapsed-pending', compact);
+								}
+								syncShellFrameRail();
+								document.addEventListener('openvibely:shell-frame-change', syncShellFrameRail);
+						})();
 					</script>
 			</div>
 			@ConfirmationDialog()
