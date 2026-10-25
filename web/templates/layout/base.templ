@@ -3170,6 +3170,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-thread-width="focused"] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) > .text-xs.font-semibold:first-child { display: none; }
 				html[data-thread-width="focused"] .chat-input-container { border-radius: 22px !important; border: 1px solid var(--shell-divider, oklch(var(--bc) / .08)) !important; box-shadow: none !important; }
 				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
+				html[data-shell-frame] #main-content .chat-input-shadow-gutter { padding-bottom: 14px; }
+				html[data-shell-frame][data-color-theme="openvibely-dark"] { --shell-divider: var(--shell-chrome); }
+				html[data-shell-frame][data-color-theme="openvibely-dark"] :is(.card, .chat-input-container, .chat-bubble-user-msg, .chat-bubble-assistant-msg, .stream-tool-body, .border-base-300, .border-base-200, .input, .select, .textarea) { border-color: var(--shell-chrome) !important; }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a
