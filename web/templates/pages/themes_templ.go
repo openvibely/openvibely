@@ -69,7 +69,7 @@ func Themes(projects []models.Project, currentProjectID string, catalog []themes
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base("Themes", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base("Appearance", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -102,15 +102,15 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = layout.PageTitle("Themes").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.PageTitle("Appearance").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Themes</h2></div><section class=\"mb-8\" data-display-prefs><h3 class=\"text-lg font-semibold mb-1\">Layout</h3><p class=\"text-sm opacity-70 mb-3\">How the task list sits next to the page.</p><div class=\"flex flex-col gap-3 max-w-2xl mb-6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Appearance</h2></div><section class=\"mb-8\" data-display-prefs><h3 class=\"text-lg font-semibold mb-1\">Layout</h3><p class=\"text-sm opacity-70 mb-3\">How the task list sits next to the page.</p><div class=\"flex flex-col gap-3 max-w-2xl mb-6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = displayToggle("layout", "Task list", "unified", "Unified", "floating", "Floating").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = displayToggle("layout", "Task list", "floating", "Floating", "unified", "Unified").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -122,7 +122,7 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = displayToggle("bubbles", "Assistant bubbles", "on", "On", "off", "Off").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -130,7 +130,7 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		for _, opt := range [][2]string{{"on", "On"}, {"off", "Off"}} {
+		for _, opt := range [][2]string{{"off", "Off"}, {"on", "On"}} {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<button type=\"button\" class=\"btn btn-sm join-item\" data-display-pref=\"step\" data-display-option=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -166,15 +166,15 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = boardColumnsCard("filled", "Filled", "Columns filled with the frame color.").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = boardColumnsCard("inset", "Inset cards", "Columns in the card color, cards sunk in the page color.").Render(ctx, templ_7745c5c3_Buffer)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

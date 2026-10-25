@@ -360,7 +360,7 @@ func TestSidebarThemesLinkIsMainNavigationItem(t *testing.T) {
 		t.Fatalf("render Sidebar: %v", err)
 	}
 	html := buf.String()
-	if !strings.Contains(html, `data-nav-base="/themes"`) || !strings.Contains(html, `>Themes</span>`) {
+	if !strings.Contains(html, `data-nav-base="/themes"`) || !strings.Contains(html, `>Appearance</span>`) {
 		t.Fatal("sidebar missing main Themes nav item")
 	}
 	footerStart := strings.Index(html, `id="sidebar-user-menu"`)
