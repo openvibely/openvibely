@@ -49,11 +49,9 @@ templ ThemesContent(catalog []themes.Theme) {
 			</div>
 			<h3 class="text-lg font-semibold mt-6 mb-1">Task board columns</h3>
 			<p class="text-sm opacity-70 mb-3">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
-			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 max-w-6xl">
+			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3  max-w-6xl">
 				@boardColumnsCard("filled", "Filled", "Columns filled with the frame color.")
-				@boardColumnsCard("outline", "Outline", "Page-colored columns with a thin frame-colored border.")
-				@boardColumnsCard("strip", "Header strip", "Frame color behind the column heading, column outlined.")
-				@boardColumnsCard("inset", "Inset cards", "Columns filled with the frame color, cards in the page color.")
+				@boardColumnsCard("inset", "Inset cards", "Columns in the card color, cards sunk in the page color.")
 				@boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.")
 			</div>
 		</section>
