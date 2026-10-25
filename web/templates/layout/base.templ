@@ -5527,8 +5527,15 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								}
 								if (typeof ResizeObserver === 'undefined') return;
 								var observer = new ResizeObserver(function(entries) { entries.forEach(function(e) { shape(e.target); }); });
-								var seen = new WeakSet();
+								var seen = new Set();
 								function attach() {
+									// ResizeObserver retains its targets. Release removed tabs and
+									// replaced panels before observing the current shell elements.
+									seen.forEach(function(el) {
+										if (el.isConnected) return;
+										observer.unobserve(el);
+										seen.delete(el);
+									});
 									document.querySelectorAll('#main-content, #task-list-panel, #sidebar, .desktop-project-tab, #task-details-panel').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
