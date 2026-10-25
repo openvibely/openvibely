@@ -306,7 +306,25 @@ templ TaskListPanel(currentProjectID string) {
 				setTimeout(function() { refreshSoon(0); }, 1500);
 			});
 
-			document.body.addEventListener('htmx:beforeSwap', function(e) { if (e.detail.target === groups) hideHoverCard(); });
+			// Replacing a row between pointerdown and pointerup makes the browser drop the click.
+			var pressing = false, deferredRefresh = false, lastListHTML = null;
+			groups.addEventListener('pointerdown', function() { pressing = true; });
+			function endPress() {
+				if (!pressing) return;
+				setTimeout(function() {
+					pressing = false;
+					if (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }
+				}, 0);
+			}
+			document.addEventListener('pointerup', endPress, true);
+			document.addEventListener('pointercancel', endPress, true);
+			document.body.addEventListener('htmx:beforeSwap', function(e) {
+				if (e.detail.target !== groups) return;
+				if (pressing) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
+				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
+				lastListHTML = e.detail.serverResponse;
+				hideHoverCard();
+			});
 			document.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { restoreGroups(); filter(); syncActiveRow(); } });
 			document.body.addEventListener('htmx:afterSettle', syncActiveRow);
 			window.addEventListener('popstate', syncActiveRow);
