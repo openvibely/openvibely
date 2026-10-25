@@ -33,10 +33,10 @@ func TestHandler_GetTaskCachedRefreshIncludesBoundedThread(t *testing.T) {
 		})
 		require.NoError(t, h.execRepo.Complete(t.Context(), ex.ID, models.ExecCompleted, fmt.Sprintf("output-%d", i), "", 0, 0))
 	}
-	// Ordinary navigation retains lazy loading; only warm refreshes opt in.
 	cold := htmxGet(e, "/tasks/"+task.ID)
 	assertCode(t, cold, http.StatusOK)
-	require.Contains(t, cold.Body.String(), "Thread is loading...")
+	require.Contains(t, cold.Body.String(), `id="task-thread-view"`)
+	require.NotContains(t, cold.Body.String(), "Thread is loading...")
 
 	for _, tab := range []string{"chat", "details", "changes"} {
 		t.Run(tab, func(t *testing.T) {

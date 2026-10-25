@@ -314,6 +314,7 @@
         } finally {
             restoringEntry = null;
         }
+        return true;
     };
 
     document.addEventListener('htmx:beforeSend', function (event) {

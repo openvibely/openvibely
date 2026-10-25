@@ -311,12 +311,25 @@ templ TaskListPanel(currentProjectID string) {
 			document.body.addEventListener('htmx:afterSettle', syncActiveRow);
 			window.addEventListener('popstate', syncActiveRow);
 			window.addEventListener('resize', function() { setWidth(currentWidth(), false); });
-			document.addEventListener('change', function(e) {
-				if (e.target && e.target.id === 'project-selector' && e.target.value) {
-					groups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(e.target.value));
-					if (window.htmx) { htmx.process(groups); htmx.trigger(groups, 'taskListRefresh'); }
-				}
-			});
+			function activeProjectID() {
+				var fromURL = new URLSearchParams(location.search).get('project_id');
+				if (fromURL) return fromURL;
+				var sel = document.getElementById('project-selector');
+				return sel ? sel.value : '';
+			}
+			function syncProject() {
+				var pid = activeProjectID();
+				if (!pid || pid === currentProjectID()) return;
+				clearTimeout(refreshTimer); refreshTimer = null;
+				groups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(pid));
+				if (window.htmx) { htmx.process(groups); htmx.trigger(groups, 'taskListRefresh'); }
+			}
+			document.addEventListener('change', function(e) { if (e.target && e.target.id === 'project-selector') syncProject(); });
+			document.body.addEventListener('htmx:pushedIntoHistory', syncProject);
+			document.body.addEventListener('htmx:replacedInHistory', syncProject);
+			document.body.addEventListener('htmx:historyRestore', syncProject);
+			document.body.addEventListener('htmx:afterSettle', syncProject);
+			window.addEventListener('popstate', syncProject);
 			document.addEventListener('DOMContentLoaded', syncToggle);
 			syncToggle();
 		})();
