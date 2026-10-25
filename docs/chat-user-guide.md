@@ -125,7 +125,15 @@ If Chat is already responding, a new prompt can become queued input for the next
 
 Pending queued messages and steering instructions offer an edit action before delivery. The editor temporarily holds a message from dispatch; saving or cancelling releases the hold. Already-delivered instructions cannot be edited.
 
-Context compaction progress is shown in response activity. Mermaid diagrams render as complete diagram blocks arrive during streaming.
+Context compaction progress is shown in response activity. Recovery checkpoints preserve compacted conversation state across restarts and provider changes, including tool exchanges and queued steering. Compaction summarizes older context to leave room for continued work; it does not create project memory.
+
+Mermaid diagrams, SVG, and math render as complete blocks arrive during streaming. Long conversations render visible transcript content incrementally and preserve your position during unchanged refreshes.
+
+## Documents and File Previews
+
+Ask Chat to create or edit Word documents, PDFs, spreadsheets, or presentations using the built-in document skills. If a required tool is missing, approve its installation to continue.
+
+Open attached or generated files in the shared viewer. Supported previews include PDF, Word, spreadsheets, images/SVG, audio/video, text, JSON, HTML, and Markdown. Generated files can be downloaded; desktop downloads can use the native Save As dialog. Chat files are project-scoped, while task files remain associated with their task. Files do not automatically become project memory.
 
 ## Project Scope
 
