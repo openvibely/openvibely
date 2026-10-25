@@ -23,10 +23,11 @@
  const stage=dialog.querySelector('[data-gallery-stage]'),imageControls=dialog.querySelector('[data-image-controls]');
  const prev=dialog.querySelector('[data-gallery-prev]'),next=dialog.querySelector('[data-gallery-next]');
  const selector='[data-image-gallery-item],[data-file-preview]';
- let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false,owner=null;
+ let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false,owner=null,opening=0,svgPreview=null;
  function mode(raw,key){const url=new URL(raw,location.href);for(const k of ['view','raw','download','thumbnail'])url.searchParams.delete(k);url.searchParams.set(key,'1');return url.href}
  function original(raw){const url=new URL(raw,location.href);return url.origin===location.origin&&/\/(attachments|files)\//.test(url.pathname)?mode(raw,'download'):raw}
  function clear(){
+  svgPreview?.dispose();svgPreview=null;
   dialog.querySelectorAll('header [data-sheet-tabs],header [data-sheet-count]').forEach(node=>node.remove());
   content.dispatchEvent(new CustomEvent('ov:file-replace',{bubbles:true}));
   window.OVFileImage?.clear();
@@ -46,10 +47,12 @@
   index=at;const item=items[index],id=++ticket;controller?.abort();controller=new AbortController();
   if(dialog.contains(document.activeElement))dialog.focus({preventScroll:true});
   clear();
-  currentKind=item.kind;previewKind(currentKind);title.textContent=item.name;download.href=item.download;download.download=item.name;download.hidden=false;
+  svgPreview=window.createChatSVGPreview?.(item.element);
+  const display=svgPreview?{...item,url:svgPreview.url,download:svgPreview.download}:item;
+  currentKind=item.kind;previewKind(currentKind);title.textContent=item.name;download.href=display.download;download.download=item.name;download.hidden=false;
   dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
   prev.disabled=index===0;next.disabled=index===items.length-1;
-  if(item.kind){stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(item);return}
+  if(item.kind){stage.hidden=false;imageControls.hidden=false;window.OVFileImage.render(display);return}
   content.hidden=false;
   const loading=document.createElement('div');loading.className='file-preview-loading';loading.setAttribute('role','status');loading.setAttribute('aria-label','Loading preview');
   const spinner=document.createElement('span');spinner.className='loading loading-spinner loading-sm text-primary';spinner.setAttribute('aria-hidden','true');loading.append(spinner);content.replaceChildren(loading);
@@ -73,41 +76,62 @@
    const retry=document.createElement('button');retry.textContent='Retry';retry.onclick=()=>show(index);content.append(status,retry);
   }
  }
- // Models for cold/offscreen rows contain Markdown, not enhanced file links.
+ // Cache immutable row models and serialize extraction so a cold transcript
+ // cannot launch a worker for every row at once or block the opening click.
+ const modelLinks=new WeakMap();
+ let extractionQueue=Promise.resolve();
  function modelFileLinks(model){
-  const source=model.segments.filter(segment=>segment.type==='text'||segment.type==='thinking').map(segment=>segment.content||'').join('');
-  if(!source.includes('/files/')||!window.renderChatMarkdown)return [];
-  const template=document.createElement('template');template.innerHTML=window.renderChatMarkdown(source);
-  return Array.from(template.content.querySelectorAll('a[href]')).filter(link=>{
-   let url;try{url=new URL(link.href,location.href)}catch{return false}
-   if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return false;
-   link.dataset.filePreview='';return true;
+  if(modelLinks.has(model))return modelLinks.get(model);
+  if(!model.segments.some(segment=>(segment.type==='text'||segment.type==='thinking')&&(segment.content||'').includes('/files/'))){modelLinks.set(model,[]);return []}
+  const pending=extractionQueue.then(()=>new Promise(resolve=>setTimeout(resolve,0))).then(async()=>{
+   const source=model.segments.filter(segment=>segment.type==='text'||segment.type==='thinking').map(segment=>segment.content||'').join('');
+   if(!source.includes('/files/'))return [];
+   // The async renderer uses a worker and incremental sanitization for large rows.
+   const rendered=window.renderChatMarkdownAsync?await window.renderChatMarkdownAsync(source):source.length<64*1024?window.renderChatMarkdown?.(source):null;
+   if(!rendered)return [];
+   let root=rendered;
+   if(typeof rendered==='string'){const template=document.createElement('template');template.innerHTML=rendered;root=template.content;}
+   return Array.from(root.querySelectorAll('a[href]')).filter(link=>{
+    let url;try{url=new URL(link.href,location.href)}catch{return false}
+    if(url.origin!==location.origin||!/^\/files\/[a-f0-9]+$/.test(url.pathname)||url.searchParams.has('download')||link.hasAttribute('download'))return false;
+    link.dataset.filePreview='';return true;
+   }).map(link=>{link.remove();return link});
   });
+  extractionQueue=pending.catch(()=>{});
+  const result=pending.catch(()=>{modelLinks.delete(model);return []});
+  modelLinks.set(model,result);return result;
  }
- function open(url,trigger,event){
+ async function open(url,trigger,event){
+  const request=++opening;
   if (!dialog.contains(trigger)) {
    const root=trigger?.closest('#task-detail-content,#chat-page-root');
    owner=root?{id:root.id,task:root.dataset.taskId||'',project:root.dataset.projectId||''}:null;
   }
   // Snapshot a list before replacing an in-dialog Files panel.
   group=trigger?.closest('[data-image-gallery-group],[data-files-list],.chat-markdown');
-  let links=group?Array.from(group.querySelectorAll(selector)):[];
-  // All entry points in a conversation share its files, including composer uploads.
+  let candidates=group?Array.from(group.querySelectorAll(selector)):[];
   const conversation=trigger?.closest('#task-detail-content,#chat-page-root');
   const identity=raw=>{const url=new URL(raw,location.href);for(const key of ['view','raw','download','thumbnail'])url.searchParams.delete(key);return url.href};
   const linkIdentity=link=>identity(link.href||link.dataset.imageUrl||link.dataset.filePreview);
   if(conversation){
    group=conversation;
-   const seen=new Set();
-   const candidates=window.queryChatVirtualElements?window.queryChatVirtualElements(conversation,selector,modelFileLinks):Array.from(conversation.querySelectorAll(selector));
-   links=candidates.filter(link=>{const key=linkIdentity(link);if(seen.has(key))return false;seen.add(key);return true});
+   candidates=window.queryChatVirtualElements?window.queryChatVirtualElements(conversation,selector,modelFileLinks):Array.from(conversation.querySelectorAll(selector));
   }
+  if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
+  // Show the requested file immediately while offscreen links are collected.
+  items=[itemFrom(trigger,url)];
+  if(!dialog.open)dialog.showModal();show(0);
+  dialog.focus({preventScroll:true});
+  let links;try{links=await candidates}catch{return}
+  if(request!==opening||!dialog.open)return;
+  const seen=new Set();
+  links=links.filter(link=>{const key=linkIdentity(link);if(seen.has(key))return false;seen.add(key);return true});
   // Expand buttons are not file links; match their URL to the original attachment.
   const at=links.findIndex(link=>linkIdentity(link)===identity(url));
-  items=at<0?[itemFrom(trigger,url)]:links.map(link=>itemFrom(link));
-  if(!dialog.contains(trigger)){opener=trigger;pointerOpened=!!event && event.detail>0}else group=null;
-  if(!dialog.open)dialog.showModal();show(at<0?0:at);
-  dialog.focus({preventScroll:true});
+  if(at<0)return;
+  items=links.map(link=>itemFrom(link));index=at;
+  dialog.querySelector('[data-gallery-count]').textContent=(index+1)+' / '+items.length;
+  prev.disabled=index===0;next.disabled=index===items.length-1;
  }
  function previewKind(kind){
   dialog.dataset.previewKind=kind;
@@ -118,7 +142,7 @@
   imageControls.hidden=false;
   ['minus','plus','fit'].forEach(name=>dialog.querySelector('[data-gallery-'+name+']').hidden=kind!=='image');
  }
- function close(){if(dialog.open)dialog.close()}
+ function close(){opening++;if(dialog.open)dialog.close()}
  document.addEventListener('click',event=>{
   const link=event.target.closest(selector);
   if(!link||event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
@@ -126,7 +150,7 @@
  });
  prev.onclick=()=>show(index-1);next.onclick=()=>show(index+1);
  dialog.querySelector('[data-gallery-close]').onclick=close;
- dialog.addEventListener('close',()=>{if(dialog.open)return;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected){if(pointerOpened)opener.blur();else opener.focus({preventScroll:true});}opener=null});
+ dialog.addEventListener('close',()=>{if(dialog.open)return;opening++;ticket++;controller?.abort();clear();title.textContent='File preview';download.hidden=true;download.removeAttribute('href');download.removeAttribute('download');items=[];group=null;if(opener?.isConnected){if(pointerOpened)opener.blur();else opener.focus({preventScroll:true});}opener=null});
  dialog.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.isComposing||event.altKey||event.metaKey||event.ctrlKey||event.target.closest('input,textarea,select,[contenteditable],[data-sheet-grid]'))return;
   if(event.key==='Escape'){event.preventDefault();close();return}

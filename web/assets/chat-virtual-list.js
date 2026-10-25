@@ -478,7 +478,7 @@
         function visit(node, expanded) {
             const row = !expanded && rows.get(node);
             if (row) {
-                if (row.lazy && !row.ready) found.push(...projectModel(row.model));
+                if (row.lazy && !row.ready) found.push(projectModel(row.model));
                 else if (row.node) visit(row.node, true);
                 return;
             }
@@ -486,7 +486,7 @@
             for (const child of node.children) visit(child, false);
         }
         visit(root, false);
-        return found;
+        return Promise.all(found).then(parts => parts.flat());
     };
     window.materializeVirtualChatRows = function (root, options) {
         const restored = [], pending = [], anchors = [], scrollRestores = [];
