@@ -58,8 +58,7 @@ func TestHandler_GetTaskCachedRefreshIncludesBoundedThread(t *testing.T) {
 	}
 }
 
-// Exercise the real task endpoint and its lazy /thread request, rather than a
-// fixture that always embeds the transcript in every navigation response.
+// Exercise the real task endpoint rather than a fixture-built navigation response.
 func TestTaskCachedNavigationRefreshInChrome(t *testing.T) {
 	testTaskCachedNavigationRefresh(t, false)
 }
