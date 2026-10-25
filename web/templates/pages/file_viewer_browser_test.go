@@ -223,6 +223,21 @@ func TestBrowserFunctional_FileViewers(t *testing.T) {
 			}
 			b.evaluate(`document.body.append(document.getElementById('generated'),document.querySelector('.file-html-canvas'));scope.remove();'ok'`)
 		}
+		b.evaluateAwait(`window.queryChatVirtualElements ? Promise.resolve('ready') : new Promise(resolve=>{var script=document.createElement('script');script.src='/static/chat-virtual-list.js';script.onload=()=>resolve('ready');document.head.append(script)})`)
+		for _, scope := range []string{"task-detail-content", "chat-page-root"} {
+			b.evaluate(fmt.Sprintf(`var virtualScope=document.createElement('div');virtualScope.id=%q;virtualScope.style.cssText='position:fixed;inset:100px;z-index:10';document.body.append(virtualScope);var messages=document.createElement('div');messages.id=virtualScope.id==='chat-page-root'?'chat-messages':'task-thread-messages';messages.style.cssText='height:300px;overflow:auto';messages.dataset.transcriptHydrating='true';virtualScope.append(messages);messages.innerHTML='<div data-execution-pair data-exec-status="completed"><div class="chat-markdown" id="offscreen-file"><a data-file-preview href="/fixture/math.md">Math</a></div></div><div style="height:5000px"></div><div id="cold-files"></div><div style="height:5000px"></div><a id="visible-file" data-file-preview href="/fixture/data.json">JSON</a>';messages.querySelector('[data-execution-pair]').insertAdjacentHTML('beforeend','<div class="stream-tool">Row</div>'.repeat(45));window.coldFileRenders=0;window.installChatVirtualRows(document.getElementById('cold-files'),{models:[{kind:'text',segments:[{type:'text',content:'[Generated](/files/abcdef) and `+"`[Code](/files/deadbeef)`"+`'}]}]},()=>{window.coldFileRenders++});messages.removeAttribute('data-transcript-hydrating');messages.scrollTop=messages.scrollHeight;window.refreshVirtualChatRows(messages);'ok'`, scope))
+			b.waitFor("offscreen attachment detached", `String(!document.getElementById('offscreen-file') && !!document.querySelector('#cold-files [data-virtual-chat-row]') && coldFileRenders===0)`, "true")
+			b.evaluate(`window.fileScrollBefore=messages.scrollTop;'ok'`)
+			b.click("#visible-file")
+			b.waitFor("virtual attachments included in order", `String(!!document.querySelector('[data-json-tree]') && document.querySelector('[data-gallery-count]').textContent==='3 / 3')`, "true")
+			b.click("[data-gallery-prev]")
+			b.waitFor("unrendered HTML attachment opens", `String(document.querySelector('[data-file-name]')?.dataset.fileName==='generated.html' && document.querySelector('[data-gallery-count]').textContent==='2 / 3')`, "true")
+			b.click("[data-gallery-prev]")
+			b.waitFor("detached attachment opens", `String(!!document.querySelector('[data-file-markdown]') && document.querySelector('[data-gallery-count]').textContent==='1 / 3')`, "true")
+			b.waitFor("gallery leaves virtualization and scroll intact", `String(!document.getElementById('offscreen-file') && !!document.querySelector('#cold-files [data-virtual-chat-row]') && coldFileRenders===0 && messages.scrollTop===fileScrollBefore)`, "true")
+			b.click("[data-gallery-close]")
+			b.evaluate(`virtualScope.remove();'ok'`)
+		}
 		b.click("#json")
 		b.waitFor("exact JSON number", `String(document.querySelector('[data-json-tree]')?.textContent.includes('12345678901234567890'))`, "true")
 		b.click("[data-file-close]")
