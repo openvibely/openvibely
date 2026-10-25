@@ -17,7 +17,7 @@ func TestThemesFullPageResponse(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, fragment := range []string{
-		`<title>Themes - OpenVibely</title>`,
+		`<title>Appearance - OpenVibely</title>`,
 		`id="themes-container"`,
 		`data-nav-base="/themes"`,
 		`href="/themes?project_id=`,
@@ -37,7 +37,7 @@ func TestThemesHTMXFragmentResponse(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="themes-container"`) || !strings.Contains(body, `data-openvibely-page-title="Themes - OpenVibely"`) {
+	if !strings.Contains(body, `id="themes-container"`) || !strings.Contains(body, `data-openvibely-page-title="Appearance - OpenVibely"`) {
 		t.Fatalf("HTMX Themes fragment missing container/title marker: %s", body)
 	}
 	if strings.Contains(body, "<!DOCTYPE html>") || strings.Contains(body, `<aside id="sidebar"`) {
