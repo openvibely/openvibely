@@ -3175,6 +3175,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					padding-left: calc(var(--rail-width) + var(--task-list-width, 300px)) !important;
 					--project-tab-selected: var(--shell-page);
 				}
+				html[data-shell-frame]:is([data-layout="floating"], [data-layout="edge"]) #desktop-project-titlebar { padding-left: calc(var(--rail-width) + var(--task-list-width, 300px) + var(--shell-gap)) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: calc(var(--rail-width) + 44px) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }
