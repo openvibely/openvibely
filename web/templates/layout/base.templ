@@ -3201,6 +3201,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-layout="floating"] #desktop-project-titlebar { padding-left: calc(var(--rail-width) + var(--task-list-width, 300px) + var(--shell-gap)) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar { padding-left: calc(var(--rail-width) + 44px) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px !important; }
+				/* The web toggle occupies the rail, so collapsed detached tabs start at the page edge. */
+				html[data-shell-frame][data-openvibely-runtime="web"]:not([data-tab-style="attached"]).task-list-collapsed #desktop-project-titlebar { padding-left: var(--rail-width) !important; }
 				html[data-shell-frame].task-list-collapsed #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; }
 				html[data-shell-frame] #desktop-project-titlebar > #sidebar-collapse-btn,
 				html[data-shell-frame] #desktop-project-titlebar .project-bar-brand { display: none !important; }
