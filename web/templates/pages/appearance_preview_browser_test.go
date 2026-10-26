@@ -57,6 +57,16 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
         }
        }
       }
+      for(const mode of ['default','layered']) for(const step of ['off','on']) {
+       selectOpenVibelyDisplay('surfaces',mode);selectOpenVibelyDisplay('step',step);
+       if(document.documentElement.dataset.theme!=='dark' && mode==='default')continue;
+       const probe=document.createElement('div');probe.style.color=mode==='default'?'var(--ov-surface-default-border, var(--shell-page))':'var(--ov-surface-layered-border, var(--shell-chrome))';sample.appendChild(probe);
+       const expected=getComputedStyle(probe).color;probe.remove();
+       for(const e of sample.children)if(getComputedStyle(e).borderTopColor!==expected)return 'conversation border differs in '+mode+': '+getComputedStyle(e).borderTopColor+' expected '+expected;
+       selectOpenVibelyDisplay('bubbles','off');
+       if(getComputedStyle(sample.querySelector('.chat-bubble-assistant-msg')).borderTopColor!=='rgba(0, 0, 0, 0)')return 'disabled bubble border visible';
+       selectOpenVibelyDisplay('bubbles','on');
+      }
       const off=document.querySelector('[data-kind="step"][data-variant="off"] .dp-composer');
       const on=document.querySelector('[data-kind="step"][data-variant="on"] .dp-composer');
       selectOpenVibelyDisplay('step','off'); const offColor=color(off), onColor=color(on);

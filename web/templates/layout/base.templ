@@ -3246,6 +3246,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-surface-step] .chat-bubble-user-msg,
 				html[data-surface-step] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
 				html[data-surface-step] .chat-input-container { background-color: var(--shell-card) !important; }
+                /* Conversation surfaces share the theme's card-border treatment. */
+                html[data-theme="dark"][data-surface-style="default"] { --conversation-border: var(--ov-surface-default-border, var(--shell-page)); }
+                html[data-surface-style="layered"] { --conversation-border: var(--ov-surface-layered-border, var(--shell-chrome)); }
+                html:root[data-theme-surfaces]:is([data-theme="dark"], [data-surface-style="layered"]) :is(.chat-input-container, .chat-bubble-user-msg):not(:focus-within),
+                html:root[data-theme-surfaces]:is([data-theme="dark"], [data-surface-style="layered"])[data-assistant-bubbles="on"] .chat-bubble-assistant-msg:not(:focus-within) {
+                    border-color: var(--conversation-border) !important;
+                    --chat-user-border: var(--conversation-border);
+                }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg .stream-tool-body,
 				html[data-theme="light"] .chat-bubble-assistant-msg .stream-tool-body { background: transparent !important; }
