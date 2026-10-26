@@ -151,14 +151,22 @@ templ TaskListPanel(currentProjectID string) {
 			}
 			function filter() {
 				var q = searchInput.value.trim().toLowerCase();
-				groups.querySelectorAll('.task-list-group').forEach(function(group) {
-					var visible = 0;
-					group.querySelectorAll('[data-task-list-row]').forEach(function(row) {
+groups.querySelectorAll('.task-list-group').forEach(function(group) {
+						var label = group.getAttribute('data-task-list-group');
+						var wasSearching = group.hasAttribute('data-searching');
+						if (q && !wasSearching) {
+							// Capture the current state even if its toggle event is still queued.
+							groupState[label] = Object.assign({}, groupState[label], { closed: !group.open });
+							saveGroupState();
+						}
+						var visible = 0;					group.querySelectorAll('[data-task-list-row]').forEach(function(row) {
 						var match = !q || (row.getAttribute('data-task-list-title') || '').toLowerCase().indexOf(q) !== -1;
 						row.hidden = !match; if (match) visible++;
 					});
 					group.hidden = visible === 0;
 					group.toggleAttribute('data-searching', !!q);
+						if (q) group.open = visible > 0;
+						else if (wasSearching) group.open = !(groupState[label] || {}).closed;
 				});
 			}
 			function syncActiveRow() {
@@ -221,6 +229,8 @@ templ TaskListPanel(currentProjectID string) {
 			groups.addEventListener('toggle', function(e) {
 				var group = e.target;
 				if (!group.classList || !group.classList.contains('task-list-group')) return;
+				// Search expansion is temporary, including after a live list refresh.
+				if (searchInput.value.trim()) return;
 				var label = group.getAttribute('data-task-list-group');
 				groupState[label] = Object.assign({}, groupState[label], { closed: !group.open });
 				saveGroupState();
