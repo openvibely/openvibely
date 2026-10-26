@@ -243,7 +243,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				var thread = main && main.querySelector('#task-thread-view');
 				// Cached navigation displays the new task before the URL changes.
 				// A cold navigation hides the outgoing thread; allow clicking back to it.
-				if (!thread || main.hasAttribute('data-page-loading') || thread.getAttribute('data-task-id') !== row.getAttribute('data-task-list-row')) return;
+				if (!thread || thread.closest('[hidden], .hidden, [data-workspace-hidden]') || main.hasAttribute('data-page-loading') || thread.getAttribute('data-task-id') !== row.getAttribute('data-task-list-row')) return;
 				e.preventDefault();
 				e.stopPropagation();
 			}, true);

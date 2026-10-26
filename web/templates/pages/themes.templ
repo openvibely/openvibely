@@ -35,7 +35,7 @@ templ ThemesContent(catalog []themes.Theme) {
 			<h2 class="text-2xl font-bold">Appearance</h2>
 		</div>
 		<style>
-			.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--shell-card, oklch(var(--b1))); background: var(--shell-chrome, oklch(var(--b3))); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }
+			.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--shell-chrome, oklch(var(--b3))); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }
 			.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }
 			.display-preview i:last-child { width: 55%; margin-bottom: 0; }
 			.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }
@@ -58,7 +58,7 @@ templ ThemesContent(catalog []themes.Theme) {
 			.dp-composer { background: var(--dp-card); margin-top: 4px; }
 			.display-preview[data-preview-thread="focused"] .dp-conversation { padding-left: 22%; padding-right: 22%; }
 			.display-preview[data-preview-bubbles="on"] .dp-assistant { background: var(--dp-card); }
-			.display-preview[data-preview-step="on"] :is(.dp-user,.dp-composer), .display-preview[data-preview-step="on"][data-preview-bubbles="on"] .dp-assistant { background: color-mix(in srgb, var(--dp-card) 90%, oklch(var(--bc))); }
+			.display-preview[data-preview-step="on"] { --dp-card: var(--conversation-card-raised); }
 		</style>
 		<section class="mb-8" data-display-prefs>
 			<h3 class="text-lg font-semibold mb-1">Layout</h3>
