@@ -5,6 +5,7 @@ const MAX_COLUMNS = 100;
 const MAX_SHEET_CELLS = 100000;
 const MAX_WORKBOOK_CELLS = 200000;
 const MAX_CSV_ROWS = MAX_ROWS;
+const MAX_DELIMITER_SAMPLE_BYTES = 64 * 1024;
 let source;
 let format;
 let sheetNames = [];
@@ -22,6 +23,7 @@ function readWorkbook(options) {
     type: 'array',
     bookVBA: false,
     cellHTML: false,
+    sheetCols: MAX_COLUMNS,
     ...options
   });
 }
@@ -69,26 +71,33 @@ function makeSheetPreview(index, workbook) {
   };
 }
 
-function csvDelimiter(text, requestedFormat) {
+function csvDelimiter(buffer, requestedFormat) {
   if (requestedFormat === 'tsv') return '\t';
   const counts = {'\t': 0, ',': 0, ';': 0, '|': 0};
+  const bytes = new Uint8Array(buffer);
+  const sampleEnd = Math.min(bytes.length, MAX_DELIMITER_SAMPLE_BYTES);
   let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (char === '"') {
-      if (quoted && text[i + 1] === '"') i++;
+  for (let i = 0; i < sampleEnd; i++) {
+    const byte = bytes[i];
+    if (byte === 34) {
+      if (quoted && i + 1 < sampleEnd && bytes[i + 1] === 34) i++;
       else quoted = !quoted;
-    } else if (!quoted && (char === '\n' || char === '\r')) {
+    } else if (!quoted && (byte === 10 || byte === 13)) {
       break;
-    } else if (!quoted && Object.prototype.hasOwnProperty.call(counts, char)) {
-      counts[char]++;
+    } else if (!quoted) {
+      if (byte === 9) counts['\t']++;
+      else if (byte === 44) counts[',']++;
+      else if (byte === 59) counts[';']++;
+      else if (byte === 124) counts['|']++;
     }
   }
   return Object.keys(counts).reduce((best, candidate) => counts[candidate] > counts[best] ? candidate : best, ',');
 }
 
-function scanDelimited(text, delimiter, rowLimit, columnLimit) {
-  const previewRows = rowLimit ? [] : null;
+function scanDelimited(buffer, delimiter) {
+  const bytes = new Uint8Array(buffer);
+  const decoder = new TextDecoder('utf-8');
+  const previewRows = [];
   let totalRows = 0;
   let totalColumns = 0;
   let row = [];
@@ -96,14 +105,24 @@ function scanDelimited(text, delimiter, rowLimit, columnLimit) {
   let rowIndex = 0;
   let columnIndex = 0;
   let quoted = false;
+  let pendingQuote = false;
+  let skipLineFeed = false;
   let recordStarted = false;
 
+  const rowLimit = () => Math.min(MAX_ROWS, Math.floor(Math.min(MAX_SHEET_CELLS, MAX_WORKBOOK_CELLS) / Math.min(MAX_COLUMNS, Math.max(totalColumns, 1))));
   const append = value => {
-    if (rowLimit && rowIndex < rowLimit && columnIndex < columnLimit) field += value;
+    if (rowIndex < rowLimit() && columnIndex < MAX_COLUMNS) field += value;
     if (value) recordStarted = true;
   };
+  const updateDimensions = () => {
+    totalColumns = Math.max(totalColumns, columnIndex + 1);
+    const limit = rowLimit();
+    if (previewRows.length > limit) previewRows.length = limit;
+    if (rowIndex >= limit) row = [];
+  };
   const finishField = () => {
-    if (rowLimit && rowIndex < rowLimit && columnIndex < columnLimit) row[columnIndex] = field;
+    updateDimensions();
+    if (rowIndex < rowLimit() && columnIndex < MAX_COLUMNS) row[columnIndex] = field;
     field = '';
     columnIndex++;
     recordStarted = true;
@@ -111,60 +130,90 @@ function scanDelimited(text, delimiter, rowLimit, columnLimit) {
   const finishRow = () => {
     finishField();
     totalRows = Math.max(totalRows, rowIndex + 1);
-    totalColumns = Math.max(totalColumns, columnIndex);
-    if (previewRows && rowIndex < rowLimit) previewRows[rowIndex] = row;
+    if (rowIndex < rowLimit()) previewRows[rowIndex] = row;
     row = [];
     rowIndex++;
     columnIndex = 0;
     recordStarted = false;
   };
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (quoted) {
-      if (char === '"' && text[i + 1] === '"') {
+  const consume = (text, final = false) => {
+    let i = 0;
+    if (pendingQuote) {
+      if (!text.length && !final) return;
+      if (text[0] === '"') {
         append('"');
-        i++;
-      } else if (char === '"') {
+        i = 1;
+      } else {
         quoted = false;
+      }
+      pendingQuote = false;
+    }
+    for (; i < text.length; i++) {
+      const char = text[i];
+      if (skipLineFeed) {
+        skipLineFeed = false;
+        if (char === '\n') continue;
+      }
+      if (quoted) {
+        if (char === '"') {
+          if (text[i + 1] === '"') {
+            append('"');
+            i++;
+          } else if (i === text.length - 1 && !final) {
+            pendingQuote = true;
+          } else {
+            quoted = false;
+          }
+        } else {
+          append(char);
+        }
+      } else if (char === '"') {
+        quoted = true;
+        recordStarted = true;
+      } else if (char === delimiter) {
+        finishField();
+      } else if (char === '\n' || char === '\r') {
+        finishRow();
+        if (char === '\r') skipLineFeed = true;
       } else {
         append(char);
       }
-    } else if (char === '"') {
-      quoted = true;
-      recordStarted = true;
-    } else if (char === delimiter) {
-      finishField();
-    } else if (char === '\n' || char === '\r') {
-      finishRow();
-      if (char === '\r' && text[i + 1] === '\n') i++;
-    } else {
-      append(char);
     }
+    if (final && pendingQuote) {
+      pendingQuote = false;
+      quoted = false;
+    }
+  };
+
+  const chunkSize = 64 * 1024;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = decoder.decode(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)), {stream: true});
+    if (chunk) consume(chunk);
   }
+  const tail = decoder.decode();
+  if (tail) consume(tail);
+  consume('', true);
   if (recordStarted || columnIndex > 0 || field.length > 0 || totalRows === 0) finishRow();
-  return {totalRows, totalColumns, rows: previewRows};
+
+  const columns = Math.min(totalColumns, MAX_COLUMNS);
+  const rowCount = columns
+    ? Math.min(totalRows, MAX_ROWS, Math.floor(Math.min(MAX_SHEET_CELLS, MAX_WORKBOOK_CELLS) / columns))
+    : 0;
+  const rows = Array.from({length: rowCount}, (_, rowNumber) =>
+    Array.from({length: columns}, (_, column) => String(previewRows[rowNumber]?.[column] || ''))
+  );
+  return {totalRows, totalColumns, rows};
 }
 
 function readDelimited(buffer, requestedFormat) {
-  let text = new TextDecoder('utf-8').decode(buffer);
-  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  const delimiter = csvDelimiter(text, requestedFormat);
-  const dimensions = scanDelimited(text, delimiter, 0, 0);
-  const columns = Math.min(dimensions.totalColumns, MAX_COLUMNS);
-  const rowCount = columns
-    ? Math.min(dimensions.totalRows, MAX_ROWS, Math.floor(Math.min(MAX_SHEET_CELLS, MAX_WORKBOOK_CELLS) / columns))
-    : 0;
-  const preview = scanDelimited(text, delimiter, rowCount, columns);
-  const rows = (preview.rows || []).map(values =>
-    Array.from({length: columns}, (_, index) => String(values[index] || ''))
-  );
+  const delimiter = csvDelimiter(buffer, requestedFormat);
+  const preview = scanDelimited(buffer, delimiter);
   return {
     name: 'Sheet1',
-    rows,
-    totalRows: dimensions.totalRows,
-    totalColumns: dimensions.totalColumns,
-    truncated: dimensions.totalRows > rowCount || dimensions.totalColumns > columns
+    rows: preview.rows,
+    totalRows: preview.totalRows,
+    totalColumns: preview.totalColumns,
+    truncated: preview.totalRows > preview.rows.length || preview.totalColumns > Math.min(preview.totalColumns, MAX_COLUMNS)
   };
 }
 

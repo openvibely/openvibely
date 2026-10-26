@@ -24,6 +24,6 @@ Measured on Google Chrome 156.0.8078.47, macOS arm64, with three fresh pages per
 | Worker | Median first-sheet ready | Median peak worker JS heap |
 | --- | ---: | ---: |
 | Parent revision | 3,928.1 ms | 373.3 MiB |
-| Selective worker | 847.4 ms | 26.7 MiB |
+| Selective worker | 758.8 ms | 25.1 MiB |
 
-That is 78.4% lower median ready time and 92.8% lower median peak heap. Both revisions returned 5,000 preview rows, 25,000 total rows, 20 total columns, and `truncated: true`; the displayed first-sheet row hash matched (`188cadcb`).
+That is 80.7% lower median ready time and 93.3% lower median peak heap. Both revisions returned 5,000 preview rows, 25,000 total rows, 20 total columns, and `truncated: true`; the displayed first-sheet row hash matched (`188cadcb`).
