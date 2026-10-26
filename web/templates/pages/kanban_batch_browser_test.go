@@ -125,11 +125,10 @@ window.addEventListener('DOMContentLoaded', async function() {
   check(panel, 'Sort submenu opens');
   check(Array.from(panel.querySelectorAll('button[hx-post]')).every(b => b.querySelector('[data-filter-check]') && !b.classList.contains('active')), 'sort uses checkmarks without persistent highlights');
   check(panel.querySelector('button[aria-pressed="true"] [data-filter-check]').textContent.trim() === '✓', 'current sort shows the same checkmark as filters');
-  let sortRequested = false;
-  document.body.addEventListener('htmx:beforeRequest', event => { if ((event.detail.requestConfig.path || '').includes('/completed/sort')) sortRequested = true; });
+  let sortSettled = false;
+  document.body.addEventListener('htmx:afterSettle', event => { if ((event.detail.requestConfig && event.detail.requestConfig.path || '').includes('/completed/sort')) sortSettled = true; });
   panel.querySelector('button[hx-post]').click();
-  await wait(() => sortRequested);
-  await new Promise(r=>setTimeout(r,100));
+  await wait(() => sortSettled);
   check(!document.querySelector('[data-kanban-menu-open="true"], [data-menu-submenu-portaled="true"]'), 'sort closes menu after refresh');
   col('completed').querySelector('[data-kanban-menu-trigger]').click();
   select('completed').click();
