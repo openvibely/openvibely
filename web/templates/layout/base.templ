@@ -5559,7 +5559,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var unified = layout === 'unified';
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
-									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
+									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : 17);
 									var radii = joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
@@ -5583,7 +5583,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 										observer.unobserve(el);
 										seen.delete(el);
 									});
-									document.querySelectorAll('#main-content, #task-list-panel, #sidebar, .desktop-project-tab, #task-details-panel').forEach(function(el) {
+									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, #task-details-panel').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);
