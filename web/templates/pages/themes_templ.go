@@ -106,7 +106,7 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Appearance</h2></div><style>\n\t\t\t.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }\n            .display-preview[data-preview-surfaces=\"default\"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-rail); --dp-surface-card: var(--surface-default-card); }\n            .display-preview[data-preview-surfaces=\"layered\"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }\n            .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }\n            [data-preview-surfaces=\"layered\"] .dp-surface-card { border-color: var(--dp-frame); }\n\t\t\t.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }\n\t\t\t.display-preview i:last-child { width: 55%; margin-bottom: 0; }\n\t\t\t.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }\n\t\t\t.dp-tabs span { width: 42%; height: 14px; border-radius: 5px; background: var(--dp-page); }\n\t\t\t.dp-tabs span + span { opacity: .4; }\n\t\t\t.dp-workspace { display: flex; height: 70px; }\n\t\t\t.dp-list { flex: 0 0 30%; padding: 12px 6px; background: var(--dp-rail); border-right: 1px solid oklch(var(--bc) / .12); border-radius: 7px 0 0 0; }\n\t\t\t.dp-page { flex: 1; padding: 12px; background: var(--dp-page); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] { --dp-gap: 7px; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] { --dp-tab-inset: 6px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"][data-preview-tabs=\"attached\"] { --dp-tab-inset: 13px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] .dp-workspace { gap: var(--dp-gap); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] :is(.dp-list,.dp-page) { border-radius: 7px 7px 0 0; border: 0; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child { height: 18px; border-radius: 7px 7px 0 0; position: relative; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::after { content: \"\"; position: absolute; width: 6px; height: 6px; right: -6px; bottom: 0; background: radial-gradient(circle at 100% 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::before { content: \"\"; position: absolute; width: 6px; height: 6px; left: -6px; bottom: 0; background: radial-gradient(circle at 0 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.dp-conversation { height: 100%; background: var(--dp-page); padding: 6px; }\n\t\t\t.dp-user, .dp-assistant, .dp-composer { padding: 6px; border-radius: 5px; }\n\t\t\t.dp-user { margin-left: 45%; background: var(--dp-card); margin-bottom: 4px; }\n\t\t\t.dp-composer { background: var(--dp-card); margin-top: 4px; }\n\t\t\t.display-preview[data-preview-thread=\"focused\"] .dp-conversation { padding-left: 22%; padding-right: 22%; }\n\t\t\t.display-preview[data-preview-bubbles=\"on\"] .dp-assistant { background: var(--dp-card); }\n\t\t\t.display-preview[data-preview-step=\"on\"] { --dp-card: var(--conversation-card-raised); }\n\t\t</style><section class=\"mb-8\" data-display-prefs><h3 class=\"text-lg font-semibold mb-1\">Layout</h3><p class=\"text-sm opacity-70 mb-3\">How the task list sits next to the page.</p><div class=\"flex flex-col gap-3 max-w-2xl mb-6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Appearance</h2></div><style>\n            .theme-thumbnail { --tp-frame: var(--tp-default-frame); --tp-page: var(--tp-default-page); --tp-rail: var(--tp-default-rail); --tp-card: var(--tp-default-card); background: var(--tp-frame); padding-top: 8px; }\n            html[data-surface-style=\"layered\"] .theme-thumbnail { --tp-frame: var(--tp-layered-frame); --tp-page: var(--tp-layered-page); --tp-rail: var(--tp-layered-card); --tp-card: var(--tp-layered-card); }\n            .theme-thumbnail-rail { background: var(--tp-rail); }\n            .theme-thumbnail-page { background: var(--tp-page); }\n            .theme-thumbnail-card { background: var(--tp-card); border: 1px solid transparent; border-radius: 4px; padding: 4px; }\n            html[data-surface-style=\"layered\"] .theme-thumbnail-card { border-color: var(--tp-layered-border, var(--tp-frame)); }\n\n\t\t\t.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }\n            .display-preview[data-preview-surfaces=\"default\"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-rail); --dp-surface-card: var(--surface-default-card); }\n            .display-preview[data-preview-surfaces=\"layered\"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }\n            .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }\n            [data-preview-surfaces=\"layered\"] .dp-surface-card { border-color: var(--dp-frame); }\n\t\t\t.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }\n\t\t\t.display-preview i:last-child { width: 55%; margin-bottom: 0; }\n\t\t\t.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }\n\t\t\t.dp-tabs span { width: 42%; height: 14px; border-radius: 5px; background: var(--dp-page); }\n\t\t\t.dp-tabs span + span { opacity: .4; }\n\t\t\t.dp-workspace { display: flex; height: 70px; }\n\t\t\t.dp-list { flex: 0 0 30%; padding: 12px 6px; background: var(--dp-rail); border-right: 1px solid oklch(var(--bc) / .12); border-radius: 7px 0 0 0; }\n\t\t\t.dp-page { flex: 1; padding: 12px; background: var(--dp-page); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] { --dp-gap: 7px; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] { --dp-tab-inset: 6px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"][data-preview-tabs=\"attached\"] { --dp-tab-inset: 13px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] .dp-workspace { gap: var(--dp-gap); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] :is(.dp-list,.dp-page) { border-radius: 7px 7px 0 0; border: 0; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child { height: 18px; border-radius: 7px 7px 0 0; position: relative; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::after { content: \"\"; position: absolute; width: 6px; height: 6px; right: -6px; bottom: 0; background: radial-gradient(circle at 100% 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::before { content: \"\"; position: absolute; width: 6px; height: 6px; left: -6px; bottom: 0; background: radial-gradient(circle at 0 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.dp-conversation { height: 100%; background: var(--dp-page); padding: 6px; }\n\t\t\t.dp-user, .dp-assistant, .dp-composer { padding: 6px; border-radius: 5px; }\n\t\t\t.dp-user { margin-left: 45%; background: var(--dp-card); margin-bottom: 4px; }\n\t\t\t.dp-composer { background: var(--dp-card); margin-top: 4px; }\n\t\t\t.display-preview[data-preview-thread=\"focused\"] .dp-conversation { padding-left: 22%; padding-right: 22%; }\n\t\t\t.display-preview[data-preview-bubbles=\"on\"] .dp-assistant { background: var(--dp-card); }\n\t\t\t.display-preview[data-preview-step=\"on\"] { --dp-card: var(--conversation-card-raised); }\n\t\t</style><section class=\"mb-8\" data-display-prefs><h3 class=\"text-lg font-semibold mb-1\">Layout</h3><p class=\"text-sm opacity-70 mb-3\">How the task list sits next to the page.</p><div class=\"flex flex-col gap-3 max-w-2xl mb-6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -214,7 +214,7 @@ func themeCard(theme themes.Theme) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(theme.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 163, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 170, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -227,7 +227,7 @@ func themeCard(theme themes.Theme) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(theme.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 164, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 171, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -240,7 +240,7 @@ func themeCard(theme themes.Theme) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(theme.SearchText)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 166, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 173, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
@@ -253,7 +253,7 @@ func themeCard(theme themes.Theme) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(theme.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 173, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 180, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -266,7 +266,7 @@ func themeCard(theme themes.Theme) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(theme.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 174, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 181, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -301,137 +301,137 @@ func themeCard(theme themes.Theme) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(themeKindLabel(theme.Kind))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 177, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 184, Col: 99}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span> <span class=\"badge badge-primary badge-sm hidden\" data-theme-active-badge>Active</span></div></div><div class=\"rounded-lg border overflow-hidden\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span> <span class=\"badge badge-primary badge-sm hidden\" data-theme-active-badge>Active</span></div></div><div class=\"theme-thumbnail rounded-lg border overflow-hidden\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewOuterStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 181, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 188, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" aria-hidden=\"true\"><div class=\"flex min-h-24\"><div class=\"w-16 p-2 space-y-2\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" aria-hidden=\"true\"><div class=\"flex min-h-24\"><div class=\"theme-thumbnail-rail w-16 p-2 space-y-2\"><div class=\"h-2 rounded\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSidebarStyle(theme))
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewAccentStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 183, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 191, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\"><div class=\"h-2 rounded\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\"></div><div class=\"h-2 rounded opacity-70\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewAccentStyle(theme))
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewMutedBarStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 184, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 192, Col: 77}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\"></div><div class=\"h-2 rounded opacity-70\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\"></div><div class=\"h-2 rounded opacity-50\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewMutedBarStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 185, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 193, Col: 77}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\"></div><div class=\"h-2 rounded opacity-50\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\"></div></div><div class=\"theme-thumbnail-page flex-1 p-3 space-y-2\"><div class=\"theme-thumbnail-card flex items-center gap-2\"><div class=\"h-3 w-20 rounded\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewMutedBarStyle(theme))
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewTextBarStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 186, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 197, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"></div></div><div class=\"flex-1 p-3 space-y-2\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"></div><div class=\"h-3 w-12 rounded\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSurfaceStyle(theme))
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewAccentStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 188, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 198, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\"><div class=\"flex items-center gap-2\"><div class=\"h-3 w-20 rounded\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\"></div></div><div class=\"rounded p-2 text-xs font-mono leading-relaxed\" style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewTextBarStyle(theme))
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewCodeStyle(theme))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 190, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 200, Col: 96}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\"></div><div class=\"h-3 w-12 rounded\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\"><span style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewAccentStyle(theme))
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "keyword"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 191, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 201, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\"></div></div><div class=\"rounded p-2 text-xs font-mono leading-relaxed\" style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewCodeStyle(theme))
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs("func")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 193, Col: 96}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 201, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\"><span style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span> <span style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "keyword"))
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "function"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 194, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 202, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 		if templ_7745c5c3_Err != nil {
@@ -442,9 +442,9 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 string
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs("func")
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(" theme")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 194, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 202, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
@@ -455,9 +455,9 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "function"))
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "foreground"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 195, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 203, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 		if templ_7745c5c3_Err != nil {
@@ -468,9 +468,9 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(" theme")
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(">() ")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 195, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 203, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
@@ -481,9 +481,9 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "foreground"))
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "comment"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 196, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 204, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -494,22 +494,22 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var27 string
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(">() ")
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs("// preview")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 196, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 204, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</span> <span style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</span><br><span style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "comment"))
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "string"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 197, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 206, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -520,22 +520,22 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs("// preview")
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs("\"OpenVibely\"")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 197, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 206, Col: 77}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</span><br><span style=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</span> <span style=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var30 string
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "string"))
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "number"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 199, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 207, Col: 56}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
@@ -546,41 +546,15 @@ func themeCard(theme themes.Theme) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs("\"OpenVibely\"")
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(" 130")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 199, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 207, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</span> <span style=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(previewSyntaxStyle(theme, "number"))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 200, Col: 56}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var33 string
-		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(" 130")
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 200, Col: 67}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</span></div></div></div></div></div></button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</span></div></div></div></div></div></button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -624,16 +598,30 @@ func previewColor(theme themes.Theme, group, key, fallback string) string {
 	return fallback
 }
 
+// Give every thumbnail its own palette so it does not borrow the selected theme.
 func previewOuterStyle(theme themes.Theme) string {
-	return "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";background:" + previewColor(theme, "semantic", "bg", "#1e1e1e") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
-}
-
-func previewSidebarStyle(theme themes.Theme) string {
-	return "background:" + previewColor(theme, "semantic", "sidebarBg", "#181818")
-}
-
-func previewSurfaceStyle(theme themes.Theme) string {
-	return "background:" + previewColor(theme, "semantic", "surface", "#252526")
+	values := map[string]string{
+		"default-frame": theme.Semantic["contentBg"], "default-page": theme.Semantic["contentBg"],
+		"default-rail": theme.Semantic["surface"], "default-card": theme.Semantic["surface"],
+		"layered-frame": theme.Semantic["surfaceRaised"], "layered-page": theme.Semantic["contentBg"], "layered-card": theme.Semantic["surface"],
+	}
+	if theme.ID == themes.OpenVibelyLightThemeID {
+		values["default-frame"] = "#F5F5F5"
+		values["layered-frame"] = "#F5F5F5"
+		values["layered-page"] = "#E8E8E8"
+	}
+	for key, value := range theme.SurfaceCSS {
+		if strings.HasPrefix(key, "--ov-surface-default-") || strings.HasPrefix(key, "--ov-surface-layered-") {
+			values[strings.TrimPrefix(key, "--ov-surface-")] = value
+		}
+	}
+	style := "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
+	for _, key := range []string{"default-frame", "default-page", "default-rail", "default-card", "layered-frame", "layered-page", "layered-card", "layered-border"} {
+		if value := values[key]; value != "" {
+			style += ";--tp-" + key + ":" + value
+		}
+	}
+	return style
 }
 
 func previewAccentStyle(theme themes.Theme) string {
@@ -672,125 +660,125 @@ func displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabel
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var34 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var34 == nil {
-			templ_7745c5c3_Var34 = templ.NopComponent
+		templ_7745c5c3_Var32 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var32 == nil {
+			templ_7745c5c3_Var32 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<fieldset><legend class=\"text-sm font-medium mb-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<fieldset><legend class=\"text-sm font-medium mb-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var35 string
-		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(label)
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 280, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 299, Col: 50}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</legend> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</legend> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if pref == "step" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<p class=\"text-xs opacity-60 mb-2\">Lift chat bubbles and the composer one shade above cards.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<p class=\"text-xs opacity-60 mb-2\">Lift chat bubbles and the composer one shade above cards.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<div class=\"grid grid-cols-2 gap-3\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"grid grid-cols-2 gap-3\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, opt := range [][2]string{{firstValue, firstLabel}, {secondValue, secondLabel}} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<button type=\"button\" class=\"display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\" data-display-pref=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<button type=\"button\" class=\"display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\" data-display-pref=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var34 string
+			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(pref)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 305, Col: 227}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" data-display-option=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var35 string
+			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(opt[0])
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 305, Col: 258}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" aria-pressed=\"false\" onclick=\"window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))\"><span class=\"flex justify-between items-center gap-2 mb-3\"><span class=\"text-sm font-medium\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(pref)
+			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(opt[1])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 286, Col: 227}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 306, Col: 106}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" data-display-option=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</span><span class=\"badge badge-primary badge-sm hidden\" data-display-active>Active</span></span><div class=\"display-preview\" data-kind=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var37 string
-			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(opt[0])
+			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(pref)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 286, Col: 258}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 307, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" aria-pressed=\"false\" onclick=\"window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))\"><span class=\"flex justify-between items-center gap-2 mb-3\"><span class=\"text-sm font-medium\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" data-variant=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var38 string
-			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(opt[1])
+			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.ResolveAttributeValue(opt[0])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 287, Col: 106}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 307, Col: 74}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</span><span class=\"badge badge-primary badge-sm hidden\" data-display-active>Active</span></span><div class=\"display-preview\" data-kind=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(pref)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 288, Col: 50}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" data-variant=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var40 string
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(opt[0])
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 288, Col: 74}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" aria-hidden=\"true\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" aria-hidden=\"true\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if pref == "surfaces" || pref == "layout" || pref == "tabs" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div class=\"dp-tabs\"><span></span><span></span></div><div class=\"dp-workspace\"><div class=\"dp-list\"><i></i><i></i><i></i></div><div class=\"dp-page\"><div class=\"dp-surface-card\"><i></i><i></i></div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"dp-tabs\"><span></span><span></span></div><div class=\"dp-workspace\"><div class=\"dp-list\"><i></i><i></i><i></i></div><div class=\"dp-page\"><div class=\"dp-surface-card\"><i></i><i></i></div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<div class=\"dp-conversation\"><div class=\"dp-user\"><i></i></div><div class=\"dp-assistant\"><i></i><i></i><i></i></div><div class=\"dp-composer\"><i></i></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"dp-conversation\"><div class=\"dp-user\"><i></i></div><div class=\"dp-assistant\"><i></i><i></i><i></i></div><div class=\"dp-composer\"><i></i></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</div></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</div></fieldset>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</div></fieldset>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -814,84 +802,84 @@ func boardColumnsCard(id, name, description string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var41 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var41 == nil {
-			templ_7745c5c3_Var41 = templ.NopComponent
+		templ_7745c5c3_Var39 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var39 == nil {
+			templ_7745c5c3_Var39 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<button type=\"button\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary\" data-board-columns-card data-board-columns-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<button type=\"button\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary\" data-board-columns-card data-board-columns-id=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var40 string
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(id)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 326, Col: 28}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" aria-pressed=\"false\" onclick=\"window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay('columns', this.getAttribute('data-board-columns-id'))\"><div class=\"card-body gap-3 p-4\"><div class=\"flex items-center justify-between\"><span class=\"font-semibold\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var41 string
+		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(name)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 332, Col: 38}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</span> <span class=\"badge badge-primary badge-sm hidden\" data-board-columns-active-badge>Active</span></div><div class=\"board-columns-preview\" data-preview=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(id)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 307, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 335, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" aria-pressed=\"false\" onclick=\"window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay('columns', this.getAttribute('data-board-columns-id'))\"><div class=\"card-body gap-3 p-4\"><div class=\"flex items-center justify-between\"><span class=\"font-semibold\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "\" aria-hidden=\"true\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for i := 0; i < 3; i++ {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<div class=\"bcp-col\"><div class=\"bcp-head\"></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if i != 1 {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div class=\"bcp-card\"></div><div class=\"bcp-card\"></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</div><p class=\"text-xs opacity-70\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var43 string
-		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(name)
+		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 313, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 346, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</span> <span class=\"badge badge-primary badge-sm hidden\" data-board-columns-active-badge>Active</span></div><div class=\"board-columns-preview\" data-preview=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var44 string
-		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(id)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 316, Col: 55}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" aria-hidden=\"true\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for i := 0; i < 3; i++ {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"bcp-col\"><div class=\"bcp-head\"></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if i != 1 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<div class=\"bcp-card\"></div><div class=\"bcp-card\"></div>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</div><p class=\"text-xs opacity-70\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var45 string
-		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(description)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 327, Col: 46}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</p></div></button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</p></div></button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
