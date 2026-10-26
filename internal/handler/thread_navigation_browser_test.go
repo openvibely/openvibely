@@ -108,8 +108,11 @@ window.addEventListener('DOMContentLoaded',function(){
    const preview=document.querySelector('[data-thread-refresh-preview]');
    if(!preview)return;
    refreshPreviewChecks++;
+   const live=document.getElementById('task-thread-messages');
+   const a=live.firstElementChild.getBoundingClientRect(), b=preview.firstElementChild.getBoundingClientRect();
+   if(Math.abs(a.left-b.left)>1 || Math.abs(a.width-b.width)>1 || getComputedStyle(live).scrollbarWidth!==getComputedStyle(preview).scrollbarWidth)refreshPreviewError='refresh preview shifted horizontally';
    const row=preview.firstElementChild;
-   if(!row || getComputedStyle(row).maxWidth!=='820px' || getComputedStyle(preview).paddingLeft!=='28px')refreshPreviewError='refresh preview lost focused conversation width';
+   if(document.documentElement.dataset.threadWidth==='focused' && (!row || getComputedStyle(row).maxWidth!=='820px' || getComputedStyle(preview).paddingLeft!=='28px'))refreshPreviewError='refresh preview lost focused conversation width';
  });
  let cachedShellError='';
  document.addEventListener('htmx:beforeSwap',event=>{
@@ -140,6 +143,7 @@ window.addEventListener('DOMContentLoaded',function(){
    await fetch('/advance');
    let warmURL=%q;
    for(let round=0;round<2;round++){
+     document.documentElement.dataset.threadWidth=round===0?'focused':'full';
      // Hold the cached page's delayed initializer until the user has scrolled.
      // This makes its stale saved-position race deterministic rather than CPU-dependent.
      const nativeTimeout=window.setTimeout;
