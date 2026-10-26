@@ -64,12 +64,15 @@ templ WorkerSettingsContentWithAvailability(maxWorkers int, runningWorkers int, 
 templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats, projectStatsAvailable bool, modelStatsAvailable bool) {
 	<div id="worker-settings-content" class="w-full min-w-0 max-w-full flex-none pb-6">
 		@layout.PageTitle("Workers")
-		<h2 data-page-header class="text-2xl font-bold mb-6">Workers</h2>
+		<div data-page-header class="flex items-center justify-between mb-6">
+            <h2 class="text-2xl font-bold"><span class="worker-monitor-only">Workers</span><span class="worker-config-only">Worker limits</span></h2>
+            <a class="btn btn-sm btn-ghost worker-monitor-only" href="/settings/workers" hx-get="/settings/workers" hx-target="#main-content" hx-push-url="true">Configure limits</a>
+        </div>
 
 		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0 max-w-full flex-none h-auto">
 			<div class="card-body min-w-0">
-				<h3 class="card-title text-lg">Worker Capacity &amp; Utilization</h3>
-				<p class="text-sm opacity-60 mb-4">Global and per-project worker limits shown together. Click a limit value to edit it.</p>
+				<h3 class="card-title text-lg"><span class="worker-monitor-only">Worker Capacity &amp; Utilization</span><span class="worker-config-only">Global and project limits</span></h3>
+				<p class="worker-monitor-only text-sm opacity-60 mb-4">Global and per-project worker limits shown together. Manage limits in Settings.</p>
 				if !projectStatsAvailable {
 					<p class="text-sm text-warning mb-4">Project worker capacity is currently unavailable.</p>
 				}
@@ -91,9 +94,10 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 			</div>
 		</div>
 
-		<!-- Per-Model Utilization -->
+		<p class="worker-config-only text-sm opacity-60 mb-4">Configure dedicated model pools in Models.</p>
+        <!-- Per-Model Utilization -->
 		if len(modelStats) > 0 || !modelStatsAvailable {
-			<div class="card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto">
+			<div class="worker-monitor-only card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto">
 				<div class="card-body min-w-0">
 					<h3 class="card-title text-lg">Per-Model Worker Pools</h3>
 					<p class="text-sm opacity-60 mb-4">Models with dedicated worker pools. Configure limits on the Models page.</p>
@@ -118,6 +122,13 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 		}
 
 					<style>
+            .worker-config-only { display: none; }
+            html.worker-configuration .worker-config-only { display: inline; }
+            html.worker-configuration .worker-limit-form.worker-config-only { display: flex; }
+            html.worker-configuration .worker-monitor-only { display: none; }
+            html.worker-configuration #worker-settings-content .worker-stats-table:first-child :is(th, td):nth-child(3),
+            html.worker-configuration #worker-settings-content .worker-stats-table:first-child :is(th, td):nth-child(4),
+            html.worker-configuration #worker-settings-content .worker-stats-table:first-child :is(th, td):nth-child(6) { display: none; }
                         .worker-limit-field { position: relative; display: inline-flex; font-size: .75rem; line-height: 1.625; }
                         .worker-limit-field .worker-limit-input { font: inherit; }
                         .worker-limit-infinity { display: none; position: absolute; left: .5rem; top: 50%; transform: translateY(-50%); pointer-events: none; font: inherit; }
@@ -341,13 +352,14 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 				</span>
 			</td>
 			<td id="limit-cell-global">
+                <span class="worker-monitor-only">{ workerLimitLabel(maxWorkers) }</span>
 				<form
 					method="post"
 					action="/workers"
 					hx-post="/workers"
 					hx-target="#worker-settings-content"
 					hx-swap="outerHTML"
-					class="flex flex-nowrap items-center gap-2 worker-limit-form"
+					class="flex flex-nowrap items-center gap-2 worker-limit-form worker-config-only"
 					data-project-id="global"
 				>
 					<span class="worker-limit-field"><input
@@ -401,12 +413,13 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 					</span>
 				</td>
 				<td id={ fmt.Sprintf("limit-cell-%s", ps.ID) }>
+                    <span class="worker-monitor-only">{ projectWorkerLimitLabel(ps.MaxWorkers) }</span>
 					<form
 						method="post"
 						hx-post={ fmt.Sprintf("/workers/projects/%s/limit", ps.ID) }
 						hx-target="#worker-settings-content"
 						hx-swap="outerHTML"
-						class="flex flex-nowrap items-center gap-2 worker-limit-form"
+						class="flex flex-nowrap items-center gap-2 worker-limit-form worker-config-only"
 						data-project-id={ ps.ID }
 					>
 						<span class="worker-limit-field"><input
