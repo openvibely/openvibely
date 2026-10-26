@@ -284,6 +284,7 @@ func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
 	    documentElement: {
 	      setAttribute(k, v) { attrs[k] = String(v); },
 	      getAttribute(k) { return attrs[k] || ''; },
+	      removeAttribute(k) { delete attrs[k]; },
 	      style: { removeProperty(k) { delete styleVars[k]; }, setProperty(k, v) { if (!/^--ov-[a-z0-9-]+$/.test(k)) throw new Error('unsafe css var ' + k); styleVars[k] = String(v); } }
 	    },
 	    getElementById(id) { return id === 'ov-theme-catalog' ? { getAttribute() { return catalogJSON; } } : null; },
@@ -299,8 +300,11 @@ if (Object.prototype.hasOwnProperty.call(legacy.store, 'openvibely.colorTheme'))
 if (Object.keys(legacy.styleVars).length) throw new Error('native theme must not override main CSS variables');
 legacy.api.apply('github-light');
 if (!legacy.styleVars['--ov-bg']) throw new Error('custom palette not applied');
+legacy.api.apply('openvibely-dark');
+if (Object.keys(legacy.styleVars).some(k => !k.startsWith('--ov-surface-'))) throw new Error('custom variables survived switch to native');
+if (legacy.styleVars['--ov-surface-default-page'] !== '#15191E') throw new Error('Dark surface definition was not applied');
 legacy.api.apply('openvibely-light');
-if (Object.keys(legacy.styleVars).length) throw new Error('custom variables survived switch to native');
+if (Object.keys(legacy.styleVars).length || 'data-theme-surfaces' in legacy.attrs) throw new Error('Dark surfaces survived switch to Light');
 let lateToggle = toggleEl();legacy.toggles.push(lateToggle);
 legacy.api.syncThemeControls();
 if (lateToggle.attrs['aria-pressed'] !== 'false') throw new Error('late light-mode toggle aria state was not synchronized');
