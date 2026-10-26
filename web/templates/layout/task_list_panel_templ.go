@@ -182,46 +182,33 @@ func TaskListPanelContent(projectID string, groups []TaskListGroup) templ.Compon
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" data-task-list-updated=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.UpdatedAt.Format("Jan 2, 2006 3:04 PM"))
+				var templ_7745c5c3_Var8 templ.SafeURL
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 74, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 74, Col: 71}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" href=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var9 templ.SafeURL
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 75, Col: 71}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-get=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-get=\"")
+				var templ_7745c5c3_Var9 string
+				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?from=tasks", task.ID))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 75, Col: 58}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?from=tasks", task.ID))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 76, Col: 58}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" hx-target=\"#main-content\" hx-swap=\"innerHTML\" hx-push-url=\"true\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-swap=\"innerHTML\" hx-push-url=\"true\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -229,80 +216,80 @@ func TaskListPanelContent(projectID string, groups []TaskListGroup) templ.Compon
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"task-list-title\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<span class=\"task-list-title\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var11 string
-				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(task.Title)
+				var templ_7745c5c3_Var10 string
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(task.Title)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 82, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 81, Col: 47}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if task.Prompt != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<template data-task-list-prompt>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<template data-task-list-prompt>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var12 string
-					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
+					var templ_7745c5c3_Var11 string
+					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 84, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 83, Col: 51}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</template>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</template>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</a> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</a> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 			if len(group.Tasks) > taskListGroupLimit {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<button type=\"button\" class=\"task-list-more\" data-task-list-more=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<button type=\"button\" class=\"task-list-more\" data-task-list-more=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(len(group.Tasks) - taskListGroupLimit))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 88, Col: 122}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var13 string
-				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(strconv.Itoa(len(group.Tasks) - taskListGroupLimit))
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Show %d more", len(group.Tasks)-taskListGroupLimit))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 89, Col: 122}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 88, Col: 191}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\">")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var14 string
-				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Show %d more", len(group.Tasks)-taskListGroupLimit))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 89, Col: 191}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</button>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</details>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</details>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -327,25 +314,25 @@ func TaskListPanel(currentProjectID string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var15 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var15 == nil {
-			templ_7745c5c3_Var15 = templ.NopComponent
+		templ_7745c5c3_Var14 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var14 == nil {
+			templ_7745c5c3_Var14 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<aside id=\"task-list-panel\" aria-label=\"Tasks\"><div class=\"task-list-search\" hidden><input id=\"task-list-search-input\" type=\"search\" placeholder=\"Search tasks…\" aria-label=\"Search tasks\" autocomplete=\"off\"></div><div id=\"task-list-groups\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<aside id=\"task-list-panel\" aria-label=\"Tasks\"><div class=\"task-list-search\" hidden><input id=\"task-list-search-input\" type=\"search\" placeholder=\"Search tasks…\" aria-label=\"Search tasks\" autocomplete=\"off\"></div><div id=\"task-list-groups\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var16 string
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID))
+		var templ_7745c5c3_Var15 string
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 102, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 101, Col: 73}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-trigger=\"load, taskListRefresh from:body\" hx-swap=\"innerHTML\" hx-sync=\"this:queue last\" hx-push-url=\"false\"></div></aside><div id=\"task-list-divider\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize task list\" tabindex=\"0\"></div><script>\n\t\t(function() {\n\t\t\tvar root = document.documentElement;\n\t\t\tvar panel = document.getElementById('task-list-panel');\n\t\t\tvar groups = document.getElementById('task-list-groups');\n\t\t\tvar divider = document.getElementById('task-list-divider');\n\t\t\tvar searchBox = panel.querySelector('.task-list-search');\n\t\t\tvar searchInput = document.getElementById('task-list-search-input');\n\t\t\tvar widthKey = 'openvibely.taskListWidth';\n\t\t\tvar collapsedKey = 'openvibely.taskListCollapsed';\n\t\t\tvar MIN = 200, MAX = 560;\n\n\t\t\tfunction clampWidth(w) { return Math.round(Math.max(MIN, Math.min(MAX, w, window.innerWidth - 480))); }\n\t\t\tfunction setWidth(w, persist) {\n\t\t\t\tvar next = clampWidth(w);\n\t\t\t\troot.style.setProperty('--task-list-width', next + 'px');\n\t\t\t\tdivider.setAttribute('aria-valuenow', String(next));\n\t\t\t\tif (persist) try { localStorage.setItem(widthKey, String(next)); } catch (_) {}\n\t\t\t}\n\t\t\tfunction currentWidth() { return parseFloat(getComputedStyle(root).getPropertyValue('--task-list-width')) || 300; }\n\t\t\ttry { var saved = parseFloat(localStorage.getItem(widthKey)); if (saved) setWidth(saved, false); } catch (_) {}\n\t\t\ttry { if (localStorage.getItem(collapsedKey) === 'true') root.classList.add('task-list-collapsed'); } catch (_) {}\n\n\t\t\tfunction toggleButton() { return document.getElementById('task-list-toggle'); }\n\t\t\tfunction syncToggle() {\n\t\t\t\tvar btn = toggleButton(); if (!btn) return;\n\t\t\t\tvar collapsed = root.classList.contains('task-list-collapsed');\n\t\t\t\tbtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');\n\t\t\t\tbtn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');\n\t\t\t}\n\t\t\tfunction setCollapsed(collapsed) {\n\t\t\t\troot.classList.toggle('task-list-collapsed', collapsed);\n\t\t\t\ttry { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}\n\t\t\t\tsyncToggle();\n\t\t\t}\n\t\t\tfunction openSearch(open) {\n\t\t\t\tsearchBox.hidden = !open;\n\t\t\t\tvar btn = document.getElementById('task-list-search-toggle');\n\t\t\t\tif (btn) btn.setAttribute('aria-expanded', String(open));\n\t\t\t\tif (open) { setCollapsed(false); searchInput.focus(); }\n\t\t\t\telse { searchInput.value = ''; filter(); }\n\t\t\t}\n\t\t\tfunction filter() {\n\t\t\t\tvar q = searchInput.value.trim().toLowerCase();\ngroups.querySelectorAll('.task-list-group').forEach(function(group) {\n\t\t\t\t\t\tvar label = group.getAttribute('data-task-list-group');\n\t\t\t\t\t\tvar wasSearching = group.hasAttribute('data-searching');\n\t\t\t\t\t\tif (q && !wasSearching) {\n\t\t\t\t\t\t\t// Capture the current state even if its toggle event is still queued.\n\t\t\t\t\t\t\tgroupState[label] = Object.assign({}, groupState[label], { closed: !group.open });\n\t\t\t\t\t\t\tsaveGroupState();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar visible = 0;\t\t\t\t\tgroup.querySelectorAll('[data-task-list-row]').forEach(function(row) {\n\t\t\t\t\t\tvar match = !q || (row.getAttribute('data-task-list-title') || '').toLowerCase().indexOf(q) !== -1;\n\t\t\t\t\t\trow.hidden = !match; if (match) visible++;\n\t\t\t\t\t});\n\t\t\t\t\tgroup.hidden = visible === 0;\n\t\t\t\t\tgroup.toggleAttribute('data-searching', !!q);\n\t\t\t\t\t\tif (q) group.open = visible > 0;\n\t\t\t\t\t\telse if (wasSearching) group.open = !(groupState[label] || {}).closed;\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction syncActiveRow() {\n\t\t\t\tvar m = window.location.pathname.match(/^\\/tasks\\/([^/]+)$/);\n\t\t\t\tvar id = m ? m[1] : '';\n\t\t\t\tgroups.querySelectorAll('[data-task-list-row]').forEach(function(row) {\n\t\t\t\t\tif (row.getAttribute('data-task-list-row') === id) row.setAttribute('aria-current', 'page');\n\t\t\t\t\telse row.removeAttribute('aria-current');\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tdocument.addEventListener('click', function(e) {\n\t\t\t\tif (e.target.closest('#task-list-toggle')) { e.preventDefault(); setCollapsed(!root.classList.contains('task-list-collapsed')); }\n\t\t\t\telse if (e.target.closest('#task-list-search-toggle')) { e.preventDefault(); openSearch(searchBox.hidden); }\n\t\t\t});\n\t\t\tdocument.addEventListener('keydown', function(e) {\n\t\t\t\tif (!root.hasAttribute('data-shell-frame') || e.defaultPrevented || e.isComposing || e.repeat || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'b') return;\n\t\t\t\te.preventDefault();\n\t\t\t\tsetCollapsed(!root.classList.contains('task-list-collapsed'));\n\t\t\t});\n\t\t\tsearchInput.addEventListener('input', filter);\n\t\t\tsearchInput.addEventListener('keydown', function(e) { if (e.key === 'Escape') { e.preventDefault(); openSearch(false); } });\n\n\t\t\tvar drag = null;\n\t\t\tdivider.addEventListener('pointerdown', function(e) {\n\t\t\t\tif (e.button !== 0) return;\n\t\t\t\te.preventDefault();\n\t\t\t\tdrag = { id: e.pointerId, x: e.clientX, width: panel.getBoundingClientRect().width };\n\t\t\t\tdivider.setPointerCapture(e.pointerId);\n\t\t\t\troot.classList.add('task-list-resizing');\n\t\t\t});\n\t\t\tdivider.addEventListener('pointermove', function(e) { if (drag && e.pointerId === drag.id) setWidth(drag.width + e.clientX - drag.x, false); });\n\t\t\tfunction endDrag() { if (!drag) return; drag = null; root.classList.remove('task-list-resizing'); setWidth(currentWidth(), true); }\n\t\t\tdivider.addEventListener('pointerup', endDrag);\n\t\t\tdivider.addEventListener('pointercancel', endDrag);\n\t\t\tdivider.addEventListener('lostpointercapture', endDrag);\n\t\t\tdivider.addEventListener('dblclick', function() { setWidth(300, true); });\n\t\t\tdivider.addEventListener('keydown', function(e) {\n\t\t\t\tvar w = currentWidth();\n\t\t\t\tif (e.key === 'ArrowLeft') w -= 20; else if (e.key === 'ArrowRight') w += 20; else return;\n\t\t\t\te.preventDefault(); setWidth(w, true);\n\t\t\t});\n\n\t\t\tvar groupStateKey = 'openvibely.taskListGroups';\n\t\t\tvar groupState = {};\n\t\t\ttry { groupState = JSON.parse(localStorage.getItem(groupStateKey) || '{}') || {}; } catch (_) {}\n\t\t\tfunction saveGroupState() { try { localStorage.setItem(groupStateKey, JSON.stringify(groupState)); } catch (_) {} }\n\t\t\tfunction syncMore(group) {\n\t\t\t\tvar btn = group.querySelector('.task-list-more');\n\t\t\t\tif (btn) btn.textContent = group.hasAttribute('data-expanded') ? 'Show less' : 'Show ' + btn.getAttribute('data-task-list-more') + ' more';\n\t\t\t}\n\t\t\tfunction restoreGroups() {\n\t\t\t\tgroups.querySelectorAll('.task-list-group').forEach(function(group) {\n\t\t\t\t\tvar st = groupState[group.getAttribute('data-task-list-group')] || {};\n\t\t\t\t\tgroup.open = !st.closed;\n\t\t\t\t\tgroup.toggleAttribute('data-expanded', !!st.expanded);\n\t\t\t\t\tsyncMore(group);\n\t\t\t\t});\n\t\t\t}\n\t\t\tgroups.addEventListener('toggle', function(e) {\n\t\t\t\tvar group = e.target;\n\t\t\t\tif (!group.classList || !group.classList.contains('task-list-group')) return;\n\t\t\t\t// Search expansion is temporary, including after a live list refresh.\n\t\t\t\tif (searchInput.value.trim()) return;\n\t\t\t\tvar label = group.getAttribute('data-task-list-group');\n\t\t\t\tgroupState[label] = Object.assign({}, groupState[label], { closed: !group.open });\n\t\t\t\tsaveGroupState();\n\t\t\t}, true);\n\t\t\tgroups.addEventListener('click', function(e) {\n\t\t\t\tif (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;\n\t\t\t\tvar row = e.target.closest('[data-task-list-row]');\n\t\t\t\tif (!row) return;\n\t\t\t\tvar main = document.getElementById('main-content');\n\t\t\t\tvar thread = main && main.querySelector('#task-thread-view');\n\t\t\t\t// Cached navigation displays the new task before the URL changes.\n\t\t\t\t// A cold navigation hides the outgoing thread; allow clicking back to it.\n\t\t\t\tif (!thread || thread.closest('[hidden], .hidden, [data-workspace-hidden]') || main.hasAttribute('data-page-loading') || thread.getAttribute('data-task-id') !== row.getAttribute('data-task-list-row')) return;\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t}, true);\n\t\t\tgroups.addEventListener('click', function(e) {\n\t\t\t\tvar btn = e.target.closest('.task-list-more');\n\t\t\t\tif (!btn) return;\n\t\t\t\tvar group = btn.closest('.task-list-group');\n\t\t\t\tvar expanded = !group.hasAttribute('data-expanded');\n\t\t\t\tgroup.toggleAttribute('data-expanded', expanded);\n\t\t\t\tvar label = group.getAttribute('data-task-list-group');\n\t\t\t\tgroupState[label] = Object.assign({}, groupState[label], { expanded: expanded });\n\t\t\t\tsaveGroupState();\n\t\t\t\tsyncMore(group);\n\t\t\t});\n\n\t\t\tvar hoverCard = document.createElement('div');\n\t\t\thoverCard.className = 'task-list-hovercard ov-menu';\n\t\t\thoverCard.setAttribute('role', 'tooltip');\n\t\t\thoverCard.hidden = true;\n\t\t\tdocument.body.appendChild(hoverCard);\n\t\t\tvar hoverTimer = null, hoverRow = null;\n\t\t\tfunction hideHoverCard() { clearTimeout(hoverTimer); hoverRow = null; hoverCard.hidden = true; }\n\t\t\tfunction showHoverCard(row) {\n\t\t\t\thoverCard.replaceChildren();\n\t\t\t\tvar head = document.createElement('div'); head.className = 'task-list-hovercard-head';\n\t\t\t\tvar icon = row.querySelector('[data-task-state-icon]');\n\t\t\t\tif (icon) head.appendChild(icon.cloneNode(true));\n\t\t\t\tvar title = document.createElement('strong'); title.textContent = row.getAttribute('data-task-list-title') || '';\n\t\t\t\thead.appendChild(title);\n\t\t\t\thoverCard.appendChild(head);\n\t\t\t\tvar prompt = row.querySelector('template[data-task-list-prompt]');\n\t\t\t\tif (prompt && prompt.content.textContent.trim()) {\n\t\t\t\t\tvar p = document.createElement('p'); p.className = 'task-list-hovercard-prompt'; p.textContent = prompt.content.textContent.trim();\n\t\t\t\t\thoverCard.appendChild(p);\n\t\t\t\t}\n\t\t\t\tvar meta = document.createElement('div'); meta.className = 'task-list-hovercard-meta';\n\t\t\t\tvar state = icon ? (icon.getAttribute('aria-label') || '').replace(/^Task state:\\s*/, '') : '';\n\t\t\t\tmeta.textContent = (state ? state + ' · ' : '') + 'Updated ' + (row.getAttribute('data-task-list-age') || '') + (row.getAttribute('data-task-list-age') === 'now' ? '' : ' ago');\n\t\t\t\thoverCard.appendChild(meta);\n\t\t\t\thoverCard.hidden = false;\n\t\t\t\tvar r = row.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();\n\t\t\t\tvar top = Math.max(8, Math.min(r.top - 4, window.innerHeight - hoverCard.offsetHeight - 8));\n\t\t\t\thoverCard.style.left = Math.round(panelRect.right + 8) + 'px';\n\t\t\t\thoverCard.style.top = Math.round(top) + 'px';\n\t\t\t}\n\t\t\tgroups.addEventListener('mouseover', function(e) {\n\t\t\t\tvar row = e.target.closest('[data-task-list-row]');\n\t\t\t\tif (row === hoverRow) return;\n\t\t\t\tclearTimeout(hoverTimer);\n\t\t\t\thoverRow = row;\n\t\t\t\tif (!row) { hoverCard.hidden = true; return; }\n\t\t\t\thoverTimer = setTimeout(function() { if (hoverRow === row && row.isConnected) showHoverCard(row); }, hoverCard.hidden ? 450 : 60);\n\t\t\t});\n\t\t\tgroups.addEventListener('mouseleave', hideHoverCard);\n\t\t\tgroups.addEventListener('scroll', hideHoverCard, { passive: true });\n\t\t\tgroups.addEventListener('click', hideHoverCard);\n\n\t\t\tvar refreshTimer = null, refreshAt = 0;\n\t\t\tfunction refreshSoon(delay) {\n\t\t\t\tvar at = Date.now() + delay;\n\t\t\t\tif (refreshTimer && refreshAt <= at) return;\n\t\t\t\tclearTimeout(refreshTimer);\n\t\t\t\trefreshAt = at;\n\t\t\t\trefreshTimer = setTimeout(function() { refreshTimer = null; if (window.htmx) htmx.trigger(groups, 'taskListRefresh'); }, delay);\n\t\t\t}\n\t\t\tfunction currentProjectID() {\n\t\t\t\tvar m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);\n\t\t\t\treturn m ? decodeURIComponent(m[1]) : '';\n\t\t\t}\n\t\t\tvar listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued', 'task_goal_updated', 'task_goal_paused', 'task_goal_resumed', 'task_goal_cleared', 'task_goal_evaluated', 'task_goal_followup_queued'];\n\t\t\twindow.addEventListener('sse-task-event', function(e) {\n\t\t\t\tvar data = e.detail || {};\n\t\t\t\tif (listEvents.indexOf(data.type) === -1) return;\n\t\t\t\tif (data.project_id && data.project_id !== currentProjectID()) return;\n\t\t\t\trefreshSoon(300);\n\t\t\t});\n\t\t\twindow.addEventListener('sse-live-connected', function() { refreshSoon(300); });\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(e) {\n\t\t\t\tvar cfg = e.detail && e.detail.requestConfig;\n\t\t\t\tif (!cfg || !e.detail.successful || cfg.verb === 'get' || e.detail.target === groups) return;\n\t\t\t\tif (!/^\\/(tasks|thread-inputs|executions)\\b/.test(cfg.path || '')) return;\n\t\t\t\trefreshSoon(150);\n\t\t\t\tsetTimeout(function() { refreshSoon(0); }, 1500);\n\t\t\t});\n\n\t\t\t// Replacing a row between pointerdown and pointerup makes the browser drop the click.\n\t\t\tvar pressing = false, deferredRefresh = false, lastListHTML = null;\n\t\t\tgroups.addEventListener('pointerdown', function() { pressing = true; });\n\t\t\tfunction endPress() {\n\t\t\t\tif (!pressing) return;\n\t\t\t\tsetTimeout(function() {\n\t\t\t\t\tpressing = false;\n\t\t\t\t\tif (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }\n\t\t\t\t}, 0);\n\t\t\t}\n\t\t\tdocument.addEventListener('pointerup', endPress, true);\n\t\t\tdocument.addEventListener('pointercancel', endPress, true);\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(e) {\n\t\t\t\tif (e.detail.target !== groups) return;\n\t\t\t\tif (pressing) { e.detail.shouldSwap = false; deferredRefresh = true; return; }\n\t\t\t\tif (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }\n\t\t\t\tlastListHTML = e.detail.serverResponse;\n\t\t\t\thideHoverCard();\n\t\t\t});\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { restoreGroups(); filter(); syncActiveRow(); } });\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', syncActiveRow);\n\t\t\twindow.addEventListener('popstate', syncActiveRow);\n\t\t\twindow.addEventListener('resize', function() { setWidth(currentWidth(), false); });\n\t\t\tfunction activeProjectID() {\n\t\t\t\tvar fromURL = new URLSearchParams(location.search).get('project_id');\n\t\t\t\tif (fromURL) return fromURL;\n\t\t\t\tvar sel = document.getElementById('project-selector');\n\t\t\t\treturn sel ? sel.value : '';\n\t\t\t}\n\t\t\tfunction syncProject() {\n\t\t\t\tvar pid = activeProjectID();\n\t\t\t\tif (!pid || pid === currentProjectID()) return;\n\t\t\t\tclearTimeout(refreshTimer); refreshTimer = null;\n\t\t\t\tgroups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(pid));\n\t\t\t\tif (window.htmx) { htmx.process(groups); htmx.trigger(groups, 'taskListRefresh'); }\n\t\t\t}\n\t\t\tdocument.addEventListener('change', function(e) { if (e.target && e.target.id === 'project-selector') syncProject(); });\n\t\t\tdocument.body.addEventListener('htmx:pushedIntoHistory', syncProject);\n\t\t\tdocument.body.addEventListener('htmx:replacedInHistory', syncProject);\n\t\t\tdocument.body.addEventListener('htmx:historyRestore', syncProject);\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', syncProject);\n\t\t\twindow.addEventListener('popstate', syncProject);\n\t\t\tdocument.addEventListener('DOMContentLoaded', syncToggle);\n\t\t\tsyncToggle();\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-trigger=\"load, taskListRefresh from:body\" hx-swap=\"innerHTML\" hx-sync=\"this:queue last\" hx-push-url=\"false\"></div></aside><div id=\"task-list-divider\" role=\"separator\" aria-orientation=\"vertical\" aria-label=\"Resize task list\" tabindex=\"0\"></div><script>\n\t\t(function() {\n\t\t\tvar root = document.documentElement;\n\t\t\tvar panel = document.getElementById('task-list-panel');\n\t\t\tvar groups = document.getElementById('task-list-groups');\n\t\t\tvar divider = document.getElementById('task-list-divider');\n\t\t\tvar searchBox = panel.querySelector('.task-list-search');\n\t\t\tvar searchInput = document.getElementById('task-list-search-input');\n\t\t\tvar widthKey = 'openvibely.taskListWidth';\n\t\t\tvar collapsedKey = 'openvibely.taskListCollapsed';\n\t\t\tvar MIN = 200, MAX = 560;\n\n\t\t\tfunction clampWidth(w) { return Math.round(Math.max(MIN, Math.min(MAX, w, window.innerWidth - 480))); }\n\t\t\tfunction setWidth(w, persist) {\n\t\t\t\tvar next = clampWidth(w);\n\t\t\t\troot.style.setProperty('--task-list-width', next + 'px');\n\t\t\t\tdivider.setAttribute('aria-valuenow', String(next));\n\t\t\t\tif (persist) try { localStorage.setItem(widthKey, String(next)); } catch (_) {}\n\t\t\t}\n\t\t\tfunction currentWidth() { return parseFloat(getComputedStyle(root).getPropertyValue('--task-list-width')) || 300; }\n\t\t\ttry { var saved = parseFloat(localStorage.getItem(widthKey)); if (saved) setWidth(saved, false); } catch (_) {}\n\t\t\ttry { if (localStorage.getItem(collapsedKey) === 'true') root.classList.add('task-list-collapsed'); } catch (_) {}\n\n\t\t\tfunction toggleButton() { return document.getElementById('task-list-toggle'); }\n\t\t\tfunction syncToggle() {\n\t\t\t\tvar btn = toggleButton(); if (!btn) return;\n\t\t\t\tvar collapsed = root.classList.contains('task-list-collapsed');\n\t\t\t\tbtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');\n\t\t\t\tbtn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');\n\t\t\t}\n\t\t\tfunction setCollapsed(collapsed) {\n\t\t\t\troot.classList.toggle('task-list-collapsed', collapsed);\n\t\t\t\ttry { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}\n\t\t\t\tsyncToggle();\n\t\t\t}\n\t\t\tfunction openSearch(open) {\n\t\t\t\tsearchBox.hidden = !open;\n\t\t\t\tvar btn = document.getElementById('task-list-search-toggle');\n\t\t\t\tif (btn) btn.setAttribute('aria-expanded', String(open));\n\t\t\t\tif (open) { setCollapsed(false); searchInput.focus(); }\n\t\t\t\telse { searchInput.value = ''; filter(); }\n\t\t\t}\n\t\t\tfunction filter() {\n\t\t\t\tvar q = searchInput.value.trim().toLowerCase();\ngroups.querySelectorAll('.task-list-group').forEach(function(group) {\n\t\t\t\t\t\tvar label = group.getAttribute('data-task-list-group');\n\t\t\t\t\t\tvar wasSearching = group.hasAttribute('data-searching');\n\t\t\t\t\t\tif (q && !wasSearching) {\n\t\t\t\t\t\t\t// Capture the current state even if its toggle event is still queued.\n\t\t\t\t\t\t\tgroupState[label] = Object.assign({}, groupState[label], { closed: !group.open });\n\t\t\t\t\t\t\tsaveGroupState();\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar visible = 0;\t\t\t\t\tgroup.querySelectorAll('[data-task-list-row]').forEach(function(row) {\n\t\t\t\t\t\tvar match = !q || (row.getAttribute('data-task-list-title') || '').toLowerCase().indexOf(q) !== -1;\n\t\t\t\t\t\trow.hidden = !match; if (match) visible++;\n\t\t\t\t\t});\n\t\t\t\t\tgroup.hidden = visible === 0;\n\t\t\t\t\tgroup.toggleAttribute('data-searching', !!q);\n\t\t\t\t\t\tif (q) group.open = visible > 0;\n\t\t\t\t\t\telse if (wasSearching) group.open = !(groupState[label] || {}).closed;\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction syncActiveRow() {\n\t\t\t\tvar m = window.location.pathname.match(/^\\/tasks\\/([^/]+)$/);\n\t\t\t\tvar id = m ? m[1] : '';\n\t\t\t\tgroups.querySelectorAll('[data-task-list-row]').forEach(function(row) {\n\t\t\t\t\tif (row.getAttribute('data-task-list-row') === id) row.setAttribute('aria-current', 'page');\n\t\t\t\t\telse row.removeAttribute('aria-current');\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tdocument.addEventListener('click', function(e) {\n\t\t\t\tif (e.target.closest('#task-list-toggle')) { e.preventDefault(); setCollapsed(!root.classList.contains('task-list-collapsed')); }\n\t\t\t\telse if (e.target.closest('#task-list-search-toggle')) { e.preventDefault(); openSearch(searchBox.hidden); }\n\t\t\t});\n\t\t\tdocument.addEventListener('keydown', function(e) {\n\t\t\t\tif (!root.hasAttribute('data-shell-frame') || e.defaultPrevented || e.isComposing || e.repeat || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'b') return;\n\t\t\t\te.preventDefault();\n\t\t\t\tsetCollapsed(!root.classList.contains('task-list-collapsed'));\n\t\t\t});\n\t\t\tsearchInput.addEventListener('input', filter);\n\t\t\tsearchInput.addEventListener('keydown', function(e) { if (e.key === 'Escape') { e.preventDefault(); openSearch(false); } });\n\n\t\t\tvar drag = null;\n\t\t\tdivider.addEventListener('pointerdown', function(e) {\n\t\t\t\tif (e.button !== 0) return;\n\t\t\t\te.preventDefault();\n\t\t\t\tdrag = { id: e.pointerId, x: e.clientX, width: panel.getBoundingClientRect().width };\n\t\t\t\tdivider.setPointerCapture(e.pointerId);\n\t\t\t\troot.classList.add('task-list-resizing');\n\t\t\t});\n\t\t\tdivider.addEventListener('pointermove', function(e) { if (drag && e.pointerId === drag.id) setWidth(drag.width + e.clientX - drag.x, false); });\n\t\t\tfunction endDrag() { if (!drag) return; drag = null; root.classList.remove('task-list-resizing'); setWidth(currentWidth(), true); }\n\t\t\tdivider.addEventListener('pointerup', endDrag);\n\t\t\tdivider.addEventListener('pointercancel', endDrag);\n\t\t\tdivider.addEventListener('lostpointercapture', endDrag);\n\t\t\tdivider.addEventListener('dblclick', function() { setWidth(300, true); });\n\t\t\tdivider.addEventListener('keydown', function(e) {\n\t\t\t\tvar w = currentWidth();\n\t\t\t\tif (e.key === 'ArrowLeft') w -= 20; else if (e.key === 'ArrowRight') w += 20; else return;\n\t\t\t\te.preventDefault(); setWidth(w, true);\n\t\t\t});\n\n\t\t\tvar groupStateKey = 'openvibely.taskListGroups';\n\t\t\tvar groupState = {};\n\t\t\ttry { groupState = JSON.parse(localStorage.getItem(groupStateKey) || '{}') || {}; } catch (_) {}\n\t\t\tfunction saveGroupState() { try { localStorage.setItem(groupStateKey, JSON.stringify(groupState)); } catch (_) {} }\n\t\t\tfunction syncMore(group) {\n\t\t\t\tvar btn = group.querySelector('.task-list-more');\n\t\t\t\tif (btn) btn.textContent = group.hasAttribute('data-expanded') ? 'Show less' : 'Show ' + btn.getAttribute('data-task-list-more') + ' more';\n\t\t\t}\n\t\t\tfunction restoreGroups() {\n\t\t\t\tgroups.querySelectorAll('.task-list-group').forEach(function(group) {\n\t\t\t\t\tvar st = groupState[group.getAttribute('data-task-list-group')] || {};\n\t\t\t\t\tgroup.open = !st.closed;\n\t\t\t\t\tgroup.toggleAttribute('data-expanded', !!st.expanded);\n\t\t\t\t\tsyncMore(group);\n\t\t\t\t});\n\t\t\t}\n\t\t\tgroups.addEventListener('toggle', function(e) {\n\t\t\t\tvar group = e.target;\n\t\t\t\tif (!group.classList || !group.classList.contains('task-list-group')) return;\n\t\t\t\t// Search expansion is temporary, including after a live list refresh.\n\t\t\t\tif (searchInput.value.trim()) return;\n\t\t\t\tvar label = group.getAttribute('data-task-list-group');\n\t\t\t\tgroupState[label] = Object.assign({}, groupState[label], { closed: !group.open });\n\t\t\t\tsaveGroupState();\n\t\t\t}, true);\n\t\t\tgroups.addEventListener('click', function(e) {\n\t\t\t\tif (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;\n\t\t\t\tvar row = e.target.closest('[data-task-list-row]');\n\t\t\t\tif (!row) return;\n\t\t\t\tvar main = document.getElementById('main-content');\n\t\t\t\tvar thread = main && main.querySelector('#task-thread-view');\n\t\t\t\t// Cached navigation displays the new task before the URL changes.\n\t\t\t\t// A cold navigation hides the outgoing thread; allow clicking back to it.\n\t\t\t\tif (!thread || thread.closest('[hidden], .hidden, [data-workspace-hidden]') || main.hasAttribute('data-page-loading') || thread.getAttribute('data-task-id') !== row.getAttribute('data-task-list-row')) return;\n\t\t\t\te.preventDefault();\n\t\t\t\te.stopPropagation();\n\t\t\t}, true);\n\t\t\tgroups.addEventListener('click', function(e) {\n\t\t\t\tvar btn = e.target.closest('.task-list-more');\n\t\t\t\tif (!btn) return;\n\t\t\t\tvar group = btn.closest('.task-list-group');\n\t\t\t\tvar expanded = !group.hasAttribute('data-expanded');\n\t\t\t\tgroup.toggleAttribute('data-expanded', expanded);\n\t\t\t\tvar label = group.getAttribute('data-task-list-group');\n\t\t\t\tgroupState[label] = Object.assign({}, groupState[label], { expanded: expanded });\n\t\t\t\tsaveGroupState();\n\t\t\t\tsyncMore(group);\n\t\t\t});\n\n\t\t\tvar hoverCard = document.createElement('div');\n\t\t\thoverCard.className = 'task-list-hovercard ov-menu';\n\t\t\thoverCard.setAttribute('role', 'tooltip');\n\t\t\thoverCard.hidden = true;\n\t\t\tdocument.body.appendChild(hoverCard);\n\t\t\tvar hoverTimer = null, hoverRow = null;\n\t\t\tfunction hideHoverCard() { clearTimeout(hoverTimer); hoverRow = null; hoverCard.hidden = true; }\n\t\t\tfunction showHoverCard(row) {\n\t\t\t\thoverCard.replaceChildren();\n\t\t\t\tvar head = document.createElement('div'); head.className = 'task-list-hovercard-head';\n\t\t\t\tvar icon = row.querySelector('[data-task-state-icon]');\n\t\t\t\tif (icon) head.appendChild(icon.cloneNode(true));\n\t\t\t\tvar title = document.createElement('strong'); title.textContent = row.getAttribute('data-task-list-title') || '';\n\t\t\t\thead.appendChild(title);\n\t\t\t\thoverCard.appendChild(head);\n\t\t\t\tvar prompt = row.querySelector('template[data-task-list-prompt]');\n\t\t\t\tif (prompt && prompt.content.textContent.trim()) {\n\t\t\t\t\tvar p = document.createElement('p'); p.className = 'task-list-hovercard-prompt'; p.textContent = prompt.content.textContent.trim();\n\t\t\t\t\thoverCard.appendChild(p);\n\t\t\t\t}\n\t\t\t\tvar meta = document.createElement('div'); meta.className = 'task-list-hovercard-meta';\n\t\t\t\tvar state = icon ? (icon.getAttribute('aria-label') || '').replace(/^Task state:\\s*/, '') : '';\n\t\t\t\tmeta.textContent = (state ? state + ' · ' : '') + 'Updated ' + (row.getAttribute('data-task-list-age') || '') + (row.getAttribute('data-task-list-age') === 'now' ? '' : ' ago');\n\t\t\t\thoverCard.appendChild(meta);\n\t\t\t\thoverCard.hidden = false;\n\t\t\t\tvar r = row.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();\n\t\t\t\tvar top = Math.max(8, Math.min(r.top - 4, window.innerHeight - hoverCard.offsetHeight - 8));\n\t\t\t\thoverCard.style.left = Math.round(panelRect.right + 8) + 'px';\n\t\t\t\thoverCard.style.top = Math.round(top) + 'px';\n\t\t\t}\n\t\t\tgroups.addEventListener('mouseover', function(e) {\n\t\t\t\tvar row = e.target.closest('[data-task-list-row]');\n\t\t\t\tif (row === hoverRow) return;\n\t\t\t\tclearTimeout(hoverTimer);\n\t\t\t\thoverRow = row;\n\t\t\t\tif (!row) { hoverCard.hidden = true; return; }\n\t\t\t\thoverTimer = setTimeout(function() { if (hoverRow === row && row.isConnected) showHoverCard(row); }, hoverCard.hidden ? 450 : 60);\n\t\t\t});\n\t\t\tgroups.addEventListener('mouseleave', hideHoverCard);\n\t\t\tgroups.addEventListener('scroll', hideHoverCard, { passive: true });\n\t\t\tgroups.addEventListener('click', hideHoverCard);\n\n\t\t\tvar refreshTimer = null, refreshAt = 0;\n\t\t\tfunction refreshSoon(delay) {\n\t\t\t\tvar at = Date.now() + delay;\n\t\t\t\tif (refreshTimer && refreshAt <= at) return;\n\t\t\t\tclearTimeout(refreshTimer);\n\t\t\t\trefreshAt = at;\n\t\t\t\trefreshTimer = setTimeout(function() { refreshTimer = null; if (window.htmx) htmx.trigger(groups, 'taskListRefresh'); }, delay);\n\t\t\t}\n\t\t\tfunction currentProjectID() {\n\t\t\t\tvar m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);\n\t\t\t\treturn m ? decodeURIComponent(m[1]) : '';\n\t\t\t}\n\t\t\tvar listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued', 'task_goal_updated', 'task_goal_paused', 'task_goal_resumed', 'task_goal_cleared', 'task_goal_evaluated', 'task_goal_followup_queued'];\n\t\t\twindow.addEventListener('sse-task-event', function(e) {\n\t\t\t\tvar data = e.detail || {};\n\t\t\t\tif (listEvents.indexOf(data.type) === -1) return;\n\t\t\t\tif (data.project_id && data.project_id !== currentProjectID()) return;\n\t\t\t\trefreshSoon(300);\n\t\t\t});\n\t\t\twindow.addEventListener('sse-live-connected', function() { refreshSoon(300); });\n\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(e) {\n\t\t\t\tvar cfg = e.detail && e.detail.requestConfig;\n\t\t\t\tif (!cfg || !e.detail.successful || cfg.verb === 'get' || e.detail.target === groups) return;\n\t\t\t\tif (!/^\\/(tasks|thread-inputs|executions)\\b/.test(cfg.path || '')) return;\n\t\t\t\trefreshSoon(150);\n\t\t\t\tsetTimeout(function() { refreshSoon(0); }, 1500);\n\t\t\t});\n\n\t\t\t// Replacing a row between pointerdown and pointerup makes the browser drop the click.\n\t\t\tvar pressing = false, deferredRefresh = false, lastListHTML = null;\n\t\t\tgroups.addEventListener('pointerdown', function() { pressing = true; });\n\t\t\tfunction endPress() {\n\t\t\t\tif (!pressing) return;\n\t\t\t\tsetTimeout(function() {\n\t\t\t\t\tpressing = false;\n\t\t\t\t\tif (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }\n\t\t\t\t}, 0);\n\t\t\t}\n\t\t\tdocument.addEventListener('pointerup', endPress, true);\n\t\t\tdocument.addEventListener('pointercancel', endPress, true);\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(e) {\n\t\t\t\tif (e.detail.target !== groups) return;\n\t\t\t\tif (pressing) { e.detail.shouldSwap = false; deferredRefresh = true; return; }\n\t\t\t\tif (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }\n\t\t\t\tlastListHTML = e.detail.serverResponse;\n\t\t\t\thideHoverCard();\n\t\t\t});\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { restoreGroups(); filter(); syncActiveRow(); } });\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', syncActiveRow);\n\t\t\twindow.addEventListener('popstate', syncActiveRow);\n\t\t\twindow.addEventListener('resize', function() { setWidth(currentWidth(), false); });\n\t\t\tfunction activeProjectID() {\n\t\t\t\tvar fromURL = new URLSearchParams(location.search).get('project_id');\n\t\t\t\tif (fromURL) return fromURL;\n\t\t\t\tvar sel = document.getElementById('project-selector');\n\t\t\t\treturn sel ? sel.value : '';\n\t\t\t}\n\t\t\tfunction syncProject() {\n\t\t\t\tvar pid = activeProjectID();\n\t\t\t\tif (!pid || pid === currentProjectID()) return;\n\t\t\t\tclearTimeout(refreshTimer); refreshTimer = null;\n\t\t\t\tgroups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(pid));\n\t\t\t\tif (window.htmx) { htmx.process(groups); htmx.trigger(groups, 'taskListRefresh'); }\n\t\t\t}\n\t\t\tdocument.addEventListener('change', function(e) { if (e.target && e.target.id === 'project-selector') syncProject(); });\n\t\t\tdocument.body.addEventListener('htmx:pushedIntoHistory', syncProject);\n\t\t\tdocument.body.addEventListener('htmx:replacedInHistory', syncProject);\n\t\t\tdocument.body.addEventListener('htmx:historyRestore', syncProject);\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', syncProject);\n\t\t\twindow.addEventListener('popstate', syncProject);\n\t\t\tdocument.addEventListener('DOMContentLoaded', syncToggle);\n\t\t\tsyncToggle();\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -369,38 +356,38 @@ func TaskListHeaderControls(currentProjectID string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var17 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var17 == nil {
-			templ_7745c5c3_Var17 = templ.NopComponent
+		templ_7745c5c3_Var16 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var16 == nil {
+			templ_7745c5c3_Var16 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div id=\"task-list-header\" aria-label=\"Task list controls\"><button type=\"button\" id=\"task-list-toggle\" class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-controls=\"task-list-panel\" aria-expanded=\"true\" aria-label=\"Collapse task list\" title=\"Toggle task list (⌘B)\"><svg viewBox=\"0 0 24 24\" class=\"h-5 w-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path class=\"task-list-toggle-fill\" d=\"M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4Z\" stroke=\"none\"></path><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><path d=\"M9 3v18\"></path></svg></button> <span class=\"task-list-brand\">OpenVibely</span><div class=\"task-list-actions\"><button type=\"button\" id=\"task-list-search-toggle\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-expanded=\"false\" aria-label=\"Search tasks\" title=\"Search tasks\"><svg viewBox=\"0 0 24 24\" class=\"h-5 w-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"10\" cy=\"10\" r=\"6\"></circle><path d=\"m15 15 5 5\"></path></svg></button> <a id=\"task-list-new\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" data-nav-base=\"/tasks/new\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<div id=\"task-list-header\" aria-label=\"Task list controls\"><button type=\"button\" id=\"task-list-toggle\" class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-controls=\"task-list-panel\" aria-expanded=\"true\" aria-label=\"Collapse task list\" title=\"Toggle task list (⌘B)\"><svg viewBox=\"0 0 24 24\" class=\"h-5 w-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path class=\"task-list-toggle-fill\" d=\"M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4Z\" stroke=\"none\"></path><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><path d=\"M9 3v18\"></path></svg></button> <span class=\"task-list-brand\">OpenVibely</span><div class=\"task-list-actions\"><button type=\"button\" id=\"task-list-search-toggle\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-expanded=\"false\" aria-label=\"Search tasks\" title=\"Search tasks\"><svg viewBox=\"0 0 24 24\" class=\"h-5 w-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"10\" cy=\"10\" r=\"6\"></circle><path d=\"m15 15 5 5\"></path></svg></button> <a id=\"task-list-new\" class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" data-nav-base=\"/tasks/new\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var18 templ.SafeURL
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/tasks/new?project_id=" + url.QueryEscape(currentProjectID)))
+		var templ_7745c5c3_Var17 templ.SafeURL
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/tasks/new?project_id=" + url.QueryEscape(currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 390, Col: 211}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 389, Col: 211}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-get=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue("/tasks/new?project_id=" + url.QueryEscape(currentProjectID))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 390, Col: 283}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" hx-target=\"#main-content\" hx-push-url=\"true\" aria-label=\"New task\" title=\"New task\"><svg viewBox=\"0 0 24 24\" class=\"h-5 w-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></a></div></div>")
+		var templ_7745c5c3_Var18 string
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue("/tasks/new?project_id=" + url.QueryEscape(currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 389, Col: 283}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" hx-target=\"#main-content\" hx-push-url=\"true\" aria-label=\"New task\" title=\"New task\"><svg viewBox=\"0 0 24 24\" class=\"h-5 w-5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\"></path></svg></a></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
