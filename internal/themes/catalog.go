@@ -306,7 +306,7 @@ func openVibelyDarkTheme() Theme {
 		"--ov-surface-default-rail":  "#15191E",
 		"--ov-surface-default-frame": "#191E24",
 		"--ov-surface-default-page":  "#15191E",
-		"--ov-surface-default-card":  "oklch(var(--b1))",
+		"--ov-surface-default-card":  "#191E24",
 		"--ov-surface-layered-frame": "#1D232A",
 		"--ov-surface-layered-page":  "#15191E",
 		"--ov-surface-layered-card":  "#191E24",

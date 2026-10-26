@@ -3054,13 +3054,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     --surface-default-frame: var(--ov-kanban-column-bg); --surface-default-page: var(--ov-content-bg); --surface-default-card: var(--ov-surface);
                     --surface-layered-frame: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text)); --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 92%, black); --surface-layered-card: var(--ov-surface);
                 }
+                html[data-theme="light"][data-ov-theme-layer="custom"] { --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 94%, var(--ov-text)); }
                 /* Explicit surface roles supplied by the selected theme take precedence. */
                 html:root[data-theme-surfaces] {
                     --surface-default-rail: var(--ov-surface-default-rail); --surface-default-frame: var(--ov-surface-default-frame); --surface-default-page: var(--ov-surface-default-page); --surface-default-card: var(--ov-surface-default-card);
                     --surface-layered-frame: var(--ov-surface-layered-frame); --surface-layered-page: var(--ov-surface-layered-page); --surface-layered-card: var(--ov-surface-layered-card);
                 }
                 html[data-shell-frame][data-theme-surfaces] { --b1: var(--ov-surface-desktop-base); --shell-code: var(--ov-surface-code); }
-                html[data-theme="light"][data-ov-theme-layer="custom"] { --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 94%, var(--ov-text)); }
                 html:root[data-surface-style="default"] { --shell-chrome: var(--surface-default-frame); --shell-page: var(--surface-default-page); --shell-rail: var(--surface-default-rail); --board-card-bg: var(--surface-default-card); }
                 html:root[data-surface-style="layered"] { --shell-chrome: var(--surface-layered-frame); --shell-page: var(--surface-layered-page); --shell-rail: var(--surface-layered-card); --board-card-bg: var(--surface-layered-card); --shell-divider: var(--shell-chrome); }
                 html:root[data-surface-style] #main-content :where(.bg-base-100):where(:not(.chat-input-container):not(.chat-bubble-user-msg):not(.chat-bubble-assistant-msg)) { background-color: var(--board-card-bg) !important; }
@@ -3144,14 +3144,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] body > .drawer > .drawer-content > .navbar { display: none; }
 				/* Board styles share the preview colors at every viewport width. */
 				html { --board-page-bg: var(--shell-page, oklch(var(--b2))); --board-column-bg: var(--shell-chrome, oklch(var(--b3))); }
-				html[data-ov-theme-layer="custom"] { --board-page-bg: var(--shell-page, var(--ov-content-bg)); --board-column-bg: var(--ov-kanban-column-bg); }
+				html[data-ov-theme-layer="custom"] { --board-page-bg: var(--shell-page, var(--ov-content-bg)); --board-column-bg: var(--shell-chrome, var(--ov-kanban-column-bg)); }
 				html[data-board-columns] .kanban-column { background-color: var(--board-column-bg); }
 				html[data-board-columns="tint"] .kanban-column { border: 1px solid var(--board-column-bg); }
 				html[data-board-columns="tint"] .kanban-column { background-color: color-mix(in srgb, var(--board-page-bg) 75%, var(--board-column-bg)) !important; }
 				html[data-board-columns="tintstrip"] .kanban-column { border: 1px solid var(--board-column-bg); background-color: color-mix(in srgb, var(--board-page-bg) 75%, var(--board-column-bg)) !important; padding-top: 0; }
 				html[data-board-columns="tintstrip"] .kanban-column > :first-child { background-color: var(--board-column-bg); margin: 0 -0.75rem 0.75rem; padding: 0 0.75rem; height: 3.25rem; min-height: 3.25rem; border-radius: 0.5rem 0.5rem 0 0; }
-				html[data-board-columns="inset"] .kanban-column { background-color: oklch(var(--b1)) !important; }
-				html[data-ov-theme-layer="custom"][data-board-columns="inset"] .kanban-column { background-color: var(--shell-card, oklch(var(--b1))) !important; }
+				html[data-board-columns="inset"] .kanban-column { background-color: var(--board-card-bg) !important; }
 				html[data-board-columns="inset"][data-surface-style] #main-content .kanban-column .card { background-color: var(--board-page-bg) !important; }
 				html[data-board-columns="inset"][data-surface-style] #main-content .kanban-column .card:not(:hover) { border-color: color-mix(in srgb, oklch(var(--b1)) 92%, oklch(var(--bc))); }
 				.board-columns-preview { --bcp-page: var(--board-page-bg); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: var(--board-card-bg); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
@@ -3161,8 +3160,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.board-columns-preview[data-preview="tint"] .bcp-col { background: color-mix(in srgb, var(--bcp-page) 75%, var(--bcp-frame)); border: 1px solid var(--bcp-frame); }
 				.board-columns-preview[data-preview="tintstrip"] .bcp-col { padding-top: 0; background: color-mix(in srgb, var(--bcp-page) 75%, var(--bcp-frame)); border: 1px solid var(--bcp-frame); }
 				.board-columns-preview[data-preview="tintstrip"] .bcp-head { width: auto; height: 12px; margin: 0 -4px; border-radius: 5px 5px 0 0; background: var(--bcp-frame); }
-				.board-columns-preview[data-preview="inset"] .bcp-col { background: oklch(var(--b1)); }
-				html[data-ov-theme-layer="custom"] .board-columns-preview[data-preview="inset"] .bcp-col { background: var(--shell-card, oklch(var(--b1))); }
+				.board-columns-preview[data-preview="inset"] .bcp-col { background: var(--board-card-bg); }
 				.board-columns-preview[data-preview="inset"] .bcp-card { background: var(--bcp-page); }
 
 				/* Compact icon rail */

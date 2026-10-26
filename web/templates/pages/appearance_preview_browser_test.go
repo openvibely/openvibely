@@ -35,7 +35,7 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
 				expected = "false"
 			}
 			b.waitFor("responsive layout", `String(document.documentElement.hasAttribute('data-shell-frame'))`, expected)
-			for _, theme := range []string{"openvibely-dark", "openvibely-layered", "openvibely-light"} {
+			for _, theme := range []string{"openvibely-dark", "openvibely-light", "catppuccin-mocha", "github-light", "vscode-dark-modern"} {
 				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
 				b.waitFor("independent previews match real surfaces", `(()=>{
       const color=e=>getComputedStyle(e).backgroundColor;
@@ -87,7 +87,7 @@ func TestBrowserFunctional_AppearanceBoardColumnsAtEveryWidth(t *testing.T) {
 				}
 			}
 
-			for _, theme := range []string{"openvibely-dark", "openvibely-layered", "openvibely-light"} {
+			for _, theme := range []string{"openvibely-dark", "openvibely-light", "catppuccin-mocha", "github-light", "vscode-dark-modern"} {
 				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
 				for _, step := range []string{"off", "on"} {
 					b.evaluate(`selectOpenVibelyDisplay('step','` + step + `'); 'selected'`)
@@ -96,6 +96,14 @@ func TestBrowserFunctional_AppearanceBoardColumnsAtEveryWidth(t *testing.T) {
 						b.waitFor("board matches preview: "+theme+"/"+mode, `(()=>{
       const preview=document.querySelector('.board-columns-preview[data-preview="`+mode+`"]');
       const color=e=>getComputedStyle(e).backgroundColor;
+      const before=color(boardSample);
+      const step=openVibelyDisplay.get('step');selectOpenVibelyDisplay('step',step==='on'?'off':'on');
+      if(color(boardSample)!==before)return 'conversation step changed board';
+      selectOpenVibelyDisplay('step',step);
+      if('`+mode+`'==='filled') {
+       const probe=document.createElement('div');probe.style.background='var(--shell-chrome)';document.body.appendChild(probe);
+       const frame=color(probe);probe.remove();if(color(boardSample)!==frame)return 'filled column does not match frame';
+      }
       if(color(boardSample)!==color(preview.querySelector('.bcp-col')))return 'column differs';
       if(color(boardSample.querySelector('.card'))!==color(preview.querySelector('.bcp-card')))return 'card differs';
       if('`+mode+`'==='tintstrip' && color(boardSample.firstElementChild)!==color(preview.querySelector('.bcp-head')))return 'header differs';
@@ -118,7 +126,7 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", nil).Render(r.Context(), w); err != nil {
+		if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", themes.Catalog()).Render(r.Context(), w); err != nil {
 			t.Error(err)
 		}
 	}))
@@ -146,6 +154,19 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
       const colors=()=>Array.from(surfaceSample.children).slice(1).map(e=>{const c=getComputedStyle(e);return [c.color,c.backgroundColor,e.querySelector('.hljs-keyword')&&getComputedStyle(e.querySelector('.hljs-keyword')).color]});
       const previews=()=>['default','layered'].map(v=>{const p=document.querySelector('[data-kind="surfaces"][data-variant="'+v+'"]');return [color(p),color(p.querySelector('.dp-page')),color(p.querySelector('.dp-list')),color(p.querySelector('.dp-surface-card'))]});
       selectOpenVibelyDisplay('surfaces','default'); const before=JSON.stringify(colors()), previewBefore=JSON.stringify(previews());
+      const thumb=document.querySelector('[data-theme-id="`+theme+`"] .theme-thumbnail');
+      if(thumb) {
+       for(const mode of ['default','layered']) {
+        selectOpenVibelyDisplay('surfaces',mode);
+        const preview=document.querySelector('[data-kind="surfaces"][data-variant="'+mode+'"]');
+        if(color(thumb)!==color(preview))return 'theme thumbnail frame differs';
+        if(color(thumb.querySelector('.theme-thumbnail-rail'))!==color(preview.querySelector('.dp-list')))return 'theme thumbnail rail differs';
+        if(color(thumb.querySelector('.theme-thumbnail-page'))!==color(preview.querySelector('.dp-page')))return 'theme thumbnail page differs';
+        if(color(thumb.querySelector('.theme-thumbnail-card'))!==color(preview.querySelector('.dp-surface-card')))return 'theme thumbnail card differs';
+       }
+       selectOpenVibelyDisplay('surfaces','default');
+      }
+
       if(document.documentElement.hasAttribute('data-theme-surfaces')) {
        const p=document.querySelector('[data-kind="surfaces"][data-variant="default"]');
        if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'default page preview differs';

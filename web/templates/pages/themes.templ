@@ -35,6 +35,13 @@ templ ThemesContent(catalog []themes.Theme) {
 			<h2 class="text-2xl font-bold">Appearance</h2>
 		</div>
 		<style>
+            .theme-thumbnail { --tp-frame: var(--tp-default-frame); --tp-page: var(--tp-default-page); --tp-rail: var(--tp-default-rail); --tp-card: var(--tp-default-card); background: var(--tp-frame); padding-top: 8px; }
+            html[data-surface-style="layered"] .theme-thumbnail { --tp-frame: var(--tp-layered-frame); --tp-page: var(--tp-layered-page); --tp-rail: var(--tp-layered-card); --tp-card: var(--tp-layered-card); }
+            .theme-thumbnail-rail { background: var(--tp-rail); }
+            .theme-thumbnail-page { background: var(--tp-page); }
+            .theme-thumbnail-card { background: var(--tp-card); border: 1px solid transparent; border-radius: 4px; padding: 4px; }
+            html[data-surface-style="layered"] .theme-thumbnail-card { border-color: var(--tp-layered-border, var(--tp-frame)); }
+
 			.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }
             .display-preview[data-preview-surfaces="default"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-rail); --dp-surface-card: var(--surface-default-card); }
             .display-preview[data-preview-surfaces="layered"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }
@@ -178,15 +185,15 @@ templ themeCard(theme themes.Theme) {
 					<span class="badge badge-primary badge-sm hidden" data-theme-active-badge>Active</span>
 				</div>
 			</div>
-			<div class="rounded-lg border overflow-hidden" style={ previewOuterStyle(theme) } aria-hidden="true">
+			<div class="theme-thumbnail rounded-lg border overflow-hidden" style={ previewOuterStyle(theme) } aria-hidden="true">
 				<div class="flex min-h-24">
-					<div class="w-16 p-2 space-y-2" style={ previewSidebarStyle(theme) }>
+					<div class="theme-thumbnail-rail w-16 p-2 space-y-2">
 						<div class="h-2 rounded" style={ previewAccentStyle(theme) }></div>
 						<div class="h-2 rounded opacity-70" style={ previewMutedBarStyle(theme) }></div>
 						<div class="h-2 rounded opacity-50" style={ previewMutedBarStyle(theme) }></div>
 					</div>
-					<div class="flex-1 p-3 space-y-2" style={ previewSurfaceStyle(theme) }>
-						<div class="flex items-center gap-2">
+					<div class="theme-thumbnail-page flex-1 p-3 space-y-2">
+						<div class="theme-thumbnail-card flex items-center gap-2">
 							<div class="h-3 w-20 rounded" style={ previewTextBarStyle(theme) }></div>
 							<div class="h-3 w-12 rounded" style={ previewAccentStyle(theme) }></div>
 						</div>
@@ -242,16 +249,28 @@ func previewColor(theme themes.Theme, group, key, fallback string) string {
 	return fallback
 }
 
+// Give every thumbnail its own palette so it does not borrow the selected theme.
 func previewOuterStyle(theme themes.Theme) string {
-	return "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";background:" + previewColor(theme, "semantic", "bg", "#1e1e1e") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
-}
-
-func previewSidebarStyle(theme themes.Theme) string {
-	return "background:" + previewColor(theme, "semantic", "sidebarBg", "#181818")
-}
-
-func previewSurfaceStyle(theme themes.Theme) string {
-	return "background:" + previewColor(theme, "semantic", "surface", "#252526")
+ values := map[string]string{
+  "default-frame": theme.Semantic["contentBg"], "default-page": theme.Semantic["contentBg"],
+  "default-rail": theme.Semantic["surface"], "default-card": theme.Semantic["surface"],
+  "layered-frame": theme.Semantic["surfaceRaised"], "layered-page": theme.Semantic["contentBg"], "layered-card": theme.Semantic["surface"],
+ }
+ if theme.ID == themes.OpenVibelyLightThemeID {
+  values["default-frame"] = "#F5F5F5"
+  values["layered-frame"] = "#F5F5F5"
+  values["layered-page"] = "#E8E8E8"
+ }
+ for key, value := range theme.SurfaceCSS {
+  if strings.HasPrefix(key, "--ov-surface-default-") || strings.HasPrefix(key, "--ov-surface-layered-") {
+   values[strings.TrimPrefix(key, "--ov-surface-")] = value
+  }
+ }
+ style := "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
+ for _, key := range []string{"default-frame", "default-page", "default-rail", "default-card", "layered-frame", "layered-page", "layered-card", "layered-border"} {
+  if value := values[key]; value != "" { style += ";--tp-" + key + ":" + value }
+ }
+ return style
 }
 
 func previewAccentStyle(theme themes.Theme) string {

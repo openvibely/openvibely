@@ -207,7 +207,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			{"selected project tab matches content", ".desktop-project-tab[data-selected=\"true\"]", "backgroundColor", "var(--ov-content-bg)"},
 			{"selected project tab text", ".desktop-project-tab [aria-selected=\"true\"]", "color", "var(--ov-text)"},
 			{"unselected project tab text", ".desktop-project-tab:not([data-selected=\"true\"]) [role=\"tab\"]", "color", "var(--ov-text-muted)"},
-			{"task column matches title bar", "#fixture-column", "backgroundColor", "var(--ov-kanban-column-bg)"},
+			{"task column matches title bar", "#fixture-column", "backgroundColor", "var(--shell-chrome)"},
 			{"task card matches other card pages", "#fixture-column-card", "backgroundColor", "var(--ov-surface)"},
 			{"selected task card border uses text color", "#fixture-selected-card", "borderTopColor", "var(--ov-text)"},
 			{"popup menu surface", "#fixture-menu", "backgroundColor", "var(--ov-surface-raised)"},
@@ -246,7 +246,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 			browser.evaluate(`window.openVibelyThemes.apply('` + palette.id + `');'ok'`)
 			browser.waitFor(palette.id+" enables custom theme layer", `document.documentElement.getAttribute('data-ov-theme-layer')`, "custom")
 			browser.waitFor(palette.id+" title bar", `window.computed('#desktop-project-titlebar', 'backgroundColor')`, palette.sidebar)
-			browser.waitFor(palette.id+" task column matches title bar", `window.matches('#fixture-column', 'backgroundColor', 'var(--ov-kanban-column-bg)')`, "ok")
+			browser.waitFor(palette.id+" task column matches title bar", `window.matches('#fixture-column', 'backgroundColor', 'var(--shell-chrome)')`, "ok")
 			browser.waitFor(palette.id+" popup menu surface", `window.matches('#fixture-menu', 'backgroundColor', 'var(--ov-surface-raised)')`, "ok")
 			browser.waitFor(palette.id+" checked toggle uses button color", `window.matches('#fixture-toggle-on', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
 			browser.waitFor(palette.id+" unchecked toggle uses strong border color", `window.matches('#fixture-toggle-off', 'backgroundColor', 'var(--ov-border-strong)')`, "ok")
