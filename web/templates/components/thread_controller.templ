@@ -79,10 +79,18 @@ templ ThreadControllerScript() {
 						if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
 						else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
 						if (window.renderVisibleChatRows) await window.renderVisibleChatRows(messages);
+						// Live controls and row measurements settle on the next layout frames.
+						// Keep cold history hidden until its final scroll position is ready.
+						if (messages.hasAttribute('data-transcript-hydrating')) await waitForLayout();
 						// The reader may switch panels while async Markdown is rendering.
 						// Never mark a hidden, unmeasured viewport ready for first display.
 					} while (messages.isConnected && window.waitForChatTranscriptViewport && !messages.clientHeight);
 					if (!messages.isConnected) return false;
+					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+					if (tracker && tracker.flushPendingScrollIntent) tracker.flushPendingScrollIntent();
+					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+					if (intentChanged ? !tracker.userScrolledUp : pinned) messages.scrollTop = messages.scrollHeight;
+					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
 					messages.style.visibility = '';
 					messages.removeAttribute('data-transcript-hydrating');
 					if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(messages);
