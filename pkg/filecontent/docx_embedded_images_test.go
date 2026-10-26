@@ -28,8 +28,8 @@ type docxBenchmarkEntry struct {
 	data []byte
 }
 
-func makeDocxEmbeddedImagesBenchmarkFixture(targetCount, distinctImageCount, entryCount int) []byte {
-	if distinctImageCount < 0 || distinctImageCount > targetCount || entryCount < 2+distinctImageCount {
+func makeDocxEmbeddedImagesBenchmarkFixture(targetCount, imagePartCount, decoyPartCount, entryCount int) []byte {
+	if imagePartCount < 0 || imagePartCount > targetCount || decoyPartCount < 0 || decoyPartCount > targetCount || entryCount < 2+imagePartCount+decoyPartCount {
 		panic("invalid DOCX benchmark fixture dimensions")
 	}
 
@@ -50,8 +50,11 @@ func makeDocxEmbeddedImagesBenchmarkFixture(targetCount, distinctImageCount, ent
 		docxBenchmarkEntry{name: "word/_rels/document.xml.rels", data: []byte(relationships.String())},
 		docxBenchmarkEntry{name: "word/document.xml", data: []byte(document.String())},
 	)
-	for i := 0; i < distinctImageCount; i++ {
+	for i := 0; i < imagePartCount; i++ {
 		entries = append(entries, docxBenchmarkEntry{name: fmt.Sprintf("word/media/image%d.png", i), data: benchmarkPNG})
+	}
+	for i := 0; i < decoyPartCount; i++ {
+		entries = append(entries, docxBenchmarkEntry{name: fmt.Sprintf("word/media/image%d.jpg", i), data: benchmarkPNG})
 	}
 	for i := len(entries); i < entryCount; i++ {
 		entries = append(entries, docxBenchmarkEntry{name: fmt.Sprintf("extras/part-%04d.xml", i), data: []byte(`<part/>`)})
@@ -153,16 +156,18 @@ func TestDocxPreviewEmbeddedImageDuplicateTargetIsAmbiguous(t *testing.T) {
 }
 
 // BenchmarkDocxPreviewEmbeddedImages measures the complete preview path with generated
-// in-memory DOCX fixtures. Fixture construction stays outside the timed loop.
+// in-memory DOCX fixtures. Alternate-extension media entries share target stems to
+// exercise the old scan's longer filename comparisons. Fixture construction stays outside
+// the timed loops.
 func BenchmarkDocxPreviewEmbeddedImages(b *testing.B) {
 	cases := []struct {
-		name                         string
-		targets, imageParts, entries int
+		name                                     string
+		targets, imageParts, decoyParts, entries int
 	}{
-		{name: "near_5000_entries", targets: benchmarkDocxImageTargets, imageParts: 1, entries: 4999},
-		{name: "about_500_entries", targets: benchmarkDocxImageTargets, imageParts: 1, entries: 500}}
+		{name: "near_5000_entries", targets: benchmarkDocxImageTargets, imageParts: 1, decoyParts: benchmarkDocxImageTargets, entries: 4999},
+		{name: "about_500_entries", targets: benchmarkDocxImageTargets, imageParts: 1, decoyParts: 497, entries: 500}}
 	for _, testCase := range cases {
-		fixture := makeDocxEmbeddedImagesBenchmarkFixture(testCase.targets, testCase.imageParts, testCase.entries)
+		fixture := makeDocxEmbeddedImagesBenchmarkFixture(testCase.targets, testCase.imageParts, testCase.decoyParts, testCase.entries)
 		archive, err := zip.NewReader(bytes.NewReader(fixture), int64(len(fixture)))
 		if err != nil {
 			b.Fatal(err)
