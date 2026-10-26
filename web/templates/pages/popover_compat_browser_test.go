@@ -205,7 +205,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 						b.waitFor("resize divider hover", `getComputedStyle(document.getElementById('task-panel-divider'),'::after').opacity`, "0.45")
 					}
 					if theme == "light" {
-						b.waitFor("light title bar background", `getComputedStyle(document.getElementById('desktop-project-titlebar')).backgroundColor`, "rgb(245, 245, 245)")
+						b.waitFor("light title bar background", `getComputedStyle(document.getElementById('desktop-project-titlebar')).backgroundColor`, "rgb(250, 250, 250)")
 						var point struct{ X, Y float64 }
 						if err := json.Unmarshal([]byte(b.evaluate(`JSON.stringify((function(){var r=document.getElementById('project-selector-trigger').getBoundingClientRect();return {X:r.left+r.width/2,Y:r.top+r.height/2}})())`)), &point); err != nil {
 							t.Fatal(err)

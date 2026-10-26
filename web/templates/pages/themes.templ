@@ -253,11 +253,15 @@ func previewColor(theme themes.Theme, group, key, fallback string) string {
 // Give every thumbnail its own palette so it does not borrow the selected theme.
 func previewOuterStyle(theme themes.Theme) string {
  values := map[string]string{
-  "default-frame": theme.Semantic["contentBg"], "default-page": theme.Semantic["contentBg"],
+  "default-frame": theme.CSS["--ov-kanban-column-bg"], "default-page": theme.Semantic["contentBg"],
   "default-rail": theme.Semantic["surface"], "default-card": theme.Semantic["surface"],
-  "layered-frame": theme.Semantic["surfaceRaised"], "layered-page": theme.Semantic["contentBg"], "layered-card": theme.Semantic["surface"],
+  "layered-frame": "color-mix(in srgb, " + theme.Semantic["surface"] + " 94%, " + theme.Semantic["text"] + ")",
+  "layered-page": "color-mix(in srgb, " + theme.Semantic["contentBg"] + " 92%, black)", "layered-card": theme.Semantic["surface"],
  }
 
+ if theme.Mode == "light" {
+  values["layered-page"] = "color-mix(in srgb, " + theme.Semantic["contentBg"] + " 94%, " + theme.Semantic["text"] + ")"
+ }
  for key, value := range theme.SurfaceCSS {
   if strings.HasPrefix(key, "--ov-surface-default-") || strings.HasPrefix(key, "--ov-surface-layered-") {
    values[strings.TrimPrefix(key, "--ov-surface-")] = value

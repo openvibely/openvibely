@@ -88,3 +88,19 @@ func TestThemeCardPreviewUsesOwnPaletteNotRootVariables(t *testing.T) {
 		t.Fatal("theme previews must not use current root CSS variables")
 	}
 }
+
+func TestImportedThemePreviewSurfaceFallbacks(t *testing.T) {
+	for _, mode := range []string{"dark", "light"} {
+		theme := themes.Theme{Mode: mode, Semantic: map[string]string{"contentBg": "#202020", "surface": "#303030", "surfaceRaised": "#404040", "text": "#eeeeee"}, CSS: map[string]string{"--ov-kanban-column-bg": "#101010"}}
+		got := previewOuterStyle(theme)
+		page := "color-mix(in srgb, #202020 92%, black)"
+		if mode == "light" {
+			page = "color-mix(in srgb, #202020 94%, #eeeeee)"
+		}
+		for _, want := range []string{"--tp-default-frame:#101010", "--tp-default-page:#202020", "--tp-default-rail:#303030", "--tp-layered-frame:color-mix(in srgb, #303030 94%, #eeeeee)", "--tp-layered-page:" + page} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s preview missing %s: %s", mode, want, got)
+			}
+		}
+	}
+}
