@@ -36,6 +36,8 @@ func TestBrowserFunctional_TaskListGoalEventsAndSearch(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL, "task-list-goal-events", func(b *composerFocusCDP) {
 		state := `document.querySelector('[data-task-list-row="goal-task"] [data-task-state]')?.dataset.taskState || ''`
 		b.waitFor("initial completed icon", state, "completed")
+		b.waitFor("web toggle centered above icon rail", `(()=>{const root=document.documentElement; if(root.dataset.openvibelyRuntime!=='web')return 'wrong runtime';const toggle=document.getElementById('task-list-toggle').getBoundingClientRect();const rail=parseFloat(getComputedStyle(root).getPropertyValue('--rail-width'));return String(Math.abs(toggle.left+toggle.width/2-rail/2)<1)})()`, "true")
+		b.waitFor("web header actions stay inside task list", `(()=>{const panel=document.getElementById('task-list-panel').getBoundingClientRect();const actions=document.querySelector('#task-list-header .task-list-actions').getBoundingClientRect();return String(actions.right<=panel.right && actions.left>panel.left)})()`, "true")
 		// Search must reveal a collapsed group without saving the temporary expansion.
 		b.evaluate(`document.querySelector('[data-task-list-group="Completed"]').open=false; document.getElementById('task-list-search-toggle').click(); var input=document.getElementById('task-list-search-input'); input.value='Goal task'; input.dispatchEvent(new Event('input')); 'searched'`)
 		visible := `String(document.querySelector('[data-task-list-group="Completed"]').open && !document.querySelector('[data-task-list-row="goal-task"]').hidden)`

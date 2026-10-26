@@ -3134,6 +3134,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				#task-list-header { display: none; }
 				html[data-shell-frame] #task-list-header { display: flex; align-items: center; gap: 4px; position: absolute; left: var(--rail-width); width: calc(var(--task-list-width, 300px) - 8px); top: 0; height: 100%; padding: 0 4px 0 0; --wails-draggable: drag; }
 				html[data-shell-frame] #desktop-project-titlebar[data-platform="darwin"] #task-list-header { left: 80px; width: calc(var(--rail-width) + var(--task-list-width, 300px) - 88px); }
+				/* Web has no native window buttons: center the toggle above the icon rail. */
+				html[data-shell-frame][data-openvibely-runtime="web"] #task-list-header { left: calc((var(--rail-width) - 32px) / 2); width: calc(var(--task-list-width, 300px) + var(--rail-width) / 2 + 8px); }
 				#task-list-header button, #task-list-header a { --wails-draggable: no-drag; }
 								#task-list-search-toggle[aria-expanded="true"] { background: oklch(var(--p) / .22); opacity: 1; }
 				.task-list-toggle-fill { fill: currentColor; }
