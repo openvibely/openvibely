@@ -3063,9 +3063,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 html[data-theme="light"][data-ov-theme-layer="custom"] { --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 94%, var(--ov-text)); }
                 html:root[data-surface-style="default"] { --shell-chrome: var(--surface-default-frame); --shell-page: var(--surface-default-page); --shell-rail: var(--surface-default-rail); --board-card-bg: var(--surface-default-card); }
                 html:root[data-surface-style="layered"] { --shell-chrome: var(--surface-layered-frame); --shell-page: var(--surface-layered-page); --shell-rail: var(--surface-layered-card); --board-card-bg: var(--surface-layered-card); --shell-divider: var(--shell-chrome); }
-                html:root[data-surface-style="layered"] #main-content :where(.bg-base-100):where(:not(.chat-input-container):not(.chat-bubble-user-msg):not(.chat-bubble-assistant-msg)) { background-color: var(--board-card-bg) !important; }
-                html:root[data-surface-style="layered"] #main-content .border-base-300:where(:not(:hover):not(:focus-visible):not(.border-primary)) { border-color: var(--shell-chrome) !important; }
-                html:root[data-surface-style="layered"] #main-content { background-color: var(--shell-page) !important; }
+                html:root[data-surface-style] #main-content :where(.bg-base-100):where(:not(.chat-input-container):not(.chat-bubble-user-msg):not(.chat-bubble-assistant-msg)) { background-color: var(--board-card-bg) !important; }
+                html:root[data-surface-style="layered"] #main-content .border-base-300:where(:not(:hover):not(:focus-visible):not(.border-primary)) { border-color: var(--ov-surface-layered-border, var(--shell-chrome)) !important; }
+                html:root[data-surface-style] #main-content { background-color: var(--shell-page) !important; }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;

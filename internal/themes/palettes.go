@@ -51,7 +51,7 @@ func paletteSpecs() []paletteSpec {
 			id: "openvibely-slate", name: "OpenVibely Slate", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
 			canvas: "#1E2329", column: "#16191E", surface: "#252B34", raised: "#2B323C", text: "#D5DAE1", muted: "#949CA8", accent: "#7480FF", codeBg: "#181C21",
 			shellRail: "#1A1E23",
-			info: "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
+			info:      "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
 			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#D5DAE1", "comment": "#6B7480", "title": "#82AAFF"},
 		},
 		{
@@ -226,7 +226,7 @@ func paletteTheme(spec paletteSpec) Theme {
 	if dark {
 		kind = KindDark
 	}
-	return Theme{
+	theme := Theme{
 		ID: spec.id, Name: spec.name, Source: spec.source, Kind: kind, Mode: spec.mode, Upstream: spec.upstream,
 		Semantic: semantic, Syntax: syntax, CSS: css,
 		Preview: map[string]string{
@@ -235,6 +235,8 @@ func paletteTheme(spec paletteSpec) Theme {
 		},
 		SearchText: spec.name + " " + kind + " " + spec.source + " palette app theme",
 	}
+	applySurfacePalette(&theme)
+	return theme
 }
 
 func mixHex(from, to string, amount float64) string {
