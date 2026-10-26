@@ -78,18 +78,29 @@ func TestBrowserFunctional_AppearanceBoardColumnsAtEveryWidth(t *testing.T) {
 				expected = "false"
 			}
 			b.waitFor("responsive layout", `String(document.documentElement.hasAttribute('data-shell-frame'))`, expected)
+			if width == 1440 {
+				for _, layout := range []string{"floating", "unified"} {
+					b.evaluate(`selectOpenVibelyDisplay('tabs','attached'); selectOpenVibelyDisplay('layout','` + layout + `');document.documentElement.classList.add('task-list-collapsed'); 'collapsed'`)
+					b.waitFor("collapsed attached tab spacing", `getComputedStyle(document.getElementById('desktop-project-tabs')).paddingLeft`, "10px")
+					b.evaluate(`document.documentElement.classList.remove('task-list-collapsed'); 'expanded'`)
+				}
+			}
+
 			for _, theme := range []string{"openvibely-dark", "openvibely-layered", "openvibely-light"} {
 				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
-				for _, mode := range []string{"tint", "filled", "inset", "tintstrip"} {
-					b.evaluate(`selectOpenVibelyDisplay('columns','` + mode + `'); 'selected'`)
-					b.waitFor("board matches preview: "+theme+"/"+mode, `(()=>{
+				for _, step := range []string{"off", "on"} {
+					b.evaluate(`selectOpenVibelyDisplay('step','` + step + `'); 'selected'`)
+					for _, mode := range []string{"tint", "filled", "inset", "tintstrip"} {
+						b.evaluate(`selectOpenVibelyDisplay('columns','` + mode + `'); 'selected'`)
+						b.waitFor("board matches preview: "+theme+"/"+mode, `(()=>{
       const preview=document.querySelector('.board-columns-preview[data-preview="`+mode+`"]');
       const color=e=>getComputedStyle(e).backgroundColor;
       if(color(boardSample)!==color(preview.querySelector('.bcp-col')))return 'column differs';
-      if('`+mode+`'==='inset' && color(boardSample.querySelector('.card'))!==color(preview.querySelector('.bcp-card')))return 'card differs';
+      if(color(boardSample.querySelector('.card'))!==color(preview.querySelector('.bcp-card')))return 'card differs';
       if('`+mode+`'==='tintstrip' && color(boardSample.firstElementChild)!==color(preview.querySelector('.bcp-head')))return 'header differs';
       return 'pass';
      })()`, "pass")
+					}
 				}
 			}
 		}
