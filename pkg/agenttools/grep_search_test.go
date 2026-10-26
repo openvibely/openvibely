@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,6 +37,94 @@ func TestGrepSearchPreservesLineBoundaries(t *testing.T) {
 				t.Fatalf("output = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGrepSearchMissingPathReturnsPathError(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{
+		"missing-relative",
+		filepath.Join(root, "missing-absolute"),
+	} {
+		t.Run(path, func(t *testing.T) {
+			got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("target", path, ""))
+			if err == nil {
+				t.Fatalf("grep_search returned %q, want an error for missing path %q", got, path)
+			}
+			if !strings.Contains(err.Error(), filepath.Base(path)) {
+				t.Fatalf("error %q does not identify requested path %q", err, path)
+			}
+			if strings.Contains(got, "No matches found") {
+				t.Fatalf("missing path was reported as a successful search: %q", got)
+			}
+		})
+	}
+}
+
+func TestGrepSearchEmptyDirectoryReturnsNoMatches(t *testing.T) {
+	root := t.TempDir()
+	emptyDir := filepath.Join(root, "empty")
+	if err := os.Mkdir(emptyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("target", "empty", ""))
+	if err != nil {
+		t.Fatalf("grep_search: %v", err)
+	}
+	if want := `No matches found for pattern "target"`; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+}
+
+func TestGrepSearchUnreadableRootReturnsPathError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Chmod(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(root, 0755)
+
+	if _, err := os.ReadDir(root); err == nil {
+		if err := os.Chmod(root, 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Skip("directory permissions do not prevent reads for this user")
+	}
+
+	got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("target", "", ""))
+	if err == nil {
+		t.Fatalf("grep_search returned %q, want an access error for %q", got, root)
+	}
+	if !strings.Contains(err.Error(), root) {
+		t.Fatalf("error %q does not identify requested path %q", err, root)
+	}
+	if strings.Contains(got, "No matches found") {
+		t.Fatalf("unreadable path was reported as a successful search: %q", got)
+	}
+}
+
+func TestGrepSearchIgnoresUnreadableDescendant(t *testing.T) {
+	root := t.TempDir()
+	unreadableDir := filepath.Join(root, "unreadable")
+	writeTestFile(t, filepath.Join(unreadableDir, "match.txt"), "target\n")
+	if err := os.Chmod(unreadableDir, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(unreadableDir, 0755)
+
+	if _, err := os.ReadDir(unreadableDir); err == nil {
+		if err := os.Chmod(unreadableDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Skip("directory permissions do not prevent reads for this user")
+	}
+
+	got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("target", "", ""))
+	if err != nil {
+		t.Fatalf("grep_search should skip unreadable descendants: %v", err)
+	}
+	if want := `No matches found for pattern "target"`; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
 	}
 }
 

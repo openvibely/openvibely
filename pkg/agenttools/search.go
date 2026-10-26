@@ -61,6 +61,9 @@ func SearchFiles(ctx context.Context, root, pattern string, opts SearchOptions) 
 			return err
 		}
 		if walkErr != nil {
+			if path == root {
+				return fmt.Errorf("search path %q: %w", root, walkErr)
+			}
 			if opts.IgnoreWalkErrors {
 				return nil
 			}
