@@ -46,7 +46,11 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 					}
 					toastTop := gap
 					if !wantMobile {
-						toastTop += 46
+						if desktop {
+							toastTop += 54
+						} else {
+							toastTop += 46
+						}
 					}
 					for _, modal := range []bool{false, true} {
 						if modal {

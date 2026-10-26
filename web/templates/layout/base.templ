@@ -3190,6 +3190,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"] #desktop-project-tabs,
 				html[data-shell-frame][data-tab-style="attached"].task-list-collapsed #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-3px); }
+				/* Leave the same top breathing room for attached and detached desktop tabs. */
+				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-tabs { padding-top: 10px; }
+				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [role="tab"] { padding-bottom: 10px; }
+				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [data-close-project],
+				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
+				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-5px); }
 
 				html[data-shell-frame] #main-content[style*="--superellipse-clip"],
 				html[data-shell-frame] #task-list-panel[style*="--superellipse-clip"],
