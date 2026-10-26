@@ -61,6 +61,9 @@ func applySurfacePalette(theme *Theme) {
 		"--ov-surface-desktop-base":  oklchTriplet(rgb),
 		"--ov-surface-code":          theme.Semantic["codeBg"],
 	}
+	if theme.Mode == "dark" {
+		theme.SurfaceCSS["--ov-surface-default-border"] = page
+	}
 	// Light Modern uses the card shade for code upstream. In a conversation
 	// bubble that makes the tool boxes disappear; reuse its existing hover shade.
 	if theme.ID == "vscode-light-modern" {
@@ -69,5 +72,6 @@ func applySurfacePalette(theme *Theme) {
 	// High-contrast themes must retain their explicit outlines in either mode.
 	if theme.Kind == KindHighContrastDark || theme.Kind == KindHighContrastLight {
 		theme.SurfaceCSS["--ov-surface-layered-border"] = theme.Semantic["border"]
+		theme.SurfaceCSS["--ov-surface-default-border"] = theme.Semantic["border"]
 	}
 }

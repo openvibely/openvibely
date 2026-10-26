@@ -303,15 +303,16 @@ func openVibelyDarkTheme() Theme {
 	// Surface treatments belong to the theme, independently of its native
 	// accent and syntax styles. The desktop base preserves existing card fills.
 	theme.SurfaceCSS = map[string]string{
-		"--ov-surface-default-rail":  "#15191E",
-		"--ov-surface-default-frame": "#191E24",
-		"--ov-surface-default-page":  "#15191E",
-		"--ov-surface-default-card":  "#191E24",
-		"--ov-surface-layered-frame": "#1D232A",
-		"--ov-surface-layered-page":  "#15191E",
-		"--ov-surface-layered-card":  "#191E24",
-		"--ov-surface-desktop-base":  "23.2607% 0.013807 253.100675",
-		"--ov-surface-code":          "#111418",
+		"--ov-surface-default-rail":   "#15191E",
+		"--ov-surface-default-frame":  "#191E24",
+		"--ov-surface-default-page":   "#15191E",
+		"--ov-surface-default-card":   "#191E24",
+		"--ov-surface-default-border": "#15191E",
+		"--ov-surface-layered-frame":  "#1D232A",
+		"--ov-surface-layered-page":   "#15191E",
+		"--ov-surface-layered-card":   "#191E24",
+		"--ov-surface-desktop-base":   "23.2607% 0.013807 253.100675",
+		"--ov-surface-code":           "#111418",
 	}
 	return theme
 }
