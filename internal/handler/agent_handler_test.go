@@ -14,10 +14,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -744,6 +746,26 @@ func TestHandler_GenerateAgent_RetriesTransientTimeoutThenSucceeds(t *testing.T)
 	if generated.Name != "Retry Agent" {
 		t.Fatalf("expected LLM payload to be used, got %q", generated.Name)
 	}
+}
+
+func TestWaitForGenerateAgentRetryReturnsContextErrorOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	waitStarted := make(chan time.Duration, 1)
+	ctx = httpretry.WithRetryTimer(ctx, func(delay time.Duration) <-chan time.Time {
+		waitStarted <- delay
+		return make(chan time.Time)
+	})
+
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- waitForGenerateAgentRetry(ctx)
+	}()
+
+	require.Equal(t, generateAgentTransientRetryDelay, <-waitStarted)
+	cancel()
+	require.ErrorIs(t, <-waitDone, context.Canceled)
 }
 
 func TestHandler_GenerateAgent_TimeoutUsesClearFallbackError(t *testing.T) {
