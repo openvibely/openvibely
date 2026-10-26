@@ -129,6 +129,10 @@ Context compaction progress is shown in response activity. Recovery checkpoints 
 
 Mermaid diagrams, SVG, and math render as complete blocks arrive during streaming. Long conversations render visible transcript content incrementally and preserve your position during unchanged refreshes.
 
+## Conversation Appearance
+
+Open **Appearance** to choose full-width or focused conversations, show or hide assistant bubbles, and adjust bubble/composer surface contrast. These settings apply to both Chat and task threads. On wider windows, the searchable task sidebar lets you open project tasks without returning to the board.
+
 ## Documents and File Previews
 
 Ask Chat to create or edit Word documents, PDFs, spreadsheets, or presentations using the built-in document skills. If a required tool is missing, approve its installation to continue.
