@@ -49,6 +49,9 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
           if(color(box)!=='rgb(242, 242, 242)' || color(box)===color(bubble))return 'Light Modern tool box blends into bubble';
          }
         }
+        for(const e of sample.querySelectorAll('.stream-tool-body-label,.stream-tool-body-content')) {
+         if(getComputedStyle(e).borderTopWidth!=='0px')return 'light tool row has a divider';
+        }
         for(const e of sample.querySelectorAll('.stream-tool-body,.stream-tool-body-content')) {
          if(color(e)!=='rgba(0, 0, 0, 0)')return 'tool wrapper paints a different surface: '+color(e);
         }
