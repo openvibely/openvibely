@@ -2605,6 +2605,10 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	assertContains(t, rec, "#worker-settings-content .worker-limit-input:focus")
 	assertContains(t, rec, "#worker-settings-content .worker-limit-input:focus-visible")
 	assertNotContains(t, rec, "input-warning")
+	settingsRec := htmxGet(e, "/settings/workers?project_id="+p1.ID)
+	assertCode(t, settingsRec, http.StatusOK)
+	assertContains(t, settingsRec, `id="limit-input-global"`)
+	assertContains(t, settingsRec, "Worker limits")
 }
 
 func TestHandler_WorkerSettingsReportsCapacitySourceFailures(t *testing.T) {
