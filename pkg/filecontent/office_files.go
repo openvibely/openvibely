@@ -156,6 +156,50 @@ func docxHyperlinkTargets(z *zip.Reader, parts ...string) (map[string]string, er
 	return links, nil
 }
 
+func docxDocumentRelationships(z *zip.Reader) (map[string]string, map[string]string, *zip.File, error) {
+	links := map[string]string{}
+	imageTargets := map[string]string{}
+	for _, file := range z.File {
+		if file.Name != "word/_rels/document.xml.rels" {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		dec := xml.NewDecoder(io.LimitReader(rc, 1<<20))
+		for {
+			token, tokenErr := dec.Token()
+			if tokenErr == io.EOF {
+				rc.Close()
+				return links, imageTargets, file, nil
+			}
+			if tokenErr != nil {
+				rc.Close()
+				return nil, nil, nil, invalid("Could not read Office relationships")
+			}
+			start, ok := token.(xml.StartElement)
+			if !ok || start.Name.Local != "Relationship" {
+				continue
+			}
+			kind := docxAttribute(start.Attr, "Type")
+			id := docxAttribute(start.Attr, "Id")
+			if strings.HasSuffix(kind, "/hyperlink") && id != "" {
+				if link := docxSafeHyperlink(docxAttribute(start.Attr, "Target")); link != "" {
+					links[id] = link
+				}
+			}
+			if id == "" || strings.EqualFold(docxAttribute(start.Attr, "TargetMode"), "External") || !strings.HasSuffix(kind, "/image") {
+				continue
+			}
+			if part := docxImagePartPath(docxAttribute(start.Attr, "Target")); part != "" {
+				imageTargets[id] = part
+			}
+		}
+	}
+	return links, imageTargets, nil, nil
+}
+
 func docxSafeHyperlink(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.User != nil || u.Host == "" {
@@ -227,6 +271,10 @@ func docxImageMediaType(name string, data []byte) string {
 }
 
 func docxEmbeddedImages(z *zip.Reader) (map[string]docxImageAsset, error) {
+	return docxEmbeddedImagesWithTargets(z, nil, nil)
+}
+
+func docxEmbeddedImagesWithTargets(z *zip.Reader, initialTargets map[string]string, parsedRelationshipFile *zip.File) (map[string]docxImageAsset, error) {
 	entriesByName := make(map[string]*zip.File, len(z.File))
 	var relationshipFiles []*zip.File
 	for _, file := range z.File {
@@ -240,8 +288,14 @@ func docxEmbeddedImages(z *zip.Reader) (map[string]docxImageAsset, error) {
 		}
 	}
 
-	targets := map[string]string{}
+	targets := make(map[string]string, len(initialTargets))
+	for id, target := range initialTargets {
+		targets[id] = target
+	}
 	for _, file := range relationshipFiles {
+		if file == parsedRelationshipFile {
+			continue
+		}
 		rc, err := file.Open()
 		if err != nil {
 			return nil, err
@@ -535,7 +589,7 @@ func DocxPreview(name string, data []byte) (DocumentPreview, bool, error) {
 	if len(z.File) > 5000 {
 		return DocumentPreview{}, true, invalid("Office document has too many entries")
 	}
-	links, err := docxHyperlinkTargets(z)
+	links, imageTargets, parsedRelationshipFile, err := docxDocumentRelationships(z)
 	if err != nil {
 		return DocumentPreview{}, true, err
 	}
@@ -547,7 +601,7 @@ func DocxPreview(name string, data []byte) (DocumentPreview, bool, error) {
 	if err != nil {
 		return DocumentPreview{}, true, err
 	}
-	images, err := docxEmbeddedImages(z)
+	images, err := docxEmbeddedImagesWithTargets(z, imageTargets, parsedRelationshipFile)
 	if err != nil {
 		return DocumentPreview{}, true, err
 	}
