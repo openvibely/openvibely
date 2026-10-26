@@ -3190,10 +3190,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar { --project-tab-contour: transparent; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs { padding-left: 10px; }
 				html[data-shell-frame][data-tab-style="attached"].task-list-collapsed #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
-				/* In floating mode the first attached tab shares the page's left edge. */
-				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed) #desktop-project-tabs { padding-left: 0; }
-				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed) .desktop-project-tab:first-child[data-selected="true"]::before { display: none; }
-				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed):has(.desktop-project-tab:first-child[data-selected="true"]) #main-content { border-top-left-radius: 0; clip-path: none; }
+				/* A tighter page corner leaves room for the attached tab's downward curve. */
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"] #desktop-project-tabs { padding-left: 22px; }
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"] #main-content { border-top-left-radius: 12px; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-3px); }
 				/* Leave the same top breathing room for attached and detached desktop tabs. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-tabs { padding-top: 10px; }
@@ -5528,6 +5527,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 									var list = el.id === 'task-list-panel';
 									var joined = unified && el.id === 'main-content' && document.documentElement.hasAttribute('data-shell-frame') && !document.documentElement.classList.contains('task-list-collapsed');
 									var r = Math.min(w / 2, h / 2, el.id === 'main-content' || inspector || list ? 28 : el.id === 'sidebar' ? 22 : 17);
+									if (el.id === 'main-content' && layout === 'floating' && document.documentElement.getAttribute('data-tab-style') === 'attached') r = Math.min(r, 12);
 									var radii = joined ? [0, 0, 0, 0] : list ? (unified ? [0, 0, 0, r] : [r, 0, 0, r]) : el.id === 'main-content' ? [0, 0, 0, r] : [r, r, r, r];
 									var corners = [[w - r, r, -Math.PI / 2], [w - r, h - r, 0], [r, h - r, Math.PI / 2], [r, r, Math.PI]];
 									var pts = [];
@@ -5561,7 +5561,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								attach();
 								document.addEventListener('DOMContentLoaded', attach);
 								document.body.addEventListener('htmx:afterSettle', attach);
-								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout'] });
+								new MutationObserver(function() { var m = document.getElementById('main-content'); if (m) shape(m); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-shell-frame', 'data-layout', 'data-tab-style'] });
 								var tabs = document.getElementById('desktop-project-titlebar');
 								if (tabs) new MutationObserver(attach).observe(tabs, { childList: true, subtree: true });
 						})();
