@@ -180,19 +180,22 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
       };
       const layered=document.querySelector('[data-kind="surfaces"][data-variant="layered"]');
       const frameL=luminance(layered), railL=luminance(layered.querySelector('.dp-list')), pageL=luminance(layered.querySelector('.dp-page'));
-      if(document.documentElement.dataset.theme==='light' ? !(frameL<railL && railL<pageL) : !(pageL<railL && railL<frameL))return 'surface brightness order reversed';
+      const highContrast='`+theme+`'.includes('high-contrast');
+      if(highContrast ? !(frameL===railL && railL===pageL) : (document.documentElement.dataset.theme==='light' ? !(frameL<railL && railL<pageL) : !(pageL<railL && railL<frameL)))return 'surface brightness order reversed';
       const frameBefore=getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome');
       selectOpenVibelyDisplay('surfaces','layered');
       if(JSON.stringify(colors())!==before)return 'theme colors changed';
       if(JSON.stringify(previews())!==previewBefore)return 'alternatives changed';
-      if(getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome')===frameBefore && document.documentElement.dataset.theme!=='light')return 'frame did not change';
+      if(!highContrast && getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome')===frameBefore && document.documentElement.dataset.theme!=='light')return 'frame did not change';
       const p=document.querySelector('[data-kind="surfaces"][data-variant="layered"]');
       if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'page preview differs';
       if(color(p.querySelector('.dp-surface-card'))!==color(surfaceSample.firstElementChild))return 'card preview differs';
       if(document.documentElement.hasAttribute('data-shell-frame') && document.documentElement.hasAttribute('data-theme-surfaces')) {
        if(color(p)!==color(document.getElementById('desktop-project-titlebar')))return 'frame preview differs';
        if(color(p.querySelector('.dp-list'))!==color(document.getElementById('task-list-panel')))return 'list preview differs';
-       if(color(document.getElementById('desktop-project-titlebar'))===color(document.getElementById('main-content')))return 'active tab blends into frame';
+       if(highContrast) {
+        if(getComputedStyle(document.querySelector('.desktop-project-tab[data-selected="true"]')).outlineColor==='rgba(0, 0, 0, 0)')return 'high contrast tab outline lost';
+       } else if(color(document.getElementById('desktop-project-titlebar'))===color(document.getElementById('main-content')))return 'active tab blends into frame';
       }
       return 'pass';
     })()`, "pass")
