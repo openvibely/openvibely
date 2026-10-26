@@ -19,7 +19,7 @@ import (
 // Keep hidden palettes available to existing saved preferences.
 func themeVisibleInPicker(id string) bool {
 	switch id {
-	case "openvibely-layered", "vscode-dark-modern", "vscode-default-high-contrast", "vscode-abyss",
+	case "openvibely-graphite", "openvibely-slate", "openvibely-layered", "vscode-dark-modern", "vscode-default-high-contrast", "vscode-abyss",
 		"vscode-kimbie-dark", "vscode-monokai", "vscode-monokai-dimmed",
 		"vscode-red", "vscode-solarized-dark", "vscode-solarized-light",
 		"vscode-tomorrow-night-blue", "nord", "openvibely-paper",
