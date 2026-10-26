@@ -3044,7 +3044,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
                 /* Surface treatment is independent of the selected theme's text and accents. */
                 html {
-                    --surface-default-frame: oklch(var(--b2)); --surface-default-page: oklch(var(--b2)); --surface-default-card: oklch(var(--b1));
+                    --surface-default-rail: var(--surface-default-card); --surface-default-frame: oklch(var(--b2)); --surface-default-page: oklch(var(--b2)); --surface-default-card: oklch(var(--b1));
                     --surface-layered-frame: oklch(var(--b1)); --surface-layered-page: oklch(var(--b3)); --surface-layered-card: oklch(var(--b2));
                 }
                 html[data-theme="light"] { --surface-default-frame: #F5F5F5; --surface-default-page: #F5F5F5; --surface-default-card: #FAFAFA; --surface-layered-frame: #F5F5F5; --surface-layered-page: #E8E8E8; --surface-layered-card: #FAFAFA; }
@@ -3052,8 +3052,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     --surface-default-frame: var(--ov-kanban-column-bg); --surface-default-page: var(--ov-content-bg); --surface-default-card: var(--ov-surface);
                     --surface-layered-frame: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text)); --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 92%, black); --surface-layered-card: var(--ov-surface);
                 }
+                /* Preserve the established Dark shell; Layered lifts its frame and rail. */
+                html[data-color-theme="openvibely-dark"][data-theme="dark"] { --surface-default-rail: #15191E; --surface-default-frame: #191E24; --surface-default-page: #15191E; --surface-default-card: oklch(var(--b1)); --surface-layered-frame: #1D232A; --surface-layered-page: #15191E; --surface-layered-card: #191E24; }
+                html[data-shell-frame][data-color-theme="openvibely-dark"][data-theme="dark"] { --b1: 23.2607% 0.013807 253.100675; --shell-code: #111418; }
                 html[data-theme="light"][data-ov-theme-layer="custom"] { --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 94%, var(--ov-text)); }
-                html:root[data-surface-style="default"] { --shell-chrome: var(--surface-default-frame); --shell-page: var(--surface-default-page); --shell-rail: var(--surface-default-card); --board-card-bg: var(--surface-default-card); }
+                html:root[data-surface-style="default"] { --shell-chrome: var(--surface-default-frame); --shell-page: var(--surface-default-page); --shell-rail: var(--surface-default-rail); --board-card-bg: var(--surface-default-card); }
                 html:root[data-surface-style="layered"] { --shell-chrome: var(--surface-layered-frame); --shell-page: var(--surface-layered-page); --shell-rail: var(--surface-layered-card); --board-card-bg: var(--surface-layered-card); --shell-divider: var(--shell-chrome); }
                 html:root[data-surface-style="layered"] #main-content :where(.bg-base-100):where(:not(.chat-input-container):not(.chat-bubble-user-msg):not(.chat-bubble-assistant-msg)) { background-color: var(--board-card-bg) !important; }
                 html:root[data-surface-style="layered"] #main-content .border-base-300:where(:not(:hover):not(:focus-visible):not(.border-primary)) { border-color: var(--shell-chrome) !important; }

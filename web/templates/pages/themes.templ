@@ -36,7 +36,7 @@ templ ThemesContent(catalog []themes.Theme) {
 		</div>
 		<style>
 			.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }
-            .display-preview[data-preview-surfaces="default"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-card); --dp-surface-card: var(--surface-default-card); }
+            .display-preview[data-preview-surfaces="default"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-rail); --dp-surface-card: var(--surface-default-card); }
             .display-preview[data-preview-surfaces="layered"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }
             .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }
             [data-preview-surfaces="layered"] .dp-surface-card { border-color: var(--dp-frame); }
