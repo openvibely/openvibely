@@ -21,11 +21,24 @@ Text, accents, status colors, syntax, and diff colors are unchanged. Code backgr
 - [Catppuccin](https://github.com/catppuccin/catppuccin): Mocha uses mantle/base/surface0 for page/card/frame; Latte uses base/mantle/crust.
 - [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme): night and storm background shades.
 - [Nord](https://www.nordtheme.com/docs/colors-and-palettes/): nord0/nord1/nord2.
-- [Dracula](https://draculatheme.com/contribute): existing dark and background shades, with a softer intermediate frame than the bright selection color.
+- [Dracula](https://github.com/dracula/visual-studio-code/blob/master/src/dracula.yml): BGDark/BG/BGLight; all three are upstream shades.
 - [Rosé Pine](https://rosepinetheme.com/palette/): base/surface/overlay; Dawn uses its warm low/background/surface shades.
-- [GitHub Primer](https://github.com/primer/primitives): existing neutral background shades.
+- [GitHub Primer](https://github.com/primer/primitives): neutral background shades from the published `@primer/primitives` 7.0.0 palette (including Light `#EAEEF2`).
 - VS Code: the repository's existing pinned catalog (`PinnedVSCodeRepository`, `PinnedVSCodeRef` in `catalog_gen.go`) remains the source of all semantic/syntax colors. Its title-bar and sidebar assignments are remapped for OpenVibely. The generator and upstream snapshot are unchanged.
 
-Some themes do not provide three suitable background shades. Their explicit palettes include restrained intermediate shades rather than reusing bright selection colors. Abyss and Solarized Dark keep their frames dark enough for their softer text. Solarized Light retains its original text color and does not reduce contrast below its original card background. High-contrast themes use near-black/near-white steps and retain their theme outlines.
+Surface colors reuse upstream shades rather than interpolating new ones. The reviewed VS Code mappings use the pinned 1.130.0 theme files (including their `include` parents). Specific replacements:
+
+| Theme | Upstream roles used for page / card / frame |
+| --- | --- |
+| Abyss | editor.background / titleBar.activeBackground / input.background |
+| Light Modern | editor.background / sideBar.background / list.hoverBackground |
+| Classic Dark and Dark+ | editor.background / menu.background / default tab.inactiveBackground |
+| Quiet Light | editor.background / sideBar.background / activityBar.background |
+| Solarized Dark | sideBar.background / editor.background / titleBar.activeBackground |
+| Solarized Light | editor.background / notebook.cellEditorBackground / sideBar.background |
+
+Classic Dark's inactive-tab shade comes from [VS Code's workbench defaults](https://github.com/microsoft/vscode/blob/1.130.0/src/vs/workbench/common/theme.ts), rather than a color added by OpenVibely. High-contrast themes are deliberately exempt from the three-shade requirement: both treatments retain pure black or white and the original explicit outlines. Inventing gray backgrounds just to distinguish the treatments would change their intended contrast.
+
+OpenVibely-branded palettes are our own designs. Imported themes still have generic CSS fallbacks, and the optional conversation color-step effect still blends colors. Shared surface CSS remains necessary to map the selected theme's roles onto app components; this is not an unmodified upstream editor layout.
 
 These surface mappings are OpenVibely adaptations, not claims that upstream authors prescribe this application layout. Tests check every bundled mapping, desktop/mobile previews, and preservation of accent/status/syntax colors when switching treatments.

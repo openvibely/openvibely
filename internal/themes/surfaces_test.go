@@ -20,7 +20,15 @@ func TestBundledSurfaceArrangements(t *testing.T) {
 				}
 				return relativeLuminance(rgb)
 			}
-			if theme.Mode == "light" {
+			if theme.Kind == KindHighContrastDark || theme.Kind == KindHighContrastLight {
+				want := "#000000"
+				if theme.Mode == "light" {
+					want = "#FFFFFF"
+				}
+				if page != want || card != want || frame != want {
+					t.Fatal("high contrast must preserve its original flat background")
+				}
+			} else if theme.Mode == "light" {
 				if !(luminance(frame) < luminance(card) && luminance(card) < luminance(page)) {
 					t.Fatal("light surfaces must brighten from frame to card to page")
 				}

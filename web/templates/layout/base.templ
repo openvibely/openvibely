@@ -3209,8 +3209,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab [data-close-project],
 				html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"])::after { top: 50%; }
 				html[data-shell-frame] #desktop-project-titlebar #project-selector-trigger { transform: none; }
+				html[data-shell-frame] .desktop-project-tab[data-selected="true"] { outline: 1px solid var(--ov-surface-layered-border, transparent); outline-offset: -1px; }
 				/* Attached tabs flow into the page. The first tab's outer corner must clear the page's rounded top-left. */
-				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar { --project-tab-contour: transparent; }
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar { --project-tab-contour: var(--ov-surface-layered-border, transparent); }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs { padding-left: 10px; }
 				/* Move floating attached tabs closer to the page edge. */
 				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed) #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
