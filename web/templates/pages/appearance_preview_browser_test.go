@@ -63,8 +63,11 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
        menu.className='ov-menu';tip.className='ov-tooltip';card.style.backgroundColor='var(--board-card-bg)';
        document.body.append(menu,tip,card);
        const menuMatches=color(menu)===color(card), tipMatches=color(tip)===color(card);
+       const dialog=document.createElement('div');dialog.className='modal-box';document.body.append(dialog);
+       menu.classList.add('dropdown-content');dialog.append(menu);
+       const dialogMatches=color(menu)===color(card);dialog.remove();
        menu.remove();tip.remove();card.remove();
-       if(!menuMatches || !tipMatches)return 'menu/tooltip differs from card in '+mode;
+       if(!menuMatches || !tipMatches || !dialogMatches)return 'menu/tooltip differs from card in '+mode;
        if(document.documentElement.dataset.theme!=='dark' && mode==='default')continue;
        const probe=document.createElement('div');probe.style.color=mode==='default'?'var(--ov-surface-default-border, var(--shell-page))':'var(--ov-surface-layered-border, var(--shell-chrome))';sample.appendChild(probe);
        const expected=getComputedStyle(probe).color;probe.remove();
