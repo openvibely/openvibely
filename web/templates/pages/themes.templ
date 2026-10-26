@@ -74,8 +74,6 @@ templ ThemesContent(catalog []themes.Theme) {
 		</style>
 		<nav class="settings-mobile-nav mb-6" aria-label="Settings"><a href="#themes" data-settings-link="themes">Themes</a><a href="#layout" data-settings-link="layout">Layout</a><a href="#chat" data-settings-link="chat">Chat appearance</a><a href="/tasks" data-settings-back hx-get="/tasks" hx-target="#main-content" hx-push-url="true">← Back to workspace</a></nav>
 		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
-			<h3 class="text-lg font-semibold mb-1">Layout</h3>
-			<p class="text-sm opacity-70 mb-3">How the task list sits next to the page.</p>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
 				@displayToggle("surfaces", "Surfaces", "default", "Default", "layered", "Layered")
 				@displayToggle("layout", "Task list", "floating", "Floating", "unified", "Unified")
@@ -91,8 +89,6 @@ templ ThemesContent(catalog []themes.Theme) {
 			</div>
 		</section>
 		<section data-display-prefs data-settings-section="chat" hidden>
-			<h3 class="text-lg font-semibold mb-1">Conversation</h3>
-			<p class="text-sm opacity-70 mb-3">Applies to chat and task threads in every layout.</p>
 			<div class="flex flex-col gap-3 max-w-2xl">
 				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
 				@displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On")

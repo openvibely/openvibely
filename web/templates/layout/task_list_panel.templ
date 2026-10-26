@@ -96,9 +96,9 @@ templ TaskListPanel(currentProjectID string) {
 		<nav id="appearance-settings-nav" aria-label="Settings">
 			<a class="settings-back" href="/tasks" data-settings-back hx-get="/tasks" hx-target="#main-content" hx-push-url="true">← Back to workspace</a>
 			<h2>Settings</h2>
-			<a href="#themes" data-settings-link="themes">Themes</a>
-			<a href="#layout" data-settings-link="layout">Layout</a>
-			<a href="#chat" data-settings-link="chat">Chat appearance</a>
+			<a class="task-list-row" href="#themes" data-settings-link="themes"><span class="task-list-title">Themes</span></a>
+			<a class="task-list-row" href="#layout" data-settings-link="layout"><span class="task-list-title">Layout</span></a>
+			<a class="task-list-row" href="#chat" data-settings-link="chat"><span class="task-list-title">Chat appearance</span></a>
 		</nav>
 		<div class="task-list-search" hidden>
 			<input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off"/>
@@ -116,11 +116,9 @@ templ TaskListPanel(currentProjectID string) {
 	<style>
         #appearance-settings-nav { display: none; }
         html.appearance-settings #task-list-panel > :not(#appearance-settings-nav) { display: none !important; }
-        html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; padding: 8px; overflow-y: auto; }
-        #appearance-settings-nav a { padding: 12px; border-radius: 10px; text-decoration: none; }
-        #appearance-settings-nav a:hover, #appearance-settings-nav a[aria-current="page"] { background: color-mix(in srgb, currentColor 9%, transparent); }
-        #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; margin-bottom: 20px; }
-        #appearance-settings-nav h2 { font-size: 20px; font-weight: 600; margin: 0 12px 20px; }
+        html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
+        #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; padding: 10px; margin-bottom: 12px; }
+        #appearance-settings-nav h2 { font-size: 14px; font-weight: 500; margin: 0 10px 12px; }
         html.appearance-settings #task-list-header { visibility: hidden; }
         html.appearance-settings #task-list-divider { display: none !important; }
         .settings-mobile-nav { display: flex; flex-wrap: wrap; gap: 16px; }
