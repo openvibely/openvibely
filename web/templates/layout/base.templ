@@ -3189,8 +3189,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Attached tabs flow into the page. The first tab's outer corner must clear the page's rounded top-left. */
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar { --project-tab-contour: transparent; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs { padding-left: 10px; }
-				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"] #desktop-project-tabs,
 				html[data-shell-frame][data-tab-style="attached"].task-list-collapsed #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
+				/* In floating mode the first attached tab shares the page's left edge. */
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed) #desktop-project-tabs { padding-left: 0; }
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed) .desktop-project-tab:first-child[data-selected="true"]::before { display: none; }
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed):has(.desktop-project-tab:first-child[data-selected="true"]) #main-content { border-top-left-radius: 0; clip-path: none; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-3px); }
 				/* Leave the same top breathing room for attached and detached desktop tabs. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-tabs { padding-top: 10px; }
