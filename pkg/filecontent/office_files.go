@@ -227,11 +227,21 @@ func docxImageMediaType(name string, data []byte) string {
 }
 
 func docxEmbeddedImages(z *zip.Reader) (map[string]docxImageAsset, error) {
-	targets := map[string]string{}
+	entriesByName := make(map[string]*zip.File, len(z.File))
+	var relationshipFiles []*zip.File
 	for _, file := range z.File {
-		if file.Name != "word/_rels/document.xml.rels" {
-			continue
+		if _, exists := entriesByName[file.Name]; exists {
+			entriesByName[file.Name] = nil
+		} else {
+			entriesByName[file.Name] = file
 		}
+		if file.Name == "word/_rels/document.xml.rels" {
+			relationshipFiles = append(relationshipFiles, file)
+		}
+	}
+
+	targets := map[string]string{}
+	for _, file := range relationshipFiles {
 		rc, err := file.Open()
 		if err != nil {
 			return nil, err
@@ -264,17 +274,12 @@ func docxEmbeddedImages(z *zip.Reader) (map[string]docxImageAsset, error) {
 	images := make(map[string]docxImageAsset, len(targets))
 	var total uint64
 	for id, target := range targets {
-		var part *zip.File
-		for _, file := range z.File {
-			if file.Name == target {
-				if part != nil {
-					return nil, invalid("Office image part is ambiguous")
-				}
-				part = file
-			}
+		part, exists := entriesByName[target]
+		if !exists {
+			continue
 		}
 		if part == nil {
-			continue
+			return nil, invalid("Office image part is ambiguous")
 		}
 		if part.UncompressedSize64 > 4<<20 || total+part.UncompressedSize64 > 8<<20 {
 			return nil, invalid("Office images exceed preview limit")
