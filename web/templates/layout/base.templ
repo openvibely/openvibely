@@ -2444,7 +2444,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					line-height: 1.5;
 				}
 				/* --- Tool use (copied from Claude Code VSCode: root/toolSummary/toolBody) --- */
-				.stream-tool { position: relative; margin: 2px 0; }
+				/* Live responses use text-sm while saved responses inherit the page font.
+				   Keep tool geometry identical when the same output moves between them. */
+				.stream-tool { position: relative; margin: 2px 0; font-size: 1rem; line-height: 1.5; }
 				.stream-tool-summary {
 					display: flex;
 					align-items: center;
