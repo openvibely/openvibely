@@ -1129,7 +1129,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				     for specificity 1,1,0 — beats Tailwind CDN's .w-full (0,1,0) which
 				     injects after our <style> block and would otherwise override width. */
 				#chat-messages,
-				#task-thread-messages {
+				#task-thread-messages,
+				[data-thread-refresh-preview] {
 					/* WKWebView rubber-banding moves beyond the transcript's bounds,
 					   conflicting with virtual row measurement and bottom restoration.
 					   Keep native scrolling, but stop boundary bounce and scroll chaining. */
@@ -1269,7 +1270,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				/* Chat message scrollports: scrollbar appearance only (geometry handled above). */
 				#chat-messages,
-				#task-thread-messages {
+				#task-thread-messages,
+				[data-thread-refresh-preview] {
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.2) transparent;
 				}					/* Remove outlines/borders from chat selectors */
