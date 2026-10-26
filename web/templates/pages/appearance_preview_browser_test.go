@@ -106,3 +106,56 @@ func TestBrowserFunctional_AppearanceBoardColumnsAtEveryWidth(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", nil).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "appearance-surfaces", func(b *composerFocusCDP) {
+		b.waitFor("appearance ready", `String(!!window.selectOpenVibelyDisplay)`, "true")
+		b.evaluate(`var surfaceSample=document.createElement('div');surfaceSample.innerHTML='<div class="card bg-base-100 border border-base-300">Card</div><button class="btn btn-primary">Run</button><span class="text-success">Success</span><span class="text-error">Error</span><span class="text-warning">Warning</span><span class="text-info">Info</span><code class="hljs"><span class="hljs-keyword">const</span></code>';document.getElementById('main-content').appendChild(surfaceSample); 'ready'`)
+		for _, width := range []int{1440, 390} {
+			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+			expected := "true"
+			if width < 1024 {
+				expected = "false"
+			}
+			b.waitFor("responsive layout", `String(document.documentElement.hasAttribute('data-shell-frame'))`, expected)
+			for _, theme := range []string{"openvibely-dark", "openvibely-light", "openvibely-slate", "catppuccin-mocha", "catppuccin-latte"} {
+				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
+				b.waitFor("surfaces preserve theme colors: "+theme, `(()=>{
+      const color=e=>getComputedStyle(e).backgroundColor;
+      const colors=()=>Array.from(surfaceSample.children).slice(1).map(e=>{const c=getComputedStyle(e);return [c.color,c.backgroundColor,e.querySelector('.hljs-keyword')&&getComputedStyle(e.querySelector('.hljs-keyword')).color]});
+      const previews=()=>['default','layered'].map(v=>{const p=document.querySelector('[data-kind="surfaces"][data-variant="'+v+'"]');return [color(p),color(p.querySelector('.dp-page')),color(p.querySelector('.dp-list')),color(p.querySelector('.dp-surface-card'))]});
+      selectOpenVibelyDisplay('surfaces','default'); const before=JSON.stringify(colors()), previewBefore=JSON.stringify(previews());
+      const pageBefore=color(document.getElementById('main-content'));
+      selectOpenVibelyDisplay('surfaces','layered');
+      if(JSON.stringify(colors())!==before)return 'theme colors changed';
+      if(JSON.stringify(previews())!==previewBefore)return 'alternatives changed';
+      if(color(document.getElementById('main-content'))===pageBefore)return 'page did not change';
+      const p=document.querySelector('[data-kind="surfaces"][data-variant="layered"]');
+      if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'page preview differs';
+      if(color(p.querySelector('.dp-surface-card'))!==color(surfaceSample.firstElementChild))return 'card preview differs';
+      return 'pass';
+    })()`, "pass")
+			}
+		}
+		b.evaluate(`localStorage.removeItem('openvibely.surfaceStyle');localStorage.setItem('openvibely.colorTheme','openvibely-layered');localStorage.setItem('theme','openvibely-layered'); 'saved legacy'`)
+		b.call("Page.navigate", map[string]any{"url": server.URL + "/?migration=1"}, nil)
+		b.waitFor("legacy theme migrated", `(()=>{const state=[location.search,document.readyState,typeof window.selectOpenVibelyDisplay,openVibelyThemes.currentID(),openVibelyDisplay.get('surfaces'),localStorage.getItem('openvibely.colorTheme'),localStorage.getItem('openvibely.surfaceStyle')];return new URLSearchParams(state[0]).get('migration')==='1' && state[1]==='complete' && state[2]==='function' && state[3]==='openvibely-dark' && state[4]==='layered' && state[5]==='openvibely-dark' ? 'true' : JSON.stringify(state);})()`, "true")
+		b.evaluate(`selectOpenVibelyDisplay('surfaces','default'); 'saved default'`)
+		b.call("Page.navigate", map[string]any{"url": server.URL + "/?migration=2"}, nil)
+		b.waitFor("surface preference persists", `String(new URLSearchParams(location.search).get('migration')==='2' && !!window.openVibelyDisplay && openVibelyDisplay.get('surfaces')==='default')`, "true")
+	})
+}
