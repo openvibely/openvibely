@@ -59,6 +59,12 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
       }
       for(const mode of ['default','layered']) for(const step of ['off','on']) {
        selectOpenVibelyDisplay('surfaces',mode);selectOpenVibelyDisplay('step',step);
+       const menu=document.createElement('div'), tip=document.createElement('div'), card=document.createElement('div');
+       menu.className='ov-menu';tip.className='ov-tooltip';card.style.backgroundColor='var(--board-card-bg)';
+       document.body.append(menu,tip,card);
+       const menuMatches=color(menu)===color(card), tipMatches=color(tip)===color(card);
+       menu.remove();tip.remove();card.remove();
+       if(!menuMatches || !tipMatches)return 'menu/tooltip differs from card in '+mode;
        if(document.documentElement.dataset.theme!=='dark' && mode==='default')continue;
        const probe=document.createElement('div');probe.style.color=mode==='default'?'var(--ov-surface-default-border, var(--shell-page))':'var(--ov-surface-layered-border, var(--shell-chrome))';sample.appendChild(probe);
        const expected=getComputedStyle(probe).color;probe.remove();

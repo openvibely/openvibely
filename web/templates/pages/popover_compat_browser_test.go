@@ -263,7 +263,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					hover(`#project-tab-settings-action`)
 					b.waitFor("menu hover "+theme, `String(getComputedStyle(document.getElementById('project-tab-settings-action')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
 					if legacy && theme == "dark" {
-						b.waitFor("legacy dark menu background", `getComputedStyle(document.getElementById('project-tab-menu')).backgroundColor`, "rgb(21, 25, 30)")
+						b.waitFor("legacy dark menu background", `getComputedStyle(document.getElementById('project-tab-menu')).backgroundColor`, "rgb(25, 30, 36)")
 						b.waitFor("legacy dark menu border", `getComputedStyle(document.getElementById('project-tab-menu')).borderTopColor`, "rgba(166, 173, 187, 0.2)")
 					}
 					if theme == "light" {
