@@ -32,6 +32,7 @@ type Theme struct {
 	Syntax     map[string]string `json:"syntax"`
 	Preview    map[string]string `json:"preview"`
 	CSS        map[string]string `json:"css"`
+	SurfaceCSS map[string]string `json:"surfaceCSS,omitempty"`
 	SearchText string            `json:"searchText"`
 }
 
@@ -213,11 +214,12 @@ var runtimeCatalog struct {
 func RuntimeCatalogJSON() string {
 	runtimeCatalog.once.Do(func() {
 		type runtimeTheme struct {
-			ID    string            `json:"id"`
-			Kind  string            `json:"kind"`
-			Mode  string            `json:"mode"`
-			CSS   map[string]string `json:"css"`
-			Roles [7]string         `json:"r"`
+			ID         string            `json:"id"`
+			Kind       string            `json:"kind"`
+			Mode       string            `json:"mode"`
+			CSS        map[string]string `json:"css"`
+			SurfaceCSS map[string]string `json:"surfaceCSS,omitempty"`
+			Roles      [7]string         `json:"r"`
 		}
 		catalog := Catalog()
 		native := make(map[string]bool)
@@ -226,9 +228,10 @@ func RuntimeCatalogJSON() string {
 		}
 		runtime := make([]runtimeTheme, 0, len(catalog))
 		for _, theme := range catalog {
-			// Native themes are styled by the stylesheet; the browser never applies their variables.
+			// Native themes keep their stylesheet accents and syntax; only their
+			// explicitly defined surface treatments are applied by the browser.
 			if native[theme.ID] {
-				runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, Roles: toggleRuntimeRoles(theme)})
+				runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, SurfaceCSS: theme.SurfaceCSS, Roles: toggleRuntimeRoles(theme)})
 				continue
 			}
 			css := make(map[string]string, len(theme.CSS)-3)
@@ -244,7 +247,7 @@ func RuntimeCatalogJSON() string {
 			css["--ov-schedule-task-bg"] = card
 			css["--ov-schedule-selection-bg"] = scheduleSelectionBackground(theme, card)
 			runtime = append(runtime, runtimeTheme{
-				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css,
+				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css, SurfaceCSS: theme.SurfaceCSS,
 				Roles: toggleRuntimeRoles(theme),
 			})
 		}
@@ -295,7 +298,21 @@ func openVibelyDarkTheme() Theme {
 		"background": "#1E1E1E", "foreground": "#D4D4D4", "comment": "#6A9955", "string": "#CE9178", "number": "#B5CEA8",
 		"keyword": "#569CD6", "function": "#DCDCAA", "type": "#4EC9B0", "variable": "#9CDCFE", "title": "#DCDCAA", "error": "#F44747",
 	}
-	return openVibelyTheme(OpenVibelyDarkThemeID, "OpenVibely Dark", KindDark, "dark", semantic, syntax)
+	theme := openVibelyTheme(OpenVibelyDarkThemeID, "OpenVibely Dark", KindDark, "dark", semantic, syntax)
+	// Surface treatments belong to the theme, independently of its native
+	// accent and syntax styles. The desktop base preserves existing card fills.
+	theme.SurfaceCSS = map[string]string{
+		"--ov-surface-default-rail":  "#15191E",
+		"--ov-surface-default-frame": "#191E24",
+		"--ov-surface-default-page":  "#15191E",
+		"--ov-surface-default-card":  "oklch(var(--b1))",
+		"--ov-surface-layered-frame": "#1D232A",
+		"--ov-surface-layered-page":  "#15191E",
+		"--ov-surface-layered-card":  "#191E24",
+		"--ov-surface-desktop-base":  "23.2607% 0.013807 253.100675",
+		"--ov-surface-code":          "#111418",
+	}
+	return theme
 }
 
 func openVibelyLightTheme() Theme {
