@@ -643,7 +643,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
-		return formatSteeringInstruction(combinedSteeringContent(batch.inputs)), nil
+		return service.FormatQueuedSteeringText(batch.inputs), nil
 	}
 	localSteeringCallback := func(callbackCtx context.Context) (llmcontracts.LocalSteeringInput, error) {
 		if steeringCallbackParams == nil {
@@ -665,7 +665,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		steeringCallbackParams.ImageAttachments = steeringCallbackParams.ImageAttachments[:attachmentStart]
 		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
-		text := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
+		text := service.FormatQueuedSteeringText(batch.inputs)
 		steeringCallbackParams.lifecycleUserMessage = text
 		commit := h.preparedSteeringCommit(params, batch)
 		return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
@@ -1116,8 +1116,7 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 			return batch, err
 		}
 	}
-	steeringMessage := combinedSteeringContent(batch.inputs)
-	steeringInstruction := formatSteeringInstruction(steeringMessage)
+	steeringInstruction := service.FormatQueuedSteeringText(batch.inputs)
 	params.lifecycleUserMessage = steeringInstruction
 	if previousAssistantOutput != "" {
 		assistantDelta := previousAssistantOutput
@@ -1478,20 +1477,6 @@ func (h *Handler) commitPreparedSteeringInputs(ctx context.Context, params strea
 		}
 	}
 	return nil
-}
-
-func combinedSteeringContent(inputs []models.ThreadInput) string {
-	parts := make([]string, 0, len(inputs))
-	for _, input := range inputs {
-		if content := strings.TrimSpace(input.Content); content != "" {
-			parts = append(parts, content)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func formatSteeringInstruction(steeringMessage string) string {
-	return strings.TrimSpace(steeringMessage)
 }
 
 func combineActivePromptWithSteering(activePrompt, steeringInstruction string) string {
