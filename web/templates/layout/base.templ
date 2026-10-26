@@ -112,7 +112,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
+						try { prefs = { surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
+						root.setAttribute('data-surface-style', prefs.surfaces === 'layered' ? 'layered' : 'default');
 						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
 						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
 						root.setAttribute('data-tab-style', prefs.tabs === 'attached' ? 'attached' : 'detached');
@@ -126,6 +127,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
+ surfaces: { key: 'openvibely.surfaceStyle', attr: 'data-surface-style', values: ['default', 'layered'] },
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
 						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
@@ -166,7 +168,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						function modeForTheme(theme) { return theme && theme.mode === 'light' ? 'light' : 'dark'; }
 						function fallbackIDForMode(mode) { return mode === 'light' ? defaultLight : defaultDark; }
 						function validTheme(id) { return id && byID[id] ? byID[id] : null; }
-							function normalizeStoredTheme(value) { value = String(value || '').trim(); if (value === 'light' || value === 'dark') return fallbackIDForMode(value); if (validTheme(value)) return value; return ''; }
+							function normalizeStoredTheme(value) { value = String(value || '').trim(); if (value === 'openvibely-layered') { if (!safeGet('openvibely.surfaceStyle')) window.openVibelyDisplay.set('surfaces', 'layered'); safeSet(exactKey, defaultDark); safeSet(legacyModeKey, defaultDark); safeSet(lastDarkKey, defaultDark); return defaultDark; } if (value === 'light' || value === 'dark') return fallbackIDForMode(value); if (validTheme(value)) return value; return ''; }
 							function normalizeThemeID(value) { return normalizeStoredTheme(value); }
 							function persistUIPreference(payload) { try { fetch('/ui/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function() {}); } catch (_) {} }
 							function usesNativeTheme(id) { return id === defaultLight || id === defaultDark; }
@@ -3039,6 +3041,23 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 				html[data-shell-frame][data-theme="light"] { --shell-chrome: #F5F5F5; --shell-page: #E8E8E8; }
 				html[data-shell-frame][data-ov-theme-layer="custom"] { --shell-chrome: var(--ov-shell-chrome, var(--ov-kanban-column-bg)); --shell-page: var(--ov-shell-page, var(--ov-content-bg)); --shell-rail: var(--ov-shell-rail, var(--shell-page)); --shell-card: var(--ov-shell-card, var(--ov-surface)); --shell-code: var(--ov-code-bg); --shell-row-selected: var(--ov-shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent)); --shell-divider: var(--ov-subtle-border); }
+
+                /* Surface treatment is independent of the selected theme's text and accents. */
+                html {
+                    --surface-default-frame: oklch(var(--b2)); --surface-default-page: oklch(var(--b2)); --surface-default-card: oklch(var(--b1));
+                    --surface-layered-frame: oklch(var(--b1)); --surface-layered-page: oklch(var(--b3)); --surface-layered-card: oklch(var(--b2));
+                }
+                html[data-theme="light"] { --surface-default-frame: #F5F5F5; --surface-default-page: #F5F5F5; --surface-default-card: #FAFAFA; --surface-layered-frame: #F5F5F5; --surface-layered-page: #E8E8E8; --surface-layered-card: #FAFAFA; }
+                html[data-ov-theme-layer="custom"] {
+                    --surface-default-frame: var(--ov-kanban-column-bg); --surface-default-page: var(--ov-content-bg); --surface-default-card: var(--ov-surface);
+                    --surface-layered-frame: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text)); --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 92%, black); --surface-layered-card: var(--ov-surface);
+                }
+                html[data-theme="light"][data-ov-theme-layer="custom"] { --surface-layered-page: color-mix(in srgb, var(--ov-content-bg) 94%, var(--ov-text)); }
+                html:root[data-surface-style="default"] { --shell-chrome: var(--surface-default-frame); --shell-page: var(--surface-default-page); --shell-rail: var(--surface-default-card); --board-card-bg: var(--surface-default-card); }
+                html:root[data-surface-style="layered"] { --shell-chrome: var(--surface-layered-frame); --shell-page: var(--surface-layered-page); --shell-rail: var(--surface-layered-card); --board-card-bg: var(--surface-layered-card); --shell-divider: var(--shell-chrome); }
+                html:root[data-surface-style="layered"] #main-content :where(.bg-base-100):where(:not(.chat-input-container):not(.chat-bubble-user-msg):not(.chat-bubble-assistant-msg)) { background-color: var(--board-card-bg) !important; }
+                html:root[data-surface-style="layered"] #main-content .border-base-300:where(:not(:hover):not(:focus-visible):not(.border-primary)) { border-color: var(--shell-chrome) !important; }
+                html:root[data-surface-style="layered"] #main-content { background-color: var(--shell-page) !important; }
 				html[data-shell-frame] body { background-color: var(--shell-chrome) !important; }
 				html[data-shell-frame] body > .drawer > .drawer-content {
 					display: flex; flex-direction: row;
@@ -3125,11 +3144,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-board-columns="tintstrip"] .kanban-column > :first-child { background-color: var(--board-column-bg); margin: 0 -0.75rem 0.75rem; padding: 0 0.75rem; height: 3.25rem; min-height: 3.25rem; border-radius: 0.5rem 0.5rem 0 0; }
 				html[data-board-columns="inset"] .kanban-column { background-color: oklch(var(--b1)) !important; }
 				html[data-ov-theme-layer="custom"][data-board-columns="inset"] .kanban-column { background-color: var(--shell-card, oklch(var(--b1))) !important; }
-				html[data-board-columns="inset"] .kanban-column .card { background-color: var(--board-page-bg) !important; }
-				html[data-board-columns="inset"] .kanban-column .card:not(:hover) { border-color: color-mix(in srgb, oklch(var(--b1)) 92%, oklch(var(--bc))); }
-				.board-columns-preview { --bcp-page: var(--board-page-bg); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: oklch(var(--b1)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
-				html[data-theme="light"] .board-columns-preview { --bcp-card: var(--ov-l-bg); }
-				html[data-ov-theme-layer="custom"] .board-columns-preview { --bcp-card: var(--ov-surface); }
+				html[data-board-columns="inset"][data-surface-style] #main-content .kanban-column .card { background-color: var(--board-page-bg) !important; }
+				html[data-board-columns="inset"][data-surface-style] #main-content .kanban-column .card:not(:hover) { border-color: color-mix(in srgb, oklch(var(--b1)) 92%, oklch(var(--bc))); }
+				.board-columns-preview { --bcp-page: var(--board-page-bg); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: var(--board-card-bg); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
 				.bcp-col { display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 6px; background: var(--bcp-frame); }
 				.bcp-head { height: 6px; width: 55%; border-radius: 2px; background: oklch(var(--bc) / .3); }
 				.bcp-card { height: 18px; border-radius: 4px; background: var(--bcp-card); }
@@ -3237,18 +3254,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
 				html[data-shell-frame] #main-content .chat-input-shadow-gutter { padding-bottom: 14px; }
 				/* Shared unmodified/raised colors keep previews independent of the selection. */
-				html { --conversation-card-base: oklch(var(--b1)); --conversation-card-raised: color-mix(in srgb, oklch(var(--b1)) 94%, oklch(var(--bc))); }
-				html[data-ov-theme-layer="custom"] { --conversation-card-base: var(--ov-surface); --conversation-card-raised: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text, oklch(var(--bc)))); }
-				html[data-color-theme="openvibely-dark"][data-theme="dark"] { --conversation-card-base: oklch(23.2607% 0.013807 253.100675); --conversation-card-raised: oklch(25.3267% 0.015896 252.417568); }
+				html { --conversation-card-base: var(--board-card-bg); --conversation-card-raised: color-mix(in srgb, var(--board-card-bg) 94%, oklch(var(--bc))); }
+				html[data-ov-theme-layer="custom"] { --conversation-card-base: var(--board-card-bg); --conversation-card-raised: color-mix(in srgb, var(--board-card-bg) 94%, var(--ov-text, oklch(var(--bc)))); }
 				html[data-surface-step="off"] { --shell-card: var(--conversation-card-base) !important; }
 				html[data-surface-step="on"] { --shell-card: var(--conversation-card-raised) !important; }
-				html[data-shell-frame][data-color-theme="openvibely-dark"][data-theme="dark"] { --b1: 23.2607% 0.013807 253.100675; --shell-card: oklch(25.3267% 0.015896 252.417568); --shell-code: #111418; }
 				html[data-ov-theme-layer="custom"] .queued-input-row { background-color: color-mix(in srgb, var(--ov-content-bg) 45%, transparent) !important; }
-				html[data-shell-frame]:is([data-color-theme="openvibely-dark"], [data-color-theme="openvibely-layered"]) { --ov-menu-surface: var(--shell-rail); }
-				html[data-shell-frame]:is([data-color-theme="openvibely-dark"], [data-color-theme="openvibely-layered"]) :is(.ov-menu, .dropdown-content, .schedule-datetime-popup) { background: var(--shell-rail) !important; --ov-menu-active: rgba(166, 173, 187, .07); }
-				html[data-shell-frame]:is([data-color-theme="openvibely-dark"], [data-color-theme="openvibely-layered"]) .dropdown-content :is(a, button, summary):hover { background-color: color-mix(in srgb, oklch(var(--bc)) 7%, transparent) !important; }
-				html[data-theme="dark"][data-color-theme="openvibely-dark"] .stream-tool-body { background: #191E24; border-color: #1D232A; }
-				html[data-theme="dark"][data-color-theme="openvibely-dark"] :is(.stream-tool-body-label, .stream-tool-body-content) { border-top-color: #1D232A; }
 			</style>
 			<script>
 // Configure Marked for chat rendering. Re-run this on first use so a

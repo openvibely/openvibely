@@ -11,7 +11,7 @@ import (
 // Keep hidden palettes available to existing saved preferences.
 func themeVisibleInPicker(id string) bool {
 	switch id {
-	case "vscode-dark-modern", "vscode-default-high-contrast", "vscode-abyss",
+	case "openvibely-layered", "vscode-dark-modern", "vscode-default-high-contrast", "vscode-abyss",
 		"vscode-kimbie-dark", "vscode-monokai", "vscode-monokai-dimmed",
 		"vscode-red", "vscode-solarized-dark", "vscode-solarized-light",
 		"vscode-tomorrow-night-blue", "nord", "openvibely-paper",
@@ -35,14 +35,18 @@ templ ThemesContent(catalog []themes.Theme) {
 			<h2 class="text-2xl font-bold">Appearance</h2>
 		</div>
 		<style>
-			.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--shell-chrome, oklch(var(--b3))); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }
+			.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }
+            .display-preview[data-preview-surfaces="default"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-card); --dp-surface-card: var(--surface-default-card); }
+            .display-preview[data-preview-surfaces="layered"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }
+            .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }
+            [data-preview-surfaces="layered"] .dp-surface-card { border-color: var(--dp-frame); }
 			.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }
 			.display-preview i:last-child { width: 55%; margin-bottom: 0; }
 			.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }
 			.dp-tabs span { width: 42%; height: 14px; border-radius: 5px; background: var(--dp-page); }
 			.dp-tabs span + span { opacity: .4; }
 			.dp-workspace { display: flex; height: 70px; }
-			.dp-list { flex: 0 0 30%; padding: 12px 6px; background: var(--dp-page); border-right: 1px solid oklch(var(--bc) / .12); border-radius: 7px 0 0 0; }
+			.dp-list { flex: 0 0 30%; padding: 12px 6px; background: var(--dp-rail); border-right: 1px solid oklch(var(--bc) / .12); border-radius: 7px 0 0 0; }
 			.dp-page { flex: 1; padding: 12px; background: var(--dp-page); }
 			.display-preview[data-preview-layout="floating"] { --dp-gap: 7px; }
 			.display-preview[data-preview-tabs="attached"] { --dp-tab-inset: 6px; }
@@ -64,6 +68,7 @@ templ ThemesContent(catalog []themes.Theme) {
 			<h3 class="text-lg font-semibold mb-1">Layout</h3>
 			<p class="text-sm opacity-70 mb-3">How the task list sits next to the page.</p>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
+				@displayToggle("surfaces", "Surfaces", "default", "Default", "layered", "Layered")
 				@displayToggle("layout", "Task list", "floating", "Floating", "unified", "Unified")
 				@displayToggle("tabs", "Project tabs", "detached", "Detached", "attached", "Attached")
 			</div>
@@ -98,7 +103,7 @@ templ ThemesContent(catalog []themes.Theme) {
 					var display = window.openVibelyDisplay;
 					if (!display) return;
 					document.querySelectorAll('.display-preview').forEach(function(preview) {
-						['layout', 'tabs', 'thread', 'bubbles', 'step'].forEach(function(pref) {
+						['surfaces', 'layout', 'tabs', 'thread', 'bubbles', 'step'].forEach(function(pref) {
 							preview.setAttribute('data-preview-' + pref, preview.dataset.kind === pref ? preview.dataset.variant : display.get(pref));
 						});
 					});
@@ -281,9 +286,9 @@ templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabe
 				<button type="button" class="display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" data-display-pref={ pref } data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">
 					<span class="flex justify-between items-center gap-2 mb-3"><span class="text-sm font-medium">{ opt[1] }</span><span class="badge badge-primary badge-sm hidden" data-display-active>Active</span></span>
 					<div class="display-preview" data-kind={ pref } data-variant={ opt[0] } aria-hidden="true">
-						if pref == "layout" || pref == "tabs" {
+						if pref == "surfaces" || pref == "layout" || pref == "tabs" {
 							<div class="dp-tabs"><span></span><span></span></div>
-							<div class="dp-workspace"><div class="dp-list"><i></i><i></i><i></i></div><div class="dp-page"><i></i><i></i></div></div>
+							<div class="dp-workspace"><div class="dp-list"><i></i><i></i><i></i></div><div class="dp-page"><div class="dp-surface-card"><i></i><i></i></div></div></div>
 						} else {
 							<div class="dp-conversation"><div class="dp-user"><i></i></div><div class="dp-assistant"><i></i><i></i><i></i></div><div class="dp-composer"><i></i></div></div>
 						}
