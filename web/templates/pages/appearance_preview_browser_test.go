@@ -52,3 +52,46 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserFunctional_AppearanceBoardColumnsAtEveryWidth(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", nil).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "appearance-columns", func(b *composerFocusCDP) {
+		b.waitFor("appearance ready", `String(!!window.selectOpenVibelyDisplay)`, "true")
+		b.evaluate(`var boardSample=document.createElement('div'); boardSample.className='kanban-column'; boardSample.innerHTML='<div>Active</div><div class="card bg-base-100">Task</div>'; document.getElementById('main-content').appendChild(boardSample); 'ready'`)
+		for _, width := range []int{1440, 390} {
+			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+			expected := "true"
+			if width < 1024 {
+				expected = "false"
+			}
+			b.waitFor("responsive layout", `String(document.documentElement.hasAttribute('data-shell-frame'))`, expected)
+			for _, theme := range []string{"openvibely-dark", "openvibely-layered", "openvibely-light"} {
+				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
+				for _, mode := range []string{"tint", "filled", "inset", "tintstrip"} {
+					b.evaluate(`selectOpenVibelyDisplay('columns','` + mode + `'); 'selected'`)
+					b.waitFor("board matches preview: "+theme+"/"+mode, `(()=>{
+      const preview=document.querySelector('.board-columns-preview[data-preview="`+mode+`"]');
+      const color=e=>getComputedStyle(e).backgroundColor;
+      if(color(boardSample)!==color(preview.querySelector('.bcp-col')))return 'column differs';
+      if('`+mode+`'==='inset' && color(boardSample.querySelector('.card'))!==color(preview.querySelector('.bcp-card')))return 'card differs';
+      if('`+mode+`'==='tintstrip' && color(boardSample.firstElementChild)!==color(preview.querySelector('.bcp-head')))return 'header differs';
+      return 'pass';
+     })()`, "pass")
+				}
+			}
+		}
+	})
+}

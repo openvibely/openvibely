@@ -3115,20 +3115,19 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html.task-list-collapsed #task-list-header .task-list-brand,
 				html.task-list-collapsed #task-list-header .task-list-actions { display: none; }
 				html[data-shell-frame] body > .drawer > .drawer-content > .navbar { display: none; }
-				/* Kanban columns used the new page color; lift them onto the chrome color. */
-				html[data-shell-frame] .kanban-column { background-color: var(--shell-chrome); }
-				html[data-shell-frame][data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-kanban-column-bg); }
-				html[data-shell-frame] { --board-column-bg: var(--shell-chrome); }
-				html[data-shell-frame][data-ov-theme-layer="custom"] { --board-column-bg: var(--ov-kanban-column-bg); }
-				html[data-shell-frame][data-board-columns="tint"] .kanban-column { border: 1px solid var(--board-column-bg); }
-				html[data-shell-frame][data-board-columns="tint"] .kanban-column { background-color: color-mix(in srgb, var(--shell-page) 75%, var(--board-column-bg)) !important; }
-				html[data-shell-frame][data-board-columns="tintstrip"] .kanban-column { border: 1px solid var(--board-column-bg); background-color: color-mix(in srgb, var(--shell-page) 75%, var(--board-column-bg)) !important; padding-top: 0; }
-				html[data-shell-frame][data-board-columns="tintstrip"] .kanban-column > :first-child { background-color: var(--board-column-bg); margin: 0 -0.75rem 0.75rem; padding: 0 0.75rem; height: 3.25rem; min-height: 3.25rem; border-radius: 0.5rem 0.5rem 0 0; }
-				html[data-shell-frame][data-board-columns="inset"] .kanban-column { background-color: oklch(var(--b1)) !important; }
-				html[data-shell-frame][data-ov-theme-layer="custom"][data-board-columns="inset"] .kanban-column { background-color: var(--shell-card) !important; }
-				html[data-shell-frame][data-board-columns="inset"] .kanban-column .card { background-color: var(--shell-page) !important; }
-				html[data-shell-frame][data-board-columns="inset"] .kanban-column .card:not(:hover) { border-color: color-mix(in srgb, oklch(var(--b1)) 92%, oklch(var(--bc))); }
-				.board-columns-preview { --bcp-page: var(--shell-page, oklch(var(--b2))); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: var(--shell-card, oklch(var(--b1))); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
+				/* Board styles share the preview colors at every viewport width. */
+				html { --board-page-bg: var(--shell-page, oklch(var(--b2))); --board-column-bg: var(--shell-chrome, oklch(var(--b3))); }
+				html[data-ov-theme-layer="custom"] { --board-page-bg: var(--shell-page, var(--ov-content-bg)); --board-column-bg: var(--ov-kanban-column-bg); }
+				html[data-board-columns] .kanban-column { background-color: var(--board-column-bg); }
+				html[data-board-columns="tint"] .kanban-column { border: 1px solid var(--board-column-bg); }
+				html[data-board-columns="tint"] .kanban-column { background-color: color-mix(in srgb, var(--board-page-bg) 75%, var(--board-column-bg)) !important; }
+				html[data-board-columns="tintstrip"] .kanban-column { border: 1px solid var(--board-column-bg); background-color: color-mix(in srgb, var(--board-page-bg) 75%, var(--board-column-bg)) !important; padding-top: 0; }
+				html[data-board-columns="tintstrip"] .kanban-column > :first-child { background-color: var(--board-column-bg); margin: 0 -0.75rem 0.75rem; padding: 0 0.75rem; height: 3.25rem; min-height: 3.25rem; border-radius: 0.5rem 0.5rem 0 0; }
+				html[data-board-columns="inset"] .kanban-column { background-color: oklch(var(--b1)) !important; }
+				html[data-ov-theme-layer="custom"][data-board-columns="inset"] .kanban-column { background-color: var(--shell-card, oklch(var(--b1))) !important; }
+				html[data-board-columns="inset"] .kanban-column .card { background-color: var(--board-page-bg) !important; }
+				html[data-board-columns="inset"] .kanban-column .card:not(:hover) { border-color: color-mix(in srgb, oklch(var(--b1)) 92%, oklch(var(--bc))); }
+				.board-columns-preview { --bcp-page: var(--board-page-bg); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: var(--shell-card, oklch(var(--b1))); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
 				.bcp-col { display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 6px; background: var(--bcp-frame); }
 				.bcp-head { height: 6px; width: 55%; border-radius: 2px; background: oklch(var(--bc) / .3); }
 				.bcp-card { height: 18px; border-radius: 4px; background: var(--bcp-card); }
