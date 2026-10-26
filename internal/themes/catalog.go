@@ -48,6 +48,7 @@ func VSCodeCatalog() []Theme {
 	var catalog []Theme
 	_ = json.Unmarshal([]byte(CatalogJSONRaw), &catalog)
 	for i := range catalog {
+		applySurfacePalette(&catalog[i])
 		if catalog[i].CSS == nil {
 			catalog[i].CSS = make(map[string]string)
 		}

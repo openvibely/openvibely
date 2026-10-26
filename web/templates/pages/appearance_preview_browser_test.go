@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/themes"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -134,13 +135,22 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
 				expected = "false"
 			}
 			b.waitFor("responsive layout", `String(document.documentElement.hasAttribute('data-shell-frame'))`, expected)
-			for _, theme := range []string{"openvibely-dark", "openvibely-light", "openvibely-slate", "catppuccin-mocha", "catppuccin-latte"} {
+			for _, definition := range themes.Catalog() {
+				theme := definition.ID
+				if theme == "openvibely-layered" {
+					continue
+				}
 				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
 				b.waitFor("surfaces preserve theme colors: "+theme, `(()=>{
       const color=e=>getComputedStyle(e).backgroundColor;
       const colors=()=>Array.from(surfaceSample.children).slice(1).map(e=>{const c=getComputedStyle(e);return [c.color,c.backgroundColor,e.querySelector('.hljs-keyword')&&getComputedStyle(e.querySelector('.hljs-keyword')).color]});
       const previews=()=>['default','layered'].map(v=>{const p=document.querySelector('[data-kind="surfaces"][data-variant="'+v+'"]');return [color(p),color(p.querySelector('.dp-page')),color(p.querySelector('.dp-list')),color(p.querySelector('.dp-surface-card'))]});
       selectOpenVibelyDisplay('surfaces','default'); const before=JSON.stringify(colors()), previewBefore=JSON.stringify(previews());
+      if(document.documentElement.hasAttribute('data-theme-surfaces')) {
+       const p=document.querySelector('[data-kind="surfaces"][data-variant="default"]');
+       if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'default page preview differs';
+       if(color(p.querySelector('.dp-surface-card'))!==color(surfaceSample.firstElementChild))return 'default card preview differs';
+      }
       const frameBefore=getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome');
       selectOpenVibelyDisplay('surfaces','layered');
       if(JSON.stringify(colors())!==before)return 'theme colors changed';
@@ -149,13 +159,18 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
       const p=document.querySelector('[data-kind="surfaces"][data-variant="layered"]');
       if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'page preview differs';
       if(color(p.querySelector('.dp-surface-card'))!==color(surfaceSample.firstElementChild))return 'card preview differs';
+      if(document.documentElement.hasAttribute('data-shell-frame') && document.documentElement.hasAttribute('data-theme-surfaces')) {
+       if(color(p)!==color(document.getElementById('desktop-project-titlebar')))return 'frame preview differs';
+       if(color(p.querySelector('.dp-list'))!==color(document.getElementById('task-list-panel')))return 'list preview differs';
+       if(color(document.getElementById('desktop-project-titlebar'))===color(document.getElementById('main-content')))return 'active tab blends into frame';
+      }
       return 'pass';
     })()`, "pass")
 			}
 		}
 		b.evaluate(`localStorage.removeItem('openvibely.surfaceStyle');localStorage.setItem('openvibely.colorTheme','openvibely-layered');localStorage.setItem('theme','openvibely-layered'); 'saved legacy'`)
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/?migration=1"}, nil)
-		b.waitFor("legacy theme migrated", `(()=>{const state=[location.search,document.readyState,typeof window.selectOpenVibelyDisplay,openVibelyThemes.currentID(),openVibelyDisplay.get('surfaces'),localStorage.getItem('openvibely.colorTheme'),localStorage.getItem('openvibely.surfaceStyle')];return new URLSearchParams(state[0]).get('migration')==='1' && state[1]==='complete' && state[2]==='function' && state[3]==='openvibely-dark' && state[4]==='layered' && state[5]==='openvibely-dark' ? 'true' : JSON.stringify(state);})()`, "true")
+		b.waitFor("legacy theme migrated", `(()=>{if(!window.openVibelyThemes || !window.openVibelyDisplay)return 'loading';const state=[location.search,document.readyState,typeof window.selectOpenVibelyDisplay,openVibelyThemes.currentID(),openVibelyDisplay.get('surfaces'),localStorage.getItem('openvibely.colorTheme'),localStorage.getItem('openvibely.surfaceStyle')];return new URLSearchParams(state[0]).get('migration')==='1' && state[1]==='complete' && state[2]==='function' && state[3]==='openvibely-dark' && state[4]==='layered' && state[5]==='openvibely-dark' ? 'true' : JSON.stringify(state);})()`, "true")
 		b.evaluate(`selectOpenVibelyDisplay('surfaces','default'); 'saved default'`)
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/?migration=2"}, nil)
 		b.waitFor("surface preference persists", `String(new URLSearchParams(location.search).get('migration')==='2' && !!window.openVibelyDisplay && openVibelyDisplay.get('surfaces')==='default')`, "true")
