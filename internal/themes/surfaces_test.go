@@ -38,6 +38,9 @@ func TestBundledSurfaceArrangements(t *testing.T) {
 			if css["--ov-surface-default-rail"] != page || css["--ov-surface-default-frame"] != card || css["--ov-surface-layered-page"] != page || css["--ov-surface-layered-card"] != card {
 				t.Fatal("treatments must change frame and rail, not page and card")
 			}
+			if theme.Mode == "dark" && theme.Kind != KindHighContrastDark && css["--ov-surface-default-border"] != page {
+				t.Fatal("default dark card borders must match the page")
+			}
 			text, _, _ := parseThemeHexColor(theme.Semantic["text"])
 			// Preserve upstream softer text where it already falls below 4.5.
 			floor := 4.5
@@ -54,7 +57,7 @@ func TestBundledSurfaceArrangements(t *testing.T) {
 				}
 			}
 			if theme.Kind == KindHighContrastDark || theme.Kind == KindHighContrastLight {
-				if css["--ov-surface-layered-border"] != theme.Semantic["border"] {
+				if css["--ov-surface-layered-border"] != theme.Semantic["border"] || css["--ov-surface-default-border"] != theme.Semantic["border"] {
 					t.Fatal("high contrast outline lost")
 				}
 			}
