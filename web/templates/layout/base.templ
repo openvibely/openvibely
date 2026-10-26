@@ -3083,7 +3083,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-title { min-width: 0; flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 				[data-task-list-group="Completed"] .task-list-title { opacity: .65; }
 				.task-list-row[data-task-list-extra] { display: none; }
-				.task-list-group[data-expanded] .task-list-row[data-task-list-extra], .task-list-group[data-searching] .task-list-row[data-task-list-extra] { display: flex; }
+				.task-list-group[data-expanded] .task-list-row[data-task-list-extra]:not([hidden]), .task-list-group[data-searching] .task-list-row[data-task-list-extra]:not([hidden]) { display: flex; }
 				.task-list-group[data-searching] .task-list-more { display: none; }
 				.task-list-more { display: block; width: 100%; text-align: left; padding: 6px 10px 6px 32px; border-radius: 8px; font-size: 12px; color: oklch(var(--bc) / .55); }
 				.task-list-more:hover { background: oklch(var(--bc) / .07); color: oklch(var(--bc) / .85); }

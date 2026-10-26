@@ -92,3 +92,41 @@ func TestBrowserFunctional_TaskListClickUsesDisplayedTask(t *testing.T) {
 		b.waitFor("click back during cold navigation is allowed", `String(window.taskRowRequests)`, "2")
 	})
 }
+
+func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	tasks := []models.Task{}
+	for _, title := range []string{"login-first", "other-2", "other-3", "other-4", "other-5", "other-6", "other-7", "login-extra", "unrelated-extra"} {
+		tasks = append(tasks, models.Task{ID: title, Title: title, Category: models.CategoryCompleted})
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			if err := layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/":
+			if err := layout.Base("Tasks", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-list-extra-search", func(b *composerFocusCDP) {
+		visible := `JSON.stringify(Array.from(document.querySelectorAll('[data-task-list-row]')).filter(e=>getComputedStyle(e).display!=='none').map(e=>e.dataset.taskListRow))`
+		b.waitFor("initial seven rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
+		b.evaluate(`document.getElementById('task-list-search-toggle').click(); var search=document.getElementById('task-list-search-input'); search.value='login'; search.dispatchEvent(new Event('input')); 'searched'`)
+		b.waitFor("only matching rows including eighth task", visible, `["login-first","login-extra"]`)
+		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); document.querySelector('.task-list-more').click(); 'expanded'`)
+		b.waitFor("show more reveals all nine rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
+		b.evaluate(`search.value='login'; search.dispatchEvent(new Event('input')); 'searched expanded group'`)
+		b.waitFor("expanded group still excludes nonmatches", visible, `["login-first","login-extra"]`)
+		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); 'cleared'`)
+		b.waitFor("clearing search preserves show more", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
+	})
+}
