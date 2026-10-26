@@ -161,6 +161,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 			}
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks?view=board#keep", "project-tabs", func(browser *composerFocusCDP) {
 				browser.waitFor("initial scope", `new URL(location.href).searchParams.get('project_id') || ''`, "p00")
+				browser.waitFor("new task link initially scoped", `document.getElementById("task-list-new").getAttribute("href")`, "/tasks/new?project_id=p00")
 				// Tab setup moves the selector on DOMContentLoaded, which would demote an already-open modal menu.
 				browser.waitFor("page initialized", `String(document.readyState === 'complete' && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
 				if got := browser.evaluate(`String(location.hash === '#keep' && new URL(location.href).searchParams.get('view') === 'board')`); got != "true" {
@@ -434,6 +435,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("shared navigation", `location.search`, "?project_id=p01")
 				browser.waitFor("active tab", `document.querySelector('[data-project-tab="p01"]').getAttribute('aria-selected')`, "true")
 				browser.waitFor("loaded project", `document.getElementById('fixture-project')?.textContent || ''`, "p01")
+				browser.waitFor("new task link follows project switch", `JSON.stringify([document.getElementById("task-list-new").getAttribute("href"),document.getElementById("task-list-new").getAttribute("hx-get")])`, `["/tasks/new?project_id=p01","/tasks/new?project_id=p01"]`)
 				browser.click(`[data-project-tab="p01"]`)
 				key := func(key, code string) {
 					params := map[string]any{"type": "keyDown", "key": key, "code": code}
