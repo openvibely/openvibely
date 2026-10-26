@@ -103,6 +103,36 @@ func TestGrepSearchUnreadableRootReturnsPathError(t *testing.T) {
 	}
 }
 
+func TestGrepSearchUnreadableFileRootReturnsPathError(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "unreadable.txt")
+	writeTestFile(t, path, "target\n")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(path, 0600)
+
+	file, err := os.Open(path)
+	if err == nil {
+		file.Close()
+		if err := os.Chmod(path, 0600); err != nil {
+			t.Fatal(err)
+		}
+		t.Skip("file permissions do not prevent reads for this user")
+	}
+
+	got, err := agenttools.Execute(context.Background(), root, "grep_search", rawGrepInput("target", path, ""))
+	if err == nil {
+		t.Fatalf("grep_search returned %q, want an access error for %q", got, path)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("error %q does not identify requested path %q", err, path)
+	}
+	if strings.Contains(got, "No matches found") {
+		t.Fatalf("unreadable file was reported as a successful search: %q", got)
+	}
+}
+
 func TestGrepSearchIgnoresUnreadableDescendant(t *testing.T) {
 	root := t.TempDir()
 	unreadableDir := filepath.Join(root, "unreadable")
