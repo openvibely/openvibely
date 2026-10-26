@@ -299,7 +299,7 @@ templ TaskListPanel(currentProjectID string) {
 				var m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);
 				return m ? decodeURIComponent(m[1]) : '';
 			}
-			var listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued'];
+			var listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued', 'task_goal_updated', 'task_goal_paused', 'task_goal_resumed', 'task_goal_cleared', 'task_goal_evaluated', 'task_goal_followup_queued'];
 			window.addEventListener('sse-task-event', function(e) {
 				var data = e.detail || {};
 				if (listEvents.indexOf(data.type) === -1) return;
