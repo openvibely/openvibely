@@ -93,6 +93,13 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 
 templ TaskListPanel(currentProjectID string) {
 	<aside id="task-list-panel" aria-label="Tasks">
+		<nav id="appearance-settings-nav" aria-label="Settings">
+			<a class="settings-back" href="/tasks" data-settings-back hx-get="/tasks" hx-target="#main-content" hx-push-url="true">← Back to workspace</a>
+			<h2>Settings</h2>
+			<a href="#themes" data-settings-link="themes">Themes</a>
+			<a href="#layout" data-settings-link="layout">Layout</a>
+			<a href="#chat" data-settings-link="chat">Chat appearance</a>
+		</nav>
 		<div class="task-list-search" hidden>
 			<input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off"/>
 		</div>
@@ -106,6 +113,75 @@ templ TaskListPanel(currentProjectID string) {
 		></div>
 	</aside>
 	<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
+	<style>
+        #appearance-settings-nav { display: none; }
+        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav) { display: none !important; }
+        html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; padding: 8px; overflow-y: auto; }
+        #appearance-settings-nav a { padding: 12px; border-radius: 10px; text-decoration: none; }
+        #appearance-settings-nav a:hover, #appearance-settings-nav a[aria-current="page"] { background: color-mix(in srgb, currentColor 9%, transparent); }
+        #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; margin-bottom: 20px; }
+        #appearance-settings-nav h2 { font-size: 20px; font-weight: 600; margin: 0 12px 20px; }
+        html.appearance-settings #task-list-header { visibility: hidden; }
+        html.appearance-settings #task-list-divider { display: none !important; }
+        .settings-mobile-nav { display: flex; flex-wrap: wrap; gap: 16px; }
+        html[data-shell-frame] .settings-mobile-nav { display: none; }
+        [data-settings-section][hidden] { display: none !important; }
+    </style>
+	<script>
+        (function() {
+            var root = document.documentElement;
+            var inSettings = false;
+            var wasCollapsed = false;
+            var workspaceURL = location.pathname === '/themes' ? '/tasks' + location.search : location.pathname + location.search + location.hash;
+            var workspaceScroll = 0;
+            document.addEventListener('htmx:beforeRequest', function(e) {
+                if (e.detail.target && e.detail.target.id === 'main-content' && !document.getElementById('themes-container')) {
+                    workspaceURL = location.pathname + location.search + location.hash;
+                    workspaceScroll = document.getElementById('main-content').scrollTop;
+                }
+            });
+            window.syncAppearanceSettings = function() {
+                var active = !!document.getElementById('themes-container');
+                if (active && !inSettings) {
+                    wasCollapsed = root.classList.contains('task-list-collapsed');
+                    root.classList.remove('task-list-collapsed');
+                } else if (!active && inSettings) {
+                    root.classList.toggle('task-list-collapsed', wasCollapsed);
+                    if (location.pathname + location.search + location.hash === workspaceURL) {
+                        document.getElementById('main-content').scrollTop = workspaceScroll;
+                    }
+                }
+                inSettings = active;
+                root.classList.toggle('appearance-settings', active);
+                document.getElementById('task-list-panel').setAttribute('aria-label', active ? 'Settings' : 'Tasks');
+                if (!active) return;
+                var section = location.hash.slice(1);
+                if (!['themes','layout','chat'].includes(section)) section = 'themes';
+                document.querySelectorAll('[data-settings-section]').forEach(function(el) { el.hidden = el.dataset.settingsSection !== section; });
+                document.querySelectorAll('[data-settings-link]').forEach(function(el) {
+                    if (el.dataset.settingsLink === section) el.setAttribute('aria-current', 'page');
+                    else el.removeAttribute('aria-current');
+                });
+                document.getElementById('appearance-section-title').textContent = {themes: 'Themes', layout: 'Layout', chat: 'Chat appearance'}[section];
+                document.querySelectorAll('[data-settings-back]').forEach(function(el) {
+                    el.setAttribute('href', workspaceURL);
+                    el.setAttribute('hx-get', workspaceURL);
+                    if (window.htmx) htmx.process(el);
+                });
+            };
+            document.addEventListener('click', function(e) {
+                var link = e.target.closest('[data-settings-link]');
+                if (!link || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                history.replaceState(history.state, '', link.getAttribute('href'));
+                window.syncAppearanceSettings();
+            });
+            document.addEventListener('DOMContentLoaded', window.syncAppearanceSettings);
+            document.addEventListener('htmx:afterSettle', window.syncAppearanceSettings);
+            document.addEventListener('htmx:historyRestore', window.syncAppearanceSettings);
+            window.addEventListener('hashchange', window.syncAppearanceSettings);
+        })();
+    </script>
 	<script>
 		(function() {
 			var root = document.documentElement;
@@ -137,6 +213,7 @@ templ TaskListPanel(currentProjectID string) {
 				btn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');
 			}
 			function setCollapsed(collapsed) {
+                if (root.classList.contains("appearance-settings")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
 				try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
 				syncToggle();
