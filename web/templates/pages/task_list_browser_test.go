@@ -55,3 +55,40 @@ func TestBrowserFunctional_TaskListGoalEventsAndSearch(t *testing.T) {
 		b.waitFor("closing search preserves previously open group", `String(document.querySelector('[data-task-list-group="Completed"]').open && !document.querySelector('[data-task-list-group="Completed"]').hidden)`, "true")
 	})
 }
+
+func TestBrowserFunctional_TaskListClickUsesDisplayedTask(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			tasks := []models.Task{
+				{ID: "task-a", Title: "Task A", Category: models.CategoryCompleted},
+				{ID: "task-b", Title: "Task B", Category: models.CategoryCompleted},
+			}
+			if err := layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/":
+			if err := layout.Base("Tasks", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-list-displayed-task", func(b *composerFocusCDP) {
+		b.waitFor("task rows ready", `String(!!document.querySelector('[data-task-list-row="task-a"]'))`, "true")
+		// A cached preview is already showing B while A remains in the address bar.
+		b.evaluate(`htmx.process(document.getElementById('task-list-groups')); history.replaceState({},'', '/tasks/task-a?project_id=project'); document.getElementById('main-content').innerHTML='<div id="task-thread-view" data-task-id="task-b"></div>'; window.taskRowRequests=0; document.body.addEventListener('htmx:beforeRequest',e=>{if(e.detail.elt.matches('[data-task-list-row]')){window.taskRowRequests++;e.preventDefault();}}); document.querySelector('[data-task-list-row="task-a"]').click(); 'clicked'`)
+		b.waitFor("click back to A starts navigation", `String(window.taskRowRequests)`, "1")
+		b.evaluate(`document.getElementById('task-thread-view').dataset.taskId='task-a'; document.querySelector('[data-task-list-row="task-a"]').click(); 'clicked'`)
+		b.waitFor("click on displayed task remains a no-op", `String(window.taskRowRequests)`, "1")
+		// Cold navigation hides A behind the loading state; clicking A must cancel it too.
+		b.evaluate(`document.getElementById('main-content').setAttribute('data-page-loading',''); document.querySelector('[data-task-list-row="task-a"]').click(); 'clicked'`)
+		b.waitFor("click back during cold navigation is allowed", `String(window.taskRowRequests)`, "2")
+	})
+}
