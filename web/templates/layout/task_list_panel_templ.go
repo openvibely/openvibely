@@ -312,14 +312,14 @@ func TaskListPanel(currentProjectID string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<aside id=\"task-list-panel\" aria-label=\"Tasks\"><nav id=\"appearance-settings-nav\" aria-label=\"Settings\"><a class=\"settings-back\" href=\"/tasks\" data-settings-back hx-get=\"/tasks\" hx-target=\"#main-content\" hx-push-url=\"true\">← Back to workspace</a> <a class=\"task-list-row\" href=\"#themes\" data-settings-link=\"themes\"><span class=\"task-list-title\">Themes</span></a> <a class=\"task-list-row\" href=\"#layout\" data-settings-link=\"layout\"><span class=\"task-list-title\">Layout</span></a> <a class=\"task-list-row\" href=\"#chat\" data-settings-link=\"chat\"><span class=\"task-list-title\">Chat appearance</span></a></nav><div class=\"task-list-search\" hidden><input id=\"task-list-search-input\" type=\"search\" placeholder=\"Search tasks…\" aria-label=\"Search tasks\" autocomplete=\"off\"></div><div id=\"task-list-groups\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<aside id=\"task-list-panel\" aria-label=\"Tasks\"><nav id=\"appearance-settings-nav\" aria-label=\"Settings\"><a class=\"settings-back\" href=\"/tasks\" data-settings-back hx-get=\"/tasks\" hx-target=\"#main-content\" hx-push-url=\"true\">← Back to workspace</a> <a class=\"task-list-row\" href=\"#themes\" data-settings-link=\"themes\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"14\" height=\"6\" rx=\"2\"></rect> <path d=\"M17 6h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-7v3\"></path> <rect x=\"10\" y=\"16\" width=\"4\" height=\"6\" rx=\"1\"></rect></svg> <span class=\"task-list-title\">Themes</span></a> <a class=\"task-list-row\" href=\"#layout\" data-settings-link=\"layout\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect> <path d=\"M3 9h18M9 9v12\"></path></svg> <span class=\"task-list-title\">Layout</span></a> <a class=\"task-list-row\" href=\"#chat\" data-settings-link=\"chat\"><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z\"></path> <path d=\"M8 10h8M8 14h5\"></path></svg> <span class=\"task-list-title\">Chat appearance</span></a></nav><div class=\"task-list-search\" hidden><input id=\"task-list-search-input\" type=\"search\" placeholder=\"Search tasks…\" aria-label=\"Search tasks\" autocomplete=\"off\"></div><div id=\"task-list-groups\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 107, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 126, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -357,7 +357,7 @@ func TaskListHeaderControls(currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL("/tasks/new?project_id=" + url.QueryEscape(currentProjectID))).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 478, Col: 211}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 497, Col: 211}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -370,7 +370,7 @@ func TaskListHeaderControls(currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/tasks/new?project_id=" + url.QueryEscape(currentProjectID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 478, Col: 283}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/task_list_panel.templ`, Line: 497, Col: 283}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
