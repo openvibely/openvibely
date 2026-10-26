@@ -98,7 +98,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = TaskListHeaderControls().Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TaskListHeaderControls(currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

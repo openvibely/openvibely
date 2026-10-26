@@ -146,7 +146,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
  </style>
 	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
 			<span class="project-bar-brand">OpenVibely</span>
-			@TaskListHeaderControls()
+			@TaskListHeaderControls(currentProjectID)
 
 			if serverRuntimeMode(ctx) == "desktop" {
  @SidebarToggle()
