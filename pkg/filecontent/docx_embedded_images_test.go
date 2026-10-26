@@ -39,11 +39,7 @@ func makeDocxEmbeddedImagesBenchmarkFixture(targetCount, distinctImageCount, ent
 	document.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body><w:p><w:r><w:t>benchmark preview</w:t></w:r>`)
 	for i := 0; i < targetCount; i++ {
 		id := fmt.Sprintf("image%d", i)
-		partIndex := i
-		if distinctImageCount > 0 {
-			partIndex %= distinctImageCount
-		}
-		part := fmt.Sprintf("image%d.png", partIndex)
+		part := fmt.Sprintf("image%d.png", i)
 		fmt.Fprintf(&relationships, `<Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/%s"/>`, id, part)
 	}
 	relationships.WriteString(`</Relationships>`)
@@ -156,25 +152,33 @@ func TestDocxPreviewEmbeddedImageDuplicateTargetIsAmbiguous(t *testing.T) {
 	}
 }
 
-// BenchmarkDocxPreviewEmbeddedImages isolates ZIP target resolution in the image stage
-// used by DocxPreview. Its unresolved targets avoid payload decoding so timings capture
-// archive metadata lookup; each generated fixture is built before its timed loop.
+// BenchmarkDocxPreviewEmbeddedImages measures the complete preview path with generated
+// in-memory DOCX fixtures. Fixture construction stays outside the timed loop.
 func BenchmarkDocxPreviewEmbeddedImages(b *testing.B) {
 	cases := []struct {
 		name                         string
 		targets, imageParts, entries int
 	}{
-		{name: "near_5000_entries", targets: benchmarkDocxImageTargets, imageParts: 0, entries: 4999},
-		{name: "about_500_entries", targets: benchmarkDocxImageTargets, imageParts: 0, entries: 500}}
+		{name: "near_5000_entries", targets: benchmarkDocxImageTargets, imageParts: 1, entries: 4999},
+		{name: "about_500_entries", targets: benchmarkDocxImageTargets, imageParts: 1, entries: 500}}
 	for _, testCase := range cases {
 		fixture := makeDocxEmbeddedImagesBenchmarkFixture(testCase.targets, testCase.imageParts, testCase.entries)
 		archive, err := zip.NewReader(bytes.NewReader(fixture), int64(len(fixture)))
 		if err != nil {
 			b.Fatal(err)
 		}
-		b.Run(testCase.name, func(b *testing.B) {
+		b.Run(testCase.name+"/preview", func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(fixture)))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, supported, err := DocxPreview("benchmark.docx", fixture); err != nil || !supported {
+					b.Fatalf("DocxPreview() supported=%v, err=%v", supported, err)
+				}
+			}
+		})
+		b.Run(testCase.name+"/image_resolution", func(b *testing.B) {
+			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				if _, err := docxEmbeddedImages(archive); err != nil {
