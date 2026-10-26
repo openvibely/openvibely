@@ -4,7 +4,7 @@ import "testing"
 
 func TestBundledSurfaceArrangements(t *testing.T) {
 	for _, theme := range Catalog() {
-		if theme.ID == OpenVibelyDarkThemeID || theme.ID == OpenVibelyLightThemeID {
+		if theme.ID == OpenVibelyDarkThemeID {
 			continue
 		}
 		t.Run(theme.ID, func(t *testing.T) {
@@ -20,8 +20,12 @@ func TestBundledSurfaceArrangements(t *testing.T) {
 				}
 				return relativeLuminance(rgb)
 			}
-			if !(luminance(page) < luminance(card) && luminance(card) < luminance(frame)) {
-				t.Fatal("surface ordering must be page < card < layered frame")
+			if theme.Mode == "light" {
+				if !(luminance(frame) < luminance(card) && luminance(card) < luminance(page)) {
+					t.Fatal("light surfaces must brighten from frame to card to page")
+				}
+			} else if !(luminance(page) < luminance(card) && luminance(card) < luminance(frame)) {
+				t.Fatal("dark surfaces must brighten from page to card to frame")
 			}
 			if css["--ov-surface-default-rail"] != page || css["--ov-surface-default-frame"] != card || css["--ov-surface-layered-page"] != page || css["--ov-surface-layered-card"] != card {
 				t.Fatal("treatments must change frame and rail, not page and card")

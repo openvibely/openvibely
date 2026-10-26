@@ -256,11 +256,7 @@ func previewOuterStyle(theme themes.Theme) string {
   "default-rail": theme.Semantic["surface"], "default-card": theme.Semantic["surface"],
   "layered-frame": theme.Semantic["surfaceRaised"], "layered-page": theme.Semantic["contentBg"], "layered-card": theme.Semantic["surface"],
  }
- if theme.ID == themes.OpenVibelyLightThemeID {
-  values["default-frame"] = "#F5F5F5"
-  values["layered-frame"] = "#F5F5F5"
-  values["layered-page"] = "#E8E8E8"
- }
+
  for key, value := range theme.SurfaceCSS {
   if strings.HasPrefix(key, "--ov-surface-default-") || strings.HasPrefix(key, "--ov-surface-layered-") {
    values[strings.TrimPrefix(key, "--ov-surface-")] = value

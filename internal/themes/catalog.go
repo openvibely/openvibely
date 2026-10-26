@@ -334,7 +334,9 @@ func openVibelyLightTheme() Theme {
 		"background": "#0000001F", "foreground": "#24292F", "comment": "#6A737D", "string": "#032F62", "number": "#005CC5",
 		"keyword": "#D73A49", "function": "#6F42C1", "type": "#005CC5", "variable": "#24292F", "title": "#6F42C1", "error": "#D73A49",
 	}
-	return openVibelyTheme(OpenVibelyLightThemeID, "OpenVibely Light", KindLight, "light", semantic, syntax)
+	theme := openVibelyTheme(OpenVibelyLightThemeID, "OpenVibely Light", KindLight, "light", semantic, syntax)
+	applySurfacePalette(&theme)
+	return theme
 }
 
 func openVibelyTheme(id, name, kind, mode string, semantic, syntax map[string]string) Theme {
