@@ -14,7 +14,7 @@ The three shades are deliberately mapped to OpenVibely roles rather than copying
 
 Dark themes brighten from page to card to frame. Light themes reverse that order: a softly shaded frame, lighter cards/task list, and the brightest page. Default removes the extra rail/frame separation even if the upstream theme is already layered. Layered selects the defined shades directly; it never repeatedly brightens an already-layered theme.
 
-Text, accents, status colors, syntax, and diff colors are unchanged. Code backgrounds retain their existing theme values. Mobile uses the same page/card colors as desktop and the Appearance previews. User-imported themes still use the existing generic fallback; they are not part of this bundled-theme mapping.
+Text, accents, status colors, syntax, and diff colors are unchanged. Code backgrounds retain their existing theme values except Light Modern: its upstream code and card backgrounds are identical, so conversation code boxes use its existing `list.hoverBackground` shade (`#F2F2F2`) to remain distinct inside assistant bubbles. Mobile uses the same page/card colors as desktop and the Appearance previews. User-imported themes still use the existing generic fallback; they are not part of this bundled-theme mapping.
 
 ## Sources and adaptation
 

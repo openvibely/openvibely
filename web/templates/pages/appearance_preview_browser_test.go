@@ -43,6 +43,12 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
       if(document.documentElement.dataset.theme==='light') {
        for(const mode of ['default','layered']) for(const step of ['off','on']) {
         selectOpenVibelyDisplay('surfaces',mode);selectOpenVibelyDisplay('step',step);
+        if('`+theme+`'==='vscode-light-modern') {
+         const bubble=sample.querySelector('.chat-bubble-assistant-msg');
+         for(const box of bubble.querySelectorAll('pre')) {
+          if(color(box)!=='rgb(242, 242, 242)' || color(box)===color(bubble))return 'Light Modern tool box blends into bubble';
+         }
+        }
         for(const e of sample.querySelectorAll('.stream-tool-body,.stream-tool-body-content')) {
          if(color(e)!=='rgba(0, 0, 0, 0)')return 'tool wrapper paints a different surface: '+color(e);
         }
