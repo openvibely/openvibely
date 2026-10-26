@@ -39,7 +39,7 @@ func projectBarPlatform(ctx context.Context) string {
 
 templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 	<style>
- html[data-openvibely-runtime="desktop"] { --project-titlebar-height: 46px; }
+ html[data-openvibely-runtime="desktop"] { --project-titlebar-height: 54px; }
  [data-openvibely-runtime="web"] #desktop-project-titlebar { display: none; --wails-draggable: no-drag; }
  #project-selector-trigger .project-selector-plus { display: none; }
  #desktop-project-titlebar #project-selector-trigger .project-selector-plus { display: block; }
@@ -54,9 +54,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="web"] .sidebar-header { display: none; }
  }
 
-  [data-openvibely-runtime="desktop"] body > .drawer { height: calc(100% - 46px); }
-  [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - 46px); }
-  [data-openvibely-runtime="desktop"] .drawer-side { top: 0; height: calc(100dvh - 46px); z-index: auto; }
+  [data-openvibely-runtime="desktop"] body > .drawer { height: calc(100% - var(--project-titlebar-height)); }
+  [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - var(--project-titlebar-height)); }
+  [data-openvibely-runtime="desktop"] .drawer-side { top: 0; height: calc(100dvh - var(--project-titlebar-height)); z-index: auto; }
   [data-openvibely-runtime="desktop"] .drawer-content > .navbar,
   [data-openvibely-runtime="desktop"] .sidebar-header { display: none; }
   #desktop-project-titlebar { height: var(--project-titlebar-height, 46px); display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-contour: oklch(var(--b1)); box-shadow: inset 0 -2px var(--project-tab-contour); }
