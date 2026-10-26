@@ -12,13 +12,13 @@ The three shades are deliberately mapped to OpenVibely roles rather than copying
 | Outer frame | Card shade | Frame shade |
 | Card outline | Theme outline | Frame shade (high-contrast themes keep their explicit outline) |
 
-Page, card, and frame shades increase in brightness. In light themes this means a softly tinted page and lighter cards/frame. Default removes the extra rail/frame separation even if the upstream theme is already layered. Layered selects the defined shades directly; it never repeatedly brightens an already-layered theme.
+Dark themes brighten from page to card to frame. Light themes reverse that order: a softly shaded frame, lighter cards/task list, and the brightest page. Default removes the extra rail/frame separation even if the upstream theme is already layered. Layered selects the defined shades directly; it never repeatedly brightens an already-layered theme.
 
 Text, accents, status colors, syntax, and diff colors are unchanged. Code backgrounds retain their existing theme values. Mobile uses the same page/card colors as desktop and the Appearance previews. User-imported themes still use the existing generic fallback; they are not part of this bundled-theme mapping.
 
 ## Sources and adaptation
 
-- [Catppuccin](https://github.com/catppuccin/catppuccin): Mocha uses mantle/base/surface0; Latte uses crust/mantle/base.
+- [Catppuccin](https://github.com/catppuccin/catppuccin): Mocha uses mantle/base/surface0 for page/card/frame; Latte uses base/mantle/crust.
 - [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme): night and storm background shades.
 - [Nord](https://www.nordtheme.com/docs/colors-and-palettes/): nord0/nord1/nord2.
 - [Dracula](https://draculatheme.com/contribute): existing dark and background shades, with a softer intermediate frame than the bright selection color.

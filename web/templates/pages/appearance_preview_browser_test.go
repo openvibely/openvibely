@@ -172,6 +172,15 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
        if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'default page preview differs';
        if(color(p.querySelector('.dp-surface-card'))!==color(surfaceSample.firstElementChild))return 'default card preview differs';
       }
+      const luminance=e=>{
+       const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d');
+       ctx.fillStyle=color(e);ctx.fillRect(0,0,1,1);
+       const rgb=Array.from(ctx.getImageData(0,0,1,1).data).slice(0,3).map(v=>{v/=255;return v<=.04045?v/12.92:Math.pow((v+.055)/1.055,2.4)});
+       return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;
+      };
+      const layered=document.querySelector('[data-kind="surfaces"][data-variant="layered"]');
+      const frameL=luminance(layered), railL=luminance(layered.querySelector('.dp-list')), pageL=luminance(layered.querySelector('.dp-page'));
+      if(document.documentElement.dataset.theme==='light' ? !(frameL<railL && railL<pageL) : !(pageL<railL && railL<frameL))return 'surface brightness order reversed';
       const frameBefore=getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome');
       selectOpenVibelyDisplay('surfaces','layered');
       if(JSON.stringify(colors())!==before)return 'theme colors changed';
