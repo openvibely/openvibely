@@ -102,6 +102,15 @@ window.addEventListener('DOMContentLoaded',function(){
  const originalLink=window.linkStreamingToolResults;
  window.linkStreamingToolResults=function(...args){parsedSources++;return originalLink.apply(this,args)};
  const view=()=>document.getElementById('task-thread-view');
+ document.documentElement.setAttribute('data-thread-width','focused');
+ let refreshPreviewChecks=0, refreshPreviewError='';
+ document.addEventListener('htmx:beforeSwap',()=>{
+   const preview=document.querySelector('[data-thread-refresh-preview]');
+   if(!preview)return;
+   refreshPreviewChecks++;
+   const row=preview.firstElementChild;
+   if(!row || getComputedStyle(row).maxWidth!=='820px' || getComputedStyle(preview).paddingLeft!=='28px')refreshPreviewError='refresh preview lost focused conversation width';
+ });
  let cachedShellError='';
  document.addEventListener('htmx:beforeSwap',event=>{
    if(!event.detail._ovCachedPreview)return;
@@ -200,6 +209,8 @@ window.addEventListener('DOMContentLoaded',function(){
        assert(input.value==='draft typed during refresh','queue action lost the draft');
      }
    }
+   assert(refreshPreviewChecks>0,'focused refresh preview was not exercised');
+   assert(!refreshPreviewError,refreshPreviewError);
    const currentTaskID=view().dataset.taskId;
    history.back();
    await until(()=>view() && view().dataset.taskId!==currentTaskID,'browser back to other task');
