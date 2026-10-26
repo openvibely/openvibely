@@ -71,7 +71,6 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 					data-task-list-title={ task.Title }
 					data-task-list-extra?={ i >= taskListGroupLimit }
 					data-task-list-age={ taskListAge(task.UpdatedAt) }
-					data-task-list-updated={ task.UpdatedAt.Format("Jan 2, 2006 3:04 PM") }
 					href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)) }
 					hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
 					hx-target="#main-content"
