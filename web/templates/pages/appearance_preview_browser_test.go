@@ -69,6 +69,13 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
        const probe=document.createElement('div');probe.style.color=mode==='default'?'var(--ov-surface-default-border, var(--shell-page))':'var(--ov-surface-layered-border, var(--shell-chrome))';sample.appendChild(probe);
        const expected=getComputedStyle(probe).color;probe.remove();
        for(const e of sample.children)if(getComputedStyle(e).borderTopColor!==expected)return 'conversation border differs in '+mode+': '+getComputedStyle(e).borderTopColor+' expected '+expected;
+       if(document.documentElement.dataset.theme==='dark') {
+        const composer=sample.querySelector('.chat-input-container'), input=document.createElement('textarea');composer.appendChild(input);
+        input.focus();
+        const focusedBorder=getComputedStyle(composer).borderTopColor;
+        input.blur();input.remove();
+        if(focusedBorder!==expected)return 'focused composer border differs in '+mode;
+       }
        selectOpenVibelyDisplay('bubbles','off');
        if(getComputedStyle(sample.querySelector('.chat-bubble-assistant-msg')).borderTopColor!=='rgba(0, 0, 0, 0)')return 'disabled bubble border visible';
        selectOpenVibelyDisplay('bubbles','on');
