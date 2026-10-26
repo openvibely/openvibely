@@ -239,6 +239,23 @@ func responsesLiteTools(tools any) []any {
 	if tools == nil {
 		return []any{}
 	}
+	if typed, ok := tools.([]ToolDefinition); ok {
+		filtered := make([]any, 0, len(typed))
+		for _, tool := range typed {
+			if isResponsesLiteHostedToolType(tool.Type) {
+				continue
+			}
+			// Copy before clearing Async so definitions reused by later agentic
+			// turns are left untouched. ToolDefinition's custom marshaler still
+			// materializes the parameter schema when the request is encoded.
+			tool.Async = false
+			filtered = append(filtered, tool)
+		}
+		return filtered
+	}
+
+	// Keep the generic path for map-based and extension tool definitions. Its
+	// JSON conversion preserves unknown fields with the same handling as before.
 	encoded, err := json.Marshal(tools)
 	if err != nil {
 		return []any{}
@@ -250,17 +267,24 @@ func responsesLiteTools(tools any) []any {
 	filtered := decoded[:0]
 	for _, raw := range decoded {
 		tool, _ := raw.(map[string]any)
-		switch strings.ToLower(strings.TrimSpace(stringFromAny(tool["type"]))) {
-		case "web_search", "web_search_preview", "image_generation":
+		if isResponsesLiteHostedToolType(stringFromAny(tool["type"])) {
 			continue
-		default:
-			// Responses Lite does not implement the standard Responses async
-			// tool protocol. Never forward async metadata into a Lite request.
-			delete(tool, "async")
-			filtered = append(filtered, raw)
 		}
+		// Responses Lite does not implement the standard Responses async tool
+		// protocol. Never forward async metadata into a Lite request.
+		delete(tool, "async")
+		filtered = append(filtered, raw)
 	}
 	return filtered
+}
+
+func isResponsesLiteHostedToolType(toolType string) bool {
+	switch strings.ToLower(strings.TrimSpace(toolType)) {
+	case "web_search", "web_search_preview", "image_generation":
+		return true
+	default:
+		return false
+	}
 }
 
 func filterResponsesLiteImageDetails(value any, model string) {
