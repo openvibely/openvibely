@@ -238,8 +238,12 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			groups.addEventListener('click', function(e) {
 				if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 				var row = e.target.closest('[data-task-list-row]');
-				if (!row || window.location.pathname !== '/tasks/' + row.getAttribute('data-task-list-row')) return;
-				if (!document.querySelector('#main-content #task-thread-view')) return;
+				if (!row) return;
+				var main = document.getElementById('main-content');
+				var thread = main && main.querySelector('#task-thread-view');
+				// Cached navigation displays the new task before the URL changes.
+				// A cold navigation hides the outgoing thread; allow clicking back to it.
+				if (!thread || main.hasAttribute('data-page-loading') || thread.getAttribute('data-task-id') !== row.getAttribute('data-task-list-row')) return;
 				e.preventDefault();
 				e.stopPropagation();
 			}, true);
