@@ -3218,9 +3218,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] #task-details-panel[data-overlay="true"] { inset: var(--task-panel-top, 0px) var(--shell-gap) var(--shell-gap) auto; width: calc(100% - var(--rail-width) - var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-docked="true"] { padding-right: calc(var(--task-panel-reserved-width) + var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-overlay="true"] #task-details-opener { right: var(--shell-gap); }
-				html[data-shell-frame] .chat-bubble-user-msg,
-				html[data-shell-frame] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
-				html[data-shell-frame] .chat-input-container { background-color: var(--shell-card) !important; }
+				html[data-surface-step] .chat-bubble-user-msg,
+				html[data-surface-step] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
+				html[data-surface-step] .chat-input-container { background-color: var(--shell-card) !important; }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg { background-color: transparent !important; border-color: transparent !important; box-shadow: none !important; }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg .stream-tool-body { background: transparent !important; }
 				html[data-assistant-bubbles="off"] .chat-bubble-assistant-msg::before,
@@ -3236,11 +3236,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-thread-width="focused"] .chat-input-container { border-radius: 22px !important; box-shadow: none !important; }
 				html[data-shell-frame] :is(.chat-bubble-user-msg, .chat-bubble-assistant-msg) pre { background-color: var(--shell-code) !important; border-color: transparent !important; }
 				html[data-shell-frame] #main-content .chat-input-shadow-gutter { padding-bottom: 14px; }
-				html[data-shell-frame][data-surface-step="off"] { --shell-card: oklch(var(--b1)) !important; }
-				html[data-shell-frame][data-surface-step="off"][data-ov-theme-layer="custom"] { --shell-card: var(--ov-surface) !important; }
-				html[data-shell-frame][data-surface-step="on"] { --shell-card: color-mix(in srgb, oklch(var(--b1)) 94%, oklch(var(--bc))) !important; }
-				html[data-shell-frame][data-surface-step="on"][data-color-theme="openvibely-dark"][data-theme="dark"] { --shell-card: oklch(25.3267% 0.015896 252.417568) !important; }
-				html[data-shell-frame][data-surface-step="on"][data-ov-theme-layer="custom"] { --shell-card: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text, oklch(var(--bc)))) !important; }
+				/* Shared unmodified/raised colors keep previews independent of the selection. */
+				html { --conversation-card-base: oklch(var(--b1)); --conversation-card-raised: color-mix(in srgb, oklch(var(--b1)) 94%, oklch(var(--bc))); }
+				html[data-ov-theme-layer="custom"] { --conversation-card-base: var(--ov-surface); --conversation-card-raised: color-mix(in srgb, var(--ov-surface) 94%, var(--ov-text, oklch(var(--bc)))); }
+				html[data-color-theme="openvibely-dark"][data-theme="dark"] { --conversation-card-base: oklch(23.2607% 0.013807 253.100675); --conversation-card-raised: oklch(25.3267% 0.015896 252.417568); }
+				html[data-surface-step="off"] { --shell-card: var(--conversation-card-base) !important; }
+				html[data-surface-step="on"] { --shell-card: var(--conversation-card-raised) !important; }
 				html[data-shell-frame][data-color-theme="openvibely-dark"][data-theme="dark"] { --b1: 23.2607% 0.013807 253.100675; --shell-card: oklch(25.3267% 0.015896 252.417568); --shell-code: #111418; }
 				html[data-ov-theme-layer="custom"] .queued-input-row { background-color: color-mix(in srgb, var(--ov-content-bg) 45%, transparent) !important; }
 				html[data-shell-frame]:is([data-color-theme="openvibely-dark"], [data-color-theme="openvibely-layered"]) { --ov-menu-surface: var(--shell-rail); }

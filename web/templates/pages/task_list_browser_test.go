@@ -90,6 +90,9 @@ func TestBrowserFunctional_TaskListClickUsesDisplayedTask(t *testing.T) {
 		// Cold navigation hides A behind the loading state; clicking A must cancel it too.
 		b.evaluate(`document.getElementById('main-content').setAttribute('data-page-loading',''); document.querySelector('[data-task-list-row="task-a"]').click(); 'clicked'`)
 		b.waitFor("click back during cold navigation is allowed", `String(window.taskRowRequests)`, "2")
+		// Changes view retains the thread DOM but hides its workspace.
+		b.evaluate(`document.getElementById('main-content').removeAttribute('data-page-loading'); document.getElementById('task-thread-view').outerHTML='<div id="tab-chat" class="hidden" data-workspace-hidden="true"><div id="task-thread-view" data-task-id="task-a"></div></div>'; document.querySelector('[data-task-list-row="task-a"]').click(); 'clicked'`)
+		b.waitFor("click returns from changes to conversation", `String(window.taskRowRequests)`, "3")
 	})
 }
 
