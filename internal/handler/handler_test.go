@@ -2608,7 +2608,7 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	settingsRec := htmxGet(e, "/settings/workers?project_id="+p1.ID)
 	assertCode(t, settingsRec, http.StatusOK)
 	assertContains(t, settingsRec, `id="limit-input-global"`)
-	assertContains(t, settingsRec, "Worker limits")
+	assertContains(t, settingsRec, "Worker Capacity &amp; Utilization")
 }
 
 func TestHandler_WorkerSettingsReportsCapacitySourceFailures(t *testing.T) {
