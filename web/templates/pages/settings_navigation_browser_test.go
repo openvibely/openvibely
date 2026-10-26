@@ -59,8 +59,9 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			b.waitFor("settings navigation survives "+route, `String(!!document.getElementById('`+route+`-container') && document.documentElement.classList.contains('appearance-settings') && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
 			b.waitFor("settings rail selected", `String(document.querySelector('.sidebar-aside [data-nav-base="/themes"]').getAttribute('aria-current')==='page')`, "true")
 		}
-		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/settings/workers"]').click();'limits'`)
-		b.waitFor("worker limits editable", `String(document.documentElement.classList.contains('worker-configuration') && document.getElementById('limit-input-global').getBoundingClientRect().width>0)`, "true")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'limits'`)
+		b.waitFor("worker limits editable", `String(document.documentElement.classList.contains('appearance-settings') && document.getElementById('limit-input-global').getBoundingClientRect().width>0)`, "true")
+		b.waitFor("workers only in settings with utilization visible", `String(!document.querySelector('.sidebar-aside [data-nav-base="/workers"]') && Array.from(document.querySelectorAll('#worker-settings-content th')).some(el=>el.textContent==='Running' && el.getBoundingClientRect().width>0))`, "true")
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-link="layout"]').click();'appearance'`)
 		b.waitFor("layout reachable from configuration", `String(!!document.getElementById('themes-container') && !document.querySelector('[data-settings-section="layout"]').hidden)`, "true")
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'workspace'`)
@@ -76,7 +77,7 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		b.evaluate(`document.querySelector('.settings-mobile-nav [data-settings-link="layout"]').click();'mobile layout'`)
 		b.waitFor("mobile layout preview visible", `String(document.querySelector('[data-settings-section="layout"] .display-preview').getBoundingClientRect().height > 0)`, "true")
 		b.evaluate(`htmx.ajax('GET','/workers',{target:'#main-content',swap:'innerHTML'});'monitor'`)
-		b.waitFor("worker monitor read only", `String(!!document.getElementById('worker-settings-content') && !document.documentElement.classList.contains('appearance-settings') && document.getElementById('limit-input-global').getBoundingClientRect().width===0)`, "true")
+		b.waitFor("workers remain in settings", `String(!!document.getElementById('worker-settings-content') && document.documentElement.classList.contains('appearance-settings') && document.getElementById('limit-input-global').getBoundingClientRect().width>0)`, "true")
 
 	})
 }

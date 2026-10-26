@@ -30,7 +30,7 @@ func TestWorkerSettingsContentUsesNonShrinkingScrollableTableLayout(t *testing.T
 	for _, required := range []string{
 		`id="worker-settings-content" class="w-full min-w-0 max-w-full flex-none pb-6"`,
 		`class="card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0 max-w-full flex-none h-auto"`,
-		`class="worker-monitor-only card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto"`,
+		`class="card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto"`,
 		`class="worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto"`,
 		`class="table table-sm worker-stats-table w-full min-w-max h-auto"`,
 		`#worker-settings-content .worker-table-scroll`,
@@ -39,7 +39,7 @@ func TestWorkerSettingsContentUsesNonShrinkingScrollableTableLayout(t *testing.T
 		`padding-top: 0.625rem;`,
 		`white-space: nowrap;`,
 		`min-height: 2.75rem;`,
-		`class="flex flex-nowrap items-center gap-2 worker-limit-form worker-config-only"`,
+		`class="flex flex-nowrap items-center gap-2 worker-limit-form"`,
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("worker table layout contract missing %q", required)
