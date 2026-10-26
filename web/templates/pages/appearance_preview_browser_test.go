@@ -125,6 +125,8 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL, "appearance-surfaces", func(b *composerFocusCDP) {
 		b.waitFor("appearance ready", `String(!!window.selectOpenVibelyDisplay)`, "true")
 		b.evaluate(`var surfaceSample=document.createElement('div');surfaceSample.innerHTML='<div class="card bg-base-100 border border-base-300">Card</div><button class="btn btn-primary">Run</button><span class="text-success">Success</span><span class="text-error">Error</span><span class="text-warning">Warning</span><span class="text-info">Info</span><code class="hljs"><span class="hljs-keyword">const</span></code>';document.getElementById('main-content').appendChild(surfaceSample); 'ready'`)
+		b.evaluate(`openVibelyThemes.apply('openvibely-dark');selectOpenVibelyDisplay('surfaces','default');var codeProbe=document.createElement('div');codeProbe.className='chat-bubble-assistant-msg';codeProbe.innerHTML='<pre>Code</pre>';document.getElementById('main-content').appendChild(codeProbe); 'ready'`)
+		b.waitFor("Dark default keeps page, frame and code contrast", `(()=>{const color=e=>getComputedStyle(e).backgroundColor;return JSON.stringify([color(document.getElementById('desktop-project-titlebar')),color(document.getElementById('main-content')),color(document.getElementById('task-list-panel')),color(codeProbe.firstElementChild)]);})()`, `["rgb(25, 30, 36)","rgb(21, 25, 30)","rgb(21, 25, 30)","rgb(17, 20, 24)"]`)
 		for _, width := range []int{1440, 390} {
 			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 			expected := "true"
@@ -139,11 +141,11 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
       const colors=()=>Array.from(surfaceSample.children).slice(1).map(e=>{const c=getComputedStyle(e);return [c.color,c.backgroundColor,e.querySelector('.hljs-keyword')&&getComputedStyle(e.querySelector('.hljs-keyword')).color]});
       const previews=()=>['default','layered'].map(v=>{const p=document.querySelector('[data-kind="surfaces"][data-variant="'+v+'"]');return [color(p),color(p.querySelector('.dp-page')),color(p.querySelector('.dp-list')),color(p.querySelector('.dp-surface-card'))]});
       selectOpenVibelyDisplay('surfaces','default'); const before=JSON.stringify(colors()), previewBefore=JSON.stringify(previews());
-      const pageBefore=color(document.getElementById('main-content'));
+      const frameBefore=getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome');
       selectOpenVibelyDisplay('surfaces','layered');
       if(JSON.stringify(colors())!==before)return 'theme colors changed';
       if(JSON.stringify(previews())!==previewBefore)return 'alternatives changed';
-      if(color(document.getElementById('main-content'))===pageBefore)return 'page did not change';
+      if(getComputedStyle(document.documentElement).getPropertyValue('--shell-chrome')===frameBefore && document.documentElement.dataset.theme!=='light')return 'frame did not change';
       const p=document.querySelector('[data-kind="surfaces"][data-variant="layered"]');
       if(color(p.querySelector('.dp-page'))!==color(document.getElementById('main-content')))return 'page preview differs';
       if(color(p.querySelector('.dp-surface-card'))!==color(surfaceSample.firstElementChild))return 'card preview differs';
