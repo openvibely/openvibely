@@ -3127,7 +3127,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-ov-theme-layer="custom"][data-board-columns="inset"] .kanban-column { background-color: var(--shell-card, oklch(var(--b1))) !important; }
 				html[data-board-columns="inset"] .kanban-column .card { background-color: var(--board-page-bg) !important; }
 				html[data-board-columns="inset"] .kanban-column .card:not(:hover) { border-color: color-mix(in srgb, oklch(var(--b1)) 92%, oklch(var(--bc))); }
-				.board-columns-preview { --bcp-page: var(--board-page-bg); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: var(--shell-card, oklch(var(--b1))); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
+				.board-columns-preview { --bcp-page: var(--board-page-bg); --bcp-frame: var(--board-column-bg, oklch(var(--b3))); --bcp-card: oklch(var(--b1)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; height: 84px; padding: 6px; border-radius: 10px; background: var(--bcp-page); }
+				html[data-theme="light"] .board-columns-preview { --bcp-card: var(--ov-l-bg); }
+				html[data-ov-theme-layer="custom"] .board-columns-preview { --bcp-card: var(--ov-surface); }
 				.bcp-col { display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 6px; background: var(--bcp-frame); }
 				.bcp-head { height: 6px; width: 55%; border-radius: 2px; background: oklch(var(--bc) / .3); }
 				.bcp-card { height: 18px; border-radius: 4px; background: var(--bcp-card); }
@@ -3135,7 +3137,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.board-columns-preview[data-preview="tintstrip"] .bcp-col { padding-top: 0; background: color-mix(in srgb, var(--bcp-page) 75%, var(--bcp-frame)); border: 1px solid var(--bcp-frame); }
 				.board-columns-preview[data-preview="tintstrip"] .bcp-head { width: auto; height: 12px; margin: 0 -4px; border-radius: 5px 5px 0 0; background: var(--bcp-frame); }
 				.board-columns-preview[data-preview="inset"] .bcp-col { background: oklch(var(--b1)); }
-				html[data-ov-theme-layer="custom"] .board-columns-preview[data-preview="inset"] .bcp-col { background: var(--bcp-card); }
+				html[data-ov-theme-layer="custom"] .board-columns-preview[data-preview="inset"] .bcp-col { background: var(--shell-card, oklch(var(--b1))); }
 				.board-columns-preview[data-preview="inset"] .bcp-card { background: var(--bcp-page); }
 
 				/* Compact icon rail */
@@ -3188,9 +3190,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Attached tabs flow into the page. The first tab's outer corner must clear the page's rounded top-left. */
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar { --project-tab-contour: transparent; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs { padding-left: 10px; }
-				html[data-shell-frame][data-tab-style="attached"].task-list-collapsed #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
 				/* Move floating attached tabs closer to the page edge. */
-				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"] #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
+				html[data-shell-frame][data-tab-style="attached"][data-layout="floating"]:not(.task-list-collapsed) #desktop-project-tabs { padding-left: calc(var(--shell-page-radius) + 10px); }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-3px); }
 				/* Leave the same top breathing room for attached and detached desktop tabs. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-tabs { padding-top: 10px; }
