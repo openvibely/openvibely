@@ -3076,15 +3076,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 				html[data-shell-frame] #main-content {
 					flex: 1 1 0%; min-width: 0; min-height: 0; overflow-y: auto;
-					margin: 0 var(--shell-gap) var(--shell-gap) 0 !important;
 					background-color: var(--shell-page) !important;
-					border-radius: var(--shell-page-radius);
 				}
 				#task-list-panel { display: none; }
 				html[data-shell-frame] #task-list-panel {
 					position: relative; display: flex; flex-direction: column;
 					width: var(--task-list-width); flex: 0 0 var(--task-list-width);
-					min-height: 0; padding: 0 8px var(--shell-gap) 0;
+					min-height: 0;
 					color: inherit;
 				}
 				html[data-shell-frame] #task-list-panel { padding: 8px 8px 0; background-color: var(--shell-rail); }
