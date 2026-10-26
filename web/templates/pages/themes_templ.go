@@ -115,7 +115,7 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div><h3 class=\"text-lg font-semibold mt-6 mb-1\">Task board columns</h3><p class=\"text-sm opacity-70 mb-3\">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p><div class=\"grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div><h3 class=\"text-sm font-medium mt-6 mb-2\">Task board columns</h3><p class=\"text-xs opacity-60 mb-2\">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p><div class=\"grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
