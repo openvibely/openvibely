@@ -3195,10 +3195,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Leave the same top breathing room for attached and detached desktop tabs. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-tabs { padding-top: 10px; }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [role="tab"] { padding-bottom: 10px; }
-				/* Keep inactive tabs at their original height and hover geometry;
-				   the extra title-bar room belongs below them, not in their border. */
+				/* Keep inactive labels aligned, and draw the hover pill without
+				   asymmetric transparent borders that distort its rounded ends. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"]) [role="tab"] { height: calc(100% - 4px); align-self: flex-start; padding-bottom: 6px; }
-				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { padding-bottom: 0; }
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { height: 32px; width: calc(100% - 4px); align-self: flex-start; margin: 1px 2px 0; border: 0; padding: 0 38px 0 14px; border-radius: 999px; }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [data-close-project],
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-5px); }
