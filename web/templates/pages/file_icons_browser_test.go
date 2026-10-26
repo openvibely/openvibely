@@ -82,7 +82,8 @@ func TestBrowserFunctional_AttachmentGrid(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "attachment-grid", func(b *composerFocusCDP) {
 		// Simulate navigation in an already-open shell with no new grid CSS.
-		b.waitFor("HTMX ready", `String(typeof htmx!=="undefined")`, "true")
+		// HTMX loads in the head; the body and grid may not be parsed yet.
+		b.waitFor("HTMX and grid ready", `String(typeof htmx!=="undefined" && !!document.querySelector('#attachment-list'))`, "true")
 		b.evaluate(`document.querySelectorAll('style').forEach(e=>{if(e.textContent.includes('.attachment-grid {'))e.remove()});htmx.ajax('GET','/fragment',{target:'#attachment-list',swap:'outerHTML'});'refresh'`)
 		b.waitFor("fragment supplies its own styles", `getComputedStyle(document.querySelector('#attachment-list')).display`, "grid")
 		b.waitFor("four tiles", `String(document.querySelectorAll('.attachment-grid-tile').length)`, "4")

@@ -179,11 +179,13 @@ func TestBrowserFunctional_ProjectRepositorySourceVisibility(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "repo-source-"+mode, func(b *composerFocusCDP) {
 				b.waitFor("shell ready", `String(document.readyState==='complete' && !!window.htmx && !!document.getElementById('project-settings-container'))`, "true")
-				b.evaluate(`document.body.addEventListener('htmx:beforeSwap', function(e) {
+				b.evaluate(`document.body.addEventListener('htmx:beforeSwap', function onDialogSwap(e) {
+ if (e.detail.pathInfo.requestPath !== '/dialog') return;
+ document.body.removeEventListener('htmx:beforeSwap', onDialogSwap);
  const parsed = new DOMParser().parseFromString(e.detail.serverResponse, 'text/html');
  const remote = parsed.querySelector('[name="repo_source"]').value === 'github';
  window.initialRepoVisibility = parsed.querySelector('[id$="-local-fields"]').hidden === remote && parsed.querySelector('[id$="-github-fields"]').hidden === !remote;
- }, {once:true});htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
+ });htmx.ajax('GET','/dialog',{target:'#project-settings-container',swap:'innerHTML'});'ok'`)
 				b.waitFor("ready", `String(document.readyState==='complete' && !!document.querySelector('dialog[open]'))`, "true")
 				b.waitFor("server-rendered source visibility", `String(window.initialRepoVisibility)`, "true")
 				check := `(() => {
