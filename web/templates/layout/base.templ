@@ -3195,6 +3195,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Leave the same top breathing room for attached and detached desktop tabs. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-tabs { padding-top: 10px; }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [role="tab"] { padding-bottom: 10px; }
+				/* The hover pill uses transparent borders as its inset; replace the
+				   resting padding rather than adding those borders to it. */
+				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { padding-bottom: 0; border-bottom-width: 11px; }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [data-close-project],
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-5px); }
