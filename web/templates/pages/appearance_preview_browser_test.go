@@ -27,7 +27,7 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "appearance-step", func(b *composerFocusCDP) {
 		b.waitFor("appearance ready", `String(!!window.selectOpenVibelyDisplay)`, "true")
-		b.evaluate(`var sample=document.createElement('div'); sample.innerHTML='<div class="chat-input-container"></div><div class="chat-bubble-user-msg"></div><div class="chat-bubble-assistant-msg"></div>';document.getElementById('main-content').appendChild(sample); openVibelyDisplay.set('bubbles','on'); 'ready'`)
+		b.evaluate(`var sample=document.createElement('div'); sample.innerHTML='<div class="chat-input-container"></div><div class="chat-bubble-user-msg"></div><div class="chat-bubble-assistant-msg"><div class="stream-tool"><div class="stream-tool-body"><div class="stream-tool-body-grid"><div class="stream-tool-body-row"><div class="stream-tool-body-label">IN</div><div class="stream-tool-body-content"><pre class="stream-tool-output-text">echo hello</pre></div></div><div class="stream-tool-body-row"><div class="stream-tool-body-label">OUT</div><div class="stream-tool-body-content"><pre class="stream-tool-output-text">hello</pre></div></div></div></div></div></div>';document.getElementById('main-content').appendChild(sample); openVibelyDisplay.set('bubbles','on'); 'ready'`)
 		for _, width := range []int{1440, 390} {
 			b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 			expected := "true"
@@ -35,10 +35,19 @@ func TestBrowserFunctional_AppearanceColorStepPreviews(t *testing.T) {
 				expected = "false"
 			}
 			b.waitFor("responsive layout", `String(document.documentElement.hasAttribute('data-shell-frame'))`, expected)
-			for _, theme := range []string{"openvibely-dark", "openvibely-light", "catppuccin-mocha", "github-light", "vscode-dark-modern"} {
+			for _, definition := range themes.Catalog() {
+				theme := definition.ID
 				b.evaluate(`openVibelyThemes.apply('` + theme + `'); 'applied'`)
 				b.waitFor("independent previews match real surfaces", `(()=>{
       const color=e=>getComputedStyle(e).backgroundColor;
+      if(document.documentElement.dataset.theme==='light') {
+       for(const mode of ['default','layered']) for(const step of ['off','on']) {
+        selectOpenVibelyDisplay('surfaces',mode);selectOpenVibelyDisplay('step',step);
+        for(const e of sample.querySelectorAll('.stream-tool-body,.stream-tool-body-content')) {
+         if(color(e)!=='rgba(0, 0, 0, 0)')return 'tool wrapper paints a different surface: '+color(e);
+        }
+       }
+      }
       const off=document.querySelector('[data-kind="step"][data-variant="off"] .dp-composer');
       const on=document.querySelector('[data-kind="step"][data-variant="on"] .dp-composer');
       selectOpenVibelyDisplay('step','off'); const offColor=color(off), onColor=color(on);
