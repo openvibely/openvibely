@@ -3250,6 +3250,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 /* Conversation surfaces share the theme's card-border treatment. */
                 html[data-theme="dark"][data-surface-style="default"] { --conversation-border: var(--ov-surface-default-border, var(--shell-page)); }
                 html[data-surface-style="layered"] { --conversation-border: var(--ov-surface-layered-border, var(--shell-chrome)); }
+                html:root[data-theme-surfaces][data-theme="dark"] .chat-input-container,
                 html:root[data-theme-surfaces]:is([data-theme="dark"], [data-surface-style="layered"]) :is(.chat-input-container, .chat-bubble-user-msg):not(:focus-within),
                 html:root[data-theme-surfaces]:is([data-theme="dark"], [data-surface-style="layered"])[data-assistant-bubbles="on"] .chat-bubble-assistant-msg:not(:focus-within) {
                     border-color: var(--conversation-border) !important;
