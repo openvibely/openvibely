@@ -11,6 +11,10 @@ repos/
 .worktrees/
 .openvibely/
 
+# Frontend downloads and intermediate CSS inputs are only used by scripts/build-assets.sh.
+# Container builds use the committed web/static/dist output instead.
+web/assets/.cache/
+
 # Development
 .git
 *.md
