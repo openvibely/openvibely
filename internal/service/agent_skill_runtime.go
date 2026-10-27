@@ -39,12 +39,14 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 		if err != nil {
 			catalog = agentskills.NewCatalog(task.ID, nil)
 		}
+		// Scheduled curation inspects skill instructions; it does not activate
+		// their dependencies or wait for permission to install document tools.
 		var readers *llmcontracts.RuntimeTools
 		if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
 			catalog = mergeSkillCatalogs(task.ID+":skill-tools", s.standaloneSkillCatalog(task, projectRoot), catalog)
-			readers = agentskills.ExecutingSkillRuntimeTools(catalog, s.globalSkillRoot, projectRoot, inspector)
+			readers = agentskills.SkillRuntimeTools(catalog, s.globalSkillRoot, projectRoot, inspector)
 		} else if agentExplicitlyAllowsTool(agent, "skill_view") {
-			readers = agentskills.SelectedSkillRuntimeTools(catalog)
+			readers = agentskills.InspectSelectedSkillRuntimeTools(catalog)
 		}
 		return s.instrumentSkillRuntimeTools(readers, catalog, skillAnalyticsContext{ProjectID: task.ProjectID, TaskID: task.ID, ThreadID: turnThreadID(task.ID, turn), AgentID: agent.ID, Source: models.SkillEventSourceManual, Surface: skillAnalyticsSurface(task, turn)})
 	}
