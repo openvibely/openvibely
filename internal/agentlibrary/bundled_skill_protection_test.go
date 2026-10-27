@@ -47,7 +47,10 @@ func TestBundledSkillMutationProtection(t *testing.T) {
 		blocked          bool
 	}{
 		{"bundled global", "global", "document_word", true},
+		{"uppercase bundled global", "global", "DOCUMENT_WORD", true},
+		{"mixed-case bundled global", "global", "Document_Word", true},
 		{"project override", "project", "document_word", false},
+		{"mixed-case project override", "project", "Document_Word", false},
 		{"user global", "global", "user_skill", false},
 	} {
 		for _, action := range []string{"create", "patch", "archive", "write_file", "remove_file", "import"} {
@@ -119,12 +122,12 @@ func TestBundledInventoryProtectsAllSkillsBeforeSync(t *testing.T) {
 			return nil
 		}
 		parts := strings.Split(strings.TrimPrefix(path, "builtin/"), "/")
-		key := parts[len(parts)-2]
+		key := strings.ToUpper(parts[len(parts)-2])
 		decl := &SkillDeclaration{Kind: "openvibely.agent_skill", Version: 1, Skill: SkillBlock{Key: key, Scope: "global"}}
 		if len(parts) == 3 {
 			_, err = imp.WriteSkill(context.Background(), decl, "replacement")
 		} else {
-			_, err = imp.WriteAgentOwnedSkill(context.Background(), "global", parts[1], decl, "replacement")
+			_, err = imp.WriteAgentOwnedSkill(context.Background(), "global", strings.ToUpper(parts[1]), decl, "replacement")
 		}
 		if err == nil || !strings.Contains(err.Error(), "protected: bundled skill") {
 			t.Errorf("unprotected bundled package %s: %v", path, err)
