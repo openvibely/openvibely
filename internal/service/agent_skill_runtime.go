@@ -86,10 +86,10 @@ func curatorMayInspectSkill(globalRoot, skillPath string) bool {
 	if err != nil {
 		return true
 	}
-	if strings.HasPrefix(filepath.ToSlash(rel), "agents/skill_curator/skills/") {
+	if strings.HasPrefix(strings.ToLower(filepath.ToSlash(rel)), "agents/skill_curator/skills/") {
 		return true
 	}
-	return !builtinskills.IsBundledFile(rel)
+	return !builtinskills.IsBundledFileFold(rel)
 }
 
 func (s *LLMService) standaloneSkillCatalog(task models.Task, projectRoot string) *agentskills.Catalog {

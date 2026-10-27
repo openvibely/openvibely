@@ -34,6 +34,33 @@ func IsBundledFile(relativePath string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// IsBundledFileFold recognizes case aliases of app-owned files, including on
+// case-insensitive filesystems. Paths outside the library are never matched.
+func IsBundledFileFold(relativePath string) bool {
+	rel := filepath.ToSlash(relativePath)
+	if !fs.ValidPath(rel) {
+		return false
+	}
+	_, found := foldedBundledFiles[strings.ToLower(rel)]
+	return found
+}
+
+var foldedBundledFiles = func() map[string]struct{} {
+	files := make(map[string]struct{})
+	if err := fs.WalkDir(FS, "builtin", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			files[strings.ToLower(strings.TrimPrefix(path, "builtin/"))] = struct{}{}
+		}
+		return nil
+	}); err != nil {
+		panic(fmt.Sprintf("index embedded skills: %v", err))
+	}
+	return files
+}()
+
 // SyncTo writes the embedded built-in files under root.
 //
 // SKILL.md bodies and bundled support files are always overwritten: those are the app's source of

@@ -439,3 +439,16 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsDisabledStandaloneSkillsOutOfRou
 		}
 	}
 }
+
+func TestIsBundledFileFold(t *testing.T) {
+	for _, path := range []string{"skills/document_word/SKILL.md", "SKILLS/DOCUMENT_WORD/skill.md", "skills/Document_Word/REFERENCES/Creation.md"} {
+		if !IsBundledFileFold(path) {
+			t.Errorf("bundled alias not recognized: %s", path)
+		}
+	}
+	for _, path := range []string{"../skills/document_word/SKILL.md", "skills/user_skill/SKILL.md", "skills/document_word", "/skills/document_word/SKILL.md"} {
+		if IsBundledFileFold(path) {
+			t.Errorf("non-bundled file matched: %s", path)
+		}
+	}
+}

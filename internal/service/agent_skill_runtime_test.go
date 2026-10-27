@@ -167,3 +167,45 @@ func TestSkillCuratorOmitsBundledLibrarySkills(t *testing.T) {
 		t.Fatal("global bundled skill leaked after project override")
 	}
 }
+
+func TestCuratorFiltersBundledCaseAliases(t *testing.T) {
+	for _, key := range []string{"DOCUMENT_WORD", "Document_Word"} {
+		t.Run(key, func(t *testing.T) {
+			global, project := t.TempDir(), t.TempDir()
+			// Materialize the alias so this also exercises the policy on Linux.
+			writeLifecycleStandaloneSkill(t, global, key, "BUNDLED_ALIAS")
+			writeLifecycleStandaloneSkill(t, global, "user_skill", "USER_SKILL")
+			check := func(projectRoot string, wantVisible bool) {
+				t.Helper()
+				catalog, err := agentskills.BuildCatalog("audit", global, projectRoot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tools := agentskills.FilteredSkillRuntimeTools(catalog, global, projectRoot, nil, func(path string) bool {
+					return curatorMayInspectSkill(global, path)
+				})
+				out, handled, failed, err := tools.Executor(context.Background(), "skills_list", json.RawMessage(`{"scope":"all"}`))
+				if err != nil || !handled || failed || strings.Contains(out, key) != wantVisible || !strings.Contains(out, "user_skill") {
+					t.Fatalf("unexpected discovery: %s (%v)", out, err)
+				}
+				for _, handle := range []string{key, "standalone:" + key, "skill:" + key} {
+					args, _ := json.Marshal(map[string]string{"handle": handle})
+					out, handled, failed, err = tools.Executor(context.Background(), "skill_view", args)
+					if err != nil || !handled || failed == wantVisible {
+						t.Fatalf("unexpected view: %s (%v)", out, err)
+					}
+					if wantVisible && !strings.Contains(out, "PROJECT_OVERRIDE") {
+						t.Fatal(out)
+					}
+				}
+			}
+			check("", false)
+			writeLifecycleStandaloneSkill(t, project, key, "PROJECT_OVERRIDE")
+			check(project, true)
+		})
+	}
+	root := t.TempDir()
+	if !curatorMayInspectSkill(root, filepath.Join(root, "AGENTS", "SKILL_CURATOR", "SKILLS", "MAINTAIN_SKILL_LIBRARY", "SKILL.md")) {
+		t.Fatal("curator must retain access to its own instructions")
+	}
+}
