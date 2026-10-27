@@ -17,7 +17,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
 // This fixture uses the real worker, provider adapter, question broker, database,
@@ -35,11 +35,7 @@ func preparePendingApprovalE2E(t *testing.T, appData string) *pendingApprovalE2E
 	if err := os.MkdirAll(appData, 0700); err != nil {
 		t.Fatal(err)
 	}
-	backend, err := sqlite.Open(filepath.Join(appData, "openvibely.db"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = backend.Close() })
+	backend := teststores.OpenBackend(t, filepath.Join(appData, "openvibely.db"), nil)
 	f := &pendingApprovalE2E{stores: backend.Stores()}
 	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
