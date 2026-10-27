@@ -2,6 +2,7 @@ package pages
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -56,8 +57,17 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL+path, "chain-panel", func(b *composerFocusCDP) {
 				b.waitFor("chain add visible", `String(!!document.querySelector('[data-chain-add]') && document.querySelector('[data-chain-add]').getClientRects().length>0)`, "true")
+				// Visibility can precede DOMContentLoaded shell initialization. Capture
+				// geometry only after fonts and layout observers have settled, as the
+				// native click helper does before measuring its target coordinates.
+				b.waitFor("page initialization complete", `document.readyState`, "complete")
+				b.evaluateAwait(`document.fonts.ready.then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('settled')))))`)
 				b.evaluate(`window.chainHeadingTop=document.querySelector('#task-chain-panel h3').getBoundingClientRect().top; 'saved'`)
 				b.evaluate(`window.panelContentTop=document.querySelector("[data-chain-empty]").getBoundingClientRect().top; "saved"`)
+				waitAligned := func(label, selector, baseline string) {
+					t.Helper()
+					b.waitFor(label, fmt.Sprintf(`(()=>{const el=document.querySelector(%q),expected=window[%q],actual=el?.getBoundingClientRect().top;return el&&el.getClientRects().length&&Math.abs(actual-expected)<1?'true':JSON.stringify({actual,expected,delta:actual-expected,panelTop:document.querySelector('#task-details-panel').getBoundingClientRect().top,scrollTop:document.querySelector('#task-inspector-body').scrollTop});})()`, selector, baseline), "true")
+				}
 				for _, tab := range []struct{ key, heading string }{{"details", "#task-detail-metrics h3"}, {"schedules", "#task-schedule-panel h3"}, {"attachments", "#tab-attachments h3"}} {
 					b.click("#inspector-tab-" + tab.key)
 					if tab.key == "attachments" && path != "/new?tab=chaining" {
@@ -66,15 +76,15 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 						b.waitFor("files list below upload control", `String((()=>{const list=document.querySelector('#attachment-list'),add=document.querySelector('#add-attachment-btn');return !!list && list.getBoundingClientRect().top>=add.getBoundingClientRect().bottom;})())`, "true")
 						continue
 					}
-					b.waitFor("heading aligned with "+tab.key, `String(Math.abs(document.querySelector('`+tab.heading+`').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
+					waitAligned("heading aligned with "+tab.key, tab.heading, "chainHeadingTop")
 				}
 				if path == "/new?tab=chaining" {
-					b.waitFor("files content aligned with chaining", `String(Math.abs(document.querySelector('#draft-panel-attachments, #attachment-list').getBoundingClientRect().top-window.panelContentTop)<1)`, "true")
+					waitAligned("files content aligned with chaining", "#draft-panel-attachments, #attachment-list", "panelContentTop")
 				}
 				if path != "/new?tab=chaining" {
 					b.click("#inspector-tab-lifecycle")
-					b.waitFor("lifecycle heading aligned", `String(Math.abs(document.querySelector('#tab-lifecycle h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
-					b.waitFor("lifecycle content aligned with chaining", `String(Math.abs(document.querySelector("#lifecycle-activity-scroll").getBoundingClientRect().top-window.panelContentTop)<1)`, "true")
+					waitAligned("lifecycle heading aligned", "#tab-lifecycle h3", "chainHeadingTop")
+					waitAligned("lifecycle content aligned with chaining", "#lifecycle-activity-scroll", "panelContentTop")
 				}
 				b.click("#inspector-tab-chaining")
 				b.evaluate(`window.retainedThread=document.getElementById('tab-chat'); 'saved'`)
@@ -82,7 +92,7 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 				b.evaluate(`document.querySelector('[data-chain-form] [name="chain_child_category"]').value='backlog'; 'set'`)
 				b.click(`[data-chain-save]`)
 				b.waitFor("configured card", `String(!document.querySelector('[data-chain-card]').hidden && !document.getElementById('task-chain-editor').open && document.querySelector('[data-chain-category]').textContent.includes('backlog'))`, "true")
-				b.waitFor("configured heading keeps its position", `String(Math.abs(document.querySelector('#task-chain-panel h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
+				waitAligned("configured heading keeps its position", "#task-chain-panel h3", "chainHeadingTop")
 				b.waitFor("thread retained", `String(window.retainedThread===document.getElementById('tab-chat'))`, "true")
 				b.click(`[data-chain-card] [data-chain-open]`)
 				b.waitFor("consistent delete label", `document.querySelector("[data-chain-remove]").textContent`, "Delete follow-up")
