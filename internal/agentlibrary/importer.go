@@ -661,9 +661,11 @@ func (i *Importer) rejectBundledSkillMutation(root, agentKey, skillKey string) e
 	if root == "" || i.roots.Global == "" || filepath.Clean(root) != filepath.Clean(i.roots.Global) {
 		return nil
 	}
-	rel := filepath.Join("skills", skillKey, "SKILL.md")
+	// Bundled directory keys are lowercase. Reserve their case aliases too:
+	// case-insensitive filesystems resolve those aliases to the same package.
+	rel := filepath.Join("skills", strings.ToLower(skillKey), "SKILL.md")
 	if agentKey != "" {
-		rel = filepath.Join("agents", agentKey, rel)
+		rel = filepath.Join("agents", strings.ToLower(agentKey), rel)
 	}
 	if builtinskills.IsBundledFile(rel) {
 		return fmt.Errorf("protected: bundled skill %q is managed by the app; create a project override instead", skillKey)
