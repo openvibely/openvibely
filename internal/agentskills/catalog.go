@@ -409,11 +409,13 @@ func loadSkillIndexEntries(indexPath, skillsDir string, source Source, agentKey 
 
 const maxSkillFrontmatterBytes = 64 * 1024
 
-// skillDisabledOnDisk reads only bounded YAML frontmatter from SKILL.md at path
-// and returns true only when it explicitly sets skill.enabled: false. Missing
-// files, parse errors, absent frontmatter, over-cap frontmatter, or an absent
-// enabled field default to enabled (returns false).
+// skillDisabledOnDisk applies the user preference first, then reads bounded
+// YAML frontmatter from SKILL.md. Without a preference, missing or invalid
+// frontmatter and an absent enabled field default to enabled.
 func skillDisabledOnDisk(path string) bool {
+	if enabled := SkillEnabledPreference(path); enabled != nil {
+		return !*enabled
+	}
 	front, ok := readSkillFrontmatter(path)
 	if !ok {
 		return false
