@@ -123,6 +123,10 @@ func readAgentSkillsSection(root, agentKey, scope string) string {
 // resolveSkillsList (skills_list tool output) so that disabled handles are
 // absent from every surface the route_task model can inspect.
 func filteredIndexBody(indexPath, skillsDir, agentKey string) (string, bool) {
+	return filteredIndexBodyWithFilter(indexPath, skillsDir, agentKey, nil)
+}
+
+func filteredIndexBodyWithFilter(indexPath, skillsDir, agentKey string, includePath func(string) bool) (string, bool) {
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
 		return "", false
@@ -161,6 +165,9 @@ func filteredIndexBody(indexPath, skillsDir, agentKey string) (string, bool) {
 	var sb strings.Builder
 	for _, sec := range sections {
 		absPath := filepath.Join(skillsDir, sec.skill, SkillFile)
+		if includePath != nil && !includePath(absPath) {
+			continue
+		}
 		if _, err := os.Stat(absPath); err != nil {
 			continue
 		}

@@ -23,6 +23,17 @@ import (
 //go:embed builtin/skills/*/references/*.md
 var FS embed.FS
 
+// IsBundledFile reports whether a root-relative path is shipped with the app.
+// The embedded inventory, rather than a separate list of names, is authoritative.
+func IsBundledFile(relativePath string) bool {
+	rel := filepath.ToSlash(relativePath)
+	if !fs.ValidPath(rel) {
+		return false
+	}
+	info, err := fs.Stat(FS, "builtin/"+rel)
+	return err == nil && !info.IsDir()
+}
+
 // SyncTo writes the embedded built-in files under root.
 //
 // SKILL.md bodies and bundled support files are always overwritten: those are the app's source of

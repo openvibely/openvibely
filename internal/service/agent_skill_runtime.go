@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -44,7 +46,9 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 		var readers *llmcontracts.RuntimeTools
 		if agentExplicitlyAllowsAnyTool(agent, "skills_list", "agent_list", "agent_view") {
 			catalog = mergeSkillCatalogs(task.ID+":skill-tools", s.standaloneSkillCatalog(task, projectRoot), catalog)
-			readers = agentskills.SkillRuntimeTools(catalog, s.globalSkillRoot, projectRoot, inspector)
+			readers = agentskills.FilteredSkillRuntimeTools(catalog, s.globalSkillRoot, projectRoot, inspector, func(path string) bool {
+				return curatorMayInspectSkill(s.globalSkillRoot, path)
+			})
 		} else if agentExplicitlyAllowsTool(agent, "skill_view") {
 			readers = agentskills.InspectSelectedSkillRuntimeTools(catalog)
 		}
@@ -69,6 +73,23 @@ func (s *LLMService) agentDeclaredSkillRuntimeTools(ctx context.Context, task mo
 	parts := []*llmcontracts.RuntimeTools{readers}
 	parts = append(parts, writers...)
 	return llmcontracts.CompositeRuntimeTools(parts...)
+}
+
+// Bundled library packages are app-owned, not curator maintenance targets.
+// The curator still needs its own bundled instructions to perform maintenance.
+// Project overrides are user-owned even when their names match bundled skills.
+func curatorMayInspectSkill(globalRoot, skillPath string) bool {
+	if globalRoot == "" {
+		return true
+	}
+	rel, err := filepath.Rel(globalRoot, skillPath)
+	if err != nil {
+		return true
+	}
+	if strings.HasPrefix(filepath.ToSlash(rel), "agents/skill_curator/skills/") {
+		return true
+	}
+	return !builtinskills.IsBundledFile(rel)
 }
 
 func (s *LLMService) standaloneSkillCatalog(task models.Task, projectRoot string) *agentskills.Catalog {
