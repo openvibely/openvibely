@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"gopkg.in/yaml.v3"
@@ -234,6 +235,9 @@ func (h *Handler) GetSkillDetail(c echo.Context) error {
 		Archived:     decl.Skill.Archived,
 		Enabled:      decl.Skill.Enabled == nil || *decl.Skill.Enabled,
 	}
+	if enabled := agentskills.SkillEnabledPreference(skillPath); enabled != nil {
+		resp.Enabled = *enabled
+	}
 	switch scope {
 	case "global":
 		resp.AlwaysUse = alwaysUseSet(h.agentSkillRoot)[handle]
@@ -447,6 +451,13 @@ func (h *Handler) SetSkillEnabled(c echo.Context) error {
 	decl, body, parseErr := agentlibrary.ParseDeclaration(string(data))
 	if parseErr != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
+	}
+	if scope == "global" && builtinskills.IsBundledFile(filepath.Join("skills", strings.ToLower(handle), "SKILL.md")) {
+		if err := agentskills.SetSkillEnabledPreference(root, handle, req.Enabled); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		h.recordManualSkillEvent(c, models.SkillEventEdited, handle, scope, "")
+		return h.ListSkills(c)
 	}
 	if req.Enabled {
 		// Enabling — normalize to nil (absence = enabled, keeps frontmatter clean)
@@ -688,6 +699,9 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 			card.Archived = decl.Skill.Archived
 			card.RequiresExternalTools = len(decl.Dependencies) > 0
 			card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
+		}
+		if enabled := agentskills.SkillEnabledPreference(entry.AbsolutePath); enabled != nil {
+			card.Enabled = *enabled
 		}
 		out = append(out, card)
 	}
