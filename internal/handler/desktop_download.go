@@ -19,6 +19,12 @@ func (h *Handler) SetDesktopFileSaver(save DesktopFileSaver) { h.desktopFileSave
 
 func (h *Handler) saveDesktopFile(authorize echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		// The spreadsheet preview posts bounded shared-string indexes to the same
+		// authorized file route used to fetch the workbook. Let that request pass
+		// through without treating it as a native file-save operation.
+		if c.Request().Method == http.MethodPost && c.QueryParam("spreadsheet-strings") == "1" {
+			return authorize(c)
+		}
 		if h.desktopFileSaver == nil {
 			return echo.NewHTTPError(http.StatusNotImplemented, "Desktop saving is unavailable")
 		}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
@@ -132,6 +133,44 @@ func TestSteeringDocumentReferenceUsesCommittedPath(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(parts[0].Data), target)
 	require.NotContains(t, string(parts[0].Data), "%PDF-original")
+}
+
+func TestFileContentServesOnlyRequestedPrecomputedSpreadsheetStrings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workbook.xlsx")
+	indexPath := path + ".spreadsheet-strings.json"
+	require.NoError(t, os.WriteFile(indexPath, []byte(`{"0":"visible","6001":"cold high-index value"}`), 0600))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/file?spreadsheet-strings=1", strings.NewReader(`[6001]`))
+	request.Header.Set("Content-Type", "application/json")
+	ctx := echo.New().NewContext(request, recorder)
+	require.NoError(t, serveFileContent(ctx, path, filepath.Base(path)))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, `{"6001":"cold high-index value"}`, recorder.Body.String())
+	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
+}
+
+func TestFileContentBuildsMissingSpreadsheetIndexAsynchronously(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.xlsx")
+	require.NoError(t, os.WriteFile(path, []byte("not a workbook"), 0600))
+	request := func() (int, error) {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/file?spreadsheet-strings=1", strings.NewReader(`[6001]`))
+		ctx := echo.New().NewContext(req, recorder)
+		return recorder.Code, serveFileContent(ctx, path, filepath.Base(path))
+	}
+	status, err := request()
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, status, "a missing preview index must not scan the workbook in the request")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err = request()
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusServiceUnavailable {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	require.Fail(t, "failed background indexing should surface an unavailable response instead of retrying the SST scan")
 }
 
 func TestFilePreviewReportsUnsupportedEncoding(t *testing.T) {

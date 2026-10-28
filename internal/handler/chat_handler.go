@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -776,10 +777,12 @@ func (h *Handler) stageMessageAttachmentsForDelivery(ctx context.Context, sessio
 			rollback()
 			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-copy session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
+		prepareSpreadsheetStringIndex(destPath)
 
 		info, err := os.Stat(destPath)
 		if err != nil {
 			_ = os.Remove(destPath)
+			removeSpreadsheetStringIndex(destPath)
 			rollback()
 			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-verify session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
@@ -790,6 +793,7 @@ func (h *Handler) stageMessageAttachmentsForDelivery(ctx context.Context, sessio
 		}
 		if err := createMetadata(ctx, attachment); err != nil {
 			_ = os.Remove(destPath)
+			removeSpreadsheetStringIndex(destPath)
 			rollback()
 			return "", nil, nil, nil, fmt.Errorf("attachment lifecycle stage=session-metadata session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, err)
 		}
@@ -941,6 +945,9 @@ func rollbackAttachmentPublications(
 		if err := os.Remove(item.path); err != nil && !os.IsNotExist(err) {
 			rollbackErrs = append(rollbackErrs, fmt.Errorf("remove file destination=%s: %w", item.path, err))
 		}
+		if err := os.Remove(spreadsheetpreviewindex.SidecarPath(item.path)); err != nil && !os.IsNotExist(err) {
+			rollbackErrs = append(rollbackErrs, fmt.Errorf("remove spreadsheet preview index destination=%s: %w", item.path, err))
+		}
 	}
 	return rollbackErrs
 }
@@ -981,10 +988,12 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 			rollback()
 			return 0, fmt.Errorf("attachment lifecycle stage=copy-file execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
 		}
+		prepareSpreadsheetStringIndex(destPath)
 
 		info, err := os.Stat(destPath)
 		if err != nil {
 			_ = os.Remove(destPath)
+			removeSpreadsheetStringIndex(destPath)
 			rollback()
 			return 0, fmt.Errorf("attachment lifecycle stage=verify-destination execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
 		}
@@ -994,6 +1003,7 @@ func (h *Handler) copyChatAttachmentsToTask(ctx context.Context, executionID, ta
 		}
 		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
 			_ = os.Remove(destPath)
+			removeSpreadsheetStringIndex(destPath)
 			rollback()
 			return 0, fmt.Errorf("attachment lifecycle stage=persist-metadata execution=%s source=%s task=%s destination=%s: %w", executionID, srcPath, taskID, destPath, err)
 		}

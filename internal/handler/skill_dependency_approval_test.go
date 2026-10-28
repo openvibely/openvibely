@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/update"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1230,6 +1231,72 @@ func TestInstallationToastOpensThreadFragment(t *testing.T) {
 				if !strings.HasPrefix(destination, prefix) || !strings.Contains(destination, "approval_execution_id="+execution.ID) || !strings.HasSuffix(destination, "#chat-input-request-"+question.ID) {
 					t.Fatalf("wrong destination: %s", destination)
 				}
+			}
+		})
+	}
+}
+
+func TestSkillInstallationWaitYieldsForUpdate(t *testing.T) {
+	for _, alreadyDraining := range []bool{false, true} {
+		t.Run(fmt.Sprint(alreadyDraining), func(t *testing.T) {
+			h, _, configs, _ := setupTestHandlerWithStores(t)
+			ctx := context.Background()
+			model := createAgent(t, configs)
+			project := createProject(t, h, "update installation wait")
+			task := createTask(t, h, project.ID, "install")
+			execution := createExec(t, h, task.ID, model.ID, func(e *models.Execution) { e.Status = models.ExecRunning })
+			h.drainManager = update.NewDrainManager(nil, nil, 0, time.Now)
+			begin := func() {
+				t.Helper()
+				if _, err := h.drainManager.BeginDrain(update.DrainRequest{Lease: time.Minute}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if alreadyDraining {
+				begin()
+			}
+			waitCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				done <- h.requestSkillInstallation(waitCtx, contracts.AgentRequest{ExecID: execution.ID, ProjectID: project.ID}, skilldeps.InstallationRequest{Identity: skilldeps.SkillIdentity{Skill: "fixture"}})
+			}()
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			ticker := time.NewTicker(time.Millisecond)
+			defer ticker.Stop()
+			var question persistence.ChatInputRequestRecord
+			for question.ID == "" {
+				select {
+				case <-deadline.C:
+					t.Fatal("question not persisted")
+				case <-ticker.C:
+					records, err := h.chatInputRequestRepo.ListByExecutions(ctx, project.ID, []string{execution.ID})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(records) > 0 {
+						question = records[0]
+					}
+				}
+			}
+			if !alreadyDraining {
+				begin()
+			}
+			select {
+			case err := <-done:
+				if err == nil || !strings.HasPrefix(err.Error(), contracts.PendingSkillInputPrefix) {
+					t.Fatalf("expected resumable pending input, got %v", err)
+				}
+			case <-deadline.C:
+				t.Fatal("update blocked on human input")
+			}
+			saved, err := h.chatInputRequestRepo.Get(ctx, question.ID)
+			if err != nil || saved == nil || saved.Status != persistence.ChatInputRequestPending {
+				t.Fatalf("lost pending question: %+v %v", saved, err)
+			}
+			if len(h.chatInputRequests.listProject(project.ID)) != 1 {
+				t.Fatal("question no longer available to answer")
 			}
 		})
 	}

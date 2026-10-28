@@ -19,11 +19,15 @@ Compare the reported medians. The preview signature must match between revisions
 
 ## Recorded run
 
-Measured on Google Chrome 156.0.8078.47, macOS arm64, with three fresh pages per revision:
+Measured on Google Chrome 156.0.8078.73, Darwin 27.0.0 arm64, with three fresh pages per revision. The baseline worker is from `e0f67d6e5`; both runs use the same harness, generated fixture, and vendored SheetJS library. Baseline and selective measurements were run sequentially.
 
-| Worker | Median first-sheet ready | Median peak worker JS heap |
-| --- | ---: | ---: |
-| Parent revision | 3,928.1 ms | 373.3 MiB |
-| Selective worker | 758.8 ms | 25.1 MiB |
+| Worker | Run | First-sheet ready | Sampled peak worker JS heap |
+| --- | ---: | ---: | ---: |
+| Baseline | 1 | 3,547.0 ms | 360.2 MiB |
+| Baseline | 2 | 3,715.9 ms | 363.2 MiB |
+| Baseline | 3 | 3,732.2 ms | 363.0 MiB |
+| Selective | 1 | 320.5 ms | 27.0 MiB |
+| Selective | 2 | 312.6 ms | 16.3 MiB |
+| Selective | 3 | 326.4 ms | 33.5 MiB |
 
-That is 80.7% lower median ready time and 93.3% lower median peak heap. Both revisions returned 5,000 preview rows, 25,000 total rows, 20 total columns, and `truncated: true`; the displayed first-sheet row hash matched (`188cadcb`).
+Median ready time fell from 3,715.9 ms to 320.5 ms (91.4% lower); median sampled peak heap fell from 363.0 MiB to 27.0 MiB (92.6% lower). Both revisions returned 5,000 preview rows, 25,000 total rows, 20 total columns, and `truncated: true`; the displayed first-sheet row hash matched (`188cadcb`) in every run. The harness now fails if any run's dimensions, truncation, or value hash differs from this expected preview, so performance gains cannot hide changed output. Heap measurements are CDP samples, not an allocation trace.

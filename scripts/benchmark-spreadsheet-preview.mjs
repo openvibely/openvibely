@@ -168,6 +168,9 @@ try {
     detach();
     await devtools.send('Target.closeTarget', {targetId}).catch(() => {});
     if (!result || typeof result !== 'object') throw new Error(`Run ${run + 1} failed: ${String(result || 'benchmark timed out')}`);
+    if (result.rows !== 5000 || result.totalRows !== 25000 || result.totalColumns !== 20 || result.truncated !== true || result.rowHash !== '188cadcb') {
+      throw new Error(`Run ${run + 1} returned an incorrect preview: ${JSON.stringify(result)}`);
+    }
     const record = {...result, peakWorkerHeapMiB: Number((peakBytes / 1024 / 1024).toFixed(1))};
     results.push(record);
     console.log(`Run ${run + 1}: ${JSON.stringify(record)}`);

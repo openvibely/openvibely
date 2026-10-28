@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"mime"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/pkg/filecontent"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -31,6 +33,44 @@ func serveFileContent(c echo.Context, path, name string) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Could not save the file. Please try again.").SetInternal(err)
 		}
 		return c.JSON(http.StatusOK, map[string]bool{"saved": !canceled, "canceled": canceled})
+	}
+	if c.QueryParam("spreadsheet-strings") == "1" {
+		if c.Request().Method != http.MethodPost {
+			return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
+		}
+		indexes, err := spreadsheetpreviewindex.DecodeIndexes(c.Request().Body)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid shared-string request")
+		}
+		indexPath := spreadsheetpreviewindex.SidecarPath(path)
+		values, err := spreadsheetpreviewindex.Read(indexPath, indexes)
+		if errors.Is(err, os.ErrNotExist) {
+			job, started := spreadsheetpreviewindex.StartBuild(path)
+			if started {
+				c.Response().Header().Set("Cache-Control", "private, no-store")
+				c.Response().Header().Set("Retry-After", "1")
+				return c.NoContent(http.StatusAccepted)
+			}
+			select {
+			case <-job.Done():
+				if buildErr := job.Err(); buildErr != nil {
+					return echo.NewHTTPError(http.StatusServiceUnavailable, "preview string index unavailable").SetInternal(buildErr)
+				}
+				values, err = spreadsheetpreviewindex.Read(indexPath, indexes)
+			default:
+				c.Response().Header().Set("Cache-Control", "private, no-store")
+				c.Response().Header().Set("Retry-After", "1")
+				return c.NoContent(http.StatusAccepted)
+			}
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "preview string index unavailable")
+		}
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "could not read preview string index")
+		}
+		c.Response().Header().Set("Cache-Control", "private, no-store")
+		return c.JSON(http.StatusOK, values)
 	}
 	c.Response().Header().Set("Cache-Control", "private, no-store")
 	c.Response().Header().Set("X-Content-Type-Options", "nosniff")

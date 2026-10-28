@@ -150,12 +150,14 @@ func configureSQLiteDSNForRole(dsn string, queryOnly bool) (configured string, i
 	pragmas := values["_pragma"][:0]
 	for _, pragma := range values["_pragma"] {
 		normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(pragma), " ", ""))
-		if strings.HasPrefix(normalized, "foreign_keys") || strings.HasPrefix(normalized, "busy_timeout") || strings.HasPrefix(normalized, "query_only") {
+		if strings.HasPrefix(normalized, "foreign_keys") || strings.HasPrefix(normalized, "busy_timeout") || strings.HasPrefix(normalized, "query_only") || strings.HasPrefix(normalized, "temp_store") {
 			continue
 		}
 		pragmas = append(pragmas, pragma)
 	}
-	values["_pragma"] = append(pragmas, "foreign_keys(1)", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMS))
+	// File-backed temp sorters turn large Analytics sorts into pread/pwrite
+	// syscalls that stall badly under CPU contention while holding the sole reader.
+	values["_pragma"] = append(pragmas, "foreign_keys(1)", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMS), "temp_store(2)")
 	if queryOnly {
 		values["_pragma"] = append(values["_pragma"], "query_only(1)")
 	}
