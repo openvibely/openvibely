@@ -106,6 +106,8 @@ OpenAI and Anthropic configurations do not expose this output setting; their ada
 
 In an OpenAI conversation with tools and file publication enabled, ask for an image (for example, “Generate an image of a goat”). The `image_gen.imagegen` tool generates a PNG with `gpt-image-2` and publishes it as a downloadable chat artifact. It uses your configured OpenAI API key or OAuth account through a separate image endpoint; your account must have access to image generation.
 
+Ask for a transparent background or background removal to use the tool’s `transparent_background` option. Generated PNGs retain their transparency.
+
 Ask for changes to a recent image to edit it, or supply local PNG, JPEG, or WebP reference files. The tool accepts up to five references, using either recent conversation images or local paths in one call. Image generation is unavailable in Plan mode or when file publication is disabled. This integration applies to the first-party OpenAI Responses workflow.
 
 #### GPT-6 Workflow Controls

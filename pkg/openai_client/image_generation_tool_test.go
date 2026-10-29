@@ -226,6 +226,7 @@ func TestImageGenerationPermissionAndInvalidReferences(t *testing.T) {
 		`{"prompt":"goat","referenced_image_paths":["missing.png"]}`,
 		`{"prompt":"goat","referenced_image_paths":["a.png"],"num_last_images_to_include":1}`,
 		`{"prompt":"goat","unexpected":true}`,
+		`{"prompt":"goat","transparent_background":"true"}`,
 	} {
 		_, failed, err := NewWithAPIKey("key").runImageGenerationTool(attachment.WithToolImages(context.Background()), opts, nil, json.RawMessage(input))
 		if !failed || err == nil {
@@ -300,5 +301,77 @@ func TestRecentImageReferencesAfterHistoryRoundTrip(t *testing.T) {
 	refs := recentImageReferences(restored, 2)
 	if len(refs) != 2 || refs[0] != "second" || refs[1] != "third" {
 		t.Fatalf("references = %#v", refs)
+	}
+}
+
+func TestImageGenerationTransparentBackground(t *testing.T) {
+	data := imageTestPNG(t) // Includes transparent pixels; publication must retain them.
+	encoded := base64.StdEncoding.EncodeToString(data)
+	for _, oauth := range []bool{false, true} {
+		for _, edit := range []bool{false, true} {
+			for _, setting := range []string{"omitted", "false", "true"} {
+				t.Run(fmt.Sprintf("oauth=%v/edit=%v/transparent=%s", oauth, edit, setting), func(t *testing.T) {
+					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						operation := "generations"
+						if edit {
+							operation = "edits"
+						}
+						if r.URL.Path != "/images/"+operation {
+							t.Errorf("path = %s", r.URL.Path)
+						}
+						var payload map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+							t.Error(err)
+							return
+						}
+						want := "auto"
+						if setting == "true" {
+							want = "transparent"
+						}
+						if payload["background"] != want {
+							t.Errorf("background = %v, want %s", payload["background"], want)
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"b64_json": encoded}}})
+					}))
+					defer srv.Close()
+					oldAPI, oldOAuth := OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL
+					OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = srv.URL, srv.URL
+					defer func() { OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = oldAPI, oldOAuth }()
+					client := NewWithAPIKey("key")
+					if oauth {
+						client = NewWithOAuthToken("token", "refresh", time.Now().Add(24*time.Hour).UnixMilli(), "account")
+					}
+					published := false
+					opts := &AgenticOptions{PublishGeneratedImage: func(_ context.Context, path string) (string, error) {
+						published = true
+						actual, err := os.ReadFile(path)
+						if err != nil {
+							return "", err
+						}
+						if !bytes.Equal(actual, data) {
+							t.Error("PNG alpha data changed before publication")
+						}
+						return `{"url":"/files/image"}`, nil
+					}}
+					args := map[string]any{"prompt": "A goat cutout"}
+					if setting != "omitted" {
+						args["transparent_background"] = setting == "true"
+					}
+					var history []any
+					if edit {
+						args["num_last_images_to_include"] = 1
+						history = []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + encoded}}}}
+					}
+					input, err := json.Marshal(args)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, failed, err := client.runImageGenerationTool(attachment.WithToolImages(context.Background()), opts, history, input)
+					if err != nil || failed || !published {
+						t.Fatalf("published=%v failed=%v err=%v", published, failed, err)
+					}
+				})
+			}
+		}
 	}
 }
