@@ -100,7 +100,11 @@ func (h *Handler) requestSkillInstallation(ctx context.Context, req contracts.Ag
 	if h.alertSvc != nil {
 		_ = h.alertSvc.Create(ctx, &models.Alert{ProjectID: task.ProjectID, TaskID: &task.ID, ExecutionID: &req.ExecID, Title: "Skill needs dependency installation", Message: "Answer the question in the requesting thread.", Type: models.AlertCustom, Source: "skill_dependency_approval", IdempotencyKey: "skill-dependency:" + pending.ID, DecisionState: models.AlertDecisionNotRequired})
 	}
-	_, waitErr := h.chatInputRequests.wait(ctx, pending.ID)
+	var draining <-chan struct{}
+	if h.drainManager != nil {
+		draining = h.drainManager.Draining()
+	}
+	_, waitErr := h.chatInputRequests.waitUntil(ctx, pending.ID, draining)
 	if waitErr != nil || ctx.Err() != nil {
 		return fmt.Errorf("%s%s", contracts.PendingSkillInputPrefix, pending.ID)
 	}

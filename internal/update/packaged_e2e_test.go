@@ -44,6 +44,9 @@ func TestPackagedUpdateE2E(t *testing.T) {
 	switch distribution {
 	case "", "binary":
 		t.Run("binary real app succeeds", testPackagedUpdateE2EBinarySucceeds)
+		t.Run("binary dependency approval survives update", func(t *testing.T) {
+			runBinaryUpdateE2E(t, "0.6.0", "0.6.0", StateSucceeded, binaryE2EDirectLayout, true)
+		})
 		t.Run("binary real app rolls back", testPackagedUpdateE2EBinaryRollsBack)
 		t.Run("binary real recovery helper succeeds", testPackagedUpdateE2EBinaryRecoverySucceeds)
 		t.Run("binary real recovery helper rolls back", testPackagedUpdateE2EBinaryRecoveryRollsBack)
@@ -113,7 +116,7 @@ const (
 	binaryE2ESymlinkLayout binaryE2EInstallLayout = "symlink"
 )
 
-func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantState string, layout binaryE2EInstallLayout) {
+func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantState string, layout binaryE2EInstallLayout, pendingApproval ...bool) {
 	t.Helper()
 	root := t.TempDir()
 	current := filepath.Join(root, executableName("openvibely"))
@@ -154,6 +157,10 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 
 	port := freeTCPPort(t)
 	appData := filepath.Join(root, "app-data")
+	var approval *pendingApprovalE2E
+	if len(pendingApproval) > 0 && pendingApproval[0] {
+		approval = preparePendingApprovalE2E(t, appData)
+	}
 	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "binary-current")
 	cmd := exec.Command(launchPath)
 	cmd.Dir = root
@@ -168,6 +175,9 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		"DISABLE_UPDATE_NOTIFICATIONS=false",
 		"OPENVIBELY_DISABLE_INSTALL_ID=1",
 	)
+	if approval != nil {
+		cmd.Env = append(cmd.Env, "AUTH_ENABLED=false", "OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS=true")
+	}
 	cmd.Stdout = stdoutLog
 	cmd.Stderr = stderrLog
 	if err := cmd.Start(); err != nil {
@@ -182,6 +192,9 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	baseURL := "http://127.0.0.1:" + port
 	waitForHealthVersion(t, baseURL, "0.5.0", readLogs)
 	waitForStagedUpdate(t, baseURL)
+	if approval != nil {
+		approval.startAndWait(t, baseURL, readLogs)
+	}
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
 	if err != nil {
 		t.Fatalf("accept update: %v\n%s", err, readLogs())
@@ -203,6 +216,9 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		})
 	}
 	waitForUpdateState(t, baseURL, wantState)
+	if approval != nil {
+		approval.answerAfterRestart(t, baseURL, readLogs)
+	}
 	if layout == binaryE2ESymlinkLayout {
 		assertBinarySymlinkLayoutUpdated(t, commandDir, launchPath, current, releaseVersion, wantState)
 	}

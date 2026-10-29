@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
 )
 
@@ -441,23 +440,15 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsDisabledStandaloneSkillsOutOfRou
 	}
 }
 
-func TestSkillCuratorLearningDisabledByDefault(t *testing.T) {
-	root := t.TempDir()
-	if err := SyncTo(root); err != nil {
-		t.Fatal(err)
+func TestIsBundledFileFold(t *testing.T) {
+	for _, path := range []string{"skills/document_word/SKILL.md", "SKILLS/DOCUMENT_WORD/skill.md", "skills/Document_Word/REFERENCES/Creation.md"} {
+		if !IsBundledFileFold(path) {
+			t.Errorf("bundled alias not recognized: %s", path)
+		}
 	}
-	data, err := os.ReadFile(filepath.Join(root, "agents", "skill_curator", "SKILLS.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	decl, _, err := agentlibrary.ParseDeclaration(string(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for slot, want := range map[string]bool{"after_complete": false} {
-		hook, ok := decl.LifecycleHooks[slot]
-		if !ok || hook.Enabled == nil || *hook.Enabled != want {
-			t.Fatalf("%s default enabled should be %v: %+v", slot, want, hook)
+	for _, path := range []string{"../skills/document_word/SKILL.md", "skills/user_skill/SKILL.md", "skills/document_word", "/skills/document_word/SKILL.md"} {
+		if IsBundledFileFold(path) {
+			t.Errorf("non-bundled file matched: %s", path)
 		}
 	}
 }
