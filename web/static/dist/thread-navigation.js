@@ -293,9 +293,8 @@
         const entry = id && entries.get(id);
         pending = { xhr: detail.xhr, url: url, mutation: mutation, cached: false, source: detail.elt, pushURL: detail.elt?.getAttribute('hx-push-url') ?? null };
         if (!entry || key(activeURL) === id) return;
-        // The normal task response is a lazy shell. A warm refresh needs the
-        // bounded transcript in that response so it never replaces the preview
-        // with a loading placeholder and discards the live composer.
+        // Non-thread tabs return a lazy shell; ask for the embedded transcript so
+        // the refresh never replaces the preview with a loading placeholder.
         if (new URL(url, location.href).pathname.startsWith('/tasks/')) {
             detail.xhr.setRequestHeader('X-OpenVibely-Thread-Refresh', 'true');
         }
@@ -314,6 +313,7 @@
         } finally {
             restoringEntry = null;
         }
+        return true;
     };
 
     document.addEventListener('htmx:beforeSend', function (event) {

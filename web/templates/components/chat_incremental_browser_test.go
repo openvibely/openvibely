@@ -586,7 +586,8 @@ func TestBrowserFunctional_TranscriptHydrationRevealsTogether(t *testing.T) {
    assert(getComputedStyle(messages).visibility==='hidden','history appeared one bubble at a time');
    gates[i]();
  }
- await hydration; await paint();
+ await hydration;
+ for(let i=0;i<10 && messages.hasAttribute('data-transcript-hydrating');i++) await paint();
  assert(getComputedStyle(messages).visibility==='visible','rendered history was not revealed');
  assert(messages.querySelectorAll('.chat-markdown').length===3,'reveal omitted completed bubbles');
  assert(!settled,'fixture did not delay attachment loading');
@@ -605,6 +606,30 @@ func TestBrowserFunctional_TranscriptHydrationRevealsTogether(t *testing.T) {
  }
  await cachedRestore;
  window.renderStreamingContent=render;
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_RunningTranscriptRevealsAtFinalScrollPosition(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages'); messages.id='task-thread-messages';
+ messages.setAttribute('data-transcript-hydrating','true');
+ stream.innerHTML='<div style="height:3000px">Running output</div>';
+ let controlsReady=false, reveal=null;
+ const observer=new MutationObserver(()=>{
+   if(!messages.hasAttribute('data-transcript-hydrating') && !reveal)
+     reveal={controlsReady,gap:messages.scrollHeight-messages.clientHeight-messages.scrollTop};
+ });
+ observer.observe(messages,{attributes:true,attributeFilter:['data-transcript-hydrating']});
+ // Live controls finish their layout just after the initial output render.
+ const rendered=Promise.resolve().then(()=>requestAnimationFrame(()=>{
+   const controls=document.createElement('div'); controls.style.height='22px';
+   messages.appendChild(controls); controlsReady=true;
+ }));
+ await restoreChatTranscriptScroll({messages,defaultPinned:true,renderPromise:rendered});
+ observer.disconnect();
+ assert(reveal && reveal.controlsReady,'running thread revealed before live controls settled');
+ assert(Math.abs(reveal.gap)<2,'running thread revealed above its final bottom: '+reveal.gap);
  return {};
  `)
 }

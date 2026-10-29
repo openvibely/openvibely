@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"unicode/utf8"
 )
 
 // SearchOptions preserves each caller's directory policy and output limits.
@@ -61,6 +63,9 @@ func SearchFiles(ctx context.Context, root, pattern string, opts SearchOptions) 
 			return err
 		}
 		if walkErr != nil {
+			if path == root {
+				return fmt.Errorf("search path %q: %w", root, walkErr)
+			}
 			if opts.IgnoreWalkErrors {
 				return nil
 			}
@@ -87,7 +92,7 @@ func SearchFiles(ctx context.Context, root, pattern string, opts SearchOptions) 
 		if allow, ok := ctx.Value(fileReadAuthorizationKey{}).(func(context.Context, string) bool); ok && !allow(ctx, path) {
 			return nil
 		}
-		if err := s.searchFile(path); err != nil {
+		if err := s.searchFile(path, path == root); err != nil {
 			return err
 		}
 		if s.full() {
@@ -117,19 +122,32 @@ func (s *fileSearcher) full() bool {
 }
 
 // searchFile stages matches until EOF so a NUL byte found mid-stream discards
-// the whole file. Only context errors are returned; unreadable files are skipped.
-func (s *fileSearcher) searchFile(path string) error {
+// the whole file. Read errors are reported for the requested root file and skipped
+// for descendant files.
+func (s *fileSearcher) searchFile(path string, reportErrors bool) error {
 	file, err := os.Open(path)
 	if err != nil {
+		if reportErrors {
+			return fmt.Errorf("search path %q: %w", path, err)
+		}
 		return nil
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
+		if reportErrors {
+			return fmt.Errorf("search path %q: %w", path, err)
+		}
 		return nil
 	}
 	containsNUL, err := containsNULInFileSamples(file, info.Size(), s.binarySample)
-	if err != nil || containsNUL {
+	if err != nil {
+		if reportErrors {
+			return fmt.Errorf("search path %q: %w", path, err)
+		}
+		return nil
+	}
+	if containsNUL {
 		return nil
 	}
 	s.reader.Reset(file)
@@ -188,6 +206,9 @@ func (s *fileSearcher) searchFile(path string) error {
 			s.matches = append(s.matches, s.fileMatches...)
 			return nil
 		default:
+			if reportErrors {
+				return fmt.Errorf("search path %q: %w", path, readErr)
+			}
 			return nil
 		}
 	}
@@ -232,8 +253,16 @@ func containsNULInFileSamples(file io.ReaderAt, size int64, buffer []byte) (bool
 }
 
 func truncateLine(line string, maxLen int) string {
+	if !utf8.ValidString(line) {
+		line = strings.ToValidUTF8(line, "\uFFFD")
+	}
 	if len(line) <= maxLen {
 		return line
 	}
-	return line[:maxLen] + "..."
+
+	end := maxLen
+	for end > 0 && !utf8.RuneStart(line[end]) {
+		end--
+	}
+	return line[:end] + "..."
 }

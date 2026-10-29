@@ -139,7 +139,7 @@ func TestHandlerTaskUIAgentProjectionAcrossRenders(t *testing.T) {
 		{
 			name: "initial task detail",
 			request: func() *http.Request {
-				return httptest.NewRequest(http.MethodGet, "/tasks/"+detailTask.ID, nil)
+				return httptest.NewRequest(http.MethodGet, "/tasks/"+detailTask.ID+"?tab=details", nil)
 			},
 			want: []string{disabled.Name, "No Agent"},
 		},

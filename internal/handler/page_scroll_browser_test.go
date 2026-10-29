@@ -19,6 +19,7 @@ import (
 
 // Exercise the real shell across ordinary page swaps. A tall child makes the
 // scroll contract independent of how much fixture data each page contains.
+// The shell reaches the viewport bottom; the page, not the document, scrolls.
 func TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome(t *testing.T) {
 	if testing.Short() {
 		t.Skip("browser regression")
@@ -89,7 +90,7 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
    const rect=main.getBoundingClientRect();
    const geometry={bottom:rect.bottom,viewport:innerHeight,height:main.clientHeight,scrollHeight:main.scrollHeight,top:main.scrollTop,overflow:getComputedStyle(main).overflowY};
    await stage(path+' layout '+JSON.stringify(geometry));
-   assert(rect.bottom<=innerHeight-9 && rect.bottom>=innerHeight-20,path+' lost bottom inset: '+rect.bottom+' viewport '+innerHeight);
+   assert(Math.abs(rect.bottom-innerHeight)<2,path+' page does not reach viewport bottom: '+rect.bottom+' viewport '+innerHeight);
    assert(geometry.scrollHeight>geometry.height+100,path+' expanded instead of scrolling');
    await stage(path+' before scrollTop=500');
    main.scrollTop=500;

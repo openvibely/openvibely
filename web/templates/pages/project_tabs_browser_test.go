@@ -161,6 +161,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 			}
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks?view=board#keep", "project-tabs", func(browser *composerFocusCDP) {
 				browser.waitFor("initial scope", `new URL(location.href).searchParams.get('project_id') || ''`, "p00")
+				browser.waitFor("new task link initially scoped", `document.getElementById("task-list-new").getAttribute("href")`, "/tasks/new?project_id=p00")
 				// Tab setup moves the selector on DOMContentLoaded, which would demote an already-open modal menu.
 				browser.waitFor("page initialized", `String(document.readyState === 'complete' && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
 				if got := browser.evaluate(`String(location.hash === '#keep' && new URL(location.href).searchParams.get('view') === 'board')`); got != "true" {
@@ -378,7 +379,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`JSON.stringify([getComputedStyle(document.querySelector('.desktop-titlebar-space')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.querySelector('[data-project-tab]')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.getElementById('project-selector-trigger')).getPropertyValue('--wails-draggable').trim()])`); got != `["drag","no-drag","no-drag"]` {
 					t.Fatal("drag regions", got)
 				}
-				if got := browser.evaluate(`(function(){var active=document.querySelector('[data-project-tab="p00"]'),inactive=document.querySelector('[data-project-tab="p01"]');return String(getComputedStyle(active.parentElement).backgroundColor===getComputedStyle(document.body).backgroundColor && getComputedStyle(active.parentElement).backgroundColor!==getComputedStyle(inactive.parentElement).backgroundColor && getComputedStyle(active).backgroundColor==='rgba(0, 0, 0, 0)' && active.getBoundingClientRect().width===active.parentElement.getBoundingClientRect().width);})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var active=document.querySelector('[data-project-tab="p00"]'),inactive=document.querySelector('[data-project-tab="p01"]');return String(getComputedStyle(active.parentElement).backgroundColor===getComputedStyle(document.getElementById('main-content')).backgroundColor && getComputedStyle(active.parentElement).backgroundColor!==getComputedStyle(inactive.parentElement).backgroundColor && getComputedStyle(active).backgroundColor==='rgba(0, 0, 0, 0)' && active.getBoundingClientRect().width===active.parentElement.getBoundingClientRect().width);})()`); got != "true" {
 					t.Fatal("active background must cover the whole tab, not only the label", got)
 				}
 				if got := browser.evaluate(`(function(){var plus=document.getElementById('project-selector-trigger').getBoundingClientRect(),close=document.querySelector('[data-close-project]').getBoundingClientRect();return String(Math.abs((plus.top+plus.bottom-close.top-close.bottom)/2)<0.5);})()`); got != "true" {
@@ -434,6 +435,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("shared navigation", `location.search`, "?project_id=p01")
 				browser.waitFor("active tab", `document.querySelector('[data-project-tab="p01"]').getAttribute('aria-selected')`, "true")
 				browser.waitFor("loaded project", `document.getElementById('fixture-project')?.textContent || ''`, "p01")
+				browser.waitFor("new task link follows project switch", `JSON.stringify([document.getElementById("task-list-new").getAttribute("href"),document.getElementById("task-list-new").getAttribute("hx-get")])`, `["/tasks/new?project_id=p01","/tasks/new?project_id=p01"]`)
 				browser.click(`[data-project-tab="p01"]`)
 				key := func(key, code string) {
 					params := map[string]any{"type": "keyDown", "key": key, "code": code}
@@ -452,9 +454,12 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				key("Enter", "Enter")
 				browser.waitFor("keyboard switch", `location.search`, "?project_id=p02")
+				browser.evaluate(`window.closedTabShapeReleased=false;window.closedTabShape=document.querySelector('[data-project-tab="p02"]').closest('.desktop-project-tab');window.originalResizeUnobserve=ResizeObserver.prototype.unobserve;ResizeObserver.prototype.unobserve=function(el){if(el===window.closedTabShape)window.closedTabShapeReleased=true;return window.originalResizeUnobserve.call(this,el)};'ready'`)
 				browser.click(`[data-close-project="p02"]`)
 				browser.waitFor("closing active tab chooses neighbor", `location.search`, "?project_id=p03")
 				browser.waitFor("closed tab", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
+				browser.waitFor("closed tab released by corner observer", `String(window.closedTabShapeReleased && !window.closedTabShape.isConnected)`, "true")
+				browser.evaluate(`ResizeObserver.prototype.unobserve=window.originalResizeUnobserve;delete window.originalResizeUnobserve;delete window.closedTabShape;'restored'`)
 				key("Home", "Home")
 				browser.click("#project-selector-trigger")
 				browser.waitFor("full selector", `String(document.getElementById('project-selector-dialog').open)`, "true")

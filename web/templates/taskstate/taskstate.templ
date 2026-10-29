@@ -1,0 +1,164 @@
+package taskstate
+
+import "github.com/openvibely/openvibely/internal/models"
+
+func StatusLabel(status models.TaskStatus) string {
+	switch status {
+	case models.StatusPending:
+		return "Queued"
+	case models.StatusQueued:
+		return "Queued"
+	case models.StatusRunning:
+		return "In Progress"
+	case models.StatusCompleted:
+		return "Completed"
+	case models.StatusFailed:
+		return "Failed"
+	case models.StatusCancelled:
+		return "Cancelled"
+	case models.StatusBlocked:
+		return "Waiting for Parent"
+	default:
+		return string(status)
+	}
+}
+
+func StatusLabelForTask(status models.TaskStatus, category models.TaskCategory) string {
+	if status == models.StatusPending {
+		switch category {
+		case models.CategoryBacklog:
+			return "Pending"
+		case models.CategoryScheduled:
+			return "Scheduled"
+		}
+	}
+	return StatusLabel(status)
+}
+
+type State struct {
+	Key       string
+	Label     string
+	TextClass string
+}
+
+func canShowMergeProblem(task models.Task) bool {
+	switch task.Status {
+	case models.StatusCompleted, models.StatusFailed, models.StatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func Display(task models.Task) State {
+	if task.Status == models.StatusRunning && task.WorkerCapacityQueued {
+		return State{Key: "queued", Label: "Queued", TextClass: "text-info"}
+	}
+	if task.Status == models.StatusCompleted && task.MergeStatus == models.MergeStatusMerged {
+		return State{Key: "merged", Label: "Merged", TextClass: "text-success"}
+	}
+	if canShowMergeProblem(task) && task.MergeStatus == models.MergeStatusConflict {
+		return State{Key: "merge-conflict", Label: "Merge conflict", TextClass: "text-error"}
+	}
+	if canShowMergeProblem(task) && task.MergeStatus == models.MergeStatusFailed {
+		return State{Key: "merge-failed", Label: "Merge failed", TextClass: "text-error"}
+	}
+	if task.Status == models.StatusCompleted && task.GoalMet {
+		return State{Key: "goal-met", Label: "Goal met", TextClass: "text-success"}
+	}
+
+	label := StatusLabelForTask(task.Status, task.Category)
+	switch task.Status {
+	case models.StatusPending:
+		if task.Category == models.CategoryBacklog {
+			return State{Key: "pending", Label: label, TextClass: "text-base-content/45"}
+		}
+		return State{Key: "queued", Label: label, TextClass: "text-info"}
+	case models.StatusQueued:
+		return State{Key: "queued", Label: label, TextClass: "text-info"}
+	case models.StatusRunning:
+		return State{Key: "running", Label: label, TextClass: "task-state-running"}
+	case models.StatusCompleted:
+		return State{Key: "completed", Label: label, TextClass: "text-success"}
+	case models.StatusFailed:
+		return State{Key: "failed", Label: label, TextClass: "text-error"}
+	case models.StatusCancelled:
+		return State{Key: "cancelled", Label: label, TextClass: "text-base-content/45"}
+	case models.StatusBlocked:
+		return State{Key: "blocked", Label: label, TextClass: "text-warning"}
+	default:
+		return State{Key: "pending", Label: "Pending", TextClass: "text-base-content/45"}
+	}
+}
+
+templ Icon(task models.Task) {
+	{{ state := Display(task) }}
+	<span
+		data-task-state-icon
+		data-task-state={ state.Key }
+		class={ "inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
+		data-tooltip-disabled
+		role="img"
+		aria-label={ "Task state: " + state.Label }
+	>
+		switch state.Key {
+			case "goal-met":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="12" cy="8.5" r="7.5" stroke-width="2"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m8 14-2 8 6-3.5 6 3.5-2-8"></path>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m9 8.5 2 2 4-4"></path>
+				</svg>
+			case "merged":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="6.5" cy="4.5" r="2.5" stroke-width="2"></circle>
+					<circle cx="6.5" cy="19.5" r="2.5" stroke-width="2"></circle>
+					<circle cx="18" cy="12" r="2.5" stroke-width="2"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5"></path>
+				</svg>
+			case "merge-failed", "merge-conflict":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="6.5" cy="4.5" r="2.5" stroke-width="2"></circle>
+					<circle cx="6.5" cy="19.5" r="2.5" stroke-width="2"></circle>
+					<circle cx="18" cy="12" r="2.5" stroke-width="2"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6.5 7v10M6.5 7c0 3.2 3.4 5 9 5"></path>
+				</svg>
+			case "queued":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="5" cy="7" r="1" fill="currentColor" stroke="none"></circle>
+					<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle>
+					<circle cx="5" cy="17" r="1" fill="currentColor" stroke="none"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h10M9 12h10M9 17h7"></path>
+				</svg>
+			case "running":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+					<path d="m10 8 6 4-6 4z" fill="currentColor" stroke="none"></path>
+				</svg>
+			case "completed":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m7.5 12 3 3 6-6"></path>
+				</svg>
+			case "failed":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m8 3-5 5v8l5 5h8l5-5V8l-5-5zM12 7.5v6m0 3h.01"></path>
+				</svg>
+			case "cancelled":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<rect x="4" y="4" width="16" height="16" rx="4" stroke-width="2"></rect>
+					<path d="M9 9h6v6H9z" fill="currentColor" stroke="none"></path>
+				</svg>
+			case "blocked":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<rect x="5" y="10" width="14" height="10" rx="2" stroke-width="2"></rect>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+				</svg>
+			default:
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+					<circle cx="12" cy="12" r="1.75" fill="currentColor" stroke="none"></circle>
+				</svg>
+		}
+	</span>
+}
+

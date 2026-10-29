@@ -176,7 +176,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.waitFor("shared menu row spacing "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-pick'));return String(['#project-selector-dialog [data-searchable-selector-option]','#menu-style-fixture li button','#menu-style-fixture form button','#project-tab-settings-action','#task-property-picker button[data-value]'].every(function(selector){var s=getComputedStyle(document.querySelector(selector));return ['paddingTop','paddingBottom','paddingLeft','paddingRight','fontSize','borderRadius'].every(function(key){return s[key]===model[key]})}))})()`, "true")
 					b.waitFor("shared search headers "+theme, `(function(){var model=getComputedStyle(document.querySelector('.ov-mp-search'));return String(Array.from(document.querySelectorAll('[data-searchable-selector-search-shell],#task-property-picker .ov-menu-search')).every(function(el){var s=getComputedStyle(el);return ['padding','borderBottomWidth','borderBottomColor'].every(function(key){return s[key]===model[key]})}))})()`, "true")
 					b.waitFor("composer active-row color", `(function(){var row=document.querySelector('#conversation-model-picker .ov-mp-row');row.setAttribute('data-picker-active','');return String(getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)')})()`, "true")
-					b.click(`.project-bar-brand`)
+					b.click(`#task-list-header .task-list-brand`)
 					b.evaluate(`var panel=document.querySelector('#menu-style-fixture .dropdown-content').cloneNode(true);panel.id='submenu-hover-fixture';panel.classList.remove('dropdown-content');panel.setAttribute('data-menu-submenu-portaled','true');panel.style.cssText='display:block;visibility:visible;opacity:1;position:fixed;left:300px;top:180px;z-index:2000';panel.querySelector('.active').classList.remove('active');document.body.append(panel);'ok'`)
 					hover(`#submenu-hover-fixture button:not(:disabled)`)
 					b.waitFor("enabled submenu hover "+theme, `String(getComputedStyle(document.querySelector('#submenu-hover-fixture button:not(:disabled)')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
@@ -205,7 +205,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 						b.waitFor("resize divider hover", `getComputedStyle(document.getElementById('task-panel-divider'),'::after').opacity`, "0.45")
 					}
 					if theme == "light" {
-						b.waitFor("light title bar background", `getComputedStyle(document.getElementById('desktop-project-titlebar')).backgroundColor`, "rgb(232, 232, 232)")
+						b.waitFor("light title bar background", `getComputedStyle(document.getElementById('desktop-project-titlebar')).backgroundColor`, "rgb(250, 250, 250)")
 						var point struct{ X, Y float64 }
 						if err := json.Unmarshal([]byte(b.evaluate(`JSON.stringify((function(){var r=document.getElementById('project-selector-trigger').getBoundingClientRect();return {X:r.left+r.width/2,Y:r.top+r.height/2}})())`)), &point); err != nil {
 							t.Fatal(err)
@@ -224,7 +224,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 							b.waitFor("tab stays highlighted over close button", `getComputedStyle(document.querySelector('[data-project-tab="other-project"]')).backgroundColor`, "rgba(38, 38, 39, 0.08)")
 						}
 						b.waitFor("light task status colors", `(function(){var expected={queued:'rgb(37, 99, 235)',running:'rgb(116, 128, 255)',completed:'rgb(46, 160, 67)',failed:'rgb(248, 81, 73)',blocked:'rgb(137, 85, 3)',cancelled:'rgb(118, 118, 118)'};return String(Array.from(document.querySelectorAll('#status-color-fixture [data-task-state-icon]')).every(function(icon){return getComputedStyle(icon).color===expected[icon.dataset.taskState] && getComputedStyle(icon.querySelector('svg')).stroke===expected[icon.dataset.taskState];}))})()`, "true")
-						b.waitFor("active tab connects to content", `(function(){var tab=document.querySelector('[data-project-tab][aria-selected="true"]').parentElement, style=getComputedStyle(tab), bar=document.getElementById('desktop-project-titlebar');return String(style.backgroundColor===getComputedStyle(document.getElementById('main-content')).backgroundColor && style.backgroundColor!=='rgba(0, 0, 0, 0)' && getComputedStyle(tab,'::before').backgroundImage!=='none' && getComputedStyle(tab,'::after').backgroundImage!=='none' && tab.getBoundingClientRect().bottom===bar.getBoundingClientRect().bottom)})()`, "true")
+						b.waitFor("active tab uses page color as a detached pill", `(function(){var tab=document.querySelector('[data-project-tab][aria-selected="true"]').parentElement, style=getComputedStyle(tab), bar=document.getElementById('desktop-project-titlebar');return String(style.backgroundColor===getComputedStyle(document.getElementById('main-content')).backgroundColor && style.backgroundColor!=='rgba(0, 0, 0, 0)' && getComputedStyle(tab,'::before').display==='none' && getComputedStyle(tab,'::after').display==='none' && tab.getBoundingClientRect().bottom<bar.getBoundingClientRect().bottom)})()`, "true")
 					}
 					b.waitFor("picker initially hidden", `String(document.getElementById('task-property-picker').getClientRects().length === 0)`, "true")
 					b.waitFor("tab menu initially hidden", `String(document.getElementById('project-tab-menu').getClientRects().length === 0)`, "true")
@@ -255,7 +255,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.click(`[data-detail-property="priority"]`)
 					b.waitFor("trigger toggles closed", `String(!document.getElementById('task-property-picker').getClientRects().length)`, "true")
 					b.click(`[data-detail-property="priority"]`)
-					b.click(`.project-bar-brand`)
+					b.click(`#task-list-header .task-list-brand`)
 					b.waitFor("outside click dismisses picker", `String(!document.getElementById('task-property-picker').getClientRects().length)`, "true")
 					b.evaluate(`document.querySelector('[data-project-tab]').dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, clientX:200, clientY:40})); 'ok'`)
 					b.waitFor("tab menu opens at pointer", `(function(){var r=document.getElementById('project-tab-menu').getBoundingClientRect();return String(r.width>0 && r.left===200 && r.top===40)})()`, "true")
@@ -263,7 +263,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					hover(`#project-tab-settings-action`)
 					b.waitFor("menu hover "+theme, `String(getComputedStyle(document.getElementById('project-tab-settings-action')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
 					if legacy && theme == "dark" {
-						b.waitFor("legacy dark menu background", `getComputedStyle(document.getElementById('project-tab-menu')).backgroundColor`, "rgb(29, 35, 42)")
+						b.waitFor("legacy dark menu background", `getComputedStyle(document.getElementById('project-tab-menu')).backgroundColor`, "rgb(25, 30, 36)")
 						b.waitFor("legacy dark menu border", `getComputedStyle(document.getElementById('project-tab-menu')).borderTopColor`, "rgba(166, 173, 187, 0.2)")
 					}
 					if theme == "light" {

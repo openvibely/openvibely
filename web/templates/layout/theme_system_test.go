@@ -284,6 +284,7 @@ func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
 	    documentElement: {
 	      setAttribute(k, v) { attrs[k] = String(v); },
 	      getAttribute(k) { return attrs[k] || ''; },
+	      removeAttribute(k) { delete attrs[k]; },
 	      style: { removeProperty(k) { delete styleVars[k]; }, setProperty(k, v) { if (!/^--ov-[a-z0-9-]+$/.test(k)) throw new Error('unsafe css var ' + k); styleVars[k] = String(v); } }
 	    },
 	    getElementById(id) { return id === 'ov-theme-catalog' ? { getAttribute() { return catalogJSON; } } : null; },
@@ -296,11 +297,14 @@ if (legacy.attrs['data-theme'] !== 'light') throw new Error('legacy light mode d
 if (legacy.attrs['data-color-theme'] !== 'openvibely-light') throw new Error('legacy light mode did not choose OpenVibely light theme');
 if (legacy.attrs['data-ov-theme-layer'] !== 'native') throw new Error('OpenVibely light should use the native theme layer');
 if (Object.prototype.hasOwnProperty.call(legacy.store, 'openvibely.colorTheme')) throw new Error('legacy migration should not create an exact theme preference');
-if (Object.keys(legacy.styleVars).length) throw new Error('native theme must not override main CSS variables');
+if (Object.keys(legacy.styleVars).some(k => !k.startsWith('--ov-surface-'))) throw new Error('native theme must not override accent or syntax variables');
 legacy.api.apply('github-light');
 if (!legacy.styleVars['--ov-bg']) throw new Error('custom palette not applied');
+legacy.api.apply('openvibely-dark');
+if (Object.keys(legacy.styleVars).some(k => !k.startsWith('--ov-surface-'))) throw new Error('custom variables survived switch to native');
+if (legacy.styleVars['--ov-surface-default-page'] !== '#15191E') throw new Error('Dark surface definition was not applied');
 legacy.api.apply('openvibely-light');
-if (Object.keys(legacy.styleVars).length) throw new Error('custom variables survived switch to native');
+if (legacy.styleVars['--ov-surface-default-page'] !== '#FFFFFF' || legacy.styleVars['--ov-surface-layered-frame'] !== '#F0F0F0') throw new Error('Light did not replace Dark surface colors');
 let lateToggle = toggleEl();legacy.toggles.push(lateToggle);
 legacy.api.syncThemeControls();
 if (lateToggle.attrs['aria-pressed'] !== 'false') throw new Error('late light-mode toggle aria state was not synchronized');
@@ -360,7 +364,7 @@ func TestSidebarThemesLinkIsMainNavigationItem(t *testing.T) {
 		t.Fatalf("render Sidebar: %v", err)
 	}
 	html := buf.String()
-	if !strings.Contains(html, `data-nav-base="/themes"`) || !strings.Contains(html, `>Themes</span>`) {
+	if !strings.Contains(html, `data-nav-base="/themes"`) || !strings.Contains(html, `>Settings</span>`) {
 		t.Fatal("sidebar missing main Themes nav item")
 	}
 	footerStart := strings.Index(html, `id="sidebar-user-menu"`)

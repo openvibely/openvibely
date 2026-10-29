@@ -33,10 +33,10 @@ func TestHandler_GetTaskCachedRefreshIncludesBoundedThread(t *testing.T) {
 		})
 		require.NoError(t, h.execRepo.Complete(t.Context(), ex.ID, models.ExecCompleted, fmt.Sprintf("output-%d", i), "", 0, 0))
 	}
-	// Ordinary navigation retains lazy loading; only warm refreshes opt in.
 	cold := htmxGet(e, "/tasks/"+task.ID)
 	assertCode(t, cold, http.StatusOK)
-	require.Contains(t, cold.Body.String(), "Thread is loading...")
+	require.Contains(t, cold.Body.String(), `id="task-thread-view"`)
+	require.NotContains(t, cold.Body.String(), "Thread is loading...")
 
 	for _, tab := range []string{"chat", "details", "changes"} {
 		t.Run(tab, func(t *testing.T) {
@@ -58,8 +58,7 @@ func TestHandler_GetTaskCachedRefreshIncludesBoundedThread(t *testing.T) {
 	}
 }
 
-// Exercise the real task endpoint and its lazy /thread request, rather than a
-// fixture that always embeds the transcript in every navigation response.
+// Exercise the real task endpoint rather than a fixture-built navigation response.
 func TestTaskCachedNavigationRefreshInChrome(t *testing.T) {
 	testTaskCachedNavigationRefresh(t, false)
 }
@@ -103,6 +102,18 @@ window.addEventListener('DOMContentLoaded',function(){
  const originalLink=window.linkStreamingToolResults;
  window.linkStreamingToolResults=function(...args){parsedSources++;return originalLink.apply(this,args)};
  const view=()=>document.getElementById('task-thread-view');
+ document.documentElement.setAttribute('data-thread-width','focused');
+ let refreshPreviewChecks=0, refreshPreviewError='';
+ document.addEventListener('htmx:beforeSwap',()=>{
+   const preview=document.querySelector('[data-thread-refresh-preview]');
+   if(!preview)return;
+   refreshPreviewChecks++;
+   const live=document.getElementById('task-thread-messages');
+   const a=live.firstElementChild.getBoundingClientRect(), b=preview.firstElementChild.getBoundingClientRect();
+   if(Math.abs(a.left-b.left)>1 || Math.abs(a.width-b.width)>1 || getComputedStyle(live).scrollbarWidth!==getComputedStyle(preview).scrollbarWidth)refreshPreviewError='refresh preview shifted horizontally';
+   const row=preview.firstElementChild;
+   if(document.documentElement.dataset.threadWidth==='focused' && (!row || getComputedStyle(row).maxWidth!=='820px' || getComputedStyle(preview).paddingLeft!=='28px'))refreshPreviewError='refresh preview lost focused conversation width';
+ });
  let cachedShellError='';
  document.addEventListener('htmx:beforeSwap',event=>{
    if(!event.detail._ovCachedPreview)return;
@@ -116,7 +127,8 @@ window.addEventListener('DOMContentLoaded',function(){
  async function checkToggle(){
    await until(()=>toggle() && toggle().isConnected,'tool hydration');
    await until(()=>document.querySelector('.chat-stream-content')._renderedRevision,'render revision');
-   assert(getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','rendered transcript is hidden');
+   // Rendering is followed by layout settling before the transcript is revealed.
+   await until(()=>getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','transcript reveal');
    const button=toggle(), expanded=button.getAttribute('aria-expanded');
    button.click(); assert(button.getAttribute('aria-expanded')!==expanded,'tool toggle lost its handler');
  }
@@ -131,6 +143,7 @@ window.addEventListener('DOMContentLoaded',function(){
    await fetch('/advance');
    let warmURL=%q;
    for(let round=0;round<2;round++){
+     document.documentElement.dataset.threadWidth=round===0?'focused':'full';
      // Hold the cached page's delayed initializer until the user has scrolled.
      // This makes its stale saved-position race deterministic rather than CPU-dependent.
      const nativeTimeout=window.setTimeout;
@@ -200,6 +213,8 @@ window.addEventListener('DOMContentLoaded',function(){
        assert(input.value==='draft typed during refresh','queue action lost the draft');
      }
    }
+   assert(refreshPreviewChecks>0,'focused refresh preview was not exercised');
+   assert(!refreshPreviewError,refreshPreviewError);
    const currentTaskID=view().dataset.taskId;
    history.back();
    await until(()=>view() && view().dataset.taskId!==currentTaskID,'browser back to other task');
@@ -278,5 +293,5 @@ window.addEventListener('DOMContentLoaded',function(){
 	stopHandlerBrowserProcess(cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
 	require.EqualValues(t, 2, warmRequests.Load(), "both returns should request an embedded thread")
-	require.EqualValues(t, 1, threadRequests.Load(), "only the initial cold visit should fetch the lazy thread")
+	require.Zero(t, threadRequests.Load(), "a full page load embeds the thread")
 }

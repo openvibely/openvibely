@@ -268,9 +268,9 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 		counter.SetEnabled(true)
 		var rec *httptest.ResponseRecorder
 		if htmx {
-			rec = htmxGet(e, "/tasks/"+task.ID)
+			rec = htmxGet(e, "/tasks/"+task.ID+"?tab=details")
 		} else {
-			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=details", nil)
 			rec = httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
 		}
@@ -289,6 +289,33 @@ func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
 
 	checkInitialDetail("HTMX", true)
 	checkInitialDetail("full-page", false)
+
+	// The default thread view embeds only the newest few runs, never the full history.
+	const runBytes = 4*1024 + 64*1024
+	checkInitialThread := func(name string, htmx bool) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		var rec *httptest.ResponseRecorder
+		if htmx {
+			rec = htmxGet(e, "/tasks/"+task.ID)
+		} else {
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+			rec = httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+		}
+		counter.SetEnabled(false)
+
+		assertCode(t, rec, http.StatusOK)
+		assertContains(t, rec, `id="task-thread-view"`)
+		stats := counter.Snapshot()
+		require.Equal(t, 1, stats.ExecutionWindowReads, name)
+		require.Zero(t, stats.UnboundedExecutionHistoryReads, name)
+		require.Less(t, stats.ReadTextBytes, 10*runBytes, name)
+	}
+
+	checkInitialThread("HTMX", true)
+	checkInitialThread("full-page", false)
 }
 
 func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
@@ -811,7 +838,7 @@ func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *t
 	})
 	counter.Reset()
 	counter.SetEnabled(true)
-	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
+	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID+"?tab=details")
 	counter.SetEnabled(false)
 	assertCode(t, fullPage, http.StatusOK)
 	require.Equal(t, 1, counter.Snapshot().AgentReads)
@@ -1216,8 +1243,8 @@ func TestHandler_GetTask_RunningTask(t *testing.T) {
 	}
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `id="thread-content"`)
-	assertContains(t, rec, "Thread is loading...")
-	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload, expectedExecId)")
+	assertContains(t, rec, `id="task-thread-view"`)
+	assertNotContains(t, rec, "Thread is loading...")
 }
 
 func TestHandler_NewTaskFirstMessage(t *testing.T) {
@@ -1336,7 +1363,7 @@ func TestHandler_GetTask_ThreadTabAliasActivatesThread(t *testing.T) {
 	assertContains(t, rec, `data-initial-tab="chat"`)
 	assertContains(t, rec, `id="tab-chat"`)
 	assertContains(t, rec, "tab-active")
-	assertContains(t, rec, "Thread is loading...")
+	assertContains(t, rec, `id="task-thread-view"`)
 }
 
 func TestHandler_GetTask_CompletedTaskDefaultsToChat(t *testing.T) {
@@ -2578,6 +2605,10 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	assertContains(t, rec, "#worker-settings-content .worker-limit-input:focus")
 	assertContains(t, rec, "#worker-settings-content .worker-limit-input:focus-visible")
 	assertNotContains(t, rec, "input-warning")
+	settingsRec := htmxGet(e, "/settings/workers?project_id="+p1.ID)
+	assertCode(t, settingsRec, http.StatusOK)
+	assertContains(t, settingsRec, `id="limit-input-global"`)
+	assertContains(t, settingsRec, "Worker Capacity &amp; Utilization")
 }
 
 func TestHandler_WorkerSettingsReportsCapacitySourceFailures(t *testing.T) {
@@ -6006,15 +6037,15 @@ func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 	insightsIdx := strings.Index(body, `>Insights</span>`)
 	systemIdx := strings.Index(body, `>System</span>`)
 	alertsIdx := strings.Index(body, `data-nav-base="/alerts"`)
-	modelsIdx := strings.Index(body, `data-nav-base="/models"`)
-	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || modelsIdx < 0 {
-		t.Fatal("sidebar missing Insights/System/Alerts/Models markers")
+	settingsIdx := strings.Index(body, `data-nav-base="/themes"`)
+	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || settingsIdx < 0 {
+		t.Fatal("sidebar missing Insights/System/Alerts/Settings markers")
 	}
 	if !(insightsIdx < systemIdx) {
 		t.Fatal("Insights section must appear before System section")
 	}
-	if !(systemIdx < alertsIdx && alertsIdx < modelsIdx) {
-		t.Fatal("Alerts nav item must be grouped under System, before Models")
+	if !(systemIdx < alertsIdx && alertsIdx < settingsIdx) {
+		t.Fatal("Alerts nav item must be grouped under System, before Settings")
 	}
 	if strings.Contains(body[:systemIdx], `data-nav-base="/alerts"`) {
 		t.Fatal("Alerts nav item must not appear before the System section")
@@ -8852,8 +8883,7 @@ func TestHandler_GetTaskThread_MultiTurnOrdering(t *testing.T) {
 		t.Error("BUG: original prompt should appear BEFORE follow-up")
 	}
 
-	// GetTask now lazy-loads thread content, so /tasks?tab=chat should not eagerly
-	// include full thread transcript in the initial HTML.
+	// The chat tab response embeds the thread so navigation takes one request.
 	req2 := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=chat", nil)
 	req2.Header.Set("HX-Request", "true")
 	rec2 := httptest.NewRecorder()
@@ -8863,11 +8893,8 @@ func TestHandler_GetTaskThread_MultiTurnOrdering(t *testing.T) {
 	c2.SetParamValues(task.ID)
 	h.GetTask(c2)
 	body2 := rec2.Body.String()
-	if !strings.Contains(body2, "Thread is loading...") {
-		t.Error("expected lazy thread loading placeholder in task detail response")
-	}
-	if strings.Contains(body2, "Summary output") || strings.Contains(body2, `id="task-thread-view"`) {
-		t.Error("did not expect eager thread transcript in task detail response")
+	if strings.Contains(body2, "Thread is loading...") || !strings.Contains(body2, `id="task-thread-view"`) {
+		t.Error("expected thread transcript embedded in task detail response")
 	}
 }
 

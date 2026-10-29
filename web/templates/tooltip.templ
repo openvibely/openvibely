@@ -60,6 +60,7 @@ templ Tooltips() {
    if(!active)return;
    point=point||pointer;
    var r=active.getBoundingClientRect(),box=tip.getBoundingClientRect(),x=point?point.x:r.left,y=point?point.y:r.bottom;
+   if(active.dataset.tipSide==='right'){tip.style.left=(r.right+8)+'px';tip.style.top=Math.max(8,Math.min(r.top+(r.height-box.height)/2,innerHeight-box.height-8))+'px';return;}
    tip.style.left=Math.max(8,Math.min(x,innerWidth-box.width-8))+'px';
    tip.style.top=Math.max(8,Math.min(y+8+box.height<=innerHeight?y+8:(point?y:r.top)-box.height-8,innerHeight-box.height-8))+'px';
   }

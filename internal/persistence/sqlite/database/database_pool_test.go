@@ -409,7 +409,7 @@ func TestConfigureSQLiteDSNPreservesCallerParameters(t *testing.T) {
 		t.Fatalf("configured query = %#v", values)
 	}
 	joined := strings.Join(values["_pragma"], "|")
-	for _, want := range []string{"synchronous(NORMAL)", "foreign_keys(1)", "busy_timeout(5000)"} {
+	for _, want := range []string{"synchronous(NORMAL)", "foreign_keys(1)", "busy_timeout(5000)", "temp_store(2)"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("PRAGMAs %q do not contain %q", joined, want)
 		}

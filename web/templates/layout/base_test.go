@@ -1136,7 +1136,8 @@ func TestChatBubbleTailCSS_DoesNotInsetBubbleBody(t *testing.T) {
 	//   - width: calc(100% + 16px)  — only needs to recover the left shift, no extra right
 	for _, expected := range []string{
 		"#chat-messages,",
-		"#task-thread-messages {",
+		"#task-thread-messages,",
+		"[data-thread-refresh-preview] {",
 		".chat-input-shadow-gutter,",
 		"margin-left: -16px;",
 		"width: calc(100% + 28px);",
