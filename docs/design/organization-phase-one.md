@@ -1,6 +1,6 @@
 # Organization accounts: Phase 1
 
-One installation has one organization. Open **Organization** in the sidebar to rename it, manage members, or create invitation links.
+One installation has one organization. Open **Settings → Organization** to rename it, manage members, or create invitation links.
 
 ## Existing installations
 
@@ -14,7 +14,7 @@ With authentication off, every request acts as the default local owner. Invitati
 
 ## Inviting someone
 
-1. Sign in as the owner and open **Organization**.
+1. Sign in as the owner and open **Settings → Organization**.
 2. Create an invitation for a member or admin.
 3. Copy the link shown once and send it to the intended recipient.
 4. They open it and create an account, enter an existing account's credentials, or accept while already logged in.

@@ -568,7 +568,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var currentPath = window.location.pathname;
 							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
 								var base = link.getAttribute('data-nav-base');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(models|agents|skills|channels|personality|workers|settings\/workers)(\/|$)/.test(currentPath));
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
@@ -906,21 +906,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							<path d="m9.5 3-.6 2.2-1.5.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.5-.9-.6-2.2Z"></path>
 						</svg>
 						<span class="sidebar-text">Settings</span>
-					</a>
-				</li>
-				<li>
-					<a
-                        data-nav-base="/organization"
-                        href={ templ.SafeURL(fmt.Sprintf("/organization?project_id=%s", currentProjectID)) }
-                        hx-get={ fmt.Sprintf("/organization?project_id=%s", currentProjectID) }
-                        hx-target="#main-content"
-                        hx-push-url="true"
-                        aria-label="Organization" title="Organization"
-                    >
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 0 0-6-3.465M17 20H7m10 0v-2a5 5 0 0 0-10 0v2m0 0H2v-2a4 4 0 0 1 6-3.465M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm6 3a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM8 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"></path>
-						</svg>
-						<span class="sidebar-text">Organization</span>
 					</a>
 				</li>
 			</ul>
