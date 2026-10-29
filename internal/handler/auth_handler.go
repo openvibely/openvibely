@@ -409,7 +409,7 @@ func (h *Handler) HostedSSOCallback(c echo.Context) error {
 		InstanceID: identity.InstanceID, AuthSource: auth.HostedAuthSource,
 		IssuedAt: now.Unix(), ExpiresAt: now.Add(auth.HostedSessionLifetime).Unix(),
 	}
-	token, err := auth.SignHostedSession(claims, h.hostedSSOKey)
+	token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
 	if err != nil {
 		return h.hostedRetryPage(c, http.StatusBadGateway, tx.Destination)
 	}
