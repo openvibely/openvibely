@@ -164,6 +164,9 @@ func orgActionError(err error) error {
 }
 
 type organizationPageData struct {
+	Error       string
+	Username    string
+	Status      int
 	CSS         string
 	Utilities   string
 	Org         *models.Organization
@@ -185,10 +188,11 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`{{i
 <section class="card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0"><div class="card-body min-w-0"><h3 class="card-title text-lg">{{if .Joining}}Join {{.Org.Name}}{{else}}General{{end}}</h3>
 {{if .Joining}}
 <p>All organization members currently have access to every project. Join only an organization you trust.</p>
+{{if .Error}}<p role="alert" class="text-sm text-error">{{.Error}}</p>{{end}}
 <form method="post" action="/invite" class="space-y-4"><input type="hidden" name="token" value="{{.Token}}">
 {{if .SignedIn}}<p>Join as <strong>{{.Principal.Username}}</strong>.</p>{{else}}
 <p>Create an account, or enter your existing account credentials. New passwords must be at least 12 characters.</p>
-<label class="form-control">Username<input class="input input-bordered" name="username" autocomplete="username" minlength="3" maxlength="64" required></label>
+<label class="form-control">Username<input class="input input-bordered" name="username" value="{{.Username}}" autocomplete="username" minlength="3" maxlength="64" required></label>
 <label class="form-control">Password<input class="input input-bordered" name="password" type="password" autocomplete="new-password" maxlength="72" required></label>
 {{end}}<button class="btn btn-primary" type="submit">Join organization</button></form>
 {{else}}
@@ -222,7 +226,11 @@ func (h *Handler) renderOrganization(c echo.Context, data organizationPageData) 
 		return err
 	}
 	if data.Joining {
-		return c.HTML(http.StatusOK, b.String())
+		status := data.Status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		return c.HTML(status, b.String())
 	}
 	content := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, b.String())
@@ -359,7 +367,15 @@ func (h *Handler) AcceptOrgInvitation(c echo.Context) error {
 	}
 	user, err := h.organizationSvc.Accept(c.Request().Context(), c.FormValue("token"), c.FormValue("username"), c.FormValue("password"), existing)
 	if err != nil {
-		return orgActionError(err)
+		if errors.Is(err, service.ErrOrgCredentials) || errors.Is(err, service.ErrOrgLogin) || errors.Is(err, persistence.ErrInvitationInvalid) || errors.Is(err, persistence.ErrAccountExists) {
+			org, loadErr := h.organizationSvc.Store.Organization(c.Request().Context())
+			if loadErr != nil {
+				return loadErr
+			}
+			p, signedIn := models.PrincipalFromContext(c.Request().Context())
+			return h.renderOrganization(c, organizationPageData{Org: org, Principal: p, SignedIn: signedIn, Joining: true, Token: c.FormValue("token"), Username: c.FormValue("username"), Error: err.Error(), Status: http.StatusBadRequest})
+		}
+		return err
 	}
 	token, err := h.organizationSvc.NewSession(c.Request().Context(), user.UserID, h.authCfg.SessionTTL)
 	if err != nil {

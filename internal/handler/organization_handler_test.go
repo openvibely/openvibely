@@ -222,3 +222,25 @@ func TestOrganizationInviteReferrerPolicyAndOriginValidation(t *testing.T) {
 	accepted := orgRequest(e, http.MethodPost, "/invite", form, nil)
 	require.Equal(t, http.StatusSeeOther, accepted.Code, accepted.Body.String())
 }
+
+func TestOrganizationSignupShowsReadableValidationAndAllowsRetry(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	form := url.Values{"token": {token}, "username": {"testuser1"}, "password": {"123456"}}
+	rejected := orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusBadRequest, rejected.Code)
+	require.Contains(t, rejected.Header().Get("Content-Type"), "text/html")
+	require.Contains(t, rejected.Body.String(), "at least 12 characters")
+	require.Contains(t, rejected.Body.String(), `value="testuser1"`)
+	require.NotContains(t, rejected.Body.String(), "123456")
+	require.NotContains(t, rejected.Body.String(), "bytes")
+	// Six multi-byte characters still do not meet the twelve-character minimum.
+	form.Set("password", "éééééé")
+	rejected = orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusBadRequest, rejected.Code)
+	require.Contains(t, rejected.Body.String(), "at least 12 characters")
+	form.Set("password", "a-longer-password")
+	accepted := orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusSeeOther, accepted.Code)
+}
