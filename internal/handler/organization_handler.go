@@ -81,13 +81,13 @@ func (h *Handler) organizationLogin(c echo.Context) error {
 	}
 	finish, allowed := h.organizationSvc.BeginLogin(h.orgAttemptKey(c), c.FormValue("username"))
 	if !allowed {
-		return echo.NewHTTPError(http.StatusTooManyRequests, "too many attempts; try again later")
+		return h.renderLoginPage(c, http.StatusTooManyRequests, c.FormValue("username"), c.FormValue("next"), "Too many attempts. Try again later.")
 	}
 	token, err := h.organizationSvc.Login(c.Request().Context(), c.FormValue("username"), c.FormValue("password"), h.authCfg.SessionTTL)
 	finish(errors.Is(err, service.ErrOrgLogin))
 	if err != nil {
 		if errors.Is(err, service.ErrOrgLogin) {
-			return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials or unavailable account")
+			return h.renderLoginPage(c, http.StatusUnauthorized, c.FormValue("username"), c.FormValue("next"), "Incorrect username or password.")
 		}
 		return err
 	}

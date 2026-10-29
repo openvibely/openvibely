@@ -222,7 +222,17 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/")
 	}
 
-	next := template.HTMLEscapeString(c.QueryParam("next"))
+	return h.renderLoginPage(c, http.StatusOK, "", c.QueryParam("next"), "")
+}
+
+func (h *Handler) renderLoginPage(c echo.Context, status int, username, nextValue, message string) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
+	next := template.HTMLEscapeString(nextValue)
+	username = template.HTMLEscapeString(username)
+	errorHTML := ""
+	if message != "" {
+		errorHTML = `<p id="login-error" role="alert" class="text-sm text-error">` + template.HTMLEscapeString(message) + `</p>`
+	}
 	body := `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -237,15 +247,16 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
     <div class="card-body">
       <h1 class="card-title text-2xl">Sign in</h1>
       <p class="text-sm opacity-70 mb-2">Enter your credentials to continue.</p>
+      ` + errorHTML + `
       <form method="POST" action="/login" class="space-y-4">
         <input type="hidden" name="next" value="` + next + `" />
         <label class="form-control w-full">
           <span class="label-text mb-1">Username</span>
-          <input name="username" type="text" class="input input-bordered w-full" required autofocus />
+          <input name="username" type="text" value="` + username + `" autocomplete="username" class="input input-bordered w-full" required autofocus />
         </label>
         <label class="form-control w-full">
           <span class="label-text mb-1">Password</span>
-          <input name="password" type="password" class="input input-bordered w-full" required />
+          <input name="password" type="password" autocomplete="current-password" class="input input-bordered w-full" required />
         </label>
         <button type="submit" class="btn btn-primary w-full">Login</button>
       </form>
@@ -253,7 +264,7 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
   </div>
 </body>
 </html>`
-	return c.HTML(http.StatusOK, body)
+	return c.HTML(status, body)
 }
 
 func (h *Handler) AuthLogin(c echo.Context) error {

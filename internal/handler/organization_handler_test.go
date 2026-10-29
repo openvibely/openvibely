@@ -474,3 +474,31 @@ func TestOrganizationOldHostedCookieDoesNotOverwriteProfile(t *testing.T) {
 	require.NoError(t, h.organizationSvc.Logout(t.Context(), token))
 	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
 }
+
+func TestOrganizationLoginErrorsStayOnForm(t *testing.T) {
+	_, e := organizationTestApp(t, true)
+	username := `missing"><script>alert(1)</script>`
+	form := url.Values{"username": {username}, "password": {"never-echo-this-password"}, "next": {"L3Rhc2tz"}}
+	for i := 0; i < 11; i++ {
+		rec := orgRequest(e, http.MethodPost, "/login", form, nil)
+		expectedStatus, message := http.StatusUnauthorized, "Incorrect username or password."
+		if i == 10 {
+			expectedStatus, message = http.StatusTooManyRequests, "Too many attempts. Try again later."
+		}
+		require.Equal(t, expectedStatus, rec.Code)
+		require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+		require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+		require.Contains(t, rec.Body.String(), `role="alert"`)
+		require.Contains(t, rec.Body.String(), message)
+		require.Contains(t, rec.Body.String(), `action="/login"`)
+		require.Contains(t, rec.Body.String(), `value="missing&#34;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"`)
+		require.Contains(t, rec.Body.String(), `name="next" value="L3Rhc2tz"`)
+		require.NotContains(t, rec.Body.String(), "never-echo-this-password")
+		require.NotContains(t, rec.Body.String(), "<script>alert(1)</script>")
+	}
+	// A successful retry still redirects normally and creates a session.
+	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}, "next": {"L3Rhc2tz"}}, nil)
+	require.Equal(t, http.StatusFound, rec.Code)
+	require.Equal(t, "/tasks", rec.Header().Get("Location"))
+	require.NotEmpty(t, orgCookie(t, rec).Value)
+}
