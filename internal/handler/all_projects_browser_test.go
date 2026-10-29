@@ -49,11 +49,19 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  function assert(ok,msg){if(!ok)throw Error(msg)}
  try{
  await wait(()=>window.openVibelyProjectTabsSync && window.htmx);
+ const originalLive=window.openVibelyLive.live;
+ let liveHandlers;
+ window.openVibelyLive.live=function(project,task,handlers){liveHandlers=handlers;return originalLive.apply(this,arguments)};
+ const toasts=[]; const originalToast=window.showToast;
+ window.showToast=function(){toasts.push(Array.from(arguments));return originalToast.apply(this,arguments)};
  if(innerWidth<1024){const select=document.getElementById('project-selector');select.value='__all_projects__';select.dispatchEvent(new Event('change',{bubbles:true}));}else{document.querySelector('[data-project-tab="__all_projects__"]').click();}
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
  assert(document.getElementById('project-selector').value==='__all_projects__','selection mismatch');
  const card=Array.from(document.querySelectorAll('[data-all-projects-task]')).find(c=>c.textContent.includes('Cross project browser task'));assert(card && card.textContent.includes('Cross project browser task'),'missing cross project task');
  assert(!window._sidebarSSE,'virtual project opened live connection');
+ await window.openVibelyNavigate('/tasks?project_id=__all_projects__&search=Cross');
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
+
  await wait(()=>document.querySelector('#task-list-groups [data-task-list-project]'));
  const row=Array.from(document.querySelectorAll('#task-list-groups [data-task-list-row]')).find(r=>r.textContent.includes('Second browser project'));
  assert(row.textContent.includes('Second browser project'),'task list missing project label');
@@ -75,6 +83,11 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(new URL(location.href).searchParams.get('project_id')==='__all_projects__','task URL lost scope');
  const detail=document.getElementById('task-detail-content');
  const owner=detail.dataset.projectId;
+ liveHandlers.listeners.task_status_changed({data:JSON.stringify({type:'task_status_changed',project_id:owner,task_id:detail.dataset.taskId,task_name:'Completion probe',category:'backlog',status:'completed'})});
+ assert(toasts.some(t=>t[0]==='Completion probe' && t[3].clickURL.includes('project_id=__all_projects__')),'missing scoped completion notification');
+ liveHandlers.listeners.task_status_changed({data:JSON.stringify({type:'task_status_changed',project_id:'unrelated',task_id:detail.dataset.taskId,task_name:'Wrong project probe',category:'backlog',status:'completed'})});
+ assert(!toasts.some(t=>t[0]==='Wrong project probe'),'unrelated project notification leaked');
+
  await htmx.ajax('PUT','/tasks/'+detail.dataset.taskId,{source:detail,target:'#main-content',swap:'innerHTML',values:{title:'Cross project browser task',prompt:'Saved from All projects',priority:'2',category:'backlog'}});
  await wait(()=>document.getElementById('task-detail-content'));
  assert(document.getElementById('task-detail-content').dataset.projectId===owner,'edit lost task owner');
@@ -89,20 +102,27 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  document.getElementById('task-back-btn').click();
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
 
+ assert(new URL(location.href).searchParams.get('search')==='Cross','task breadcrumb lost search');
  document.querySelector('nav[aria-label="All projects views"] a[href^="/analytics"]').click();
  await wait(()=>document.querySelector('[data-all-projects-usage]'));
  document.querySelector('nav[aria-label="All projects views"] a[href^="/automations"]').click();
+ await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
+ await window.openVibelyNavigate('/automations?project_id=__all_projects__&search=Browser&filter_project='+owner);
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
  document.querySelector('[data-all-projects-automation]').click();
  await wait(()=>document.getElementById('automation-live'));
  assert(document.getElementById('project-selector').value==='__all_projects__','automation switched tabs');
  assert(document.getElementById('automation-live').dataset.projectId===owner,'automation lost owner');
+ liveHandlers.listeners.automation_invocation_started({data:JSON.stringify({type:'automation_invocation_started',project_id:owner,automation_id:location.pathname.split('/')[2],invocation_id:'toast-probe',task_name:'Automation probe'})});
+ assert(toasts.some(t=>t[0]==='Automation probe is now running.' && t[3].clickURL.includes('project_id=__all_projects__')),'missing scoped automation notification');
+
  document.querySelector('[data-automation-live-duplicate]').click();
  await wait(()=>document.getElementById('automation-builder'));
  assert(document.getElementById('project-selector').value==='__all_projects__','duplicate switched tabs');
  document.querySelector('[data-automation-breadcrumb] a').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
  assert(document.getElementById('project-selector').value==='__all_projects__','duplicate breadcrumb switched tabs');
+ assert(new URL(location.href).searchParams.get('search')==='Browser' && new URL(location.href).searchParams.get('filter_project')===owner,'automation breadcrumb lost filters');
  document.querySelector('#all-projects-page a[href^="/automations/new"]').click();
  await wait(()=>document.getElementById('all-projects-choose'));
  Array.from(document.querySelectorAll('#all-projects-choose a')).find(a=>a.textContent==='Second browser project').click();

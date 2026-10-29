@@ -190,6 +190,33 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         const restored = projectLocation(startupProjectID);
                         document.addEventListener('DOMContentLoaded', function() { navigateProject(restored, startupProjectID); }, {once: true});
                     }
+                    // Keep each combined list's filters independent of item navigation.
+                    const allProjectsLists = new Map();
+                    function rememberAllProjectsList() {
+                        const url = new URL(location.href);
+                        if (url.searchParams.get('project_id') !== '__all_projects__' || !['/tasks', '/automations'].includes(url.pathname)) return;
+                        const path = url.pathname + url.search + url.hash;
+                        allProjectsLists.set(url.pathname, path);
+                        try { sessionStorage.setItem('openvibely.all-projects-list.' + url.pathname, path); } catch (_) {}
+                    }
+                    document.addEventListener('htmx:pushedIntoHistory', rememberAllProjectsList);
+                    document.addEventListener('htmx:historyRestore', rememberAllProjectsList);
+                    window.addEventListener('popstate', rememberAllProjectsList);
+                    rememberAllProjectsList();
+                    document.addEventListener('click', function(event) {
+                        const link = event.target.closest('#task-back-btn, #task-automations-back-btn, [data-automation-breadcrumb] a');
+                        if (!link) return;
+                        const url = new URL(link.href, location.href);
+                        if (url.origin !== location.origin || url.searchParams.get('project_id') !== '__all_projects__' || !['/tasks', '/automations'].includes(url.pathname)) return;
+                        let saved = allProjectsLists.get(url.pathname);
+                        try { saved = saved || sessionStorage.getItem('openvibely.all-projects-list.' + url.pathname); } catch (_) {}
+                        if (!saved) return;
+                        const target = new URL(saved, location.href);
+                        if (target.origin !== location.origin || target.pathname !== url.pathname || target.searchParams.get('project_id') !== '__all_projects__') return;
+                        link.href = target.pathname + target.search + target.hash;
+                        link.setAttribute('hx-get', link.getAttribute('href'));
+                        htmx.process(link);
+                    }, true);
 					function rememberProjectLocation() {
 						if (!desktopProjectNavigation && !matchMedia('(min-width: 1024px)').matches) return;
 						const url = new URL(window.location.href);
@@ -477,18 +504,18 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									// Skip chat tasks — chat responses appear inline in the chat UI.
 									if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
 										const currentProjectID = projectSelector.value;
-										if (data.project_id === currentProjectID) {
+										if (data.project_id === currentProjectID || (currentProjectID === '__all_projects__' && data.project_id === (document.querySelector('#task-detail-content, #automation-live') || {}).dataset?.projectId)) {
 											const terminalStatuses = ['completed', 'failed', 'cancelled'];
 											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
 												const taskName = data.task_name || 'Task';
-												window.showToast(taskName, data.status, data.task_id);
+												window.showToast(taskName, data.status, data.task_id, {clickURL: '/tasks/' + encodeURIComponent(data.task_id) + '?project_id=' + encodeURIComponent(currentProjectID)});
 											}
 										}
 									}
 
 									if (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {
 										const currentProjectID = projectSelector.value;
-										if (data.project_id === currentProjectID) {
+										if (data.project_id === currentProjectID || (currentProjectID === '__all_projects__' && data.project_id === (document.querySelector('#task-detail-content, #automation-live') || {}).dataset?.projectId)) {
 											const automationName = data.task_name || 'Automation';
 											const invocationId = data.invocation_id || data.automation_id || '';
 											const automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);
