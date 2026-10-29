@@ -15,6 +15,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
@@ -1358,5 +1359,54 @@ func writeDisabledSkill(t *testing.T, root, handle, name, description, scope str
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: root, Project: root}, nil)
 	if _, err := importer.WriteSkill(context.Background(), decl, "Use this skill when appropriate."); err != nil {
 		t.Fatalf("write disabled skill %s: %v", handle, err)
+	}
+}
+
+func TestSetBundledSkillEnabledPreservesPackageAndSurvivesSync(t *testing.T) {
+	for _, key := range []string{"document_word", "openvibely_native_autonomous_sdlc_bootstrap"} {
+		t.Run(key, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			root := t.TempDir()
+			h.SetAgentSkillRoot(root)
+			require.NoError(t, builtinskills.SyncTo(root))
+			path := filepath.Join(root, "skills", key, "SKILL.md")
+			original, err := os.ReadFile(path)
+			require.NoError(t, err)
+			for _, enabled := range []bool{false, true} {
+				req := httptest.NewRequest(http.MethodPost, "/skills/"+key+"/enabled", strings.NewReader(fmt.Sprintf(`{"enabled":%t,"scope":"global"}`, enabled)))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("HX-Request", "true")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				actual, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, original, actual)
+				require.NoError(t, builtinskills.SyncTo(root))
+				catalog, err := agentskills.BuildCatalog("test", root, "")
+				require.NoError(t, err)
+				_, present := catalog.Lookup(key)
+				require.Equal(t, enabled, present)
+				c := e.NewContext(httptest.NewRequest(http.MethodGet, "/skills", nil), httptest.NewRecorder())
+				cards, err := h.listStandaloneSkills(c)
+				require.NoError(t, err)
+				found := false
+				for _, card := range cards {
+					if card.Handle == key {
+						found = true
+						require.Equal(t, enabled, card.Enabled)
+					}
+				}
+				require.True(t, found)
+				detailRec := httptest.NewRecorder()
+				detailContext := e.NewContext(httptest.NewRequest(http.MethodGet, "/skills/"+key+"?scope=global", nil), detailRec)
+				detailContext.SetParamNames("skill")
+				detailContext.SetParamValues(key)
+				require.NoError(t, h.GetSkillDetail(detailContext))
+				var detail skillDetailResponse
+				require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detail))
+				require.Equal(t, enabled, detail.Enabled)
+			}
+		})
 	}
 }
