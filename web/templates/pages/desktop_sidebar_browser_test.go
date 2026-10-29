@@ -35,7 +35,8 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "narrow-sidebar", func(b *composerFocusCDP) {
-				b.waitFor("sidebar rendered", `String(!!document.getElementById("sidebar"))`, "true")
+				// The sidebar can render before the scripts that initialize toast helpers.
+				b.waitFor("sidebar and toast helpers ready", `String(document.readyState === 'complete' && !!document.getElementById('sidebar') && typeof window.showToast === 'function' && typeof window.syncToastContainerHost === 'function')`, "true")
 				b.evaluate(`showToast('Title bar overlap regression', 'completed', '', {sticky:true}); 'ok'`)
 				for _, width := range []int{800, 500, 1200} {
 					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 800, "deviceScaleFactor": 1, "mobile": false}, nil)
