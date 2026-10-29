@@ -84,13 +84,18 @@ func TestSendAgenticImageGenerationAndEdit(t *testing.T) {
 						found := false
 						for _, rawTool := range tools {
 							tool := rawTool.(map[string]any)
-							if tool["type"] == "namespace" && tool["name"] == "image_gen" {
-								children := tool["tools"].([]any)
-								found = children[0].(map[string]any)["name"] == "imagegen"
+							if tool["type"] == "function" && tool["name"] == "generate_image" {
+								found = true
+								if _, ok := tool["parameters"].(map[string]any); !ok {
+									t.Error("missing image generation parameters")
+								}
+							}
+							if tool["name"] == "image_gen" || tool["name"] == "image_gen.imagegen" {
+								t.Error("reserved image generation tool advertised")
 							}
 						}
 						if !found {
-							t.Error("missing image_gen.imagegen")
+							t.Error("missing generate_image")
 						}
 					} else {
 						found := false
@@ -124,7 +129,7 @@ func TestSendAgenticImageGenerationAndEdit(t *testing.T) {
 						if turn == 1 {
 							args = `{"prompt":"Give the goat a hat","num_last_images_to_include":1}`
 						}
-						output = []any{map[string]any{"type": "function_call", "call_id": fmt.Sprintf("image-%d", turn), "namespace": "image_gen", "name": "imagegen", "arguments": args}}
+						output = []any{map[string]any{"type": "function_call", "call_id": fmt.Sprintf("image-%d", turn), "name": "generate_image", "arguments": args}}
 					} else {
 						output = []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "![Goat](/files/generated-2)"}}}}
 					}
@@ -210,8 +215,8 @@ func TestImageGenerationPermissionAndInvalidReferences(t *testing.T) {
 		if imageGenerationAllowed(opts) {
 			t.Error("image generation allowed without permission")
 		}
-		if openAIToolAllowed(opts, "image_gen") || openAIToolAllowed(opts, imageGenerationToolName) {
-			t.Error("namespace or execution permission bypass")
+		if openAIToolAllowed(opts, imageGenerationToolName) {
+			t.Error("image generation execution permission bypass")
 		}
 		_, failed, err := NewWithAPIKey("key").runImageGenerationTool(context.Background(), opts, nil, json.RawMessage(`{"prompt":"goat"}`))
 		if !failed || err == nil {
