@@ -82,6 +82,10 @@ func OrganizationContent(content templ.Component) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n        #organization-invite-link .code-copy-btn { opacity: 1; pointer-events: auto; }\n        #organization-invite-link pre { padding-right: 3rem; }\n    </style><script>\n        (function() {\n            function initInviteCopy() {\n                var link = document.getElementById('organization-invite-link');\n                if (!link || !window.addCodeCopyButtons) return;\n                window.addCodeCopyButtons(link);\n                var button = link.querySelector('.code-copy-btn');\n                if (button) button.setAttribute('aria-label', 'Copy invite link');\n            }\n            if (window.addCodeCopyButtons) initInviteCopy();\n            else document.addEventListener('DOMContentLoaded', initInviteCopy, {once: true});\n        })();\n    </script>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		return nil
 	})
 }
