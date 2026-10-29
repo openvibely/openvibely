@@ -113,8 +113,7 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		case "/alerts/unread-count":
 			return c.NoContent(http.StatusOK)
 		case "/events":
-			// Aggregate pages refresh their own content without opening a stream
-			// against a nonexistent project.
+			// Legacy SSE endpoint; notifications use the shared WebSocket transport.
 			return c.NoContent(http.StatusNoContent)
 		}
 

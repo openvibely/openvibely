@@ -5079,6 +5079,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                         const detail = event.detail;
                         if (!event.defaultPrevented && detail.target && detail.target.id === 'all-projects-results') {
                             detail.xhr.openVibelyOriginPageRequest = renderedPageRequest;
+                            const state = allProjectsInteraction(detail.target);
+                            detail.xhr.openVibelyAllProjectsRevision = state.revision;
+                            state.deferred = false;
                         }
                         if (event.defaultPrevented || !detail.target || detail.target.id !== 'main-content') return;
                         const previous = currentPageRequest;
@@ -5109,6 +5112,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                             // Failed navigation leaves the existing page active.
                             renderedPageRequest = currentPageRequest;
                             clearPageLoading();
+                            const root = document.getElementById('all-projects-results');
+                            if (root) retryAllProjectsRefresh(root);
                         }
                     });
                     document.addEventListener('htmx:sendAbort', function(event) {
@@ -5118,12 +5123,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     const allProjectsInteractions = new WeakMap();
                     function allProjectsInteraction(root) {
                         let state = allProjectsInteractions.get(root);
-                        if (!state) { state = {pointers: new Set(), deferred: false}; allProjectsInteractions.set(root, state); }
+                        if (!state) { state = {pointers: new Set(), deferred: false, revision: 0}; allProjectsInteractions.set(root, state); }
                         return state;
                     }
                     function retryAllProjectsRefresh(root) {
                         setTimeout(function() {
-                            if (!root.isConnected || root !== document.getElementById('all-projects-results') || currentPageRequest !== renderedPageRequest) return;
+                            if (document.hidden || !root.isConnected || root !== document.getElementById('all-projects-results') || currentPageRequest !== renderedPageRequest) return;
                             const state = allProjectsInteraction(root);
                             if (state.deferred && !state.pointers.size && !root.contains(document.activeElement)) {
                                 state.deferred = false;
@@ -5131,6 +5136,26 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                             }
                         }, 0);
                     }
+                    let allProjectsRefreshTimer = null;
+                    function refreshAllProjectsForEvent(event) {
+                        const root = document.getElementById('all-projects-results');
+                        if (!root) return;
+                        const filter = new URL(root.getAttribute('hx-get'), location.href).searchParams.get('filter_project');
+                        if (filter && event.detail?.project_id && event.detail.project_id !== filter) return;
+                        allProjectsInteraction(root).deferred = true;
+                        allProjectsInteraction(root).revision++;
+                        clearTimeout(allProjectsRefreshTimer);
+                        // Coalesce bursts of change notifications, not a polling loop.
+                        allProjectsRefreshTimer = setTimeout(function() { retryAllProjectsRefresh(root); }, 100);
+                    }
+                    window.addEventListener('sse-task-event', refreshAllProjectsForEvent);
+                    window.addEventListener('sse-live-connected', refreshAllProjectsForEvent);
+                    document.addEventListener('visibilitychange', function() {
+                        if (!document.hidden) {
+                            const root = document.getElementById('all-projects-results');
+                            if (root) retryAllProjectsRefresh(root);
+                        }
+                    });
                     document.addEventListener('pointerdown', function(event) {
                         const root = event.target.closest('#all-projects-results');
                         if (root) allProjectsInteraction(root).pointers.add(event.pointerId);
@@ -5162,6 +5187,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                                 window.openVibelyNavigate(recovery).catch(function() {
                                     if (window.showToast) window.showToast('Could not refresh All projects. Try again.', 'failed');
                                 });
+                            } else if (detail.target && detail.target.isConnected && detail.target === document.getElementById('all-projects-results')) {
+                                allProjectsInteraction(detail.target).deferred = true;
                             }
                             return;
                         }
@@ -5171,11 +5198,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                             const state = allProjectsInteraction(root);
                             const stale = root !== document.getElementById('all-projects-results') || detail.xhr.openVibelyOriginPageRequest !== currentPageRequest;
                             const unchanged = incoming && incoming.innerHTML === root.innerHTML;
+                            const newerEvent = state.revision !== detail.xhr.openVibelyAllProjectsRevision;
                             const interacting = state.pointers.size > 0 || root.contains(document.activeElement);
-                            if (stale || unchanged || interacting) {
+                            if (stale || unchanged || interacting || newerEvent) {
                                 detail.shouldSwap = false;
                                 event.preventDefault();
-                                if (!stale) state.deferred = !unchanged && interacting;
+                                if (!stale) { state.deferred = newerEvent || (!unchanged && interacting); if (newerEvent) retryAllProjectsRefresh(root); }
+                                else if (root.isConnected && root === document.getElementById('all-projects-results')) state.deferred = true;
                             }
                         }
                         if (detail.target && detail.target.id === 'main-content' && detail.xhr !== currentPageRequest) {

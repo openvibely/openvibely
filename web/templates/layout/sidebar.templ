@@ -518,7 +518,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									// Skip chat tasks — chat responses appear inline in the chat UI.
 									if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
 										const currentProjectID = projectSelector.value;
-										if (data.project_id === currentProjectID || (currentProjectID === '__all_projects__' && data.project_id === (document.querySelector('#task-detail-content, #automation-live') || {}).dataset?.projectId)) {
+										if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
 											const terminalStatuses = ['completed', 'failed', 'cancelled'];
 											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
 												const taskName = data.task_name || 'Task';
@@ -529,7 +529,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 									if (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {
 										const currentProjectID = projectSelector.value;
-										if (data.project_id === currentProjectID || (currentProjectID === '__all_projects__' && data.project_id === (document.querySelector('#task-detail-content, #automation-live') || {}).dataset?.projectId)) {
+										if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
 											const automationName = data.task_name || 'Automation';
 											const invocationId = data.invocation_id || data.automation_id || '';
 											const automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);
@@ -557,7 +557,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 						function currentTaskID() {
 							var match = window.location.pathname.match(/^\/tasks\/([^\/]+)/);
-							if (!match || !match[1]) return '';
+							if (!match || !match[1] || match[1] === 'new') return '';
 							try {
 								return decodeURIComponent(match[1]);
 							} catch (_) {
@@ -622,14 +622,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             if (scope === liveScope) return;
                             liveScope = scope;
                             if (window._sidebarSSE) window._sidebarSSE.close();
-                            window._sidebarSSE = projectID && projectID !== '__all_projects__' ? window.openVibelyLive.live(projectID, taskID, liveSSEHandlers) : null;
+                            window._sidebarSSE = projectID ? window.openVibelyLive.live(projectID, taskID, liveSSEHandlers) : null;
                         }
 
                         function retargetLiveEventsForCurrentLocation() {
 							var selected = projectSelector && projectSelector.value;
-                            var task = document.getElementById('task-detail-content') || document.getElementById('automation-live');
-                            var owner = selected === '__all_projects__' && task ? task.dataset.projectId : selected;
-                            retargetLiveEvents(owner, currentTaskID());
+                            retargetLiveEvents(selected, currentTaskID());
 						}
 
 						window.openVibelyRetargetLiveEvents = retargetLiveEvents;

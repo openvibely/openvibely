@@ -273,6 +273,21 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 	if cmd.ProjectID == "" || h.projectRepo == nil {
 		return false
 	}
+	if cmd.ProjectID == models.AllProjectsID {
+		// Authentication is instance-wide. The virtual scope receives project
+		// notifications, but execution streams still require their real owner.
+		if cmd.Op != "live" {
+			return false
+		}
+		if cmd.TaskID == "" {
+			return true
+		}
+		if h.taskRepo == nil {
+			return false
+		}
+		task, err := h.taskRepo.GetByID(ctx, cmd.TaskID)
+		return err == nil && task != nil
+	}
 	project, err := h.projectRepo.GetByID(ctx, cmd.ProjectID)
 	if err != nil || project == nil {
 		return false
@@ -312,14 +327,18 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 	var files events.FileChangeSubscriber
 	var err error
 	if h.broadcaster != nil {
-		tasks, err = h.broadcaster.SubscribeProject(cmd.ProjectID)
+		if cmd.ProjectID == models.AllProjectsID {
+			tasks, err = h.broadcaster.Subscribe()
+		} else {
+			tasks, err = h.broadcaster.SubscribeProject(cmd.ProjectID)
+		}
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "live subscription unavailable"})
 			return
 		}
 		defer h.broadcaster.Unsubscribe(tasks)
 	}
-	if h.chatBroadcaster != nil {
+	if h.chatBroadcaster != nil && cmd.ProjectID != models.AllProjectsID {
 		chats, err = h.chatBroadcaster.SubscribeProject(cmd.ProjectID)
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "live subscription unavailable"})

@@ -518,3 +518,21 @@ func TestLiveWebSocketServerRestartRecoversFromPersistence(t *testing.T) {
 	require.Equal(t, " after restart", recovered.next(t, "after", "message").Data)
 	require.Equal(t, "completed", recovered.next(t, "after", "done").Data)
 }
+
+func TestLiveWebSocketAllProjectsNotifications(t *testing.T) {
+	tc, server := liveTestServer(t)
+	other := tc.CreateProject().WithName("Another live project").Build()
+	exec := createRunningChatStreamExecution(t, tc, "")
+	client := dialLive(t, server.URL)
+	client.send(t, liveCommand{Op: "live", ID: "all", ProjectID: models.AllProjectsID, TaskID: exec.TaskID})
+	client.next(t, "all", "subscribed")
+	for _, projectID := range []string{"default", other.ID} {
+		tc.handler.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, ProjectID: projectID, TaskID: exec.TaskID, Status: "completed"})
+		client.next(t, "all", "task_status_changed")
+	}
+	tc.handler.fileChangeBroadcaster.Publish(events.FileChangeEvent{Type: events.FileModified, TaskID: exec.TaskID})
+	client.next(t, "all", "file_modified")
+	require.False(t, tc.handler.liveSubscriptionAllowed(t.Context(), liveCommand{Op: "execution", ProjectID: models.AllProjectsID, ExecID: exec.ID}))
+	require.False(t, tc.handler.liveSubscriptionAllowed(t.Context(), liveCommand{Op: "live", ProjectID: models.AllProjectsID, TaskID: "missing"}))
+	require.Equal(t, 0, tc.handler.chatBroadcaster.SubscriberCount(), "aggregate notifications must not subscribe to chat contents")
+}

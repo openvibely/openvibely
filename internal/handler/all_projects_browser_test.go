@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/static"
@@ -24,6 +25,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 		t.Skip("Chrome unavailable")
 	}
 	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.broadcaster = events.NewBroadcaster()
 	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
 	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
 	project := createProject(t, h, "Second browser project")
@@ -46,7 +48,15 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 	runner := `<script>
  (async function(){
  function wait(predicate){return new Promise((resolve,reject)=>{let deadline=Date.now()+12000;(function poll(){if(predicate() && !document.querySelector('.htmx-request, .htmx-settling, .htmx-swapping'))return resolve();if(Date.now()>deadline)return reject(Error('timeout: '+predicate));setTimeout(poll,30)})();})}
+ let liveReady=false;
  function assert(ok,msg){if(!ok)throw Error(msg)}
+ async function verifyLiveRefresh(project,type){
+   await wait(()=>liveReady);
+   const marker=document.createElement('span');marker.textContent='stale live data';document.getElementById('all-projects-results').append(marker);
+   const response=await fetch('/browser-publish?project='+encodeURIComponent(project)+'&type='+type,{method:'POST'});
+   assert(response.ok,'event publish failed');
+   await wait(()=>!marker.isConnected);
+ }
  async function verifyStableRefresh(cardSelector){
    let root=document.getElementById('all-projects-results');
    async function poll(){await htmx.ajax('GET',root.getAttribute('hx-get'),{source:root,target:root,swap:'outerHTML'});await wait(()=>true);}
@@ -71,14 +81,15 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>window.openVibelyProjectTabsSync && window.htmx);
  const originalLive=window.openVibelyLive.live;
  let liveHandlers;
- window.openVibelyLive.live=function(project,task,handlers){liveHandlers=handlers;return originalLive.apply(this,arguments)};
+ window.openVibelyLive.live=function(project,task,handlers){liveHandlers=handlers;liveReady=false;const onopen=handlers.onopen;return originalLive.call(this,project,task,{...handlers,onopen:function(e){liveReady=true;if(onopen)onopen(e)}})};
  const toasts=[]; const originalToast=window.showToast;
  window.showToast=function(){toasts.push(Array.from(arguments));return originalToast.apply(this,arguments)};
  if(innerWidth<1024){const select=document.getElementById('project-selector');select.value='__all_projects__';select.dispatchEvent(new Event('change',{bubbles:true}));}else{document.querySelector('[data-project-tab="__all_projects__"]').click();}
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
  assert(document.getElementById('project-selector').value==='__all_projects__','selection mismatch');
  const card=Array.from(document.querySelectorAll('[data-all-projects-task]')).find(c=>c.textContent.includes('Cross project browser task'));assert(card && card.textContent.includes('Cross project browser task'),'missing cross project task');
- assert(!window._sidebarSSE,'virtual project opened live connection');
+ assert(window._sidebarSSE,'All projects missing live connection');
+ await verifyLiveRefresh('default','task_board_updated');
  await verifyStableRefresh('[data-all-projects-task]');
  await window.openVibelyNavigate('/tasks?project_id=__all_projects__&search=Cross');
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
@@ -107,7 +118,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  liveHandlers.listeners.task_status_changed({data:JSON.stringify({type:'task_status_changed',project_id:owner,task_id:detail.dataset.taskId,task_name:'Completion probe',category:'backlog',status:'completed'})});
  assert(toasts.some(t=>t[0]==='Completion probe' && t[3].clickURL.includes('project_id=__all_projects__')),'missing scoped completion notification');
  liveHandlers.listeners.task_status_changed({data:JSON.stringify({type:'task_status_changed',project_id:'unrelated',task_id:detail.dataset.taskId,task_name:'Wrong project probe',category:'backlog',status:'completed'})});
- assert(!toasts.some(t=>t[0]==='Wrong project probe'),'unrelated project notification leaked');
+ assert(toasts.some(t=>t[0]==='Wrong project probe'),'All projects did not receive cross-project notification');
 
  await htmx.ajax('PUT','/tasks/'+detail.dataset.taskId,{source:detail,target:'#main-content',swap:'innerHTML',values:{title:'Cross project browser task',prompt:'Saved from All projects',priority:'2',category:'backlog'}});
  await wait(()=>document.getElementById('task-detail-content'));
@@ -132,6 +143,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
  assert(new URL(location.href).searchParams.get('offset')==='0','empty automation page did not recover');
  assert(new URL(location.href).searchParams.get('page_size')==='1','recovery lost page size');
+ await verifyLiveRefresh(owner,'automation_definition_updated');
  await verifyStableRefresh('[data-all-projects-automation]');
  document.querySelector('[data-all-projects-automation]').click();
  await wait(()=>document.getElementById('automation-live'));
@@ -204,6 +216,15 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 	result := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/events/ws" {
+			app.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path == "/browser-publish" {
+			h.broadcaster.Publish(events.TaskEvent{Type: events.TaskEventType(r.URL.Query().Get("type")), ProjectID: r.URL.Query().Get("project")})
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if r.URL.Path == "/browser-result" {

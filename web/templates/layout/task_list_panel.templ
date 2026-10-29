@@ -612,14 +612,11 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			window.addEventListener('sse-task-event', function(e) {
 				var data = e.detail || {};
 				if (listEvents.indexOf(data.type) === -1) return;
-				if (data.project_id && data.project_id !== currentProjectID()) return;
+				if (currentProjectID() !== '__all_projects__' && data.project_id && data.project_id !== currentProjectID()) return;
 				refreshSoon(300);
 			});
 			window.addEventListener('sse-live-connected', function() { refreshSoon(300); });
-            // The virtual scope has no project stream. Keep the shared list fresh.
-            setInterval(function() {
-                if (!document.hidden && currentProjectID() === '__all_projects__') refreshSoon(0);
-            }, 10000);
+
 			document.body.addEventListener('htmx:afterRequest', function(e) {
 				var cfg = e.detail && e.detail.requestConfig;
 				if (!cfg || !e.detail.successful || cfg.verb === 'get' || e.detail.target === groups) return;
