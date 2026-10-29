@@ -556,6 +556,8 @@ func TestBrowserFunctional_ModelPickerFastMode(t *testing.T) {
 				{ID: "fast", Name: "Fast model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol", ServiceTier: "priority"},
 				{ID: "other", Name: "Other model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-terra"},
 				{ID: "local", Name: "Local model", Provider: models.ProviderOllama, Model: "qwen"},
+				{ID: "opus", Name: "Opus model", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5"},
+				{ID: "sonnet", Name: "Sonnet model", Provider: models.ProviderAnthropic, Model: "claude-sonnet-5-5"},
 			}
 			config := ChatInputFormConfig{FormID: "fast-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/send", ProjectID: "fast-project", Agents: agents, SelectedAgentID: "fast", DefaultAgentID: "fast", ShowModelSelector: true}
 			if scope == "task" {
@@ -587,6 +589,11 @@ await choose('Fast model');assert(hidden.value==='default','restore per-model ov
 panel.querySelector('.ov-mp-speed .ov-mp-reset').click();await waitSave();assert(hidden.value===''&&toggle().getAttribute('aria-checked')==='true','Use default restores configured Fast');
 if(trigger.closest('form').dataset.modelSelectEndpoint){assert(posts.some(p=>p.agent_id==='fast'&&p.service_tier==='default'),'task override persisted');assert(stored.fast==='','task reset persisted');}
 else{assert(JSON.parse(localStorage.getItem('chat-service-tier-fast-project'))['other:gpt-6.1-terra']==='priority','chat override persisted');}
+await choose('Opus model');assert(!panel.querySelector('.ov-mp-speed').hidden,'Anthropic supported model exposes Fast');
+toggle().click();await waitSave();assert(hidden.value==='priority','Anthropic Fast override');
+await choose('Sonnet model');assert(panel.querySelector('.ov-mp-speed').hidden&&hidden.value==='','unsupported Anthropic model omits Fast');
+await choose('Opus model');assert(hidden.value==='priority','Anthropic override restored');
+panel.querySelector('.ov-mp-speed .ov-mp-reset').click();await waitSave();assert(hidden.value===''&&toggle().getAttribute('aria-checked')==='false','Anthropic reset');
 const form=trigger.closest('form');const captured=form._captureChatSubmission();assert(captured.serviceTier==='','submission snapshot includes default override');
 document.body.dataset.testResult='pass';
 }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);}})();
