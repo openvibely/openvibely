@@ -127,6 +127,13 @@ func TestBrowserFunctional_ModelContextDiscoveryAndEdit(t *testing.T) {
   populateModelEditForm(edit);
   if(field('model_fast_mode_field').classList.contains('hidden') || field('model_service_tier').disabled || !field('model_fast_mode').checked) throw Error('opening supported model did not initialize Fast mode');
   if(new FormData(field('model_form')).get('service_tier')!=='priority') throw Error('saved Fast default missing from form');
+  Object.assign(edit.dataset,{modelProvider:'anthropic',modelModel:'claude-opus-5-5',modelServiceTier:'priority'});
+  populateModelEditForm(edit);
+  if(field('model_fast_mode_field').classList.contains('hidden') || !field('model_fast_mode').checked || new FormData(field('model_form')).get('service_tier')!=='priority') throw Error('Anthropic Fast default not restored');
+  field('model_id').value='claude-sonnet-5-5';handleModelChange();
+  if(!field('model_fast_mode_field').classList.contains('hidden') || new FormData(field('model_form')).has('service_tier')) throw Error('Sonnet exposes Fast mode');
+  field('model_id').value='claude-opus-4-8';handleModelChange();
+  if(field('model_fast_mode_field').classList.contains('hidden') || field('model_fast_mode').checked) throw Error('Opus 4.8 Fast default not reset');
   field('model_provider').value='openai_compatible_vllm';toggleProviderFields();
   if(!field('model_fast_mode_field').classList.contains('hidden') || !field('model_service_tier').disabled || field('model_fast_mode').checked) throw Error('unsupported provider retained Fast mode control');
   if(new FormData(field('model_form')).has('service_tier')) throw Error('unsupported provider submits Fast mode');

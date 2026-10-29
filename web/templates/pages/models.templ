@@ -1490,7 +1490,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 
 				function updateFastModeField(provider, model) {
 					var option = selectedModelOption(provider, model);
-					var supported = provider === 'openai' && option && option.fastMode === true;
+					var supported = (provider === 'openai' || provider === 'anthropic') && option && option.fastMode === true;
 					document.getElementById('model_fast_mode_field').classList.toggle('hidden', !supported);
 					document.getElementById('model_service_tier').disabled = !supported;
 					document.getElementById('model_fast_mode').disabled = !supported;

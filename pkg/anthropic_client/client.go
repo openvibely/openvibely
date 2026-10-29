@@ -98,6 +98,7 @@ type Message struct {
 
 // MessagesRequest is sent to the Anthropic Messages API.
 type MessagesRequest struct {
+	Speed     string    `json:"speed,omitempty"`
 	Model     string    `json:"model"`
 	MaxTokens int       `json:"max_tokens"`
 	Messages  []Message `json:"messages"`
@@ -114,6 +115,7 @@ type multimodalMessage struct {
 
 // multimodalRequest is a Messages API request that supports multimodal content.
 type multimodalRequest struct {
+	Speed     string              `json:"speed,omitempty"`
 	Model     string              `json:"model"`
 	MaxTokens int                 `json:"max_tokens"`
 	Messages  []multimodalMessage `json:"messages"`
@@ -184,10 +186,11 @@ type StreamDelta struct {
 
 // SendOptions configures a single Send call.
 type SendOptions struct {
-	Model     string
-	MaxTokens int
-	System    string
-	Stream    bool
+	ServiceTier string // shared app preference; priority enables Anthropic fast speed
+	Model       string
+	MaxTokens   int
+	System      string
+	Stream      bool
 	// OnDelta is called for each text chunk during streaming.
 	// If nil with Stream=true, chunks are collected silently.
 	OnDelta func(text string)
@@ -349,6 +352,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		}
 
 		req := multimodalRequest{
+			Speed:     fastModeSpeed(opts.Model, opts.ServiceTier),
 			Model:     opts.Model,
 			MaxTokens: opts.MaxTokens,
 			Messages:  messages,
@@ -358,6 +362,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		body, err = json.Marshal(req)
 	} else {
 		req := MessagesRequest{
+			Speed:     fastModeSpeed(opts.Model, opts.ServiceTier),
 			Model:     opts.Model,
 			MaxTokens: opts.MaxTokens,
 			Messages:  c.History,
@@ -407,6 +412,13 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 					httpReq.Header.Set("anthropic-beta", strings.Join([]string{
 						"claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05",
 					}, ","))
+				}
+				if fastModeSpeed(opts.Model, opts.ServiceTier) != "" {
+					betas := httpReq.Header.Get("anthropic-beta")
+					if betas != "" {
+						betas += ","
+					}
+					httpReq.Header.Set("anthropic-beta", betas+FastModeBetaHeader)
 				}
 				return httpReq, nil
 			}
