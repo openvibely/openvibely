@@ -200,3 +200,43 @@ func TestWorkTrackerAccountsEveryClassAndRejectsAfterDrainCloses(t *testing.T) {
 		t.Fatalf("start after close = %v", err)
 	}
 }
+
+func TestDrainSignalLifecycle(t *testing.T) {
+	m := NewDrainManager(nil, nil, 0, time.Now)
+	first := m.Draining()
+	select {
+	case <-first:
+		t.Fatal("idle drain signaled")
+	default:
+	}
+	if _, err := m.BeginDrain(DrainRequest{Lease: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-first:
+	default:
+		t.Fatal("waiter not notified")
+	}
+	select {
+	case <-m.Draining():
+	default:
+		t.Fatal("late waiter not notified")
+	}
+	if !m.CancelDrain() {
+		t.Fatal("cancel failed")
+	}
+	next := m.Draining()
+	select {
+	case <-next:
+		t.Fatal("new admission cycle signaled")
+	default:
+	}
+	if _, err := m.BeginDrain(DrainRequest{Lease: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-next:
+	default:
+		t.Fatal("second drain not notified")
+	}
+}
