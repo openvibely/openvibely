@@ -1353,10 +1353,7 @@ func AllProjectsChooseContent(projects []models.Project, path string) templ.Comp
 		}
 		for _, project := range projects {
 			destination := path
-			if destination == "/automations/new" {
-				destination = "/automations"
-			}
-			if destination == "/tasks/new" {
+			if destination == "/tasks/new" || destination == "/automations/new" {
 				destination += "?project_id=" + models.AllProjectsID + "&destination_project=" + url.QueryEscape(project.ID)
 			} else {
 				destination += "?project_id=" + url.QueryEscape(project.ID)
@@ -1368,7 +1365,7 @@ func AllProjectsChooseContent(projects []models.Project, path string) templ.Comp
 			var templ_7745c5c3_Var73 string
 			templ_7745c5c3_Var73, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.URL(destination)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/all_projects.templ`, Line: 250, Col: 109}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/all_projects.templ`, Line: 247, Col: 109}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 			if templ_7745c5c3_Err != nil {
@@ -1381,7 +1378,7 @@ func AllProjectsChooseContent(projects []models.Project, path string) templ.Comp
 			var templ_7745c5c3_Var74 string
 			templ_7745c5c3_Var74, templ_7745c5c3_Err = templruntime.NewAttributeExpression(destination).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/all_projects.templ`, Line: 250, Col: 132}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/all_projects.templ`, Line: 247, Col: 132}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 			if templ_7745c5c3_Err != nil {
@@ -1394,7 +1391,7 @@ func AllProjectsChooseContent(projects []models.Project, path string) templ.Comp
 			var templ_7745c5c3_Var75 string
 			templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/all_projects.templ`, Line: 250, Col: 214}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/all_projects.templ`, Line: 247, Col: 214}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 			if templ_7745c5c3_Err != nil {

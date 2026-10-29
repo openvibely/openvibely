@@ -239,10 +239,7 @@ templ AllProjectsChooseContent(projects []models.Project, path string) {
 		<div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));">
 			for _, project := range projects {
 				{{ destination := path
-if destination == "/automations/new" {
-	destination = "/automations"
-}
-if destination == "/tasks/new" {
+if destination == "/tasks/new" || destination == "/automations/new" {
  destination += "?project_id=" + models.AllProjectsID + "&destination_project=" + url.QueryEscape(project.ID)
 } else {
  destination += "?project_id=" + url.QueryEscape(project.ID)

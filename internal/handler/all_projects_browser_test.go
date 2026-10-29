@@ -31,9 +31,16 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 	require.NoError(t, stores.Tasks.Create(t.Context(), &task))
 	other := models.Task{ProjectID: "default", Title: "Other project task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, stores.Tasks.Create(t.Context(), &other))
-	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC(), RepeatType: models.RepeatOnce, RepeatInterval: 1}
-	require.NoError(t, stores.Schedules.Create(t.Context(), &schedule))
-	_, _, err := stores.Automations.PublishRegistered(t.Context(), models.AutomationRegisteredPublication{ProjectID: project.ID, StableKey: "browser", Name: "Browser automation", AutomationType: "scheduled", AdapterKey: "custom", CreatedVia: "test", Resources: []models.AutomationResourceBinding{{NodeKey: "trigger", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"}}, Nodes: []models.AutomationNodeSpec{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "trigger"}}})
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(stores.Automations, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(stores.Automations, h.taskSvc, stores.Tasks, stores.Schedules, validator)
+	h.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+	seed, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
+	require.NoError(t, err)
+	seed.Name = "Browser automation"
+	seed.Nodes = []models.AutomationDraftNode{{Key: "task", Name: "Task", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review changes", "category": "backlog", "priority": 2}}}
+	_, err = compiler.Save(t.Context(), service.AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: seed})
 	require.NoError(t, err)
 
 	runner := `<script>
@@ -90,6 +97,18 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.getElementById('automation-live'));
  assert(document.getElementById('project-selector').value==='__all_projects__','automation switched tabs');
  assert(document.getElementById('automation-live').dataset.projectId===owner,'automation lost owner');
+ document.querySelector('[data-automation-live-duplicate]').click();
+ await wait(()=>document.getElementById('automation-builder'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','duplicate switched tabs');
+ document.querySelector('[data-automation-breadcrumb] a').click();
+ await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','duplicate breadcrumb switched tabs');
+ document.querySelector('#all-projects-page a[href^="/automations/new"]').click();
+ await wait(()=>document.getElementById('all-projects-choose'));
+ Array.from(document.querySelectorAll('#all-projects-choose a')).find(a=>a.textContent==='Second browser project').click();
+ await wait(()=>document.getElementById('automation-builder'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','new automation switched tabs');
+ assert(new URL(document.querySelector('#automation-builder form[hx-post]').getAttribute('hx-post'),location.href).searchParams.get('destination_project')===owner,'automation draft lost owner');
  document.querySelector('[data-automation-breadcrumb] a').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
 

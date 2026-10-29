@@ -6225,9 +6225,9 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var315 string
-		templ_7745c5c3_Var315, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID))).ResolveURL(ctx)
+		templ_7745c5c3_Var315, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.URL(fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID)))).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2557, Col: 179}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2557, Col: 211}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var315)
 		if templ_7745c5c3_Err != nil {
@@ -6238,9 +6238,9 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var316 string
-		templ_7745c5c3_Var316, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/automations?project_id=%s", currentProjectID)).Resolve(ctx)
+		templ_7745c5c3_Var316, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID))).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2557, Col: 250}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 2557, Col: 314}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var316)
 		if templ_7745c5c3_Err != nil {

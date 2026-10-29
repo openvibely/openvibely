@@ -36,6 +36,26 @@ func (h *Handler) ParseAutomationYAML(c echo.Context) error {
 	return c.JSON(http.StatusOK, automationYAMLParseResult{Valid: true})
 }
 
+// NewAutomation opens a blank draft without writing or saving a candidate.
+func (h *Handler) NewAutomation(c echo.Context) error {
+	if h.automationDraftSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	candidate, err := h.automationDraftSvc.BlankCandidate("")
+	if err != nil {
+		return err
+	}
+	result, err := h.previewAutomationBuilderCandidate(c.Request().Context(), projectID, candidate, nil)
+	if err != nil {
+		return err
+	}
+	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result, Source: "blank"})
+}
+
 func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if h.automationDraftSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
@@ -725,7 +745,7 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 	if startedInvocationID := firstStartedAutomationInvocationID(invocations); isHTMX(c) && h.automationGraphSvc != nil && startedInvocationID != "" {
 		definition, _, defErr := h.automationGraphSvc.GetDefinition(c.Request().Context(), projectID, c.Param("automationId"))
 		if defErr == nil && definition != nil && strings.TrimSpace(definition.Automation.Name) != "" {
-			clickURL := "/automations/" + c.Param("automationId") + "?project_id=" + url.QueryEscape(projectID)
+			clickURL := "/automations/" + c.Param("automationId") + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), projectID))
 			setHTMXToastWithOptions(c, strings.TrimSpace(definition.Automation.Name)+" is now running.", "info", "", "", "", "automation:"+startedInvocationID, clickURL)
 		}
 	}

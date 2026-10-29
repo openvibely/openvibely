@@ -46,7 +46,7 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		if strings.HasPrefix(path, "/breadcrumb-selectors/") && c.Request().Method == http.MethodGet {
 			return next(c)
 		}
-		if path == "/tasks/new" || ((path == "/tasks" || path == "/automations/builder") && c.Request().Method == http.MethodPost) {
+		if path == "/tasks/new" || path == "/automations/new" || ((path == "/tasks" || path == "/automations/builder") && c.Request().Method == http.MethodPost) {
 			destination := c.QueryParam("destination_project")
 			if destination == "" {
 				if c.Request().Method == http.MethodGet {

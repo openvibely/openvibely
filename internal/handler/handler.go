@@ -814,6 +814,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Automations (project-scoped via ?project_id= query param)
 	e.GET("/breadcrumb-selectors/:resource", h.GetBreadcrumbSelectorResults)
 	e.GET("/automations", h.ListAutomations)
+	e.GET("/automations/new", h.NewAutomation)
 	e.POST("/automations/builder", h.BuildAutomationWeb)
 	e.POST("/automations/yaml/parse", h.ParseAutomationYAML)
 	e.GET("/automations/:automationId/duplicate", h.DuplicateAutomationBuilder)

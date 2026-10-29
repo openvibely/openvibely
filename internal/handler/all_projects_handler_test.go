@@ -270,3 +270,47 @@ func TestAllProjectsResourceNavigationAndCreation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, second.ID, task.ProjectID)
 }
+
+func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	project := tc.CreateProject().WithName("Automation destination").Build()
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(tc.stores.Automations, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(tc.stores.Automations, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(tc.stores.Automations), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+	seed, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
+	require.NoError(t, err)
+	seed.Name = "Source automation"
+	seed.Nodes = []models.AutomationDraftNode{{Key: "task", Name: "Task", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review changes", "category": "backlog", "priority": 2}}}
+	saved, err := compiler.Save(t.Context(), service.AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: seed})
+	require.NoError(t, err)
+	chooser := tc.HTTP().Get("/automations/new?project_id=" + models.AllProjectsID).Execute()
+	require.Equal(t, http.StatusOK, chooser.Code)
+	require.Contains(t, chooser.Body.String(), "/automations/new?project_id="+models.AllProjectsID+"&amp;destination_project="+project.ID)
+	for _, path := range []string{
+		"/automations/new?project_id=" + models.AllProjectsID + "&destination_project=" + project.ID,
+		"/automations/" + saved.Definition.Automation.ID + "/duplicate?project_id=" + models.AllProjectsID,
+	} {
+		for _, fragment := range []bool{false, true} {
+			client := tc.HTTP()
+			if fragment {
+				client = tc.HTMX()
+			}
+			response := client.Get(path).Execute()
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			body := response.Body.String()
+			require.Contains(t, body, `id="automation-builder"`)
+			require.Contains(t, body, `href="/automations?project_id=__all_projects__"`)
+			require.Contains(t, body, `/automations/builder?project_id=__all_projects__&amp;destination_project=`+project.ID)
+			require.Contains(t, body, `name="project_id" value="`+project.ID+`"`)
+			if !fragment {
+				require.Contains(t, body, `value="__all_projects__" selected`)
+			}
+		}
+	}
+	definitions, err := tc.stores.Automations.ListPortfolioCards(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Len(t, definitions, 1, "opening drafts must not save them")
+}

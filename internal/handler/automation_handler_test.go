@@ -2113,10 +2113,12 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.NotContains(t, body, ">Vision Driver</option>")
 	require.NotContains(t, body, "Register Existing")
 
-	retiredNewPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusNotFound, retiredNewPage.Code)
-	retiredNewPartial := tc.HTMX().Get("/automations/new?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusNotFound, retiredNewPartial.Code)
+	newPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, newPage.Code)
+	require.Contains(t, newPage.Body.String(), `id="automation-builder"`)
+	newPartial := tc.HTMX().Get("/automations/new?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, newPartial.Code)
+	require.Contains(t, newPartial.Body.String(), `id="automation-builder"`)
 
 	rejectedVisionTemplate := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterVisionDriver},
@@ -4176,4 +4178,25 @@ func persistedAutomationResourceID(t *testing.T, graph *models.AutomationDefinit
 	}
 	require.Len(t, ids, 1)
 	return ids[0]
+}
+
+func TestAllProjectsAutomationRunToastPreservesWorkspace(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	project := tc.CreateProject().Build()
+	repo := tc.stores.Automations
+	registration := service.NewAutomationRegistrationService(repo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(repo), registration)
+	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(repo, tc.scheduleRepo))
+	task := models.Task{ProjectID: project.ID, Title: "Toast task", Category: models.CategoryScheduled, Priority: 2, Status: models.StatusPending, Prompt: "Run"}
+	require.NoError(t, tc.taskRepo.Create(t.Context(), &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(t.Context(), &schedule))
+	definition, _, err := registration.Register(t.Context(), service.AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/toast-workspace", Resources: []models.AutomationResourceBinding{{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID}, {NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID}}})
+	require.NoError(t, err)
+	response := tc.HTMX().Post("/automations/" + definition.Automation.ID + "/run-now?project_id=" + models.AllProjectsID).Execute()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Header().Get("HX-Trigger"), `"click_url":"/automations/`+definition.Automation.ID+`?project_id=__all_projects__"`)
+	invocations, err := repo.ListAutomationInvocations(t.Context(), project.ID, definition.Automation.ID, 10, "")
+	require.NoError(t, err)
+	require.Len(t, invocations.Items, 1)
 }
