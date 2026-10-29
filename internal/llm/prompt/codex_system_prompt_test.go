@@ -11,7 +11,7 @@ import (
 func TestCodexPromptMatchesSnapshot(t *testing.T) {
 	// Hashes of the actual cached templates, excluding surrounding whitespace.
 	for model, want := range map[string]string{
-		"gpt-6-astra":       "8e5e8f9a863bb360482e4d9fc000f1e4f1a85b1fdab7301dba58b36d1185b707",
+		"gpt-6-astra":       "44f0750eeca334d50226166d28657e7013e00480a038fb03d0106023161c4dea",
 		"gpt-6-sol":         "6e61d417b2c660f88f59b8be32933df8ed5e21240058ded907e8e3ecfbf2ea5a",
 		"gpt-6-luna":        "49c4958e931333ee6a703ecb258a44ffb46f07f40e0a167a663de04dfdfa6ef1",
 		"gpt-reserve":       "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",

@@ -9,7 +9,7 @@ import (
 
 // Snapshotted from Codex's models_cache.json on 2026-09-29. These are the
 // model_messages.instructions_template values, not permission/tool overlays.
-// Terra 6.1 and Sol 6.1 were snapshotted separately on 2026-10-29 (Codex 0.164.0).
+// Astra 6, Terra 6.1, and Sol 6.1 were refreshed on 2026-10-29 (Codex 0.164.0).
 // Identical templates share the reserve file. Unknown models use that fallback.
 //
 //go:embed codex/*.md
