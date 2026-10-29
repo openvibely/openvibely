@@ -9,6 +9,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -99,6 +100,15 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid preferences payload")
 	}
 	ctx := c.Request().Context()
+	expectedUser := c.Request().Header.Get("X-Preference-User-ID")
+	// Project preference writes may be replayed from browser storage. Require
+	// ownership on these writes so old tabs cannot save into a different account.
+	if expectedUser != "" || (h.organizationSvc != nil && (req.ProjectLocations != nil || req.PinnedProjectIDs != nil || req.ProjectID != "")) {
+		principal, ok := models.PrincipalFromContext(ctx)
+		if !ok || expectedUser == "" || expectedUser != principal.UserID {
+			return echo.NewHTTPError(http.StatusConflict, "account changed; refresh before saving preferences")
+		}
+	}
 	if req.ProjectLocations != nil {
 		for id, path := range req.ProjectLocations {
 			u, err := url.Parse(path)
