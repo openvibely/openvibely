@@ -729,3 +729,10 @@ func isTerminalResponsesWebsocketEvent(eventType string) bool {
 		return false
 	}
 }
+
+func applyServiceTier(payload map[string]any, model, tier string) {
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: model, ServiceTier: tier}
+	if value := agent.EffectiveServiceTier(); value != "" {
+		payload["service_tier"] = value
+	}
+}

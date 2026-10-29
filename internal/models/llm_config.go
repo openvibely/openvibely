@@ -64,6 +64,7 @@ type LLMConfig struct {
 	Provider        LLMProvider `json:"provider"`
 	Model           string      `json:"model"`
 	ReasoningEffort string      `json:"reasoning_effort,omitempty"`
+	ServiceTier     string      `json:"service_tier,omitempty"`
 	APIKey          string      `json:"-"`
 	MaxTokens       int         `json:"max_tokens"`
 	Temperature     float64     `json:"temperature"`

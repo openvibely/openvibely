@@ -202,6 +202,7 @@ func builtInModelOptionsJSON() string {
 		Label       string   `json:"label"`
 		Efforts     []string `json:"efforts"`
 		Temperature bool     `json:"temperature"`
+ FastMode bool `json:"fastMode"`
 		OAuth       bool     `json:"oauth"`
 		DefaultEffort string `json:"defaultEffort"`
 		ContextWindow int `json:"context_length"`
@@ -212,7 +213,7 @@ func builtInModelOptionsJSON() string {
 		for _, spec := range models.ProviderModels(provider) {
 			data[string(provider)] = append(data[string(provider)], modelOption{
 				Value: spec.ID, Label: spec.Label, Efforts: spec.ReasoningEfforts,
-				Temperature: spec.SupportsTemperature, OAuth: spec.SupportsOAuth,
+				Temperature: spec.SupportsTemperature, FastMode: spec.SupportsFastMode, OAuth: spec.SupportsOAuth,
 				DefaultEffort: spec.DefaultReasoningEffort,
 				ContextWindow: spec.ContextWindow, MaxOutputTokens: spec.MaxOutputTokens,
 			})
@@ -876,7 +877,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 								@modelSettingLabel("Reasoning effort", "model_reasoning_effort", "reasoning_effort_help", "Controls provider reasoning/thinking effort for supported models.")
                                 <select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered model-numeric-input"></select>
                             </div>
-						<div id="model_temperature_field" class="form-control">
+						<div id="model_fast_mode_field" class="form-control hidden">
+ @modelSettingLabel("Fast mode", "model_fast_mode", "model_fast_mode_help", "Faster responses with higher cost or plan usage.")
+ <input type="checkbox" id="model_fast_mode" class="toggle toggle-primary toggle-sm" onchange="document.getElementById('model_service_tier').value = this.checked ? 'priority' : 'default'"/>
+ <input type="hidden" id="model_service_tier" name="service_tier" value=""/>
+ </div>
+ <div id="model_temperature_field" class="form-control">
 							@modelSettingLabel("Temperature", "model_temperature", "model_temperature_help", "Controls randomness. Leave the default unless you want more varied responses.")
 							<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_temperature" name="temperature" class="input input-bordered model-numeric-input" value="0" placeholder="0–1"/>
 						</div>
@@ -1471,6 +1477,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
 					setReasoningEffortOptions(provider, model, selectedEffort);
 					updateTemperatureField(provider, model);
+					updateFastModeField(provider, model);
 					if (provider === 'ollama') {
                         discoverOllamaContext();
                     } else if (isOpenAICompatibleProvider(provider)) {
@@ -1481,6 +1488,17 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					}
 				}
 
+				function updateFastModeField(provider, model) {
+					var option = selectedModelOption(provider, model);
+					var supported = provider === 'openai' && option && option.fastMode === true;
+					document.getElementById('model_fast_mode_field').classList.toggle('hidden', !supported);
+					document.getElementById('model_service_tier').disabled = !supported;
+					document.getElementById('model_fast_mode').disabled = !supported;
+					if (!supported) {
+						document.getElementById('model_service_tier').value = '';
+						document.getElementById('model_fast_mode').checked = false;
+					}
+				}
 				function modelSupportsTemperature(provider, model) {
 					var normalizedModel = (model || '').trim().toLowerCase();
 					if (provider === 'mixture') return false;
@@ -2426,6 +2444,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						modelProvider: details.provider || '',
 						modelModel: details.model || '',
 						modelReasoningEffort: details.reasoning_effort || '',
+ modelServiceTier: details.service_tier || '',
 						modelTemperature: String(details.temperature || 0),
 						modelIsDefault: String(details.is_default === true),
 						modelApiKey: details.api_key || '',
@@ -2473,6 +2492,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					var dbProvider = button.dataset.modelProvider;
 					var model = button.dataset.modelModel;
 					var reasoningEffort = button.dataset.modelReasoningEffort || '';
+ var serviceTier = button.dataset.modelServiceTier || '';
 					var temperature = parseFloat(button.dataset.modelTemperature);
 						var isDefault = button.dataset.modelIsDefault === 'true';
 						var apiKey = button.dataset.modelApiKey || '';
@@ -2581,6 +2601,8 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 
 					document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
+					document.getElementById('model_service_tier').value = serviceTier;
+					document.getElementById('model_fast_mode').checked = serviceTier === 'priority';
 					populateContextLimitFields({
 						provider_context_window: parseInt(button.dataset.modelProviderContextWindow, 10) || 0,
 						provider_max_output_tokens: parseInt(button.dataset.modelProviderMaxOutputTokens, 10) || 0,
@@ -3043,7 +3065,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						document.getElementById('model_openai_compatible_custom_model').value = '';
 						applyMixtureConfig('');
 						document.getElementById('model_auto_start_tasks').checked = false;				document.getElementById('model_submit_btn').textContent = 'Create';
-				toggleProviderFields('', '');
+				document.getElementById('model_service_tier').value = '';
+					document.getElementById('model_fast_mode').checked = false;
+ toggleProviderFields('', '');
 				resetContextLimitFields();
 				resetSecretInputVisibility('model_api_key');
 				resetSecretInputVisibility('model_custom_oauth_client_secret');

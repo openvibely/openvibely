@@ -14,6 +14,17 @@ func (h *Handler) applyConversationEffort(c echo.Context, taskID string, agent *
 	if present && effort != "" && !models.ValidConversationEffort(*agent, effort) {
 		return echo.NewHTTPError(http.StatusBadRequest, "unsupported reasoning effort for selected model")
 	}
+	tier, tierPresent := formValueIfPresent(c, "service_tier")
+	if tierPresent && !models.ValidServiceTier(*agent, tier) {
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported service tier for selected model")
+	}
+	if taskID != "" && h.taskRepo != nil && tierPresent {
+		if err := h.taskRepo.SetModelServiceTier(c.Request().Context(), taskID, *agent, tier); err != nil {
+			return err
+		}
+	} else if tier != "" {
+		agent.ServiceTier = tier
+	}
 	if taskID != "" && h.taskRepo != nil {
 		if present {
 			if err := h.taskRepo.SetModelEffort(c.Request().Context(), taskID, *agent, effort); err != nil {
@@ -54,5 +65,9 @@ func (h *Handler) TaskThreadModelEffort(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(http.StatusOK, map[string]string{"reasoning_effort": effort})
+	tier, err := h.taskRepo.ModelServiceTier(c.Request().Context(), task.ID, *agent)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]string{"reasoning_effort": effort, "service_tier": tier})
 }

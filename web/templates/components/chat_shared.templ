@@ -1552,6 +1552,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			</div>
 			if config.ShowModelSelector {
 				<input type="hidden" name="reasoning_effort" value=""/>
+ <input type="hidden" name="service_tier" value=""/>
 				<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value={ selectedAgentOrAuto(config.SelectedAgentID) }/>
 			}
 			if config.ShowModeSelector {
@@ -1609,7 +1610,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								<li data-value="auto">Auto</li>
 								<li data-value="default" data-picker-effective-id={ pickerDefaultAgent(config.Agents, config.DefaultAgentID).ID } data-picker-detail={ pickerDefaultDetail(config.Agents, config.DefaultAgentID) }>Default</li>
 								for _, agent := range config.Agents {
-									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) }>{ agent.Name } ({ agent.Model })</li>
+									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) } data-picker-fast={ fmt.Sprint(models.ModelSupportsFastMode(agent.Provider, agent.Model)) } data-picker-tier={ agent.EffectiveServiceTier() }>{ agent.Name } ({ agent.Model })</li>
 								}
 							</ul>
 						</div>
@@ -2135,6 +2136,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								attachmentSessionID: sessionInput ? sessionInput.value : '',
 								modelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,
 								reasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,
+ serviceTier: fields.has('service_tier') ? fields.get('service_tier') : undefined,
 								submitIntent: form.getAttribute('data-submit-intent') || 'normal'
 							}, payload || {});
 							snapshot.parameters = Object.assign(parameters, snapshot.parameters || {});
@@ -2158,6 +2160,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							});
 							if (payload.modelID !== undefined) parameters.agent_id = payload.modelID;
 							if (payload.reasoningEffort !== undefined) parameters.reasoning_effort = payload.reasoningEffort;
+ if (payload.serviceTier !== undefined) parameters.service_tier = payload.serviceTier;
 							if (payload.expectedTurnID !== undefined) parameters.expected_turn_id = payload.expectedTurnID;
 							if (payload.managedModelSelection) parameters.model_selection_managed = '1';
 						});

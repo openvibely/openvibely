@@ -42,7 +42,9 @@
     effortBox = el("div", "ov-mp-effort"),
     status = el("div", "ov-mp-status");
   status.setAttribute("role", "status");
-  panel.append(searchWrap, list, effortBox, status);
+  const speedBox = el("div", "ov-mp-speed");
+  speedBox.hidden = true;
+  panel.append(searchWrap, list, effortBox, speedBox, status);
   const subhead = el("div", "ov-mp-subhead"),
     back = el("button", "ov-mp-back", "‹"),
     sublist = el("div", "ov-menu-list ov-menu-scroll ov-mp-sublist");
@@ -65,12 +67,18 @@
     favoriteWrites = Promise.resolve();
   const favoritesEndpoint = "/ui/model-favorites";
   async function requestFavorites(payload) {
-    const response = await fetch(favoritesEndpoint, payload ? {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    } : undefined);
-    if (!response.ok) throw Error("Could not save favorites. Reopen the picker to retry.");
+    const response = await fetch(
+      favoritesEndpoint,
+      payload
+        ? {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        : undefined,
+    );
+    if (!response.ok)
+      throw Error("Could not save favorites. Reopen the picker to retry.");
     return response.json();
   }
   async function loadFavorites() {
@@ -83,14 +91,18 @@
       let saved = await requestFavorites();
       const legacy = read(favoritesKey);
       const importIDs = Object.keys(legacy || {}).filter((id) => legacy[id]);
-      if (importIDs.length) saved = await requestFavorites({ import_ids: importIDs });
-      try { localStorage.removeItem(favoritesKey); } catch (_) {}
+      if (importIDs.length)
+        saved = await requestFavorites({ import_ids: importIDs });
+      try {
+        localStorage.removeItem(favoritesKey);
+      } catch (_) {}
       if (token !== favoritesLoadToken) return;
       favorites = saved;
       favoritesError = "";
     } catch (_) {
       if (token === favoritesLoadToken)
-        favoritesError = "Could not load favorites. Reopen the picker to retry.";
+        favoritesError =
+          "Could not load favorites. Reopen the picker to retry.";
     } finally {
       if (token === favoritesLoadToken) {
         favoritesLoading = false;
@@ -108,6 +120,8 @@
         provider: li.dataset.pickerProvider || "",
         levels: (li.dataset.pickerEfforts || "").split(",").filter(Boolean),
         defaultEffort: li.dataset.pickerDefault || "",
+        fast: li.dataset.pickerFast === "true",
+        defaultTier: li.dataset.pickerTier || "",
         effectiveID: li.dataset.pickerEffectiveId || "",
         detail: li.dataset.pickerDetail || "",
       }),
@@ -118,12 +132,16 @@
       fallback.model = resolved.model;
       fallback.levels = resolved.levels;
       fallback.defaultEffort = resolved.defaultEffort;
+      fallback.fast = resolved.fast;
+      fallback.defaultTier = resolved.defaultTier;
     }
     return all;
   }
   function sortModelsByName(models) {
     return models.sort((a, b) => {
-      const byName = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      const byName = a.name.localeCompare(b.name, undefined, {
+        sensitivity: "base",
+      });
       return byName || a.id.localeCompare(b.id);
     });
   }
@@ -139,12 +157,19 @@
   function field(btn) {
     return btn.closest("form").querySelector('[name="reasoning_effort"]');
   }
+  function tierField(btn) {
+    return btn.closest("form").querySelector('[name="service_tier"]');
+  }
   function sync(btn) {
     const s = state(btn),
       m = current(btn);
     if (!s || !m) return;
     const value = s.efforts[key(m)] || "";
     field(btn).value = m.levels.includes(value) ? value : "";
+    const tier = s.tiers[key(m)] || "";
+    if (tierField(btn))
+      tierField(btn).value =
+        m.fast && ["priority", "default"].includes(tier) ? tier : "";
     btn.title = usesAppleShortcuts() ? "Models (⌘M)" : "Models (Ctrl+M)";
   }
   function label(v) {
@@ -169,11 +194,13 @@
     sync(btn);
     if (!taskEndpoint(btn)) {
       write(s.storage, s.efforts);
+      write(s.tierStorage, s.tiers);
       return Promise.resolve();
     }
     const body = new URLSearchParams({
       agent_id: btn.dataset.currentValue,
       reasoning_effort: field(btn).value,
+      service_tier: tierField(btn)?.value || "",
     });
     const request = () =>
       fetch(taskEndpoint(btn), { method: "POST", body }).then((r) => {
@@ -222,12 +249,14 @@
         throw Error("Could not load effort. Reopen the picker to retry.");
       const data = await response.json();
       const effort = data.reasoning_effort || "";
+      const tier = data.service_tier || "";
       // A send started before another model was selected still needs this
       // result, even though the stale lookup must not update the current UI.
-      if (token !== s.loadToken) return effort;
+      if (token !== s.loadToken) return { effort, tier };
       s.efforts[key(m)] = effort;
+      s.tiers[key(m)] = tier;
       s.error = "";
-      return effort;
+      return { effort, tier };
     } catch (e) {
       if (token === s.loadToken) s.error = e.message;
     } finally {
@@ -325,11 +354,12 @@
           ...sub.querySelectorAll(".ov-mp-star"),
         ].find((b) => b.dataset.id === m.id);
         button?.focus({ preventScroll: true });
-        favoriteWrites = favoriteWrites.catch(() => {}).then(() =>
-          requestFavorites({ model_id: m.id, favorite: desired }),
-        );
+        favoriteWrites = favoriteWrites
+          .catch(() => {})
+          .then(() => requestFavorites({ model_id: m.id, favorite: desired }));
         favoriteWrites.catch(() => {
-          favoritesError = "Could not save favorites. Reopen the picker to retry.";
+          favoritesError =
+            "Could not save favorites. Reopen the picker to retry.";
           if (active) {
             status.textContent = favoritesError;
             renderList();
@@ -378,7 +408,9 @@
     clear.hidden = !q;
     if (q) {
       const matches = all.filter((m) =>
-        (m.name + " " + m.provider + " " + m.model + " " + m.detail).toLowerCase().includes(q),
+        (m.name + " " + m.provider + " " + m.model + " " + m.detail)
+          .toLowerCase()
+          .includes(q),
       );
       matches.sort((a, b) => Number(!a.provider) - Number(!b.provider));
       matches.forEach((m) => row(m, list));
@@ -418,14 +450,16 @@
       });
     const defaults = all.filter((m) => !m.provider);
     if (defaults.length) {
-      if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
+      if (list.children.length)
+        list.append(el("div", "ov-menu-rule ov-mp-rule"));
       defaults.forEach((m) => row(m, list));
     }
     const fav = sortModelsByName(
       all.filter((m) => m.provider && favorites[m.id]),
     );
     if (fav.length) {
-      if (list.children.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
+      if (list.children.length)
+        list.append(el("div", "ov-menu-rule ov-mp-rule"));
       list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
       fav.forEach((m) => row(m, list));
     }
@@ -455,12 +489,22 @@
       const toward = right
         ? event.clientX > providerPointerOrigin.x + 8
         : event.clientX < providerPointerOrigin.x - 8;
-      if (toward && event.clientY >= bounds.top - 12 && event.clientY <= bounds.bottom + 12) {
+      if (
+        toward &&
+        event.clientY >= bounds.top - 12 &&
+        event.clientY <= bounds.bottom + 12
+      ) {
         cancelProviderSwitch();
         providerSwitchProvider = p;
         providerSwitchTimer = setTimeout(() => {
           // Favorites loading can re-render the provider list while the switch is pending.
-          if (active && providerSwitchProvider === p && list.querySelector('.ov-mp-provider[data-provider="' + CSS.escape(p) + '"]')) {
+          if (
+            active &&
+            providerSwitchProvider === p &&
+            list.querySelector(
+              '.ov-mp-provider[data-provider="' + CSS.escape(p) + '"]',
+            )
+          ) {
             openProvider(p);
             providerPointerOrigin = { x: event.clientX, y: event.clientY };
           }
@@ -479,7 +523,9 @@
     sublist.replaceChildren();
     sub.setAttribute("aria-label", provider + " models");
     sortModelsByName(
-      options(active).filter((m) => m.provider === provider && !favorites[m.id]),
+      options(active).filter(
+        (m) => m.provider === provider && !favorites[m.id],
+      ),
     ).forEach((m) => row(m, sublist));
     if (!sublist.children.length) {
       closeSub();
@@ -489,6 +535,7 @@
     positionSub();
   }
   function renderEffort() {
+    renderSpeed();
     effortBox.replaceChildren();
     const m = active && current(active);
     effortBox.hidden = !m?.levels.length;
@@ -549,9 +596,56 @@
     head.append(reset);
     effortBox.append(slider, ticks);
   }
+  function renderSpeed() {
+    speedBox.replaceChildren();
+    const m = active && current(active);
+    speedBox.hidden = !m?.fast;
+    if (speedBox.hidden) return;
+    const s = state(active),
+      override = s.tiers[key(m)] || "";
+    const row = el("div", "ov-mp-speed-row"),
+      title = el("span", "", "Fast mode");
+    title.id = "ov-mp-fast-label";
+    const actions = el("div", "ov-mp-speed-actions");
+    const reset = el("button", "ov-mp-reset", "Use default");
+    reset.type = "button";
+    reset.hidden = !override;
+    reset.disabled = s.loading || !!s.error;
+    reset.onclick = () => {
+      delete s.tiers[key(m)];
+      save(active);
+      renderEffort();
+    };
+    const toggle = el("button", "ov-mp-fast-toggle");
+    toggle.type = "button";
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-labelledby", title.id);
+    toggle.setAttribute("aria-describedby", "ov-mp-fast-help");
+    toggle.setAttribute(
+      "aria-checked",
+      String((override || m.defaultTier) === "priority"),
+    );
+    toggle.disabled = s.loading || !!s.error;
+    toggle.onclick = () => {
+      s.tiers[key(m)] =
+        (override || m.defaultTier) === "priority" ? "default" : "priority";
+      save(active);
+      renderEffort();
+    };
+    actions.append(reset, toggle);
+    row.append(title, actions);
+    const help = el(
+      "div",
+      "ov-mp-speed-help",
+      "Faster responses · Higher cost or plan usage",
+    );
+    help.id = "ov-mp-fast-help";
+    speedBox.append(row, help);
+  }
   function render() {
     if (!active) return;
-    const atEnd = !search.value.trim() &&
+    const atEnd =
+      !search.value.trim() &&
       list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
     renderList();
     renderEffort();
@@ -609,7 +703,10 @@
   }
   function usesAppleShortcuts() {
     return /Mac|iPhone|iPad|iPod|iOS/i.test(
-      navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "",
+      navigator.userAgentData?.platform ||
+        navigator.platform ||
+        navigator.userAgent ||
+        "",
     );
   }
   function init(btn) {
@@ -623,6 +720,8 @@
     btn._ovModelState = {
       efforts: storage ? read(storage) : {},
       storage,
+      tierStorage: project ? "chat-service-tier-" + project : "",
+      tiers: project ? read("chat-service-tier-" + project) : {},
       pending: Promise.resolve(),
       loading: false,
       loadToken: 0,
@@ -700,10 +799,11 @@
         .forEach((row) => row.removeAttribute("data-picker-active"));
     if (!provider) return;
     if (e.target.closest(".ov-mp-provider")) cancelSubClose();
-    else if (e.target.closest(".ov-mp-row,.ov-mp-search,.ov-mp-effort"))
+    else if (
+      e.target.closest(".ov-mp-row,.ov-mp-search,.ov-mp-effort,.ov-mp-speed")
+    )
       closeSub();
-    else if (subCloseTimer === null)
-      subCloseTimer = setTimeout(closeSub, 350);
+    else if (subCloseTimer === null) subCloseTimer = setTimeout(closeSub, 350);
   };
   sub.onpointerenter = () => {
     cancelSubClose();
@@ -744,18 +844,39 @@
     "keydown",
     (e) => {
       if (
-        !e.defaultPrevented && !e.isComposing && !e.repeat &&
-        (usesAppleShortcuts() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
-        !e.shiftKey && !e.altKey &&
+        !e.defaultPrevented &&
+        !e.isComposing &&
+        !e.repeat &&
+        (usesAppleShortcuts()
+          ? e.metaKey && !e.ctrlKey
+          : e.ctrlKey && !e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
         e.key.toLowerCase() === "m"
       ) {
-        const buttons = [...document.querySelectorAll("form.chat-input-container .chat-model-select")];
-        const visible = (btn) => !btn.disabled && btn.getClientRects().length > 0 &&
-          getComputedStyle(btn).visibility !== "hidden" && !btn.closest("[inert]");
-        const focusedForm = document.activeElement?.closest("form.chat-input-container");
-        const btn = buttons.find((btn) => visible(btn) && btn.closest("form") === focusedForm) ||
-          buttons.find(visible);
-        if (!btn || (document.querySelector("dialog[open]") && !btn.closest("dialog[open]"))) return;
+        const buttons = [
+          ...document.querySelectorAll(
+            "form.chat-input-container .chat-model-select",
+          ),
+        ];
+        const visible = (btn) =>
+          !btn.disabled &&
+          btn.getClientRects().length > 0 &&
+          getComputedStyle(btn).visibility !== "hidden" &&
+          !btn.closest("[inert]");
+        const focusedForm = document.activeElement?.closest(
+          "form.chat-input-container",
+        );
+        const btn =
+          buttons.find(
+            (btn) => visible(btn) && btn.closest("form") === focusedForm,
+          ) || buttons.find(visible);
+        if (
+          !btn ||
+          (document.querySelector("dialog[open]") &&
+            !btn.closest("dialog[open]"))
+        )
+          return;
         e.preventDefault();
         e.stopPropagation();
         if (active) close(true);
@@ -835,16 +956,23 @@
       const attachment = form.querySelector('[name="attachment_session_id"]');
       const model = form.querySelector('[name="agent_id"]');
       const effort = form.querySelector('[name="reasoning_effort"]');
+      const tier = tierField(btn);
       // The composer temporarily installs a steering fallback payload, then
       // restores the newer draft synchronously. Preserve the selected model
       // and effort too, since either can change while the save completes.
-      const capturedEffort = form._chatNextSubmissionPayload?.reasoningEffort !== undefined;
-      const payload = form._captureChatSubmission(form._chatNextSubmissionPayload);
+      const capturedEffort =
+        form._chatNextSubmissionPayload?.reasoningEffort !== undefined;
+      const capturedTier =
+        form._chatNextSubmissionPayload?.serviceTier !== undefined;
+      const payload = form._captureChatSubmission(
+        form._chatNextSubmissionPayload,
+      );
       payload.managedModelSelection = true;
       // This attempt owns the captured snapshot while settings load. Do not
       // leave it on the form for a later Send if loading or saving fails.
       form._chatNextSubmissionPayload = null;
       const waitingForEffort = s.loading && !capturedEffort;
+      const waitingForTier = s.loading && !capturedTier;
       const ready = s.ready;
       const pending = s.pending;
       Promise.resolve(ready)
@@ -852,8 +980,10 @@
           if (waitingForEffort) {
             if (loadedEffort === undefined)
               throw Error("Could not load effort for the selected model.");
-            payload.reasoningEffort = loadedEffort;
+            payload.reasoningEffort = loadedEffort.effort;
           }
+          if (waitingForTier && loadedEffort)
+            payload.serviceTier = loadedEffort.tier;
           return pending;
         })
         .then(() => {
@@ -864,11 +994,13 @@
           const draftAttachments = attachment?.value;
           const draftModel = model?.value;
           const draftEffort = effort?.value;
+          const draftTier = tier?.value;
           form._chatNextSubmissionPayload = payload;
           if (message) message.value = payload.message;
           if (attachment) attachment.value = payload.attachmentSessionID;
           if (model) model.value = payload.modelID;
           if (effort) effort.value = payload.reasoningEffort;
+          if (tier) tier.value = payload.serviceTier || "";
           const managedSelection = el("input");
           managedSelection.type = "hidden";
           managedSelection.name = "model_selection_managed";
@@ -883,7 +1015,9 @@
               const liveSubmitter =
                 submitter?.form === form && submitter.type === "submit"
                   ? submitter
-                  : form.querySelector('button[type="submit"],input[type="submit"]');
+                  : form.querySelector(
+                      'button[type="submit"],input[type="submit"]',
+                    );
               form.requestSubmit(liveSubmitter || undefined);
             } else {
               form.dispatchEvent(
@@ -902,6 +1036,7 @@
             if (attachment) attachment.value = draftAttachments;
             if (model) model.value = draftModel;
             if (effort) effort.value = draftEffort;
+            if (tier) tier.value = draftTier;
           }
         })
         .catch((err) => {

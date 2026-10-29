@@ -257,6 +257,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 			RunExecutionID:      activeChatExec.ID,
 			AgentConfigID:       agent.ID,
 			ReasoningEffort:     agent.ReasoningEffort,
+			ServiceTier:         agent.EffectiveServiceTier(),
 			InputMode:           models.ThreadInputModeQueued,
 			InputStatus:         models.ThreadInputPending,
 			Content:             message,

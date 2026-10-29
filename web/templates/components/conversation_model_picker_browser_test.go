@@ -446,8 +446,8 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 	chrome := testChromePath(t)
 	var content bytes.Buffer
 	agents := []models.LLMConfig{
-		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
-		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
+		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
+		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
 	}
 	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
@@ -497,7 +497,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,20));
  const until=async(fn)=>{for(let i=0;i<200;i++){if(fn())return;await wait();}throw Error('timed out');};
  try {
- const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]');
+ const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]'),tier=form.querySelector('[name=service_tier]');
  const picker=form.querySelector('.chat-model-select');await picker._ovModelState.ready;
  const completed=[];let stopped=false;
  assert(form.querySelector('[aria-label="Stop response"]').getAttribute('hx-sync')==='this:drop','rendered Stop has an independent request scope');
@@ -507,18 +507,18 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(records?.length===1,'first request is held in flight');
  // Simulate a rejected steering request falling back to a normal send.
  form._chatNextSubmissionPayload={message:'queued follow-up',attachmentSessionID:'queued-attachment',fallbackFromSteer:true};
- message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';
+ message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';tier.value='default';
  let handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
  form.requestSubmit();await until(()=>handedOff);
  // A later send must not replace the waiting steering fallback.
- message.value='third message';attachment.value='third-attachment';model.value='b';effort.value='medium';
+ message.value='third message';attachment.value='third-attachment';model.value='b';effort.value='medium';tier.value='priority';
  handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
  form.requestSubmit();await until(()=>handedOff);
  // Rebuilt Stop controls must still run while sends are waiting.
  message.value='';message.dispatchEvent(new Event('input',{bubbles:true}));
  form.querySelector('[aria-label="Stop response"]').click();await until(()=>stopped);
  assert(completed.length===0,'Stop completes independently of the held send');
- message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';
+ message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';tier.value='default';
  message.dispatchEvent(new Event('input',{bubbles:true}));
  await fetch('/release');await until(()=>completed.length>=2);
  records=await (await fetch('/records')).json();
@@ -528,6 +528,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(records.length===3,'all three sends reach the server exactly once');
  const sent=records[1];
  assert(sent.message==='queued follow-up','queued request must not send the newer draft: '+sent.message);
+ assert(sent.service_tier==='default'&&records[2].service_tier==='priority'&&tier.value==='default','queued sends retain their own tier and preserve draft tier');
  assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
  assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
  assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
@@ -545,4 +546,54 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		srv.Close()
 	}()
 	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "queued model picker snapshot", 1000, 800, 25*time.Second)
+}
+
+func TestBrowserFunctional_ModelPickerFastMode(t *testing.T) {
+	chrome := testChromePath(t)
+	for _, scope := range []string{"chat", "task"} {
+		t.Run(scope, func(t *testing.T) {
+			agents := []models.LLMConfig{
+				{ID: "fast", Name: "Fast model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol", ServiceTier: "priority"},
+				{ID: "other", Name: "Other model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-terra"},
+				{ID: "local", Name: "Local model", Provider: models.ProviderOllama, Model: "qwen"},
+			}
+			config := ChatInputFormConfig{FormID: "fast-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/send", ProjectID: "fast-project", Agents: agents, SelectedAgentID: "fast", DefaultAgentID: "fast", ShowModelSelector: true}
+			if scope == "task" {
+				config.TaskID = "fast-task"
+			}
+			var content bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &content); err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><script>
+localStorage.clear();window.htmx={process:function(){}};const stored={},posts=[];
+window.fetch=async(url,opts)=>{if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
+if(opts?.method==='POST'){const id=opts.body.get('agent_id');stored[id]=opts.body.get('service_tier');posts.push(Object.fromEntries(opts.body));return {ok:true};}
+const id=new URL(url,location.href).searchParams.get('agent_id');return {ok:true,json:async()=>({service_tier:stored[id]||'',reasoning_effort:''})};};
+</script>`+content.String()+`<div id="browser-result"></div><script>
+(async()=>{const assert=(v,m)=>{if(!v)throw Error(m)};try{
+const trigger=document.getElementById('fast-form-agent-select');window.ovModelPicker.open(trigger);await trigger._ovModelState.ready;
+const panel=document.getElementById('conversation-model-picker'),hidden=document.querySelector('[name=service_tier]');
+const waitSave=async()=>{await trigger._ovModelState.pending;};const toggle=()=>panel.querySelector('.ov-mp-fast-toggle');
+assert(!panel.querySelector('.ov-mp-speed').hidden,'supported model exposes Fast mode');
+assert(toggle().getAttribute('aria-checked')==='true'&&hidden.value==='','inherit Fast model default');
+toggle().click();await waitSave();assert(hidden.value==='default'&&toggle().getAttribute('aria-checked')==='false','explicit off selects standard');
+const choose=async(name)=>{panel.querySelector('.ov-mp-search input').value=name;panel.querySelector('.ov-mp-search input').dispatchEvent(new Event('input'));panel.querySelector('.ov-mp-pick').click();await trigger._ovModelState.ready;};
+await choose('Local model');assert(panel.querySelector('.ov-mp-speed').hidden&&hidden.value==='','unsupported model omits toggle and tier');
+await choose('Other model');assert(toggle().getAttribute('aria-checked')==='false'&&hidden.value==='','other model has independent default');
+toggle().click();await waitSave();assert(hidden.value==='priority','Fast selection');
+await choose('Fast model');assert(hidden.value==='default','restore per-model override');
+panel.querySelector('.ov-mp-speed .ov-mp-reset').click();await waitSave();assert(hidden.value===''&&toggle().getAttribute('aria-checked')==='true','Use default restores configured Fast');
+if(trigger.closest('form').dataset.modelSelectEndpoint){assert(posts.some(p=>p.agent_id==='fast'&&p.service_tier==='default'),'task override persisted');assert(stored.fast==='','task reset persisted');}
+else{assert(JSON.parse(localStorage.getItem('chat-service-tier-fast-project'))['other:gpt-6.1-terra']==='priority','chat override persisted');}
+const form=trigger.closest('form');const captured=form._captureChatSubmission();assert(captured.serviceTier==='','submission snapshot includes default override');
+document.body.dataset.testResult='pass';
+}catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);}})();
+</script></body></html>`)
+			}))
+			defer srv.Close()
+			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "fast mode "+scope, 1000, 800, 15*time.Second)
+		})
+	}
 }

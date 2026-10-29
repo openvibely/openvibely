@@ -47,6 +47,35 @@ func TestPlannerFollowupEffortUsesSentValueOnlyForMatchingRun(t *testing.T) {
 	require.Equal(t, "medium", agent.ReasoningEffort, "empty effort restores the model default")
 }
 
+func TestPlannerFollowupServiceTierUsesSentValueOnlyForMatchingRun(t *testing.T) {
+	tier := "default"
+	cfg := models.SwarmConfig{RerunGeneration: 3}
+	setPlannerFollowupEffort(&cfg, &SwarmFollowupModelSelection{ModelID: "model-a", ServiceTier: &tier})
+	raw, err := cfg.JSON()
+	require.NoError(t, err)
+	task := models.Task{SwarmRole: models.SwarmRolePlanner, SwarmConfig: raw}
+	agent := models.LLMConfig{ID: "model-a", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol", ServiceTier: "priority"}
+	applyPlannerFollowupServiceTier(task, &agent, "priority")
+	require.Equal(t, "default", agent.ServiceTier)
+	agent.ID = "model-b"
+	agent.ServiceTier = "priority"
+	applyPlannerFollowupServiceTier(task, &agent, "priority")
+	require.Equal(t, "priority", agent.ServiceTier)
+	agent.ID = "model-a"
+	cfg.RerunGeneration++
+	task.SwarmConfig, err = cfg.JSON()
+	require.NoError(t, err)
+	applyPlannerFollowupServiceTier(task, &agent, "priority")
+	require.Equal(t, "priority", agent.ServiceTier)
+	tier = ""
+	setPlannerFollowupEffort(&cfg, &SwarmFollowupModelSelection{ModelID: "model-a", ServiceTier: &tier})
+	task.SwarmConfig, err = cfg.JSON()
+	require.NoError(t, err)
+	agent.ServiceTier = "default"
+	applyPlannerFollowupServiceTier(task, &agent, "priority")
+	require.Equal(t, "priority", agent.ServiceTier, "reset restores saved default")
+}
+
 func requireFullSwarmTestTask(t testing.TB, repo persistence.TaskStore, id string) *models.Task {
 	t.Helper()
 	task, err := repo.GetByID(context.Background(), id)

@@ -5137,12 +5137,16 @@ func TestSendAgentic_GPT6ConfigurationUpdatePreservesRequestEffort(t *testing.T)
 			if _, err := client.SendAgentic(context.Background(), "next", &AgenticOptions{
 				Model:                          model,
 				ReasoningEffort:                "high",
+				ServiceTier:                    "priority",
 				SkipDefaultTools:               true,
 				EnableAstraConfigurationUpdate: true,
 			}); err != nil {
 				t.Fatalf("SendAgentic: %v", err)
 			}
 			request := <-requests
+			if request["service_tier"] != "priority" {
+				t.Fatalf("agentic HTTP lost Fast: %v", request["service_tier"])
+			}
 			reasoning, _ := request["reasoning"].(map[string]any)
 			if reasoning["effort"] != "medium" {
 				t.Fatalf("request-level reasoning.effort = %#v, want previous medium", reasoning["effort"])

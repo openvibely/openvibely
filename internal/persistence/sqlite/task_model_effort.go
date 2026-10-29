@@ -55,8 +55,15 @@ func (r *TaskRepo) ApplyModelEffort(ctx context.Context, taskID string, agent *m
 		return nil
 	}
 	effort, err := r.ModelEffort(ctx, taskID, *agent)
-	if err == nil && effort != "" {
+	if err != nil {
+		return err
+	}
+	if effort != "" {
 		agent.ReasoningEffort = effort
+	}
+	tier, err := r.ModelServiceTier(ctx, taskID, *agent)
+	if err == nil && tier != "" {
+		agent.ServiceTier = tier
 	}
 	return err
 }

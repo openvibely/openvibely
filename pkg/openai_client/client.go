@@ -173,6 +173,7 @@ type SendOptions struct {
 	System              string
 	Stream              bool
 	ReasoningEffort     string
+	ServiceTier         string
 	DisableTools        bool
 	SuppressToolMarkers bool
 	OnDelta             func(text string)
@@ -567,6 +568,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		payload["instructions"] = system
 	}
 
+	applyServiceTier(payload, opts.Model, opts.ServiceTier)
 	if effort := normalizeReasoningEffort(opts.ReasoningEffort); effort != "" {
 		payload["reasoning"] = map[string]any{"effort": effort}
 	}

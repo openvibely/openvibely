@@ -39,6 +39,7 @@ type CompletionsOptions struct {
 	// ReasoningEffort is sent for first-party GPT-6 Sol/Luna requests. When
 	// function tools are present those models require none on Chat Completions.
 	ReasoningEffort          string
+	ServiceTier              string
 	FirstPartyOpenAI         bool
 	System                   string
 	WorkDir                  string
@@ -615,6 +616,7 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 	}
 	effort := ""
 	if opts.FirstPartyOpenAI {
+		applyServiceTier(payload, opts.Model, opts.ServiceTier)
 		effort = completionsReasoningEffort(opts.Model, opts.ReasoningEffort, len(tools) > 0)
 	}
 	if effort != "" {

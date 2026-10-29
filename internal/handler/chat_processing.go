@@ -1793,6 +1793,9 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 
 func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.ThreadInput) (selected *models.LLMConfig, unavailable bool, resultErr error) {
 	defer func() {
+		if selected != nil && resultErr == nil && selected.ID == input.AgentConfigID && input.ServiceTier != "" && models.ValidServiceTier(*selected, input.ServiceTier) {
+			selected.ServiceTier = input.ServiceTier
+		}
 		if selected != nil && resultErr == nil && selected.ID == input.AgentConfigID && models.ValidConversationEffort(*selected, input.ReasoningEffort) {
 			selected.ReasoningEffort = input.ReasoningEffort
 		}

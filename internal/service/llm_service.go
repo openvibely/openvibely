@@ -1143,6 +1143,7 @@ func applyPlannerFollowupEffort(task models.Task, agent *models.LLMConfig, model
 
 func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task, agent models.LLMConfig) (*models.Execution, llmcontracts.ChatContext, error) {
 	ctx = agenttools.WithProcessLifetime(ctx)
+	modelDefaultTier := agent.ServiceTier
 	modelDefaultEffort := agent.ReasoningEffort
 	if s.taskRepo != nil {
 		if err := s.taskRepo.ApplyModelEffort(ctx, task.ID, &agent); err != nil {
@@ -1150,6 +1151,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 	}
 	applyPlannerFollowupEffort(task, &agent, modelDefaultEffort)
+	applyPlannerFollowupServiceTier(task, &agent, modelDefaultTier)
 	applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s agent=%s model=%s", task.ID, agent.Name, agent.Model)
 	finalizeCtx := context.Background()
 
@@ -2787,4 +2789,19 @@ var automationRegistrationDefinition = llmcontracts.RuntimeToolDefinition{
 		Required:             []string{"adapter_key", "stable_key", "resources"},
 		AdditionalProperties: toolschema.Pointer(false),
 	},
+}
+
+func applyPlannerFollowupServiceTier(task models.Task, agent *models.LLMConfig, modelDefault string) {
+	if task.SwarmRole != models.SwarmRolePlanner || agent == nil {
+		return
+	}
+	cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+	if err != nil || cfg.FollowupServiceTier == nil || cfg.FollowupEffortModelID != agent.ID || cfg.FollowupEffortGeneration != cfg.RerunGeneration {
+		return
+	}
+	if *cfg.FollowupServiceTier == "" {
+		agent.ServiceTier = modelDefault
+	} else if models.ValidServiceTier(*agent, *cfg.FollowupServiceTier) {
+		agent.ServiceTier = *cfg.FollowupServiceTier
+	}
 }

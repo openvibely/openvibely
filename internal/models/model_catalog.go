@@ -41,6 +41,7 @@ type ModelSpec struct {
 	ContextWindow          int
 	PromptProfile          PromptProfile
 
+	SupportsFastMode           bool
 	SupportsTemperature        bool
 	SupportsWebSearch          bool
 	SupportsResponsesWebSearch bool
@@ -67,17 +68,17 @@ const (
 
 var modelCatalog = []ModelSpec{
 	// OpenAI models.
-	{Provider: ProviderOpenAI, ID: "gpt-6-astra", Label: "gpt-6-astra", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Astra, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true},
+	{Provider: ProviderOpenAI, ID: "gpt-6-astra", Label: "gpt-6-astra", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Astra, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true, GPT6Workflow: true},
 	// Codex 0.164.0 cache (2026-10-29): Sol 6.1 defaults to low effort and 500K context.
-	{Provider: ProviderOpenAI, ID: "gpt-6.1-sol", Label: "gpt-6.1-sol", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Sol, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningRequired},
+	{Provider: ProviderOpenAI, ID: "gpt-6.1-sol", Label: "gpt-6.1-sol", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Sol, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningRequired},
 	// Codex 0.164.0 models_cache.json (2026-10-29): Terra 6.1 uses low effort,
 	// a 500K default context, and its own prompt. Keep API-supported none effort.
-	{Provider: ProviderOpenAI, ID: "gpt-6.1-terra", Label: "gpt-6.1-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Terra, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true},
-	{Provider: ProviderOpenAI, ID: "gpt-6-sol", Label: "gpt-6-sol", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Sol, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
-	{Provider: ProviderOpenAI, ID: "gpt-6-luna", Label: "gpt-6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Luna, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
-	{Provider: ProviderOpenAI, ID: "gpt-5.6-sol", Label: "gpt-5.6-sol", Default: true, ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
-	{Provider: ProviderOpenAI, ID: "gpt-5.6-terra", Label: "gpt-5.6-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
-	{Provider: ProviderOpenAI, ID: "gpt-5.6-luna", Label: "gpt-5.6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
+	{Provider: ProviderOpenAI, ID: "gpt-6.1-terra", Label: "gpt-6.1-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Terra, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true, GPT6Workflow: true},
+	{Provider: ProviderOpenAI, ID: "gpt-6-sol", Label: "gpt-6-sol", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Sol, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
+	{Provider: ProviderOpenAI, ID: "gpt-6-luna", Label: "gpt-6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Luna, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
+	{Provider: ProviderOpenAI, ID: "gpt-5.6-sol", Label: "gpt-5.6-sol", Default: true, ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true},
+	{Provider: ProviderOpenAI, ID: "gpt-5.6-terra", Label: "gpt-5.6-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true},
+	{Provider: ProviderOpenAI, ID: "gpt-5.6-luna", Label: "gpt-5.6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", SupportsFastMode: true, ResponsesLiteWebsocket: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.5", Label: "gpt-5.5", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT55, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsNativeCompaction: true, Transport: "responses_http", RemoteCompactionV2: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.5-pro", Label: "gpt-5.5-pro", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsNativeCompaction: true, Transport: "responses_http", RemoteCompactionV2: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.4", Label: "gpt-5.4", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsNativeCompaction: true, Transport: "responses_http"},
@@ -189,4 +190,21 @@ func NormalizeModelEffort(provider LLMProvider, id, value string) string {
 func cloneModelSpec(spec ModelSpec) ModelSpec {
 	spec.ReasoningEfforts = append([]string(nil), spec.ReasoningEfforts...)
 	return spec
+}
+
+// ModelSupportsFastMode is catalog-owned; arbitrary compatible models do not inherit it.
+func ModelSupportsFastMode(provider LLMProvider, model string) bool {
+	spec, ok := LookupModel(provider, model)
+	return ok && spec.SupportsFastMode
+}
+
+func ValidServiceTier(agent LLMConfig, tier string) bool {
+	return tier == "" || (ModelSupportsFastMode(agent.Provider, agent.Model) && (tier == "priority" || tier == "default"))
+}
+
+func (a LLMConfig) EffectiveServiceTier() string {
+	if ValidServiceTier(a, a.ServiceTier) {
+		return a.ServiceTier
+	}
+	return ""
 }

@@ -68,6 +68,7 @@ type AgenticOptions struct {
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
 	ReasoningEffort  string
+	ServiceTier      string
 	ReasoningSummary string // reasoning summary mode (e.g. auto, concise, detailed, none)
 	// AutoCompaction enables client-side Codex-style history compaction for
 	// OpenAI Responses API turns.
@@ -2656,6 +2657,8 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		"input":            inputItems,
 		"stream":           true,
 	}
+
+	applyServiceTier(payload, opts.Model, opts.ServiceTier)
 	applyDefaultResponsesTextVerbosity(payload, opts.Model)
 
 	if !isChatGPTOAuth {
