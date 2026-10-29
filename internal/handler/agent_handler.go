@@ -1101,6 +1101,10 @@ func (h *Handler) repairGenerateAgentJSON(ctx context.Context, rawOutput string,
 	return generated, nil
 }
 
+func waitForGenerateAgentRetry(ctx context.Context) error {
+	return httpretry.Wait(ctx, generateAgentTransientRetryDelay)
+}
+
 func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg models.LLMConfig, workDir string) (generatedAgentResponse, error) {
 	generateCtx, cancel := context.WithTimeout(ctx, generateAgentTimeout)
 	defer cancel()
@@ -1139,7 +1143,7 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 				return generatedAgentResponse{}, lastErr
 			}
 			activePrompt = buildGenerateAgentStrictRetryPrompt(prompt, parseErr)
-			if err := httpretry.Wait(generateCtx, generateAgentTransientRetryDelay); err != nil {
+			if err := waitForGenerateAgentRetry(generateCtx); err != nil {
 				return generatedAgentResponse{}, err
 			}
 			continue
@@ -1161,7 +1165,7 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 				return generatedAgentResponse{}, lastErr
 			}
 			activePrompt = buildGenerateAgentStrictRetryPrompt(prompt, err)
-			if err := httpretry.Wait(generateCtx, generateAgentTransientRetryDelay); err != nil {
+			if err := waitForGenerateAgentRetry(generateCtx); err != nil {
 				return generatedAgentResponse{}, err
 			}
 			continue
@@ -1179,7 +1183,7 @@ func (h *Handler) generateAgentWithLLM(ctx context.Context, prompt string, cfg m
 		}
 
 		applog.Infof("[handler] GenerateAgent transient generation failure attempt=%d/%d model=%s prompt_len=%d err=%v", attempt, generateAgentTransientRetryCount, cfg.Name, len(activePrompt), err)
-		if err := httpretry.Wait(generateCtx, generateAgentTransientRetryDelay); err != nil {
+		if err := waitForGenerateAgentRetry(generateCtx); err != nil {
 			return generatedAgentResponse{}, err
 		}
 	}

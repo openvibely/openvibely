@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/util"
 	"gopkg.in/yaml.v3"
@@ -203,6 +204,9 @@ func (i *Importer) ImportSkillPackage(ctx context.Context, content, packageName,
 	root := i.roots.ExactRootForScope(decl.Skill.Scope)
 	if root == "" {
 		return nil, fmt.Errorf("importer: no root configured for scope %q", decl.Skill.Scope)
+	}
+	if err := i.rejectBundledSkillMutation(root, "", decl.Skill.Key); err != nil {
+		return nil, err
 	}
 	skillDir, err := SkillDir(root, decl.Skill.Key)
 	if err != nil {
@@ -650,6 +654,25 @@ func NewImporter(roots SkillRoots, applier Applier) *Importer {
 	return &Importer{roots: roots, applier: applier}
 }
 
+// rejectBundledSkillMutation protects entire app-owned packages, including new
+// support files. Check the resolved root so project overrides remain writable,
+// and use the embedded inventory even before startup has copied the files.
+func (i *Importer) rejectBundledSkillMutation(root, agentKey, skillKey string) error {
+	if root == "" || i.roots.Global == "" || filepath.Clean(root) != filepath.Clean(i.roots.Global) {
+		return nil
+	}
+	// Bundled directory keys are lowercase. Reserve their case aliases too:
+	// case-insensitive filesystems resolve those aliases to the same package.
+	rel := filepath.Join("skills", strings.ToLower(skillKey), "SKILL.md")
+	if agentKey != "" {
+		rel = filepath.Join("agents", strings.ToLower(agentKey), rel)
+	}
+	if builtinskills.IsBundledFile(rel) {
+		return fmt.Errorf("protected: bundled skill %q is managed by the app; create a project override instead", skillKey)
+	}
+	return nil
+}
+
 // WriteSkill renders the declaration as SKILL.md (with original body
 // preserved) and persists it under the configured root for the declared
 // scope. The applier then upserts agent/skill config from the declaration.
@@ -672,6 +695,9 @@ func (i *Importer) WriteSkill(ctx context.Context, decl *SkillDeclaration, body 
 	root := i.roots.ExactRootForScope(decl.Skill.Scope)
 	if root == "" {
 		return nil, fmt.Errorf("importer: no root configured for scope %q", decl.Skill.Scope)
+	}
+	if err := i.rejectBundledSkillMutation(root, "", decl.Skill.Key); err != nil {
+		return nil, err
 	}
 	if i.applier != nil {
 		if protected, reason, err := i.applier.IsProtected(ctx, "skill", decl.Handle()); err != nil {
@@ -755,6 +781,9 @@ func (i *Importer) WriteAgentOwnedSkill(ctx context.Context, scope, agentKey str
 	root := i.roots.ExactRootForScope(scope)
 	if root == "" {
 		return nil, fmt.Errorf("importer: no root configured for scope %q", scope)
+	}
+	if err := i.rejectBundledSkillMutation(root, agentKey, decl.Skill.Key); err != nil {
+		return nil, err
 	}
 	handle := agentKey + "/" + decl.Skill.Key
 	if i.applier != nil {
@@ -998,6 +1027,9 @@ func (i *Importer) resolveAgentOwnedSupportFilePath(ctx context.Context, scope, 
 	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") || strings.Contains(rel, "..") || filepath.IsAbs(rel) {
 		return "", "", "", fmt.Errorf("importer: invalid support file path %q", relPath)
 	}
+	if err := i.rejectBundledSkillMutation(root, agentKey, handle); err != nil {
+		return "", "", "", err
+	}
 	protectedHandle := agentKey + "/" + handle
 	if i.applier != nil {
 		if protected, reason, err := i.applier.IsProtected(ctx, "skill", protectedHandle); err != nil {
@@ -1035,6 +1067,9 @@ func (i *Importer) resolveSupportFilePath(ctx context.Context, scope, handle str
 	}
 	_, skillKey, err := SplitHandle(handle)
 	if err != nil {
+		return "", "", err
+	}
+	if err := i.rejectBundledSkillMutation(root, "", skillKey); err != nil {
 		return "", "", err
 	}
 	if !validSupportKind(kind) {
@@ -1146,7 +1181,12 @@ func (i *Importer) ArchiveSkill(ctx context.Context, handle, absorbedInto, reaso
 	if i == nil {
 		return nil, errors.New("importer: nil")
 	}
-	if _, _, err := SplitHandle(handle); err != nil {
+	_, skillKey, err := SplitHandle(handle)
+	if err != nil {
+		return nil, err
+	}
+	// ArchiveSkill may span both roots. Reject before changing either one.
+	if err := i.rejectBundledSkillMutation(i.roots.Global, "", skillKey); err != nil {
 		return nil, err
 	}
 	var imported []string
