@@ -32,7 +32,7 @@ templ ThemesContent(catalog []themes.Theme) {
 	<div id="themes-container" data-search-container>
 		@layout.PageTitle("Appearance")
 		<div data-page-header class="flex items-center justify-between mb-6">
-			<h2 class="text-2xl font-bold">Appearance</h2>
+			<h2 id="appearance-section-title" class="text-2xl font-bold">Themes</h2>
 		</div>
 		<style>
             .theme-thumbnail { --tp-frame: var(--tp-default-frame); --tp-page: var(--tp-default-page); --tp-rail: var(--tp-default-rail); --tp-card: var(--tp-default-card); background: var(--tp-frame); padding-top: 8px; }
@@ -72,23 +72,14 @@ templ ThemesContent(catalog []themes.Theme) {
 			.display-preview[data-preview-bubbles="on"] .dp-assistant { background: var(--dp-card); }
 			.display-preview[data-preview-step="on"] { --dp-card: var(--conversation-card-raised); }
 		</style>
-		<section class="mb-8" data-display-prefs>
-			<h3 class="text-lg font-semibold mb-1">Layout</h3>
-			<p class="text-sm opacity-70 mb-3">How the task list sits next to the page.</p>
+		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
 				@displayToggle("surfaces", "Surfaces", "default", "Default", "layered", "Layered")
 				@displayToggle("layout", "Task list", "floating", "Floating", "unified", "Unified")
 				@displayToggle("tabs", "Project tabs", "detached", "Detached", "attached", "Attached")
 			</div>
-			<h3 class="text-lg font-semibold mb-1">Conversation</h3>
-			<p class="text-sm opacity-70 mb-3">Applies to chat and task threads in every layout.</p>
-			<div class="flex flex-col gap-3 max-w-2xl">
-				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
-				@displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On")
-				@displayToggle("step", "Bubble and composer color step", "off", "Off", "on", "On")
-			</div>
-			<h3 class="text-lg font-semibold mt-6 mb-1">Task board columns</h3>
-			<p class="text-sm opacity-70 mb-3">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
+			<h3 class="text-sm font-medium mt-6 mb-2">Task board columns</h3>
+			<p class="text-xs opacity-60 mb-2">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
 			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 max-w-6xl">
 				@boardColumnsCard("tint", "Faint tint", "Columns tinted a quarter of the way from page to frame.")
 				@boardColumnsCard("filled", "Filled", "Columns filled with the frame color.")
@@ -96,15 +87,23 @@ templ ThemesContent(catalog []themes.Theme) {
 				@boardColumnsCard("tintstrip", "Tint + header strip", "Faint tint columns with the frame color behind the heading.")
 			</div>
 		</section>
-		<h3 class="text-lg font-semibold mb-3">Theme</h3>
-		@CardSearchInput("themes", "Search themes...")
-		<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-themes-grid>
-			for _, theme := range catalog {
-				if themeVisibleInPicker(theme.ID) {
-					@themeCard(theme)
+		<section data-display-prefs data-settings-section="chat" hidden>
+			<div class="flex flex-col gap-3 max-w-2xl">
+				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
+				@displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On")
+				@displayToggle("step", "Bubble and composer color step", "off", "Off", "on", "On")
+			</div>
+		</section>
+		<section data-settings-section="themes">
+			@CardSearchInput("themes", "Search themes...")
+			<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-themes-grid>
+				for _, theme := range catalog {
+					if themeVisibleInPicker(theme.ID) {
+						@themeCard(theme)
+					}
 				}
-			}
-		</div>
+			</div>
+		</section>
 		<script>
 			(function() {
 				function refreshDisplayPrefs() {
@@ -158,6 +157,7 @@ templ ThemesContent(catalog []themes.Theme) {
 					refreshThemeCards();
 				};
 				refreshThemeCards();
+                if (window.syncAppearanceSettings) window.syncAppearanceSettings();
 			})();
 		</script>
 	</div>
@@ -252,26 +252,28 @@ func previewColor(theme themes.Theme, group, key, fallback string) string {
 
 // Give every thumbnail its own palette so it does not borrow the selected theme.
 func previewOuterStyle(theme themes.Theme) string {
- values := map[string]string{
-  "default-frame": theme.CSS["--ov-kanban-column-bg"], "default-page": theme.Semantic["contentBg"],
-  "default-rail": theme.Semantic["surface"], "default-card": theme.Semantic["surface"],
-  "layered-frame": "color-mix(in srgb, " + theme.Semantic["surface"] + " 94%, " + theme.Semantic["text"] + ")",
-  "layered-page": "color-mix(in srgb, " + theme.Semantic["contentBg"] + " 92%, black)", "layered-card": theme.Semantic["surface"],
- }
+	values := map[string]string{
+		"default-frame": theme.CSS["--ov-kanban-column-bg"], "default-page": theme.Semantic["contentBg"],
+		"default-rail": theme.Semantic["surface"], "default-card": theme.Semantic["surface"],
+		"layered-frame": "color-mix(in srgb, " + theme.Semantic["surface"] + " 94%, " + theme.Semantic["text"] + ")",
+		"layered-page":  "color-mix(in srgb, " + theme.Semantic["contentBg"] + " 92%, black)", "layered-card": theme.Semantic["surface"],
+	}
 
- if theme.Mode == "light" {
-  values["layered-page"] = "color-mix(in srgb, " + theme.Semantic["contentBg"] + " 94%, " + theme.Semantic["text"] + ")"
- }
- for key, value := range theme.SurfaceCSS {
-  if strings.HasPrefix(key, "--ov-surface-default-") || strings.HasPrefix(key, "--ov-surface-layered-") {
-   values[strings.TrimPrefix(key, "--ov-surface-")] = value
-  }
- }
- style := "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
- for _, key := range []string{"default-frame", "default-page", "default-rail", "default-card", "default-border", "layered-frame", "layered-page", "layered-card", "layered-border"} {
-  if value := values[key]; value != "" { style += ";--tp-" + key + ":" + value }
- }
- return style
+	if theme.Mode == "light" {
+		values["layered-page"] = "color-mix(in srgb, " + theme.Semantic["contentBg"] + " 94%, " + theme.Semantic["text"] + ")"
+	}
+	for key, value := range theme.SurfaceCSS {
+		if strings.HasPrefix(key, "--ov-surface-default-") || strings.HasPrefix(key, "--ov-surface-layered-") {
+			values[strings.TrimPrefix(key, "--ov-surface-")] = value
+		}
+	}
+	style := "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
+	for _, key := range []string{"default-frame", "default-page", "default-rail", "default-card", "default-border", "layered-frame", "layered-page", "layered-card", "layered-border"} {
+		if value := values[key]; value != "" {
+			style += ";--tp-" + key + ":" + value
+		}
+	}
+	return style
 }
 
 func previewAccentStyle(theme themes.Theme) string {
@@ -293,7 +295,6 @@ func previewCodeStyle(theme themes.Theme) string {
 func previewSyntaxStyle(theme themes.Theme, key string) string {
 	return "color:" + previewColor(theme, "syntax", key, previewColor(theme, "syntax", "foreground", "#d4d4d4"))
 }
-
 
 templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabel string) {
 	<fieldset>
