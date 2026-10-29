@@ -7,10 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -19,7 +21,7 @@ import (
 
 var ErrOrgLogin = errors.New("invalid credentials or unavailable account")
 var ErrOrgRateLimited = errors.New("too many attempts; try again later")
-var ErrOrgCredentials = errors.New("use a 3–64 character username (letters, numbers, dot, dash, underscore) and a password of 12–72 bytes")
+var ErrOrgCredentials = errors.New("check your account details")
 var orgUsername = regexp.MustCompile(`^[a-zA-Z0-9_.-]{3,64}$`)
 
 type orgLoginWindow struct {
@@ -168,8 +170,11 @@ func (s *OrganizationService) Accept(ctx context.Context, token, username, passw
 	user := models.OrgUser{}
 	if existingID == "" {
 		username = strings.TrimSpace(username)
-		if username == "" || len(password) > 72 {
-			return nil, ErrOrgCredentials
+		if username == "" {
+			return nil, fmt.Errorf("%w: enter a username", ErrOrgCredentials)
+		}
+		if len(password) > 72 {
+			return nil, fmt.Errorf("%w: this password is too long; try a shorter password", ErrOrgCredentials)
 		}
 		existing, err := s.Store.UserByUsername(ctx, username)
 		if err != nil {
@@ -182,8 +187,11 @@ func (s *OrganizationService) Accept(ctx context.Context, token, username, passw
 			}
 			existingID = verified.UserID
 		} else {
-			if !orgUsername.MatchString(username) || len(password) < 12 {
-				return nil, ErrOrgCredentials
+			if !orgUsername.MatchString(username) {
+				return nil, fmt.Errorf("%w: use a username of 3–64 letters, numbers, dots, dashes, or underscores", ErrOrgCredentials)
+			}
+			if utf8.RuneCountInString(password) < 12 {
+				return nil, fmt.Errorf("%w: use a password with at least 12 characters", ErrOrgCredentials)
 			}
 			hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 			if err != nil {
