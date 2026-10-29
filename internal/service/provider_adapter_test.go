@@ -539,13 +539,13 @@ func TestGPT6SolLunaUseResponsesWebsocketAndCodexEffectiveContext(t *testing.T) 
 	}
 }
 
-func TestGPT61SolUsesResponsesWebsocketAndStandardEffectiveContext(t *testing.T) {
+func TestGPT61SolUsesResponsesWebsocketAndCodexEffectiveContext(t *testing.T) {
 	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"}}
 	if got := providerTransport(req); got != "responses_websocket_http_fallback" {
 		t.Errorf("providerTransport(gpt-6.1-sol) = %q", got)
 	}
-	if got := openAIContextWindow("gpt-6.1-sol"); got != 272000 {
-		t.Errorf("openAIContextWindow(gpt-6.1-sol) = %d, want 272000", got)
+	if got := openAIContextWindow("gpt-6.1-sol"); got != 500000 {
+		t.Errorf("openAIContextWindow(gpt-6.1-sol) = %d, want 500000", got)
 	}
 }
 
