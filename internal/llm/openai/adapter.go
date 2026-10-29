@@ -496,6 +496,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			MaxOutputTokens:          openAIDirectOutputBudget,
 			System:                   systemPrompt,
 			ReasoningEffort:          reasoningEffort(agent.Model, agent.ReasoningEffort),
+			ServiceTier:              agent.EffectiveServiceTier(),
 			ReasoningSummary:         "auto",
 			WorkDir:                  effectiveWorkDir,
 			Attachments:              oaAttachments,
@@ -530,6 +531,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		MaxOutputTokens:     openAIDirectOutputBudget,
 		System:              systemPrompt,
 		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ServiceTier:         agent.EffectiveServiceTier(),
 		DisableTools:        disableTools,
 		SuppressToolMarkers: disableTools,
 		Attachments:         oaAttachments,
@@ -595,6 +597,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		MaxOutputTokens:           openAIAgenticOutputBudget,
 		System:                    llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
 		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ServiceTier:               agent.EffectiveServiceTier(),
 		ReasoningSummary:          "auto",
 		AutoCompaction:            !agent.DisableNativeCompaction,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
@@ -739,6 +742,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		MaxOutputTokens:           openAIAgenticOutputBudget,
 		System:                    systemPromptStr,
 		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ServiceTier:               agent.EffectiveServiceTier(),
 		ReasoningSummary:          "auto",
 		AutoCompaction:            !agent.DisableNativeCompaction,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
@@ -863,6 +867,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:               agent.Model,
 		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ServiceTier:         agent.EffectiveServiceTier(),
 		FirstPartyOpenAI:    true,
 		Temperature:         agent.Temperature,
 		ContextWindow:       agent.ContextWindow,
@@ -949,6 +954,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 		ContinueFromHistory: llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:               agent.Model,
 		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ServiceTier:         agent.EffectiveServiceTier(),
 		FirstPartyOpenAI:    true,
 		Temperature:         agent.Temperature,
 		ContextWindow:       agent.ContextWindow,
@@ -1365,12 +1371,12 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 	case "bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
-			cmd = truncateToolSecondary(cmd, 320)
+			cmd = llmstream.TruncateToolSecondary(cmd, 320)
 			return "$ " + cmd
 		}
 	case "grep_search":
 		if p, ok := m["pattern"].(string); ok {
-			return truncateToolSecondary(p, 140)
+			return llmstream.TruncateToolSecondary(p, 140)
 		}
 	case "list_files":
 		if p, ok := m["path"].(string); ok {
@@ -1381,7 +1387,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 	case "web_search", "web_search_preview", "web.run":
 		if detail := webSearchSecondaryFromInput(m); detail != "" {
-			return truncateToolSecondary(detail, 140)
+			return llmstream.TruncateToolSecondary(detail, 140)
 		}
 	}
 	return ""
@@ -1464,12 +1470,4 @@ func webSearchSecondaryFromInput(m map[string]interface{}) string {
 		return url
 	}
 	return ""
-}
-
-func truncateToolSecondary(value string, max int) string {
-	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
-	if max <= 0 || len(value) <= max {
-		return value
-	}
-	return value[:max] + "…"
 }

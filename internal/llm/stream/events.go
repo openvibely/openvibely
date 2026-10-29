@@ -35,6 +35,17 @@ type Event struct {
 	SessionID string
 }
 
+// TruncateToolSecondary normalizes a tool activity detail and clips it to max
+// bytes, appending an ellipsis when clipping. A non-positive max disables
+// clipping while retaining the normalization behavior.
+func TruncateToolSecondary(value string, max int) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max] + "…"
+}
+
 // WriteEvent maps canonical events to writer output/state in one place.
 func WriteEvent(writer *Writer, event Event, skipThinking bool) {
 	switch event.Type {
