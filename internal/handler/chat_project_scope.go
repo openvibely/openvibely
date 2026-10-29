@@ -16,6 +16,11 @@ import (
 // avoids shared mutable conversation state during parallel tool calls.
 func (h *Handler) projectSelectedChatHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := h.chatActionHandlers(params, collector, mode, surface)
+	// Channels keep their existing handlers and project-assertion semantics.
+	// Project selection is an interactive web/API capability only.
+	if surface != chatcontrol.SurfaceWeb && surface != chatcontrol.SurfaceAPI {
+		return handlers
+	}
 	for name, handler := range handlers {
 		if !chatcontrol.SupportsProjectSelection(name) {
 			continue
@@ -28,7 +33,7 @@ func (h *Handler) projectSelectedChatHandlers(params streamingResponseParams, co
 			if projectID == "" || projectID == params.ProjectID {
 				return handler(ctx, forwarded)
 			}
-			if params.IsTaskFollowup || (surface != chatcontrol.SurfaceWeb && surface != chatcontrol.SurfaceAPI) || params.AutomationContext != nil {
+			if params.IsTaskFollowup || params.AutomationContext != nil {
 				return "", fmt.Errorf("%s: this conversation is restricted to its current project", name)
 			}
 			if h.projectSvc == nil {

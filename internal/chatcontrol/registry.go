@@ -2734,7 +2734,7 @@ func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 		if !a.IncludeThreadTools || includeThreadTools {
 			defs = append(defs, llmcontracts.RuntimeToolDefinition{
 				Name:        a.Name,
-				Description: a.Description,
+				Description: projectSelectionDescription(a.Name, surface, a.Description),
 				Schema:      projectSelectionSchema(a.Name, surface, a.Schema),
 				Access:      runtimeToolAccessForAction(a.Access),
 			})

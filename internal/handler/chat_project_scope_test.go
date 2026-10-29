@@ -58,7 +58,7 @@ func TestChatProjectSelection(t *testing.T) {
 	require.Contains(t, projects, second.ID)
 }
 
-func TestChatProjectSelectionCannotEscapePersistedOrChannelScope(t *testing.T) {
+func TestChatProjectSelectionCannotEscapePersistedScope(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		params  streamingResponseParams
@@ -66,8 +66,8 @@ func TestChatProjectSelectionCannotEscapePersistedOrChannelScope(t *testing.T) {
 	}{
 		{"task", streamingResponseParams{ProjectID: "owner", IsTaskFollowup: true}, chatcontrol.SurfaceWeb},
 		{"api task", streamingResponseParams{ProjectID: "owner", IsTaskFollowup: true}, chatcontrol.SurfaceAPI},
-		{"slack", streamingResponseParams{ProjectID: "owner"}, chatcontrol.SurfaceSlack},
-		{"email", streamingResponseParams{ProjectID: "owner"}, chatcontrol.SurfaceEmail},
+		{"automation", streamingResponseParams{ProjectID: "owner", AutomationContext: &models.AutomationContext{ProjectID: "owner"}}, chatcontrol.SurfaceWeb},
+		{"api automation", streamingResponseParams{ProjectID: "owner", AutomationContext: &models.AutomationContext{ProjectID: "owner"}}, chatcontrol.SurfaceAPI},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := &Handler{}

@@ -1,6 +1,12 @@
 package chatcontrol
 
-import "github.com/openvibely/openvibely/pkg/toolschema"
+import (
+	"strings"
+
+	"github.com/openvibely/openvibely/pkg/toolschema"
+)
+
+const projectSelectionHelp = "Optional destination/filter project ID from list_projects. Defaults to the current project. Available in interactive web/API chat only; task follow-ups remain restricted to their owning project."
 
 // SupportsProjectSelection identifies actions whose implicit project can be
 // selected by an interactive web/API conversation. Task workers and channel
@@ -35,8 +41,29 @@ func projectSelectionSchema(name string, surface Surface, schema *toolschema.Sch
 	for key, value := range schema.Properties {
 		copy.Properties[key] = value
 	}
-	if _, exists := copy.Properties["project_id"]; !exists {
-		copy.Properties["project_id"] = &toolschema.Schema{Type: "string", Description: "Optional destination/filter project ID from list_projects. Defaults to the current project. Available in interactive web/API chat only; task follow-ups remain restricted to their owning project."}
+	projectID := toolschema.Schema{Type: "string"}
+	if existing := copy.Properties["project_id"]; existing != nil {
+		projectID = *existing
+	}
+	projectID.Description = projectSelectionHelp
+	copy.Properties["project_id"] = &projectID
+	if name == "update_project_settings" {
+		if existing := copy.Properties["project_name"]; existing != nil {
+			projectName := *existing
+			projectName.Description = "Optional assertion matching the selected project's name exactly, case-insensitive. Defaults to the current project when project_id is omitted."
+			copy.Properties["project_name"] = &projectName
+		}
 	}
 	return &copy
+}
+
+func projectSelectionDescription(name string, surface Surface, description string) string {
+	if !SupportsProjectSelection(name) || (surface != SurfaceWeb && surface != SurfaceAPI) {
+		return description
+	}
+	description = strings.NewReplacer("current project", "selected project", "current-project", "selected-project").Replace(description)
+	if name == "update_project_settings" {
+		description = strings.ReplaceAll(description, "optional project_id/project_name are selected-project assertions", "project_id selects the project; project_name optionally asserts its name")
+	}
+	return description
 }

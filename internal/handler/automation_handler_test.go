@@ -2687,12 +2687,20 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 		{tool: "list_automations", input: json.RawMessage(fmt.Sprintf(`{"project_id":%q}`, foreign.ID))},
 		{tool: "get_automation", input: json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"project_id":%q}`, foreignAutomationID, foreign.ID))},
 	} {
-		output, handled, isError, err := runtime.Executor(ctx, request.tool, request.input)
-		require.True(t, handled)
-		require.True(t, isError)
-		require.Empty(t, output)
-		require.ErrorContains(t, err, fmt.Sprintf("project_id %q is outside the caller's authorized project context", foreign.ID))
+		result := execute(request.tool, request.input)
+		if request.tool == "list_automations" {
+			items, ok := result["automations"].([]any)
+			require.True(t, ok)
+			require.Len(t, items, 1)
+			require.Equal(t, foreignAutomationID, items[0].(map[string]any)["id"])
+		} else {
+			require.Equal(t, foreignAutomationID, result["automation"].(map[string]any)["id"])
+		}
 	}
+	// Selecting a project for one call must not change the conversation default.
+	require.Equal(t, listed, execute("list_automations", nil))
+	unscoped := execute("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignAutomationID)))
+	require.Equal(t, false, unscoped["found"])
 }
 
 func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.T) {
