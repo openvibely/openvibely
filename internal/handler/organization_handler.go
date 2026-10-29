@@ -189,12 +189,47 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`{{i
 {{if .Joining}}
 <p>All organization members currently have access to every project. Join only an organization you trust.</p>
 {{if .Error}}<p role="alert" class="text-sm text-error">{{.Error}}</p>{{end}}
-<form method="post" action="/invite" class="space-y-4"><input type="hidden" name="token" value="{{.Token}}">
+<form id="org-join-form" method="post" action="/invite" class="space-y-4"><input type="hidden" name="token" value="{{.Token}}">
 {{if .SignedIn}}<p>Join as <strong>{{.Principal.Username}}</strong>.</p>{{else}}
-<p>Create an account, or enter your existing account credentials. New passwords must be at least 12 characters.</p>
-<label class="form-control">Username<input class="input input-bordered" name="username" value="{{.Username}}" autocomplete="username" minlength="3" maxlength="64" required></label>
-<label class="form-control">Password<input class="input input-bordered" name="password" type="password" autocomplete="new-password" maxlength="72" required></label>
-{{end}}<button class="btn btn-primary" type="submit">Join organization</button></form>
+<p>Create an account to join this organization.</p>
+<label class="flex items-center gap-2 text-sm"><input id="org-existing-account" type="checkbox" class="checkbox checkbox-sm">Use an existing account</label>
+<label class="form-control">Username<input id="org-join-username" class="input input-bordered" name="username" value="{{.Username}}" autocomplete="username" maxlength="64" aria-describedby="org-username-help" required></label>
+<p id="org-username-help" class="text-sm opacity-70" aria-live="polite">Use 3–64 letters, numbers, dots, dashes, or underscores.</p>
+<label class="form-control">Password<input id="org-join-password" class="input input-bordered" name="password" type="password" autocomplete="new-password" aria-describedby="org-password-help" required></label>
+<p id="org-password-help" class="text-sm opacity-70" aria-live="polite">Use at least 12 characters.</p>
+{{end}}<button id="org-join-submit" class="btn btn-primary" type="submit">Join organization</button></form>
+{{if not .SignedIn}}<script>
+(function() {
+    var form = document.getElementById('org-join-form');
+    var username = document.getElementById('org-join-username');
+    var password = document.getElementById('org-join-password');
+    var existing = document.getElementById('org-existing-account');
+    var button = document.getElementById('org-join-submit');
+    function validate() {
+        var name = username.value.trim();
+        var nameError = existing.checked ? (name ? '' : 'Enter your username.') : (/^[a-zA-Z0-9_.-]{3,64}$/.test(name) ? '' : 'Use 3–64 letters, numbers, dots, dashes, or underscores.');
+        var count = Array.from(password.value).length;
+        var passwordError = '';
+        if (!count) passwordError = existing.checked ? 'Enter your password.' : 'Use at least 12 characters.';
+        else if (!existing.checked && count < 12) passwordError = 'Use at least 12 characters (' + count + ' entered).';
+        else if (new TextEncoder().encode(password.value).length > 72) passwordError = 'This password is too long. Try a shorter password.';
+        username.setCustomValidity(nameError);
+        password.setCustomValidity(passwordError);
+        password.autocomplete = existing.checked ? 'current-password' : 'new-password';
+        document.getElementById('org-username-help').textContent = nameError || 'Username looks good.';
+        document.getElementById('org-password-help').textContent = passwordError || (existing.checked ? 'Your credentials will be checked when you join.' : 'Password meets the length requirement.');
+        username.setAttribute('aria-invalid', String(!!nameError && !!name));
+        password.setAttribute('aria-invalid', String(!!passwordError && !!count));
+        button.disabled = !!nameError || !!passwordError;
+        return !button.disabled;
+    }
+    form.addEventListener('input', validate);
+    form.addEventListener('change', validate);
+    form.addEventListener('submit', function(event) { if (!validate()) { event.preventDefault(); form.reportValidity(); } });
+    window.addEventListener('pageshow', validate);
+    validate();
+})();
+</script>{{end}}
 {{else}}
 {{if not .Admin}}<p class="font-medium">{{.Org.Name}}</p>{{end}}
 <p class="text-sm opacity-60">Signed in as {{.Principal.Username}} · {{.Principal.Role}}</p>
