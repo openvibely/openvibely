@@ -23,6 +23,7 @@ require (
 	github.com/swaggo/echo-swagger v1.5.2
 	github.com/swaggo/swag v1.16.6
 	github.com/wailsapp/wails/v3 v3.0.0
+	golang.org/x/image v0.47.0
 	golang.org/x/mod v0.42.0
 	golang.org/x/net v0.62.0
 	golang.org/x/sync v0.24.0
