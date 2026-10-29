@@ -703,3 +703,68 @@ func runSpreadsheetWorkerNodeTest(t *testing.T, script string) {
 		t.Fatalf("spreadsheet worker: %v\n%s", err, output)
 	}
 }
+
+func TestSpreadsheetWorkerResolvesReorderedTabs(t *testing.T) {
+	runSpreadsheetWorkerNodeTest(t, `
+(async()=>{
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),XLSX=require('../../assets/file-vendor/xlsx.full.min.js');
+for(const absoluteTarget of [false,true]){
+ const wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['FIRST']]),'First');
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['SECOND']]),'Second');
+ const zip=XLSX.CFB.read(new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'})),{type:'array'});
+ const entry=XLSX.CFB.find(zip,'workbook.xml');
+ entry.content=new TextEncoder().encode(Buffer.from(entry.content).toString().replace(/(<sheet\b[^>]*\/>)(<sheet\b[^>]*\/>)/,'$2$1'));
+ if(absoluteTarget){
+  const rels=XLSX.CFB.find(zip,'workbook.xml.rels');
+  rels.content=new TextEncoder().encode(Buffer.from(rels.content).toString().replaceAll('Target="worksheets/','Target="/xl/worksheets/'));
+ }
+ const buffer=new Uint8Array(XLSX.CFB.write(zip,{type:'array',fileType:'zip'})).buffer;
+ let resolve,reject;
+ const result=new Promise((yes,no)=>{resolve=yes;reject=no});
+ const timer=setTimeout(()=>reject(Error('Reordered workbook timed out')),5000);
+ const context={XLSX,TextDecoder,ReadableStream,DecompressionStream,importScripts(){},close(){},postMessage(m){if(m.error)reject(Error(m.error));else if(m.type==='ready')resolve(m)}};
+ vm.createContext(context);vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'),context);
+ try {
+  context.onmessage({data:{buffer,format:'xlsx'}});
+  const first=await result;
+  assert.deepEqual(Array.from(first.names),['Second','First']);
+  assert.equal(first.sheet.rows[0][0],'SECOND');
+  let selected;context.postMessage=m=>{selected=m};
+  await context.loadXlsxZipSheet(1,1);
+  assert.equal(selected.sheet.name,'First');assert.equal(selected.sheet.rows[0][0],'FIRST');
+ } finally {clearTimeout(timer)}
+}
+})().catch(error=>{console.error(error);process.exitCode=1});
+`)
+}
+
+func TestSpreadsheetWorkerProbesSkippedSheetDimensionsOnly(t *testing.T) {
+	runSpreadsheetWorkerNodeTest(t, `
+(async()=>{
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),XLSX=require('../../assets/file-vendor/xlsx.full.min.js');
+for(const declaredDimensions of [true,false]){
+ const wb=XLSX.utils.book_new();
+ for(let i=0;i<3;i++)XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(i===1?Array.from({length:12000},(_,r)=>[r,r+1]):[[i]]),'Sheet'+i);
+ const zip=XLSX.CFB.read(new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'})),{type:'array'});
+ if(!declaredDimensions){const sheet=XLSX.CFB.find(zip,'sheet2.xml');sheet.content=new TextEncoder().encode(Buffer.from(sheet.content).toString().replace(/<dimension[^>]*\/>/,''))}
+ const buffer=new Uint8Array(XLSX.CFB.write(zip,{type:'array',fileType:'zip'})).buffer;
+ let resolve,reject;const result=new Promise((yes,no)=>{resolve=yes;reject=no});
+ const timer=setTimeout(()=>reject(Error('Workbook timed out')),5000);
+ const context={XLSX,TextDecoder,ReadableStream,DecompressionStream,importScripts(){},close(){},postMessage(m){if(m.error)reject(Error(m.error));else if(m.type==='ready')resolve(m)}};
+ vm.createContext(context);vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'),context);
+ try {
+  context.onmessage({data:{buffer,format:'xlsx'}});await result;
+  let consumed=0,selected;const original=context.zipEntryStream;
+  context.zipEntryStream=(buffer,path,...rest)=>{const stream=original(buffer,path,...rest);return path.endsWith('sheet2.xml')?stream.pipeThrough(new TransformStream({transform(chunk,c){consumed+=chunk.length;c.enqueue(chunk)}})):stream};
+  context.postMessage=m=>{selected=m};await context.loadXlsxZipSheet(2,1);
+  assert.equal(selected.sheet.rows[0][0],'2');
+  const dimensions=vm.runInContext('dimensions.get(1)',context);
+  assert.equal(dimensions.totalRows,12000);assert.equal(dimensions.totalColumns,2);
+  if(declaredDimensions)assert.ok(consumed<16384,'dimension probe should stop before worksheet cells');
+  else assert.ok(consumed>100000,'missing dimensions must still be determined from cells');
+ } finally {clearTimeout(timer)}
+}
+})().catch(error=>{console.error(error);process.exitCode=1});
+`)
+}

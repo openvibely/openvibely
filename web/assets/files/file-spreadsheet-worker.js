@@ -14,6 +14,7 @@ let format;
 let sharedStringsURL;
 let sheetNames = [];
 let workbookMetadata;
+let worksheetPathsPromise;
 const dimensions = new Map();
 const sharedStringsCache = new Map();
 let sharedStringsCacheBytes = 0;
@@ -737,9 +738,48 @@ function xmlAttributes(tag) {
   return attributes;
 }
 
-function xlsxWorksheetPath(index) {
-  const path = workbookMetadata && workbookMetadata.Directory && workbookMetadata.Directory.sheets && workbookMetadata.Directory.sheets[index];
-  return typeof path === 'string' ? path.replace(/^\/+/, '') : null;
+async function xlsxWorksheetPath(index) {
+  // Content-type entries need not follow tab order. Resolve each tab's r:id
+  // against the workbook relationships instead of indexing Directory.sheets.
+  if (!worksheetPathsPromise) worksheetPathsPromise = readXlsxWorksheetPaths();
+  return (await worksheetPathsPromise)[index] || null;
+}
+
+async function readXlsxWorksheetPaths() {
+  const workbookPath = workbookMetadata.Directory.workbooks[0].replace(/^\/+/, '');
+  const slash = workbookPath.lastIndexOf('/');
+  const directory = workbookPath.slice(0, slash + 1);
+  const relationshipsPath = directory + '_rels/' + workbookPath.slice(slash + 1) + '.rels';
+  const stream = zipEntryStream(source, relationshipsPath);
+  if (!stream) throw new Error('Workbook relationships are unavailable');
+  const reader = stream.getReader(), decoder = new TextDecoder('utf-8');
+  let xml = '', bytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > 4 * 1024 * 1024) throw new Error('Workbook relationships exceed preview limits');
+      xml += decoder.decode(next.value, {stream:true});
+    }
+    xml += decoder.decode();
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
+  }
+  const targets = new Map();
+  for (const match of xml.matchAll(/<(?:[\w.-]+:)?Relationship\b[^>]*>/g)) {
+    const attributes = xmlAttributes(match[0]);
+    if (!attributes.Id || !attributes.Target || attributes.TargetMode === 'External') continue;
+    const target = attributes.Target.replace(/\\/g, '/');
+    const parts = [];
+    for (const part of (target.startsWith('/') ? target : directory + target).split('/')) {
+      if (part === '..') parts.pop();
+      else if (part && part !== '.') parts.push(part);
+    }
+    targets.set(attributes.Id, parts.join('/'));
+  }
+  return workbookMetadata.Workbook.Sheets.map(sheet => targets.get(sheet.id));
 }
 
 function xlsxStyleFormat(styleIndex) {
@@ -792,7 +832,7 @@ function xlsxCellFromXML(cell, content) {
 }
 
 async function streamXlsxWorksheet(index, capture, cellCapacity) {
-  const path = xlsxWorksheetPath(index);
+  const path = await xlsxWorksheetPath(index);
   const stream = path && zipEntryStream(source, path);
   if (!stream) throw new Error('Worksheet is unavailable');
   const reader = stream.getReader();
@@ -847,6 +887,8 @@ async function streamXlsxWorksheet(index, capture, cellCapacity) {
         totalColumns = Math.max(totalColumns, range.e.c + 1);
         dimensionKnown = true;
         resizePreview();
+        // Dimension-only probes must not inflate the skipped sheet's cells.
+        if (!capture) stopped = true;
       }
       return;
     }
@@ -1478,6 +1520,7 @@ onmessage = event => {
     }
     if (['xlsx','xlsm','xltx','xltm'].includes(format) && isZipBuffer(source)) {
       workbookMetadata = readWorkbook({sheets:[]});
+      worksheetPathsPromise = undefined;
       sheetNames = workbookMetadata.SheetNames || [];
       if (!sheetNames.length) {
         postMessage({type:'ready',names:[],index:-1,sheet:null});

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -122,4 +123,43 @@ func TestBuildIndexesOnlyPreviewReferencedSharedStrings(t *testing.T) {
 	values, err := Read(SidecarPath(path), []int{4001, 3, 99999})
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"4001": "Cold high-index exact value"}, values)
+}
+
+func TestPreviewStringRefsInfersMissingCoordinates(t *testing.T) {
+	for _, tt := range []struct {
+		name, xml string
+		want      map[int]struct{}
+	}{
+		{"implicit rows and cells", `<row><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row><row><c t="s"><v>2</v></c></row>`, map[int]struct{}{0: {}, 1: {}, 2: {}}},
+		{"explicit then implicit columns", `<row r="1"><c r="CU1" t="s"><v>0</v></c><c t="s"><v>1</v></c><c t="s"><v>2</v></c></row>`, map[int]struct{}{0: {}, 1: {}}},
+		{"explicit then implicit rows", `<row r="10001"><c t="s"><v>0</v></c></row><row><c t="s"><v>1</v></c></row>`, map[int]struct{}{0: {}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			refs, _, err := previewStringRefs(strings.NewReader("<worksheet><sheetData>"+tt.xml+"</sheetData></worksheet>"), maxSheetRefs)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, refs)
+		})
+	}
+}
+
+func TestBuildIndexesCellsWithoutCoordinates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "implicit.xlsx")
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	archive := zip.NewWriter(file)
+	for name, content := range map[string]string{
+		"xl/worksheets/sheet1.xml": `<worksheet><sheetData><row><c t="s"><v>0</v></c></row><row><c t="s"><v>1</v></c></row></sheetData></worksheet>`,
+		"xl/sharedStrings.xml":     `<sst><si><t>First</t></si><si><t>Second</t></si></sst>`,
+	} {
+		entry, err := archive.Create(name)
+		require.NoError(t, err)
+		_, err = fmt.Fprint(entry, content)
+		require.NoError(t, err)
+	}
+	require.NoError(t, archive.Close())
+	require.NoError(t, file.Close())
+	require.NoError(t, Build(path))
+	values, err := Read(SidecarPath(path), []int{0, 1})
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"0": "First", "1": "Second"}, values)
 }

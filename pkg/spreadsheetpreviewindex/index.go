@@ -284,6 +284,7 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 	refs := make(map[int]struct{})
 	decoder := xml.NewDecoder(r)
 	cellCount := 0
+	row, nextRow, nextColumn := 1, 1, 0
 	for cellCount < limit {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -293,7 +294,22 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 			return nil, cellCount, err
 		}
 		start, ok := token.(xml.StartElement)
-		if !ok || start.Name.Local != "c" {
+		if !ok {
+			continue
+		}
+		if start.Name.Local == "row" {
+			row = nextRow
+			for _, attr := range start.Attr {
+				if attr.Name.Local == "r" {
+					if explicit, err := strconv.Atoi(attr.Value); err == nil && explicit > 0 {
+						row = explicit
+					}
+				}
+			}
+			nextRow, nextColumn = row+1, 0
+			continue
+		}
+		if start.Name.Local != "c" {
 			continue
 		}
 		coord, kind := "", ""
@@ -305,7 +321,13 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 				kind = attr.Value
 			}
 		}
-		row, col, valid := cellCoordinate(coord)
+		// Cell and row coordinates are optional in OOXML. Match the worker's
+		// sequential inference, including after explicitly positioned cells.
+		col, valid := nextColumn, true
+		if coord != "" {
+			row, col, valid = cellCoordinate(coord)
+		}
+		nextColumn = col + 1
 		if !valid || row < 1 || row > maxRows || col < 0 || col >= maxColumns {
 			continue
 		}
