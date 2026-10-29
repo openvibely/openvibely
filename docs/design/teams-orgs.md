@@ -281,14 +281,23 @@ ALTER TABLE executions ADD COLUMN conversation_id TEXT; -- denormalized like tas
 - The queue/FIFO semantics in `thread_inputs` (per project chat today) must become per-conversation. Two people chatting in the same conversation share one ordered queue. That is the intended collaborative semantic: each message is attributed, and the agent sees `[@alice]: …` in history.
 - Execution history for the LLM must include author labels when more than one human participated (prompt builder in `handler/chat_processing.go` / `service/task_creation.go BuildChatContext*`).
 
-### 2.6 Relationship to "Introduce Backend-Neutral Persistence Interfaces"
+### 2.6 Backend-neutral persistence: implemented
 
-That task (`2e6c5ee5…`, backlog, not started) will put every repository behind domain interfaces with SQLite as the only implementation. Sequencing recommendation:
+The persistence prerequisite is implemented in the current checkout:
 
-- **Do the persistence-interface work first, or at least before Phase 2 below.** Tenancy filters (`WHERE project_id IN (accessible)`) are cross-cutting. Adding them once to interface methods (e.g. `TaskStore.ListForPrincipal(ctx, principal, filter)`) is far cheaper than editing scattered raw `*sql.DB` callers twice.
-- Define a backend-neutral `Principal` / `AccessScope` value type in `internal/models` (no SQL), so interfaces can accept it. The interface task should **not** add tenancy, which is out of its scope ("no unrelated refactor"). This design should, however, reserve the type so method signatures are not churned twice.
-- New stores (`UserStore`, `OrgStore`, `ProjectMemberStore`, `InvitationStore`, `ConversationStore`, `AuditStore`) should be born as interfaces with SQLite implementations, constructed only in `server.Start`.
-- A future Postgres backend (implied by "backend-neutral") is the natural home for a hosted multi-org deployment. SQLite with `1W+1R` (`internal/database/database.go`) is fine for one team per instance, but becomes the scaling ceiling for multi-org SaaS (see §7).
+- `internal/persistence/backend.go` defines `Backend` and the `Stores` bundle. The backend owns schema version reporting, maintenance, and shutdown.
+- `internal/persistence/stores.go` defines domain store interfaces; projection types, errors, and the transaction marker live in the neutral package.
+- `internal/persistence/sqlite/` owns SQLite repositories, connections, migrations, and store construction. `internal/server/server.go` selects the backend at startup; SQLite is currently the only supported driver.
+- Application services and handlers use the neutral interfaces. Application tests use `internal/testutil/teststores`; its boundary tests guard against backend imports in application tests and test-helper imports in production code.
+
+Remaining teams work:
+
+- Add backend-neutral `Principal` / `AccessScope` types and authorization-aware store operations. Existing project-scoped methods help, but methods such as `TaskStore.GetByID` and `ProjectStore.GetByID` still accept only an ID. Interfaces alone do not enforce user membership or roles.
+- Add `UserStore`, `OrgStore`, `ProjectMemberStore`, `InvitationStore`, `ConversationStore`, and `AuditStore` to the neutral package and `Stores` bundle. Construct their SQLite implementations inside the backend, keeping server startup independent of concrete repositories.
+- Keep membership filters, pagination, counts, and writes consistent; verify denial and revocation through the application policy and persistence tests.
+- A future Postgres backend can implement the same contracts, but still needs its own queries, migrations, concurrency semantics, and tests. This refactor does not deliver Postgres or change SQLite's concurrency limits. Multiple orgs do not inherently require Postgres; choosing it should depend on measured load and deployment requirements.
+
+This completes the persistence refactor portion of Phase 0, not the route-ownership, event-stream, authorization, or sandbox work.
 
 ---
 
@@ -373,7 +382,7 @@ Where checks must go:
 
 ### 3.3 Preventing cross-project and cross-org leakage
 
-1. **Repository-level guardrails**: list/query methods gain a mandatory `AccessScope` argument (after the persistence-interface refactor). Any query on a project-scoped table without a project filter must be an explicit "system" method, named as such (`ListAllForSchedulerSystem`), and grep-audited in CI.
+1. **Repository-level guardrails**: list/query methods gain a mandatory `AccessScope` argument (using the existing persistence interfaces). Any query on a project-scoped table without a project filter must be an explicit "system" method, named as such (`ListAllForSchedulerSystem`), and grep-audited in CI.
 2. **No trust in request project IDs**: the request's `project_id` is an *input* to authorization, never proof of access.
 3. **Entity → project resolution** happens server-side from the row (task, execution, schedule…), then the authorizer runs.
 4. **Model-facing context**: chat context builders (`BuildChatContextWithAgentDefinitions`) must include only the current project's data. That is already true; keep it under test. Cross-project tools (e.g. global `list_tasks`) must filter by principal.
@@ -555,7 +564,7 @@ Today: global `worker_settings.max_workers`, `projects.max_workers`, and `agent_
 | Desktop (Wails, `cmd/desktop`, `config.ModeDesktop`) | Auth disabled, loopback | **Single-user mode**: bootstrap user + personal org created at migration. All authz runs with that principal. No login UI. Teams are not offered on desktop initially, but desktop may later connect to a team server as a client |
 | Self-hosted server, auth disabled | Open to anyone who can reach it | Same single-user mode. Startup warning when bound to a non-loopback address. Adding a second user requires enabling local auth |
 | Self-hosted, local auth | One env user | Env user = bootstrap instance admin + org owner. Admin UI to add users and invites. Multi-user enabled |
-| Hosted (`OPENVIBELY_HOSTED_SSO_ENABLED`, `buildinfo.ModeHosted`) | One instance per customer, SSO via control plane | **One instance = one org** (recommended first). The control plane provides membership; the instance trusts `instance_id`-bound claims. Multi-org-per-instance comes only after a Postgres backend and filesystem isolation |
+| Hosted (`OPENVIBELY_HOSTED_SSO_ENABLED`, `buildinfo.ModeHosted`) | One instance per customer, SSO via control plane | **One instance = one org** (recommended first). The control plane provides membership; the instance trusts `instance_id`-bound claims. Multi-org-per-instance requires org isolation throughout the app and filesystem; evaluate Postgres based on load |
 
 Single-user compatibility rules:
 
@@ -597,7 +606,7 @@ Note the project rules: never touch `openvibely.db` destructively, follow the ta
 - **R3: Shared mutable singletons.** Global `app_settings`, `ui.selected_project_id`, channel selection caches, global worker caps, and global agents/skills create cross-user interference.
 - **R4: Prompt and context leakage.** Chat history now contains multiple authors. A private conversation must never enter another conversation's context or memory extraction. `MemoryService` extraction writes to the repo's `.openvibely/memories/`, which is visible to all project members. Private chats must be excluded from memory extraction, or it must be documented as such.
 - **R5: Cost attribution disputes.** Follow-ups on another user's task using their personal model (§5.1).
-- **R6: SQLite write contention.** WAL mode, one writer connection, and a 1-connection reader pool (`internal/database/database.go:17`, `:47`). Most writes come from agents (streamed output, executions, usage), and the worker limit caps them, so more people add little load. Fine for teams of about 5–20 (not load-tested). If needed: raise the reader pool (WAL allows many readers) and batch agent output writes; hosted spreads load with one container and DB per org; large orgs need Postgres.
+- **R6: SQLite write contention.** WAL mode, one writer connection, and a 1-connection reader pool (`internal/persistence/sqlite/database/database.go:17`, `:47`). Most writes come from agents (streamed output, executions, usage), and the worker limit caps them, so more people add little load. Fine for teams of about 5–20 (not load-tested). If needed: raise the reader pool (WAL allows many readers) and batch agent output writes; hosted spreads load with one container and DB per org; large orgs need Postgres.
 - **R8: Sandbox coverage.** Landlock only helps if every path an agent can touch files through goes through the launcher or a path check (§3.5 gaps table). Missing one path (a new tool, a new git call) reopens R1. Mitigate with the direct-`exec` lint test and a sandbox escape test suite run in CI on Linux.
 - **R7: Scope creep.** The roadmap touches nearly every handler; it needs strict phasing and feature flags per phase. This is a temporary rollout flag, not a permanent shim.
 
@@ -631,11 +640,12 @@ Note the project rules: never touch `openvibely.db` destructively, follow the ta
 
 Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus agent assistance).
 
-### Phase 0: Groundwork (3–5 weeks)
-- Land **Backend-Neutral Persistence Interfaces** (existing task `2e6c5ee5…`), with a reserved `models.Principal`/`AccessScope` type.
+### Phase 0: Groundwork (partly complete; remaining work needs sizing)
+- **Complete:** backend-neutral persistence interfaces and SQLite implementation (§2.6).
+- **Remaining:** define `Principal`/`AccessScope` for the authorization work. Re-audit route ownership and event streams against the current code before sizing the remaining work.
 - **IDOR hardening now, independent of users**: ensure every ID-addressed route verifies the row belongs to the request project (`GetTask`, `GetTaskExecutions`, attachments, SSE `ChatStreamSSE`). Add a route-walking ownership contract test. This is valuable even for single-user instances.
 - Scope live event streams to the right project.
-- Milestone: all repos behind interfaces; route contract test green.
+- Milestone: persistence boundary retained; route ownership and event-stream contract tests green.
 
 ### Phase 1: Users (2–3 weeks)
 - `users`, `user_identities`, `organizations`, `org_memberships`, and `user_sessions` migrations, with bootstrap user and default org backfill (§8 steps 1–3, 6).
@@ -692,13 +702,13 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 - GitHub OAuth login, OIDC, and GitHub-org/team → role sync.
 - Teams/groups inside orgs; project grants to teams.
 - Presence, task assignees, and a "My work" view.
-- Multi-org instances (instance admin UI). Requires a Postgres backend.
+- Multi-org instances (instance admin UI). Evaluate Postgres based on measured load; backend-neutral interfaces are already available.
 
 ### Proposed follow-up tasks
 
 | # | Title | Phase | Size | Depends on |
 |---|---|---|---|---|
-| 1 | Complete Backend-Neutral Persistence Interfaces (existing) | 0 | L | — |
+| 1 | Backend-Neutral Persistence Interfaces — implemented (§2.6) | 0 | Done | — |
 | 2 | Harden ID-addressed routes with project-ownership checks + route-walking contract test | 0 | M | — |
 | 3 | Scope SSE (`/events/live` requires project, `/events/chat/:exec_id` ownership) | 0 | S | — |
 | 4 | Add users/orgs/memberships/sessions schema + bootstrap migration | 1 | M | 1 |
@@ -731,6 +741,8 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 | 31 | GitHub OAuth / OIDC login | Later | M | 5 |
 
 ### Totals
+
+These are historical planning estimates, not revised remaining-work estimates. The persistence prerequisite is now implemented. Re-size Phase 0 and audit the other phases against current code before treating these totals as a delivery forecast.
 
 | Milestone | Phases | Time |
 |---|---|---|
