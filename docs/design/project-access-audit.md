@@ -15,7 +15,7 @@ This audit covers the current single-instance application after the backend-neut
 
 ## Existing checks inspected
 
-- Live transport is now WebSocket based, not the old SSE implementation referenced by the original plan. `liveSubscriptionAllowed` requires an existing project and checks the task behind execution subscriptions. Task/chat notifications use project subscriptions; file notifications use a verified task subscription.
+- Live transport uses `/events/ws` with multiplexed WebSocket subscriptions. `liveSubscriptionAllowed` requires an existing project and checks the task behind execution subscriptions. Task/chat notifications use project subscriptions; file notifications use a verified task subscription.
 - Execution detail reads use `GetByIDForProject`; nested execution fragments verify the execution belongs to the task.
 - Attachment download/deletion and generated-file access have project-scoped lookups and existing foreign-project tests.
 - Schedule mutations check the owning task/project. Batch task category changes preflight every task before mutation.
@@ -38,7 +38,7 @@ The broader handler tests also cover attachment cleanup, compact polling project
 
 ## Remaining limits and next work
 
-1. Authentication is still instance-wide. Any authenticated user can select another project. The project ID is a consistency boundary, **not proof of permission**. Phase 1/2 must introduce a server-derived principal and membership checks.
+1. Authentication is still instance-wide. Any authenticated user can select another project. The project ID is a consistency boundary, **not proof of permission**. Phase 1/2 must introduce a server-derived principal and membership checks. WebSockets need authorization for every subscription/replay and cancellation of affected subscriptions on access loss, including discarding queued frames; the existing periodic session check does not enforce membership.
 2. Legacy unscoped task deep links, queued-input operations, and chat polling retain their behavior when neither explicit nor selected project context exists. They must be authorized against the resource's project once users exist. Selected-project settings are global today; they must not become a multi-user authorization source.
 3. The route-walking test covers task route families, not every HTTP endpoint. Expand it to a resource-wide permission matrix when user/org policy exists. Several existing resource handlers still distinguish malformed/missing/foreign IDs with different response codes.
 4. Global models, settings, integrations, and project enumeration remain instance-level resources until the org/credential phases.

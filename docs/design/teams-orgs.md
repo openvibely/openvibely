@@ -13,7 +13,7 @@ To support teams we need:
 
 1. **Identity**: real `users` rows, sessions bound to a user ID, and API tokens.
 2. **Tenancy**: an `organizations` root. Projects get `org_id`, `owner_user_id`, and `visibility`. A `project_members` table holds per-project roles.
-3. **One authorization chokepoint**: a `service.Authorizer` that every surface calls: HTTP, runtime tools, channels, webhooks, scheduler, workers, automations, and SSE. Cross-project checks done per handler become `authz.RequireProject(ctx, principal, projectID, perm)`.
+3. **One authorization chokepoint**: a `service.Authorizer` that every surface calls: HTTP, runtime tools, channels, webhooks, scheduler, workers, automations, and WebSocket subscriptions. Cross-project checks done per handler become `authz.RequireProject(ctx, principal, projectID, perm)`.
 4. **Attribution**: `created_by_user_id`/`author_user_id` on tasks, thread inputs, executions, schedules, automations, alerts decisions, review comments, and usage events.
 5. **Re-scoping global state**: model configs, OAuth connections, channel credentials, `app_settings`, UI preferences, global agents/skills, and worker limits currently live at instance level. Each must be explicitly assigned to user, org, or project.
 6. **A kernel sandbox for agent execution**: agents execute `bash -c` on the host (`pkg/agenttools/tools.go:343`) with the server's OS privileges. Project-level ACLs do not stop an agent in project A from writing a script that edits project B's checkout or reads the SQLite DB. The fix is a Landlock launcher that locks every agent command, and every server git call, to its own project's folders (§3.5–3.6).
@@ -99,7 +99,9 @@ I derived this by migrating a scratch DB and listing columns. **55 tables carry 
 
 ### 1.6 Realtime
 
-- `events.Broadcaster` / `ChatBroadcaster` (`internal/events/`) support `SubscribeProject(projectID)` and global `Subscribe()`. `/events/live?project_id=` (`handler/sse_handler.go:50`) subscribes to whatever `project_id` the client passes, and to **all projects** if it is omitted. `/events/chat/:exec_id` streams any execution by ID.
+- Live transport uses `/events/ws` (`internal/handler/live_websocket.go`, `LiveWebSocket`). One connection multiplexes `live` and `execution` subscriptions, each with its own subscription ID.
+- `liveSubscriptionAllowed` requires an existing project and verifies that requested tasks/executions belong to it. Task/chat events use `SubscribeProject`; file events use a verified task subscription. Execution subscriptions support replay from an offset.
+- The connection rechecks instance-session validity on incoming commands and every 15 seconds. This is not user/project membership authorization. Org support must authorize each subscription and stop delivery when membership, conversation visibility, or session access changes.
 
 ### 1.7 Explicit single-user / single-owner assumptions (checklist)
 
@@ -116,7 +118,7 @@ I derived this by migrating a scratch DB and listing columns. **55 tables carry 
 11. `review_comments.reviewed_by`, `*_authorized_users.added_by`, and `agents.created_by` hold free text, not FKs.
 12. Usage analytics has no user dimension.
 13. Global worker limit and global model caps are shared by everyone.
-14. SSE with no `project_id` streams every project.
+14. WebSocket subscriptions check project/resource consistency, but do not yet enforce per-user project membership.
 15. The project list (`ProjectRepo.ListSelectorOptions`, ordered `is_default DESC, name`) is unfiltered.
 16. Agent shell runs as the server OS user, with access to every repo under `PROJECT_REPO_ROOT` and to `openvibely.db`.
 
@@ -374,7 +376,7 @@ Where checks must go:
 | Scheduler | `SchedulerService.checkDueTasks` | Run as `schedules.run_as_user_id`. Before dispatch, re-check that the user still has `task.run`. If not, skip, pause, and alert the project owner |
 | Workers / follow-ups | `WorkerService`, Goal Agent continuation, swarm planner | Inherit the initiating principal from `executions.initiated_by_user_id`/task creator. Re-check on admission |
 | Automations | reconciler, dispatcher, `automation_*_repo.go` | Run as `published_by_user_id` with a `automation` principal kind. Re-check on dispatch. GitHub inbox → task creation is attributed to the automation publisher |
-| SSE | `handler/sse_handler.go LiveEventsSSE`, `ChatStreamSSE` | **Require `project_id`**. Drop global subscribe for non-admins, or filter to accessible IDs. Check `project.view` at subscribe time. `ChatStreamSSE` checks the execution's project (and conversation visibility). Long-lived subscriptions must be re-checked on membership change: publish a `membership_changed` event that closes affected streams |
+| WebSocket | `handler/live_websocket.go LiveWebSocket`, `liveSubscriptionAllowed`, `dispatchLiveFrame` | Authenticate the connection, then check `project.view` for **every subscription**, including execution replay and reconnects. Preserve task/execution ownership checks and enforce conversation visibility. On access revocation, cancel affected subscriptions and discard queued frames before delivery; session revocation closes the connection. A valid connection never authorizes every project on it |
 | Attachments / files | `attachment_handler.go`, `chat_attachment_handler.go`, worktree file/diff endpoints | Check via the owning task/execution |
 | Memory/skills | `agent_skills_handler.go`, `skills_handler.go`, `MemoryService` | Project scope check. Global skills edit = org admin |
 | Analytics / insights / upcoming / workers | `analytics_handler.go`, `insights_handler.go`, `upcoming_handler.go`, worker capacity | Project-scoped views check `project.view`. Global dashboards aggregate only accessible projects. Org-wide totals for org admins |
@@ -548,10 +550,10 @@ Today: global `worker_settings.max_workers`, `projects.max_workers`, and `agent_
 | **Concurrent task edits** | Add `tasks.version INTEGER` for optimistic concurrency on title, prompt, priority, and category edits (`task_detail_property_handler.go`, kanban moves). Reject stale writes with 409 and re-render the authoritative fragment, which fits the existing "server fragments are authoritative" rule. Status transitions already go through `TaskRepo.ClaimTask` and lifecycle locks |
 | **Concurrent chat/thread sends** | Already serialized via `thread_inputs` FIFO and steering. With attribution, two users queue in order. Steering/Stop require `task.run`. Show who is steering |
 | **Merge conflicts on shared worktrees** | `project_merge_conflict_owners` already exists. Add `merge_requested_by_user_id`. Merge requires `task.merge` |
-| **Realtime fan-out** | `events.Broadcaster` already supports project-scoped subscription. Add per-user streams for notifications (`SubscribeUser(userID)`), and include `actor_user_id` in `TaskEvent`/`ChatEvent` so UIs can show "Alice moved X". Enforce authorization at subscribe time (§3.2) and on membership changes |
+| **Realtime fan-out** | `events.Broadcaster` already supports project-scoped subscription. Add per-user notification subscriptions over the same WebSocket (a proposed internal `SubscribeUser(userID)` broadcaster API), and include `actor_user_id` in `TaskEvent`/`ChatEvent` so UIs can show "Alice moved X". Enforce authorization at subscribe time (§3.2) and on membership changes |
 | **Notifications per user** | Alerts are project-scoped broadcasts today. Add `alert_recipients(alert_id, user_id, read_at)`, or simpler per-user read state, `alert_reads(alert_id, user_id)`, replacing the global `alerts.is_read`. Add notification types: mentioned in chat (`@username`), task assigned, review requested, run failed (your run), share invite. Delivery: in-app, plus optional email or linked Slack DM via existing `send_message` channels |
 | **Audit log** | `audit_events(id, org_id, project_id, actor_user_id, actor_kind, action, target_type, target_id, metadata_json, ip, created_at)`. Write on: membership/role changes, visibility changes, shares, invites, credential changes, merges, PR opens, alert decisions, automation publish, break-glass access, project delete/transfer, and login success/failure. Read view for org admins and project maintainers |
-| **Presence** | Later nice-to-have: in-memory presence per project or conversation via the existing SSE (`presence` events with a heartbeat). It does not need persistence |
+| **Presence** | Later nice-to-have: in-memory presence per project or conversation via the existing WebSocket (`presence` frames with a heartbeat). It does not need persistence |
 | **Mentions** | `@user` in chat creates notifications and puts the participant into the conversation |
 | **Assignment** | Optional `tasks.assignee_user_id` plus a board filter ("My tasks") |
 
@@ -645,7 +647,7 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 - **Complete:** backend-neutral persistence interfaces and SQLite implementation (§2.6).
 - **Remaining:** define `Principal`/`AccessScope` and expand the audit into a resource-wide authorization matrix, including legacy unscoped requests, before sizing the remaining work.
 - **IDOR hardening:** task-route ownership is now covered by a route-walking contract test; review, webhook, queued-input, and chat-status fixes have regression tests. Extend coverage beyond these route families as described in the audit.
-- Live transport now uses WebSockets with project/task ownership checks. Preserve these checks and add principal-based authorization in Phase 2; the original SSE references above describe the earlier architecture.
+- Live transport now uses WebSockets with project/task ownership checks. Preserve these checks and add per-subscription principal authorization and revocation in Phase 2 (§3.2).
 - Milestone: persistence boundary retained; route ownership and event-stream contract tests green.
 
 ### Phase 1: Users (2–3 weeks)
@@ -657,12 +659,13 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 
 ### Phase 2: Sharing and app policy (3–4 weeks)
 - `projects.org_id/owner_user_id/visibility` and `project_members`. `service/authz.Authorizer` with the matrix in §3.1.
-- Enforce on all HTTP routes, the JSON API, runtime tools, SSE, and the project selector and desktop picker. Return 404 on deny.
+- Enforce on all HTTP routes, the JSON API, runtime tools, WebSocket subscriptions, and the project selector and desktop picker. Return 404 on deny.
 - Share dialog in Project Settings (add an org member with a role; change visibility); member list; transfer ownership.
 - Attribution columns on tasks, thread_inputs, executions, schedules, automations, alerts, and review_comments. UI shows the author on chat bubbles and tasks.
 - Background run-as semantics for scheduler, workers, automations, goals, and webhooks (§3.4), with revocation handling.
+- WebSocket tests: mixed allowed/denied projects on one connection; foreign execution replay; reconnect after revocation; membership removal during streaming, including queued frames; and session expiry/revocation. Private-conversation subscription tests follow in Phase 4.
 - `audit_events`, written for membership, visibility, merge, and alert decisions.
-- Milestone: Alice's private project is invisible to Bob in the app (UI, API, SSE, tools). Shared as editor, Bob can chat and run tasks but cannot merge or change settings. Agents are not yet locked, so private projects stay behind the trust-model warning (R1) until Phase 3.
+- Milestone: Alice's private project is invisible to Bob in the app (UI, API, WebSocket updates/replay, tools). Shared as editor, Bob can chat and run tasks but cannot merge or change settings. Agents are not yet locked, so private projects stay behind the trust-model warning (R1) until Phase 3.
 
 ### Phase 3: Kernel sandbox (3–4 weeks)
 - Start with the **one-day Landlock test** on a hosted server (§3.5). If Landlock is unavailable there, re-plan around container-per-run.
@@ -679,7 +682,7 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 ### Phase 4: Shared chat (3–4 weeks)
 - `chat_conversations` + participants. Migrate the default per-project thread. Conversation list UI. Private vs project-visible conversations; share a conversation.
 - Per-conversation FIFO queue, compaction checkpoints, and context usage. Author-labeled history in model prompts. Exclude private conversations from memory extraction.
-- Per-user alert read state, `@mentions`, and an in-app notifications stream (`SubscribeUser`).
+- Per-user alert read state, `@mentions`, and notification subscriptions on the existing WebSocket. Derive the user ID from the authenticated principal; clients cannot subscribe as another user.
 - `tasks.version` optimistic concurrency: a second concurrent save is rejected instead of overwriting. `actor_user_id` on live events.
 - Milestone: two users in the same conversation see each other's messages live, with attribution. Private conversations are not visible to others.
 
@@ -711,14 +714,14 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 |---|---|---|---|---|
 | 1 | Backend-Neutral Persistence Interfaces — implemented (§2.6) | 0 | Done | — |
 | 2 | Harden ID-addressed routes with project-ownership checks + route-walking contract test | 0 | M | — |
-| 3 | Scope SSE (`/events/live` requires project, `/events/chat/:exec_id` ownership) | 0 | S | — |
+| 3 | WebSocket project/task ownership checks — implemented and audited; preserve regression coverage | 0 | Done | — |
 | 4 | Add users/orgs/memberships/sessions schema + bootstrap migration | 1 | M | 1 |
 | 5 | Principal-in-context auth middleware (disabled/local/hosted SSO → user) + server-side sessions | 1 | M | 4 |
 | 6 | Move UI preferences to `user_preferences` | 1 | S | 5 |
 | 7 | User admin UI + invitations (org-level) | 1 | M | 5 |
 | 8 | Project ownership/visibility + `project_members` schema & backfill | 2 | S | 4 |
 | 9 | `authz.Authorizer` service with permission matrix + unit tests | 2 | M | 8 |
-| 10 | Enforce authz across HTTP/API routes and project selector/desktop picker | 2 | L | 2, 9 |
+| 10 | Enforce authz across HTTP/API, project pickers, and each WebSocket subscription; revoke subscriptions and discard queued frames on access loss | 2 | L | 2, 9 |
 | 11 | Enforce authz in chat runtime tools and runtime tool policy (viewer = read-only) | 2 | M | 9 |
 | 12 | Background principals: scheduler/worker/automation/goal/webhook run-as + revocation | 2 | M | 9 |
 | 13 | Attribution columns + author display on tasks, chat, threads, reviews, alerts | 2 | M | 5 |
@@ -731,7 +734,7 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 | 20 | Block localhost API from locked processes; launch MCP servers and provider-local tools through the launcher | 3 | M | 17 |
 | 21 | Refuse private projects without Landlock + sandbox escape test suite in CI | 3 | S | 17 |
 | 22 | Chat conversations (schema, migration, per-conversation queue/compaction, UI) | 4 | L | 13 |
-| 23 | Per-user notifications, alert read state, @mentions, user SSE stream | 4 | M | 22 |
+| 23 | Per-user notifications, alert read state, @mentions, user notification subscriptions over WebSocket | 4 | M | 22 |
 | 24 | Optimistic concurrency for task edits + actor on live events | 4 | S | 13 |
 | 25 | Personal vs org model configs/OAuth + project model allow-list + follow-up model re-resolution | 5 | L | 9 |
 | 26 | `integration_credentials` (org/project scope), encrypt at rest | 5 | M | 9 |
