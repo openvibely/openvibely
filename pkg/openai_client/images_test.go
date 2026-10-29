@@ -94,7 +94,7 @@ func TestGenerateImageCodexRequest(t *testing.T) {
 				if edit {
 					refs = []string{"data:image/png;base64," + encoded}
 				}
-				got, err := client.GenerateImage(context.Background(), "A goat", refs)
+				got, err := client.GenerateImage(context.Background(), "A goat", refs, false)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -121,7 +121,7 @@ func TestGenerateImageRejectsBadResponses(t *testing.T) {
 			old := OpenAIAPIBaseURL
 			OpenAIAPIBaseURL = srv.URL
 			defer func() { OpenAIAPIBaseURL = old }()
-			if _, err := NewWithAPIKey("key").GenerateImage(context.Background(), "Goat", nil); err == nil {
+			if _, err := NewWithAPIKey("key").GenerateImage(context.Background(), "Goat", nil, false); err == nil {
 				t.Fatal("expected invalid image error")
 			}
 		})
@@ -150,7 +150,7 @@ func TestGenerateImageOAuthRecovery(t *testing.T) {
 	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, token string) (OAuthTokens, bool, error) {
 		return OAuthTokens{AccessToken: "fresh"}, true, nil
 	})
-	if _, err := client.GenerateImage(context.Background(), "Goat", nil); err != nil {
+	if _, err := client.GenerateImage(context.Background(), "Goat", nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if requests != 2 {
@@ -168,7 +168,7 @@ func TestGenerateImageInvalidInputAndCancellation(t *testing.T) {
 		{"goat", []string{"data:image/png;base64,AAAA"}},
 		{"goat", make([]string, 6)},
 	} {
-		if _, err := client.GenerateImage(context.Background(), tc.prompt, tc.refs); err == nil {
+		if _, err := client.GenerateImage(context.Background(), tc.prompt, tc.refs, false); err == nil {
 			t.Fatal("invalid input accepted")
 		}
 	}
@@ -179,7 +179,7 @@ func TestGenerateImageInvalidInputAndCancellation(t *testing.T) {
 	defer func() { OpenAIAPIBaseURL = old }()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := client.GenerateImage(ctx, "Goat", nil); err == nil || !strings.Contains(err.Error(), "canceled") {
+	if _, err := client.GenerateImage(ctx, "Goat", nil, false); err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("canceled request: %v", err)
 	}
 }

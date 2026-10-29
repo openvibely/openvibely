@@ -21,6 +21,7 @@ var imageGenerationParameters = json.RawMessage(`{
  "type":"object",
  "properties":{
   "prompt":{"type":"string","description":"Describe the image to generate or the changes to make to reference images."},
+  "transparent_background":{"type":"boolean","default":false,"description":"Whether the output should have a transparent background. Defaults to false."},
   "referenced_image_paths":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":5,"description":"Paths to local PNG, JPEG, or WebP reference images, relative to the working directory or absolute."},
   "num_last_images_to_include":{"type":"integer","minimum":1,"maximum":5,"description":"Use this many of the most recent images in the conversation, including previously generated images."}
  },
@@ -31,7 +32,7 @@ func imageGenerationTool() ToolDefinition {
 	strict := false
 	return ToolDefinition{Type: "namespace", Name: "image_gen", Description: "Generate and edit images.", Tools: []ToolDefinition{{
 		Type: "function", Name: "imagegen", Strict: &strict, Parameters: imageGenerationParameters,
-		Description: "Generate or edit an image using OpenAI's image model. Provide a prompt. For edits, use either referenced_image_paths or num_last_images_to_include, never both. Omit both for a new image. The result is published as a PNG and returned visually. Display it using Markdown image syntax with the returned URL; do not substitute an SVG or drawing script for image generation.",
+		Description: "Generate or edit an image using OpenAI's image model. Provide a prompt. Set transparent_background to true for transparent backgrounds, background removal, or cutouts; otherwise set it to false. For edits, preserve existing transparency unless the user asks to change it. For edits, use either referenced_image_paths or num_last_images_to_include, never both. Omit both for a new image. The result is published as a PNG and returned visually. Display it using Markdown image syntax with the returned URL; do not substitute an SVG or drawing script for image generation.",
 	}}}
 }
 
@@ -57,9 +58,10 @@ func (c *Client) runImageGenerationTool(ctx context.Context, opts *AgenticOption
 		return "", true, err
 	}
 	var args struct {
-		Prompt string   `json:"prompt"`
-		Paths  []string `json:"referenced_image_paths"`
-		Recent *int     `json:"num_last_images_to_include"`
+		TransparentBackground bool     `json:"transparent_background"`
+		Prompt                string   `json:"prompt"`
+		Paths                 []string `json:"referenced_image_paths"`
+		Recent                *int     `json:"num_last_images_to_include"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return "", true, fmt.Errorf("decode image arguments: %w", err)
@@ -107,7 +109,7 @@ func (c *Client) runImageGenerationTool(ctx context.Context, opts *AgenticOption
 			return "", true, fmt.Errorf("the conversation does not contain %d reference images; supply referenced_image_paths instead", *args.Recent)
 		}
 	}
-	data, err := c.GenerateImage(ctx, args.Prompt, references)
+	data, err := c.GenerateImage(ctx, args.Prompt, references, args.TransparentBackground)
 	if err != nil {
 		return "", true, err
 	}

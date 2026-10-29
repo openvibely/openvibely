@@ -28,7 +28,7 @@ const (
 // GenerateImage mirrors Codex's standalone image backend: generation without
 // references, JSON edits with references, and PNG output from gpt-image-2.
 // References must be inline PNG, JPEG, or WebP data URLs; remote URLs are not fetched.
-func (c *Client) GenerateImage(ctx context.Context, prompt string, references []string) ([]byte, error) {
+func (c *Client) GenerateImage(ctx context.Context, prompt string, references []string, transparentBackground bool) ([]byte, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return nil, fmt.Errorf("image prompt is required")
 	}
@@ -38,6 +38,9 @@ func (c *Client) GenerateImage(ctx context.Context, prompt string, references []
 	payload := map[string]any{
 		"model": generatedImageModel, "prompt": prompt,
 		"background": "auto", "quality": "auto", "size": "auto",
+	}
+	if transparentBackground {
+		payload["background"] = "transparent"
 	}
 	operation := "generations"
 	if len(references) > 0 {
