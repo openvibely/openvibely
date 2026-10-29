@@ -188,3 +188,15 @@
 .ov-mp-status:empty {
   display: none;
 }
+
+.ov-mp-speed { padding: 10px 12px; border-top: 1px solid var(--ov-border-subtle, #414753); }
+.ov-mp-speed[hidden] { display: none !important; }
+.ov-mp-speed-row, .ov-mp-speed-actions { display: flex; align-items: center; gap: 10px; }
+.ov-mp-speed-row { justify-content: space-between; font-size: 12px; }
+.ov-mp-speed-help { margin-top: 4px; font-size: 11px; opacity: .65; }
+.ov-mp-fast-toggle { border: 0; border-radius: 20px; background: #505867; width: 32px; height: 18px; padding: 2px; cursor: pointer; flex-shrink: 0; }
+.ov-mp-fast-toggle::before { content: ""; display: block; width: 14px; height: 14px; background: white; border-radius: 50%; transition: transform .15s; }
+.ov-mp-fast-toggle[aria-checked="true"] { background: #938aff; }
+.ov-mp-fast-toggle[aria-checked="true"]::before { transform: translateX(14px); }
+.ov-mp-fast-toggle:disabled { opacity: .5; cursor: not-allowed; }
+.ov-model-picker .ov-mp-fast-toggle:focus-visible { outline: 2px solid #938aff; outline-offset: 3px; }

@@ -112,6 +112,7 @@ type modelEditDetails struct {
 	Provider                models.LLMProvider `json:"provider"`
 	Model                   string             `json:"model"`
 	ReasoningEffort         string             `json:"reasoning_effort"`
+	ServiceTier             string             `json:"service_tier"`
 	Temperature             float64            `json:"temperature"`
 	IsDefault               bool               `json:"is_default"`
 	APIKey                  string             `json:"api_key"`
@@ -156,7 +157,7 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 	}
 	details := modelEditDetails{
 		ID: config.ID, Name: config.Name, Provider: config.Provider, Model: config.Model,
-		ReasoningEffort: config.ReasoningEffort, Temperature: config.Temperature,
+		ReasoningEffort: config.ReasoningEffort, ServiceTier: config.EffectiveServiceTier(), Temperature: config.Temperature,
 		IsDefault: config.IsDefault, APIKey: config.APIKey, AuthMethod: config.AuthMethod,
 		OAuthConnectionID: config.OAuthConnectionID,
 		OAuthConnected:    config.HasValidOAuthToken(), OAuthNeedsReauth: config.OAuthNeedsReauth,
@@ -839,6 +840,15 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 		if spec, ok := models.LookupModel(agent.Provider, agent.Model); ok {
 			agent.Model = spec.ID
 		}
+	}
+	if tier, present := formValueIfPresent(c, "service_tier"); present {
+		if !models.ValidServiceTier(*agent, tier) {
+			return echo.NewHTTPError(http.StatusBadRequest, "unsupported service tier for selected model")
+		}
+		agent.ServiceTier = tier
+	}
+	if !models.ModelSupportsFastMode(agent.Provider, agent.Model) {
+		agent.ServiceTier = ""
 	}
 	agent.ReasoningEffort = normalizeProviderReasoningEffort(agent.Provider, agent.Model, c.FormValue("reasoning_effort"))
 	if agent.Provider == models.ProviderOpenAICompatible {

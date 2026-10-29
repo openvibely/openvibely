@@ -123,6 +123,7 @@ type SwarmConfig struct {
 	// A nil follow-up effort uses the current task preference; an empty value uses the model default.
 	FollowupEffortModelID    string   `json:"followup_effort_model_id,omitempty"`
 	FollowupEffortGeneration int      `json:"followup_effort_generation,omitempty"`
+	FollowupServiceTier      *string  `json:"followup_service_tier,omitempty"`
 	FollowupReasoningEffort  *string  `json:"followup_reasoning_effort,omitempty"`
 	CompletedGeneration      int      `json:"completed_generation,omitempty"`
 	Required                 bool     `json:"required,omitempty"`

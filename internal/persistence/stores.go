@@ -717,6 +717,8 @@ type TaskStore interface {
 	SearchByTitle(ctx context.Context, projectID string, titleQuery string) ([]models.Task, error)
 	SetActiveMergeConflictOwner(ctx context.Context, projectID string, taskID string) error
 	SetModelEffort(ctx context.Context, taskID string, agent models.LLMConfig, effort string) error
+	SetModelServiceTier(ctx context.Context, taskID string, agent models.LLMConfig, tier string) error
+	ModelServiceTier(ctx context.Context, taskID string, agent models.LLMConfig) (string, error)
 	SetPendingIfNotRunningOrQueued(ctx context.Context, id string) (bool, error)
 	SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx context.Context, id string, scheduleID string) (bool, error)
 	TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error)

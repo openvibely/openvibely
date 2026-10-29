@@ -491,6 +491,9 @@ func TestSend_GPT6SolModelsAPIKeyUsesResponsesLiteWebSocket(t *testing.T) {
 				if request["model"] != model || request["type"] != "response.create" {
 					t.Errorf("request type/model = %v/%v", request["type"], request["model"])
 				}
+				if request["service_tier"] != "priority" {
+					t.Errorf("missing Fast mode: %v", request["service_tier"])
+				}
 				metadata, _ := request["client_metadata"].(map[string]any)
 				if metadata[responsesLiteMetadataKey] != "true" {
 					t.Errorf("Responses Lite metadata = %#v", metadata)
@@ -510,7 +513,7 @@ func TestSend_GPT6SolModelsAPIKeyUsesResponsesLiteWebSocket(t *testing.T) {
 			defer func() { OpenAIAPIBaseURL = original }()
 
 			client := NewWithAPIKey("sk-test")
-			resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: model, ReasoningEffort: "medium"})
+			resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: model, ReasoningEffort: "medium", ServiceTier: "priority"})
 			if err != nil {
 				t.Fatalf("Send: %v", err)
 			}
@@ -817,6 +820,9 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 		if _, ok := request["client_metadata"]; ok {
 			t.Fatalf("HTTP fallback retained websocket client_metadata")
 		}
+		if request["service_tier"] != "default" {
+			t.Errorf("fallback lost explicit Standard: %v", request["service_tier"])
+		}
 		input, _ := request["input"].([]any)
 		userMessage, _ := input[len(input)-1].(map[string]any)
 		content, _ := userMessage["content"].([]any)
@@ -839,6 +845,7 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 	for i := 0; i < 2; i++ {
 		resp, err := client.Send(retrytest.Context(), "Hello", &SendOptions{
 			Model:       "gpt-5.6-terra",
+			ServiceTier: "default",
 			Attachments: []*FileAttachment{{FileName: "test.png", MediaType: "image/png", Data: []byte("png")}},
 		})
 		if err != nil {

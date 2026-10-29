@@ -230,12 +230,20 @@ func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, st
 type SwarmFollowupModelSelection struct {
 	ModelID         string
 	ReasoningEffort *string
+	ServiceTier     *string
 }
 
 func setPlannerFollowupEffort(cfg *models.SwarmConfig, selection *SwarmFollowupModelSelection) {
 	cfg.FollowupEffortModelID = ""
 	cfg.FollowupEffortGeneration = 0
 	cfg.FollowupReasoningEffort = nil
+	cfg.FollowupServiceTier = nil
+	if selection != nil && selection.ModelID != "" && selection.ServiceTier != nil {
+		tier := *selection.ServiceTier
+		cfg.FollowupEffortModelID = selection.ModelID
+		cfg.FollowupEffortGeneration = cfg.RerunGeneration
+		cfg.FollowupServiceTier = &tier
+	}
 	if selection != nil && selection.ModelID != "" && selection.ReasoningEffort != nil {
 		effort := *selection.ReasoningEffort
 		cfg.FollowupEffortModelID = selection.ModelID

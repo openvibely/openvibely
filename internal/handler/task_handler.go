@@ -3335,6 +3335,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 				return err
 			}
 			selection := service.SwarmFollowupModelSelection{ModelID: model.ID}
+			if tier, present := formValueIfPresent(c, "service_tier"); present {
+				selection.ServiceTier = &tier
+			}
 			if effort, present := formValueIfPresent(c, "reasoning_effort"); present {
 				selection.ReasoningEffort = &effort
 			}
