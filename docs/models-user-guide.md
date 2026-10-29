@@ -100,7 +100,13 @@ OpenAI and Anthropic configurations do not expose this output setting; their ada
 - GPT-6 Astra and GPT-6.1 Sol do not support configurable temperature. OpenVibely hides the field and discards submitted or stale values for those configurations.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 - GPT-6 Sol/Luna use Responses for tool-using reasoning workflows. Their Chat Completions fallback constrains function-tool calls to `reasoning_effort: none`; without tools it preserves the selected effort. Sampling parameters are omitted whenever their Chat Completions reasoning effort is above `none`.
-- GPT-6.1 Sol uses the standard Responses path for tool calling; its Chat Completions support is text-only. OpenVibely exposes its existing native web-search integration for GPT-6.1 Sol and GPT-6 Sol/Luna. Other server-side tools, regional endpoint controls, and image generation are outside this model-support change.
+- GPT-6.1 Sol uses Responses Lite over WebSocket for tool calling, including web search through `web.run`; its Chat Completions support is text-only.
+
+#### Image Generation
+
+In an OpenAI conversation with tools and file publication enabled, ask for an image (for example, “Generate an image of a goat”). The `image_gen.imagegen` tool generates a PNG with `gpt-image-2` and publishes it as a downloadable chat artifact. It uses your configured OpenAI API key or OAuth account through a separate image endpoint; your account must have access to image generation.
+
+Ask for changes to a recent image to edit it, or supply local PNG, JPEG, or WebP reference files. The tool accepts up to five references, using either recent conversation images or local paths in one call. Image generation is unavailable in Plan mode or when file publication is disabled. This integration applies to the first-party OpenAI Responses workflow.
 
 #### GPT-6 Workflow Controls
 
