@@ -314,10 +314,43 @@ func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
 	definitions, err := tc.stores.Automations.ListPortfolioCards(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Len(t, definitions, 1, "opening drafts must not save them")
-	returnList := "/automations?project_id=__all_projects__&search=Source&filter_project=" + project.ID
+	seed.Name = "Source A survivor"
+	_, err = compiler.Save(t.Context(), service.AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: seed})
+	require.NoError(t, err)
+	returnList := "/automations?project_id=__all_projects__&search=Source&card_page=1&page_size=1&offset=1&filter_project=" + project.ID
 	deleted := tc.HTMX().Post("/automations/" + saved.Definition.Automation.ID + "/delete?project_id=__all_projects__&return_list=" + url.QueryEscape(returnList)).Execute()
 	require.Equal(t, http.StatusNoContent, deleted.Code, deleted.Body.String())
 	require.Equal(t, returnList, deleted.Header().Get("HX-Redirect"))
+	for _, target := range []string{"", "main-content", "all-projects-results"} {
+		request := httptest.NewRequest(http.MethodGet, returnList, nil)
+		if target != "" {
+			request.Header.Set("HX-Request", "true")
+			request.Header.Set("HX-Target", target)
+		}
+		response := httptest.NewRecorder()
+		tc.echo.ServeHTTP(response, request)
+		header := "Location"
+		if target == "" {
+			require.Equal(t, http.StatusSeeOther, response.Code)
+		} else {
+			require.Equal(t, http.StatusOK, response.Code)
+			header = "HX-Replace-Url"
+			if target == "all-projects-results" {
+				header = "X-OpenVibely-All-Projects-Location"
+			} else {
+				require.Contains(t, response.Body.String(), "Source A survivor")
+			}
+		}
+		corrected, err := url.Parse(response.Header().Get(header))
+		require.NoError(t, err)
+		require.Equal(t, "0", corrected.Query().Get("offset"))
+		require.Equal(t, "1", corrected.Query().Get("page_size"))
+		require.Equal(t, "Source", corrected.Query().Get("search"))
+		require.Equal(t, project.ID, corrected.Query().Get("filter_project"))
+		final := tc.HTTP().Get(corrected.String()).Execute()
+		require.Equal(t, http.StatusOK, final.Code)
+		require.Contains(t, final.Body.String(), "Source A survivor")
+	}
 
 }
 

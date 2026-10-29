@@ -200,6 +200,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         try { sessionStorage.setItem('openvibely.all-projects-list.' + url.pathname, path); } catch (_) {}
                     }
                     document.addEventListener('htmx:pushedIntoHistory', rememberAllProjectsList);
+                    document.addEventListener('htmx:replacedInHistory', rememberAllProjectsList);
                     document.addEventListener('htmx:historyRestore', rememberAllProjectsList);
                     window.addEventListener('popstate', rememberAllProjectsList);
                     rememberAllProjectsList();

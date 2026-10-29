@@ -64,7 +64,7 @@ func (d AllProjectsData) URL(offset int) string {
 	if d.Range != "" {
 		q.Set("range", d.Range)
 	}
-	if offset > 0 {
+	if offset > 0 || (d.Section == "automations" && d.PageSize > 0) {
 		q.Set("card_page", "1")
 		q.Set("offset", strconv.Itoa(offset))
 		q.Set("page_size", strconv.Itoa(d.PageSize))

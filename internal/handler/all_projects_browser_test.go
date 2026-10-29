@@ -107,8 +107,10 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.querySelector('[data-all-projects-usage]'));
  document.querySelector('nav[aria-label="All projects views"] a[href^="/automations"]').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
- await window.openVibelyNavigate('/automations?project_id=__all_projects__&search=Browser&filter_project='+owner);
+ await window.openVibelyNavigate('/automations?project_id=__all_projects__&search=Browser&filter_project='+owner+'&card_page=1&page_size=1&offset=100000');
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
+ assert(new URL(location.href).searchParams.get('offset')==='0','empty automation page did not recover');
+ assert(new URL(location.href).searchParams.get('page_size')==='1','recovery lost page size');
  document.querySelector('[data-all-projects-automation]').click();
  await wait(()=>document.getElementById('automation-live'));
  assert(document.getElementById('project-selector').value==='__all_projects__','automation switched tabs');

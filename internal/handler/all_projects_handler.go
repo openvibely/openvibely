@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -197,6 +198,43 @@ func (h *Handler) AllProjects(c echo.Context) error {
 		cards, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, page.Offset, persistence.AutomationCardListFilter{Search: data.Search, Sort: "name_asc"})
 		if err != nil {
 			return err
+		}
+		if len(cards) == 0 && page.Offset > 0 {
+			// Find the last occupied page without walking every stale page.
+			filter := persistence.AutomationCardListFilter{Search: data.Search, Sort: "name_asc"}
+			low, high, last := 0, (page.Offset-1)/page.PageSize, 0
+			for low <= high {
+				mid := low + (high-low)/2
+				probe, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, 1, mid*page.PageSize, filter)
+				if err != nil {
+					return err
+				}
+				if len(probe) > 0 {
+					last = mid
+					low = mid + 1
+				} else {
+					high = mid - 1
+				}
+			}
+			data.Offset = last * page.PageSize
+			query := c.QueryParams()
+			query.Del("page")
+			query.Set("card_page", "1")
+			query.Set("page_size", strconv.Itoa(page.PageSize))
+			query.Set("offset", strconv.Itoa(data.Offset))
+			location := "/automations?" + query.Encode()
+			if !isHTMX(c) {
+				return c.Redirect(http.StatusSeeOther, location)
+			}
+			if c.Request().Header.Get("HX-Target") == "all-projects-results" {
+				c.Response().Header().Set("X-OpenVibely-All-Projects-Location", location)
+				return c.NoContent(http.StatusOK)
+			}
+			c.Response().Header().Set("HX-Replace-Url", location)
+			cards, err = h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, data.Offset, filter)
+			if err != nil {
+				return err
+			}
 		}
 		data.Automations, data.HasMore = cardPageItems(cards, page.PageSize)
 	case "analytics":
