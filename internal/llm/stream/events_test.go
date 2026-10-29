@@ -9,6 +9,31 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
+func TestTruncateToolSecondary(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		max   int
+		want  string
+	}{
+		{name: "empty", value: "", max: 4, want: ""},
+		{name: "whitespace only", value: " \n\t ", max: 4, want: ""},
+		{name: "normalizes whitespace and newlines", value: "  alpha\nbeta  ", max: 20, want: "alpha beta"},
+		{name: "at limit", value: "abcd", max: 4, want: "abcd"},
+		{name: "over limit", value: "abcdef", max: 3, want: "abc…"},
+		{name: "zero limit disables clipping", value: " alpha\nbeta ", max: 0, want: "alpha beta"},
+		{name: "negative limit disables clipping", value: " alpha\nbeta ", max: -1, want: "alpha beta"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TruncateToolSecondary(tt.value, tt.max); got != tt.want {
+				t.Fatalf("TruncateToolSecondary(%q, %d) = %q, want %q", tt.value, tt.max, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWriteEvent_ToolUseAndSessionAndError(t *testing.T) {
 	storeEnv := teststores.New(t)
 	execRepo := storeEnv.Stores.Executions

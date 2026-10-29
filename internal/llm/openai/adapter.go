@@ -1371,12 +1371,12 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 	case "bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
-			cmd = truncateToolSecondary(cmd, 320)
+			cmd = llmstream.TruncateToolSecondary(cmd, 320)
 			return "$ " + cmd
 		}
 	case "grep_search":
 		if p, ok := m["pattern"].(string); ok {
-			return truncateToolSecondary(p, 140)
+			return llmstream.TruncateToolSecondary(p, 140)
 		}
 	case "list_files":
 		if p, ok := m["path"].(string); ok {
@@ -1387,7 +1387,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 	case "web_search", "web_search_preview", "web.run":
 		if detail := webSearchSecondaryFromInput(m); detail != "" {
-			return truncateToolSecondary(detail, 140)
+			return llmstream.TruncateToolSecondary(detail, 140)
 		}
 	}
 	return ""
@@ -1470,12 +1470,4 @@ func webSearchSecondaryFromInput(m map[string]interface{}) string {
 		return url
 	}
 	return ""
-}
-
-func truncateToolSecondary(value string, max int) string {
-	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
-	if max <= 0 || len(value) <= max {
-		return value
-	}
-	return value[:max] + "…"
 }
