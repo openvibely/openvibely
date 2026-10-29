@@ -7,6 +7,7 @@ import "strings"
 type PromptProfile string
 
 const (
+	PromptProfileCodexGPT61Sol   PromptProfile = "codex/gpt-6.1-sol.md"
 	PromptProfileCodexGPT61Terra PromptProfile = "codex/gpt-6.1-terra.md"
 	PromptProfileCodexReserve    PromptProfile = "codex/gpt-reserve.md"
 	PromptProfileCodexGPT6Astra  PromptProfile = "codex/gpt-6-astra.md"
@@ -67,7 +68,8 @@ const (
 var modelCatalog = []ModelSpec{
 	// OpenAI models.
 	{Provider: ProviderOpenAI, ID: "gpt-6-astra", Label: "gpt-6-astra", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Astra, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true},
-	{Provider: ProviderOpenAI, ID: "gpt-6.1-sol", Label: "gpt-6.1-sol", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningRequired},
+	// Codex 0.164.0 cache (2026-10-29): Sol 6.1 defaults to low effort and 500K context.
+	{Provider: ProviderOpenAI, ID: "gpt-6.1-sol", Label: "gpt-6.1-sol", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Sol, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningRequired},
 	// Codex 0.164.0 models_cache.json (2026-10-29): Terra 6.1 uses low effort,
 	// a 500K default context, and its own prompt. Keep API-supported none effort.
 	{Provider: ProviderOpenAI, ID: "gpt-6.1-terra", Label: "gpt-6.1-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Terra, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
