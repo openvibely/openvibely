@@ -719,7 +719,11 @@ func (c *Coordinator) superviseAcceptedUpdate(ctx context.Context) {
 	defer func() {
 		c.mu.Lock()
 		c.acceptanceSupervisor = false
+		retry := c.accepted && c.operationGeneration == "" && ctx.Err() == nil
 		c.mu.Unlock()
+		if retry {
+			c.startAcceptedUpdateSupervisor()
+		}
 	}()
 	for {
 		c.mu.RLock()
@@ -816,8 +820,12 @@ func (c *Coordinator) Apply(ctx context.Context, lease time.Duration) error {
 		}
 		return err
 	}
+	waitCtx, preserve := c.recoveryCtx, c.accepted
 	c.mu.Unlock()
-	go c.waitAndApply(context.Background(), release, staged, installer, status.Generation, false)
+	if waitCtx == nil {
+		waitCtx = context.Background()
+	}
+	go c.waitAndApply(waitCtx, release, staged, installer, status.Generation, preserve)
 	return nil
 }
 
@@ -877,7 +885,28 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 			return
 		case <-ticker.C:
 			status := c.drain.Status()
+			c.mu.RLock()
+			accepted := c.accepted && c.operationGeneration == generation && !c.manual
+			lease := c.acceptanceLease
+			if accepted && status.Generation == generation && !c.drain.Owns(generation) && status.ExpiresAt.Sub(c.drain.now()) <= lease/2 {
+				// Renew only user-accepted, app-managed updates. External/manual
+				// drain deadlines remain under their owner's control.
+				if !c.drain.Renew(generation, lease) {
+					c.mu.RUnlock()
+					continue
+				}
+			}
+			c.mu.RUnlock()
 			if status.State == DrainStateIdle {
+				if accepted {
+					// Expiry releases admission, not the user's durable approval.
+					// Reuse the retryable handoff path to obtain a fresh generation.
+					c.resetAcceptedDrainHandoff(ctx, generation, errors.New("update drain lease expired; retrying accepted update"))
+					if ctx.Err() == nil {
+						c.startAcceptedUpdateSupervisor()
+					}
+					return
+				}
 				c.completeGenerationWithRetry(ctx, generation, StateIdle, "")
 				return
 			}
@@ -1202,6 +1231,21 @@ func (c *Coordinator) Cancel() error {
 		return errors.New("Hosted updates can only be cancelled by the Hosted administrator")
 	}
 	if generation == "" {
+		c.mu.Lock()
+		if c.accepted && c.operationGeneration == "" && (c.state == StateAvailable || c.state == StateFailed) {
+			oldState, oldError, lease := c.state, c.lastError, c.acceptanceLease
+			c.state, c.lastError = StateIdle, ""
+			c.clearAcceptanceLocked()
+			if err := c.persistLocked(); err != nil {
+				c.state, c.lastError = oldState, oldError
+				c.accepted, c.acceptanceLease = true, lease
+				c.mu.Unlock()
+				return err
+			}
+			c.mu.Unlock()
+			return nil
+		}
+		c.mu.Unlock()
 		if state == StateIdle {
 			return nil
 		}
