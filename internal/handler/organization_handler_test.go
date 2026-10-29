@@ -319,3 +319,32 @@ func TestOrganizationHostedSameSecondSessionsAreIndependent(t *testing.T) {
 	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), third, models.BootstrapUserID, claims.ExpiresAt))
 	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, firstCookie).Code)
 }
+
+func TestOrganizationProtectsLastOwnerControlsAndKeepsServerGuard(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.NewSession(t.Context(), models.BootstrapUserID, time.Hour)
+	require.NoError(t, err)
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	page := orgRequest(e, http.MethodGet, "/organization", nil, cookie)
+	require.Equal(t, http.StatusOK, page.Code)
+	formPattern := regexp.MustCompile(`(?s)<form method="post" action="/organization/members/local-owner".*?</form>`)
+	form := formPattern.FindString(page.Body.String())
+	require.NotEmpty(t, form)
+	require.Regexp(t, `<select[^>]*disabled`, form)
+	require.Regexp(t, `<button[^>]*value="role"[^>]*disabled`, form)
+	require.Regexp(t, `<button[^>]*value="remove"[^>]*disabled`, form)
+	require.Contains(t, page.Body.String(), "Promote another owner")
+	require.Contains(t, page.Body.String(), `id="organization-error" role="alert"`)
+	// Stale tabs and forged form submissions must still be rejected.
+	rejected := orgRequest(e, http.MethodPost, "/organization/members/local-owner", url.Values{"action": {"role"}, "role": {"member"}}, cookie)
+	require.Equal(t, http.StatusConflict, rejected.Code)
+	require.Contains(t, rejected.Body.String(), "last owner")
+	invite, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	other, err := tc.handler.organizationSvc.Accept(t.Context(), invite, "second-owner", "a-long-password", "")
+	require.NoError(t, err)
+	require.NoError(t, tc.stores.Organizations.ChangeMember(t.Context(), models.BootstrapUserID, other.UserID, "owner", false))
+	page = orgRequest(e, http.MethodGet, "/organization", nil, cookie)
+	form = formPattern.FindString(page.Body.String())
+	require.NotContains(t, form, "disabled")
+}
