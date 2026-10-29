@@ -348,3 +348,39 @@ func TestOrganizationProtectsLastOwnerControlsAndKeepsServerGuard(t *testing.T) 
 	form = formPattern.FindString(page.Body.String())
 	require.NotContains(t, form, "disabled")
 }
+
+func TestOrganizationHostedIdentityReplacesPlaceholder(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "verified-owner", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	// Also covers existing sessions issued before profile synchronization.
+	me := orgRequest(e, http.MethodGet, "/auth/me", nil, cookie)
+	require.Equal(t, http.StatusOK, me.Code, me.Body.String())
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &data))
+	for key, value := range map[string]string{"username": claims.Email, "display": claims.Email, "email": claims.Email, "subject": claims.Subject, "auth_source": auth.HostedAuthSource, "role": "owner", "user_id": models.BootstrapUserID} {
+		require.Equal(t, value, data[key], key)
+	}
+	saved, err := tc.stores.Organizations.UserByID(t.Context(), models.BootstrapUserID)
+	require.NoError(t, err)
+	require.Equal(t, claims.Email, saved.Username)
+	require.Equal(t, claims.Email, saved.DisplayName)
+	require.Equal(t, "owner", saved.Role)
+	e.GET("/test/identity", func(c echo.Context) error {
+		p, ok := models.PrincipalFromContext(c.Request().Context())
+		require.True(t, ok)
+		return c.JSON(http.StatusOK, p)
+	})
+	response := orgRequest(e, http.MethodGet, "/test/identity", nil, cookie)
+	require.Contains(t, response.Body.String(), claims.Email)
+	require.NoError(t, h.organizationSvc.Logout(t.Context(), token))
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
+}

@@ -75,3 +75,27 @@ func TestMessageAuthorsDirectFollowupAndSteering(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "testuser1", loadedInput.AuthorName)
 }
+
+func TestHostedProfileUsedForMessageAttribution(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	org := NewOrganizationRepo(db)
+	owner, err := org.BindHostedOwner(ctx, "hosted-owner", "owner@example.com")
+	require.NoError(t, err)
+	require.Equal(t, models.BootstrapUserID, owner.UserID)
+	// Background processing reloads the persisted principal, not SSO cookies.
+	owner, err = org.UserByID(ctx, owner.UserID)
+	require.NoError(t, err)
+	sender := models.WithPrincipal(ctx, owner.Principal)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	task := &models.Task{ProjectID: "default", Title: "Hosted author", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "hello", AgentID: &agent.ID}
+	require.NoError(t, NewTaskRepo(db, nil).Create(sender, task))
+	for _, followup := range []bool{false, true} {
+		execution := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "hello", IsFollowup: followup}
+		require.NoError(t, NewExecutionRepo(db).Create(sender, execution))
+		loaded, err := NewExecutionRepo(db).GetByID(ctx, execution.ID)
+		require.NoError(t, err)
+		require.Equal(t, "owner@example.com", loaded.AuthorName)
+		require.Equal(t, models.BootstrapUserID, loaded.AuthorUserID)
+	}
+}

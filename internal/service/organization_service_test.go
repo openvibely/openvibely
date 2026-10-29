@@ -161,10 +161,10 @@ func TestOrganizationLastOwnerConcurrentChanges(t *testing.T) {
 
 func TestOrganizationHostedOwnerBindingDoesNotAdmitSecondIdentity(t *testing.T) {
 	env := teststores.New(t)
-	first, err := env.Organizations.BindHostedOwner(t.Context(), "verified-subject")
+	first, err := env.Organizations.BindHostedOwner(t.Context(), "verified-subject", "owner@example.com")
 	require.NoError(t, err)
 	require.Equal(t, models.BootstrapUserID, first.UserID)
-	_, err = env.Organizations.BindHostedOwner(t.Context(), "different-subject")
+	_, err = env.Organizations.BindHostedOwner(t.Context(), "different-subject", "other@example.com")
 	require.ErrorIs(t, err, persistence.ErrOrgDenied)
 }
 

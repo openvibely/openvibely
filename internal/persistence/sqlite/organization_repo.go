@@ -259,7 +259,7 @@ func (r *OrganizationRepo) RevokeSession(ctx context.Context, hash string) error
 	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM user_sessions WHERE token_hash=?`, hash)
 	return err
 }
-func (r *OrganizationRepo) BindHostedOwner(ctx context.Context, subject string) (*models.OrgUser, error) {
+func (r *OrganizationRepo) BindHostedOwner(ctx context.Context, subject, email string) (*models.OrgUser, error) {
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		var existing string
 		err := tx.QueryRowContext(ctx, `SELECT subject FROM user_identities WHERE provider='hosted_sso' AND user_id=?`, models.BootstrapUserID).Scan(&existing)
@@ -267,12 +267,17 @@ func (r *OrganizationRepo) BindHostedOwner(ctx context.Context, subject string) 
 			if existing != subject {
 				return persistence.ErrOrgDenied
 			}
-			return nil
+		} else {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO user_identities(provider,subject,user_id) VALUES('hosted_sso',?,?)`, subject, models.BootstrapUserID); err != nil {
+				return err
+			}
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO user_identities(provider,subject,user_id) VALUES('hosted_sso',?,?)`, subject, models.BootstrapUserID)
+		// Profile values come only from verified hosted identity. Keep the
+		// stable local ID and membership so all existing references survive.
+		_, err = tx.ExecContext(ctx, `UPDATE users SET username=?,display_name=? WHERE id=?`, email, email, models.BootstrapUserID)
 		return err
 	})
 	if err != nil {

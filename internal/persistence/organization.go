@@ -28,7 +28,7 @@ type OrganizationStore interface {
 	CreateSession(ctx context.Context, tokenHash, userID string, expiresAt int64) error
 	SessionUser(ctx context.Context, tokenHash string, now int64) (*models.OrgUser, error)
 	RevokeSession(context.Context, string) error
-	BindHostedOwner(ctx context.Context, subject string) (*models.OrgUser, error)
+	BindHostedOwner(ctx context.Context, subject, email string) (*models.OrgUser, error)
 	Preferences(ctx context.Context, userID string, keys []string) (map[string]string, error)
 	SetPreferences(ctx context.Context, userID string, values map[string]string) error
 	ComparePreferences(ctx context.Context, userID string, expected, values, guards map[string]string) (bool, error)
