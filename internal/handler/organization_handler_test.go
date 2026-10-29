@@ -502,3 +502,47 @@ func TestOrganizationLoginErrorsStayOnForm(t *testing.T) {
 	require.Equal(t, "/tasks", rec.Header().Get("Location"))
 	require.NotEmpty(t, orgCookie(t, rec).Value)
 }
+
+func TestOrganizationInvitationRateLimitsStayOnForm(t *testing.T) {
+	for _, limit := range []string{"signup", "login"} {
+		t.Run(limit, func(t *testing.T) {
+			tc, e := organizationTestApp(t, true)
+			svc := tc.handler.organizationSvc
+			token, err := svc.Invite(t.Context(), models.BootstrapUserID, "member")
+			require.NoError(t, err)
+			username := `missing"><script>alert(1)</script>`
+			if limit == "signup" {
+				for i := 0; i < 30; i++ {
+					require.True(t, svc.AllowSignup("192.0.2.1"))
+				}
+			} else {
+				for i := 0; i < 10; i++ {
+					finish, allowed := svc.BeginLogin("192.0.2.1", username)
+					require.True(t, allowed)
+					finish(true)
+				}
+			}
+			form := url.Values{"token": {token}, "username": {username}, "password": {"never-echo-this-password"}}
+			rec := orgRequest(e, http.MethodPost, "/invite", form, nil)
+			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+			require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+			require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+			require.Contains(t, rec.Body.String(), `role="alert"`)
+			require.Contains(t, rec.Body.String(), "Too many attempts. Try again later.")
+			require.Contains(t, rec.Body.String(), `action="/invite"`)
+			require.Contains(t, rec.Body.String(), token)
+			require.Contains(t, rec.Body.String(), `value="missing&#34;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"`)
+			require.NotContains(t, rec.Body.String(), "never-echo-this-password")
+			require.NotContains(t, rec.Body.String(), "<script>alert(1)</script>")
+			// Rejection must not consume the invitation. Another client can join.
+			form.Set("username", "newmember")
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/invite", strings.NewReader(form.Encode()))
+			req.RemoteAddr = "192.0.2.2:12345"
+			req.Header.Set("Origin", "http://example.com")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			accepted := httptest.NewRecorder()
+			e.ServeHTTP(accepted, req)
+			require.Equal(t, http.StatusSeeOther, accepted.Code, accepted.Body.String())
+		})
+	}
+}
