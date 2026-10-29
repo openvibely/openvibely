@@ -5266,7 +5266,7 @@ func TestChatScrollTracker_UsesInteractionSignalsForScrollIntent(t *testing.T) {
 		// shouldAutoScroll relies on the persisted flag and never pins mid-interaction
 		"return !this.userScrolledUp && !(this._userInteracting && this._interactionUp === true);",
 		// User input keeps the reader parked until they reach the actual bottom.
-		"self.userScrolledUp = !atBottom;",
+		"self.userScrolledUp = !atBottom && !followingDown;",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {
