@@ -105,6 +105,19 @@ func (h *Handler) organizationLogin(c echo.Context) error {
 }
 func (h *Handler) organizationMe(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
+	if h.authMode == auth.AuthModeHostedSSO {
+		session := h.recognizeSession(c.Request(), time.Now())
+		if session.orgUser == nil || session.hostedClaims == nil {
+			return c.JSON(http.StatusUnauthorized, map[string]any{"authenticated": false})
+		}
+		p, claims := session.orgUser.Principal, session.hostedClaims
+		return c.JSON(http.StatusOK, map[string]any{
+			"authenticated": true, "user_id": p.UserID, "org_id": p.OrgID, "role": p.Role,
+			"username": claims.Email, "display": claims.Display, "email": claims.Email,
+			"subject": claims.Subject, "auth_source": auth.HostedAuthSource,
+		})
+	}
+
 	p, ok := models.PrincipalFromContext(c.Request().Context())
 	if !ok {
 		if !h.authEnabled() {

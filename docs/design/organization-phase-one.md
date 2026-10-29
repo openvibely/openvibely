@@ -27,7 +27,7 @@ Personal `ui.*` preferences follow the authenticated user. Other application set
 
 ## Hosted behavior
 
-Verified hosted SSO binds the existing workspace owner to the local owner account. A second hosted identity is rejected. Hosted multi-member invitations and workspace SSO changes remain Phase 6. Logout revokes the local session as well as clearing the cookie.
+Verified hosted SSO binds the existing workspace owner to the local owner account. The verified hosted email supplies the username, profile display, and attribution for new messages; the internal account ID and Owner role are preserved. `/auth/me` includes `auth_source: "hosted_sso"` so the UI identifies workspace logout correctly. Existing valid sessions refresh placeholder profiles on their next request. Historical message labels remain snapshots. A second hosted identity is rejected. Hosted multi-member invitations and workspace SSO changes remain Phase 6. Logout revokes the local session as well as clearing the cookie.
 
 ## Limits
 
