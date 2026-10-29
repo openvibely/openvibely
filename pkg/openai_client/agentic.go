@@ -123,7 +123,7 @@ type AgenticOptions struct {
 	standaloneWebSearch func(ctx context.Context, input json.RawMessage) (WebSearchResult, bool, error)
 	OnWebSearchResult   func(WebSearchResult)
 
-	// PublishGeneratedImage enables the image_gen.imagegen tool. The
+	// PublishGeneratedImage enables the generate_image tool. The
 	// callback must durably publish the temporary PNG and return artifact JSON.
 	// Image generation also requires the request's publish_file permission.
 	PublishGeneratedImage     func(context.Context, string) (string, error)

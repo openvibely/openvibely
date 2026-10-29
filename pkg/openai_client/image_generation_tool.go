@@ -15,15 +15,17 @@ import (
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
-const imageGenerationToolName = "image_gen.imagegen"
+// Use an app-owned name: image_gen.imagegen is reserved by OpenAI and requires
+// the model's exact configured schema rather than our custom validation schema.
+const imageGenerationToolName = "generate_image"
 
-const imageGenerationDescription = "The `image_gen.imagegen` tool enables image generation from descriptions and editing of existing images based on specific instructions. Use it when:\n" +
+const imageGenerationDescription = "The `generate_image` tool enables image generation from descriptions and editing of existing images based on specific instructions. Use it when:\n" +
 	"\n" +
 	"- The user requests an image based on a scene description, such as a diagram, portrait, comic, meme, or any other visual.\n" +
 	"- The user wants to modify an attached or previously generated image with specific changes, including adding or removing elements, altering colors, improving quality/resolution, or transforming the style (e.g., cartoon, oil painting).\n" +
 	"\n" +
 	"Guidelines:\n" +
-	"- imagegen needs a few minutes to finish. The app waits for generation to complete and automatically publishes the PNG as a downloadable chat artifact. Once it finishes, display the image using Markdown image syntax with the returned URL. No separate publish_file call is needed.\n" +
+	"- generate_image needs a few minutes to finish. The app waits for generation to complete and automatically publishes the PNG as a downloadable chat artifact. Once it finishes, display the image using Markdown image syntax with the returned URL. No separate publish_file call is needed.\n" +
 	"- Avoid printing the full tool result or its base64 image data; show the image and only small metadata when needed.\n" +
 	"- Set `transparent_background` to true when the request calls for a transparent background, including background removal or a cutout; set it to false otherwise. For edits, preserve existing transparency unless the user asks to change it.\n" +
 	"- Omit both `referenced_image_paths` and `num_last_images_to_include` when generating a brand new image.\n" +
@@ -49,10 +51,10 @@ var imageGenerationParameters = json.RawMessage(`{
 
 func imageGenerationTool() ToolDefinition {
 	strict := false
-	return ToolDefinition{Type: "namespace", Name: "image_gen", Description: "Generate and edit images.", Tools: []ToolDefinition{{
-		Type: "function", Name: "imagegen", Strict: &strict, Parameters: imageGenerationParameters,
+	return ToolDefinition{
+		Type: "function", Name: imageGenerationToolName, Strict: &strict, Parameters: imageGenerationParameters,
 		Description: imageGenerationDescription,
-	}}}
+	}
 }
 
 // Image generation inherits the request's existing permission to publish files.
@@ -63,7 +65,7 @@ func imageGenerationAllowed(opts *AgenticOptions) bool {
 }
 
 func openAIToolAllowed(opts *AgenticOptions, name string) bool {
-	if name == "image_gen" || name == imageGenerationToolName {
+	if name == imageGenerationToolName {
 		return imageGenerationAllowed(opts)
 	}
 	return opts.ToolFilter == nil || opts.ToolFilter(name)
