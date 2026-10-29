@@ -17,6 +17,7 @@ func TestCodexPromptMatchesSnapshot(t *testing.T) {
 		"gpt-reserve":       "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.6-sol":       "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.6-terra":     "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
+		"gpt-6.1-terra":     "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.6-luna":      "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.5":           "3d7984a1671ad1c65f6bd7732f03b69eb96b616cd7fa7390eb5e5ca04d06cf49",
 		"codex-auto-review": "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",

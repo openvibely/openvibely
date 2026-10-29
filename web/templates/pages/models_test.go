@@ -193,7 +193,7 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	for model, want := range map[string][]string{
 		"claude-sonnet-5-5": allEfforts, "claude-sonnet-5": allEfforts,
 		"claude-opus-5-5": allEfforts, "claude-opus-5": allEfforts, "claude-fable-5-1": allEfforts,
-		"gpt-5.6-sol": noneEfforts, "gpt-6-astra": allEfforts,
+		"gpt-6.1-terra": noneEfforts, "gpt-5.6-sol": noneEfforts, "gpt-6-astra": allEfforts,
 		"gpt-6.1-sol": allEfforts, "gpt-6-sol": noneEfforts, "gpt-6-luna": noneEfforts,
 	} {
 		provider := models.ProviderOpenAI
