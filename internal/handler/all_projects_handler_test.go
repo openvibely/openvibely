@@ -372,3 +372,41 @@ func TestAllProjectsDeleteTaskReturnList(t *testing.T) {
 		require.Equal(t, expected, rec.Header().Get("HX-Redirect"))
 	}
 }
+
+func TestAllProjectsDefaultDestinationIgnoresSavedSelection(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	other := tc.CreateProject().WithName("Saved other project").Build()
+	require.NoError(t, tc.handler.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, other.ID))
+	form := tc.HTMX().Get("/tasks/new?project_id=__all_projects__&destination_project=default").Execute()
+	require.Equal(t, http.StatusOK, form.Code)
+	require.Contains(t, form.Body.String(), "destination_project=default")
+	require.NotContains(t, form.Body.String(), "destination_project="+other.ID)
+	created := tc.HTMX().Post("/tasks?project_id=__all_projects__&destination_project=default&from=new&thread=1").WithForm(url.Values{"title": {"Default destination task"}, "message": {"Save in Default"}, "category": {"backlog"}, "priority": {"2"}}).Execute()
+	require.Equal(t, http.StatusOK, created.Code, created.Body.String())
+	task, err := tc.stores.Tasks.GetByID(t.Context(), created.Header().Get("X-Created-Task-ID"))
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	require.Equal(t, "default", task.ProjectID)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(tc.stores.Automations, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(tc.stores.Automations, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(tc.stores.Automations), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+	draft := tc.HTMX().Get("/automations/new?project_id=__all_projects__&destination_project=default").Execute()
+	require.Equal(t, http.StatusOK, draft.Code, draft.Body.String())
+	require.Contains(t, draft.Body.String(), "destination_project=default")
+	require.Contains(t, draft.Body.String(), `name="project_id" value="default"`)
+	seed, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
+	require.NoError(t, err)
+	seed.Name = "Default automation"
+	seed.Nodes = []models.AutomationDraftNode{{Key: "task", Name: "Task", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review changes", "category": "backlog", "priority": 2}}}
+	saved, err := compiler.Save(t.Context(), service.AutomationSaveRequest{ProjectID: "default", Source: "manual", CreatedVia: "web", Candidate: seed})
+	require.NoError(t, err)
+	live := tc.HTMX().Get("/automations/" + saved.Definition.Automation.ID + "?project_id=__all_projects__").Execute()
+	require.Equal(t, http.StatusOK, live.Code, live.Body.String())
+	require.Contains(t, live.Body.String(), `data-project-id="default"`)
+	selected, err := tc.handler.settingsRepo.Get(t.Context(), uiPreferenceSelectedProjectIDKey)
+	require.NoError(t, err)
+	require.Equal(t, other.ID, selected)
+}

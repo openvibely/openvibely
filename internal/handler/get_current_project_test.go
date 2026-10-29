@@ -101,15 +101,16 @@ func TestGetCurrentProjectID_WithValidID(t *testing.T) {
 	}
 }
 
-func TestGetCurrentProjectID_DefaultFallsBackToFirst(t *testing.T) {
+func TestGetCurrentProjectID_ExplicitDefaultOverridesSavedProject(t *testing.T) {
 	h, projectSvc := setupProjectTestHandler(t)
 	ctx := context.Background()
 
-	// Get the first project from list (migrations may seed one)
-	projects, _ := projectSvc.List(ctx)
-	firstID := ""
-	if len(projects) > 0 {
-		firstID = projects[0].ID
+	saved := &models.Project{Name: "Saved other project"}
+	if err := projectSvc.Create(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, saved.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	e := echo.New()
@@ -121,8 +122,8 @@ func TestGetCurrentProjectID_DefaultFallsBackToFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != firstID {
-		t.Errorf("got %q, want %q", got, firstID)
+	if got != "default" {
+		t.Errorf("got %q, want %q", got, "default")
 	}
 }
 

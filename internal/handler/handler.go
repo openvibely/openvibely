@@ -676,7 +676,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	if projectID == models.AllProjectsID {
 		return "", echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this operation.")
 	}
-	if projectID != "" && projectID != "default" {
+	if projectID != "" {
 		p, err := h.projectSvc.GetByID(ctx, projectID)
 		if err != nil {
 			return "", err
