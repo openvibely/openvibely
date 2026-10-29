@@ -5054,6 +5054,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
                     // One owner for full-page fragment navigation, including sidebar links.
                     let currentPageRequest = null;
+                    // A new request does not own the visible page until it swaps.
+                    let renderedPageRequest = null;
                     // Capture runs before HTMX restores cached history or starts a
                     // cache-miss request. A late response must not replace history.
                     if (window.addEventListener) window.addEventListener('popstate', function() {
@@ -5064,7 +5066,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     document.addEventListener('htmx:beforeRequest', function(event) {
                         const detail = event.detail;
                         if (!event.defaultPrevented && detail.target && detail.target.id === 'all-projects-results') {
-                            detail.xhr.openVibelyOriginPageRequest = currentPageRequest;
+                            detail.xhr.openVibelyOriginPageRequest = renderedPageRequest;
                         }
                         if (event.defaultPrevented || !detail.target || detail.target.id !== 'main-content') return;
                         const previous = currentPageRequest;
@@ -5081,11 +5083,21 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                         if (main) main.removeAttribute('data-page-loading');
                     }
                     document.addEventListener('htmx:beforeHistorySave', clearPageLoading);
+                    document.addEventListener('htmx:historyRestore', function() {
+                        renderedPageRequest = currentPageRequest;
+                    });
                     document.addEventListener('htmx:afterSwap', function(event) {
-                        if (event.detail.target && event.detail.target.id === 'main-content') clearPageLoading();
+                        if (event.detail.target && event.detail.target.id === 'main-content') {
+                            renderedPageRequest = event.detail.xhr;
+                            clearPageLoading();
+                        }
                     });
                     document.addEventListener('htmx:afterRequest', function(event) {
-                        if (event.detail.xhr === currentPageRequest && !event.detail.successful) clearPageLoading();
+                        if (event.detail.xhr === currentPageRequest && !event.detail.successful) {
+                            // Failed navigation leaves the existing page active.
+                            renderedPageRequest = currentPageRequest;
+                            clearPageLoading();
+                        }
                     });
                     document.addEventListener('htmx:sendAbort', function(event) {
                         if (event.detail.target && event.detail.target.id === 'main-content' && !currentPageRequest) clearPageLoading();
