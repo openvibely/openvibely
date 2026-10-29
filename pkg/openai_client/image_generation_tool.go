@@ -17,6 +17,25 @@ import (
 
 const imageGenerationToolName = "image_gen.imagegen"
 
+const imageGenerationDescription = "The `image_gen.imagegen` tool enables image generation from descriptions and editing of existing images based on specific instructions. Use it when:\n" +
+	"\n" +
+	"- The user requests an image based on a scene description, such as a diagram, portrait, comic, meme, or any other visual.\n" +
+	"- The user wants to modify an attached or previously generated image with specific changes, including adding or removing elements, altering colors, improving quality/resolution, or transforming the style (e.g., cartoon, oil painting).\n" +
+	"\n" +
+	"Guidelines:\n" +
+	"- imagegen needs a few minutes to finish. The app waits for generation to complete and automatically publishes the PNG as a downloadable chat artifact. Once it finishes, display the image using Markdown image syntax with the returned URL. No separate publish_file call is needed.\n" +
+	"- Avoid printing the full tool result or its base64 image data; show the image and only small metadata when needed.\n" +
+	"- Set `transparent_background` to true when the request calls for a transparent background, including background removal or a cutout; set it to false otherwise. For edits, preserve existing transparency unless the user asks to change it.\n" +
+	"- Omit both `referenced_image_paths` and `num_last_images_to_include` when generating a brand new image.\n" +
+	"- For edits, use `referenced_image_paths` when every target image has a local file path.\n" +
+	"- If you have not seen a local image yet, use `view_image` to inspect it before editing.\n" +
+	"- Use `num_last_images_to_include` only when at least one target image has no local file path.\n" +
+	"- Set `num_last_images_to_include` to the smallest number of recent conversation images that includes every target image, up to 5.\n" +
+	"- Never provide both `referenced_image_paths` and `num_last_images_to_include`.\n" +
+	"- If neither mechanism can include every target image, ask the user to attach the missing images again.\n" +
+	"- Directly generate the image without reconfirmation or clarification unless required images must be attached again.\n" +
+	"- Always use this tool for image editing unless the user explicitly requests otherwise. Do not use Python or other drawing or editing scripts unless specifically instructed."
+
 var imageGenerationParameters = json.RawMessage(`{
  "type":"object",
  "properties":{
@@ -32,7 +51,7 @@ func imageGenerationTool() ToolDefinition {
 	strict := false
 	return ToolDefinition{Type: "namespace", Name: "image_gen", Description: "Generate and edit images.", Tools: []ToolDefinition{{
 		Type: "function", Name: "imagegen", Strict: &strict, Parameters: imageGenerationParameters,
-		Description: "Generate or edit an image using OpenAI's image model. Provide a prompt. Set transparent_background to true for transparent backgrounds, background removal, or cutouts; otherwise set it to false. For edits, preserve existing transparency unless the user asks to change it. For edits, use either referenced_image_paths or num_last_images_to_include, never both. Omit both for a new image. The result is published as a PNG and returned visually. Display it using Markdown image syntax with the returned URL; do not substitute an SVG or drawing script for image generation.",
+		Description: imageGenerationDescription,
 	}}}
 }
 
