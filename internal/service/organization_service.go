@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,12 +30,13 @@ type orgLoginWindow struct {
 	Count int
 }
 type OrganizationService struct {
-	Store     persistence.OrganizationStore
-	secret    string
-	dummyHash []byte
-	mu        sync.Mutex
-	changes   chan struct{}
-	attempts  map[string]orgLoginWindow
+	Store          persistence.OrganizationStore
+	secret         string
+	dummyHash      []byte
+	mu             sync.Mutex
+	changes        chan struct{}
+	attempts       map[string]orgLoginWindow
+	trustedProxies []netip.Prefix
 }
 
 func NewOrganizationService(store persistence.OrganizationStore, secret string) *OrganizationService {
@@ -82,25 +84,133 @@ func (s *OrganizationService) tokenHash(token string) string {
 	sum := sha256.Sum256([]byte(s.secret + "\x00" + token))
 	return hex.EncodeToString(sum[:])
 }
-func (s *OrganizationService) AllowAttempt(key string) bool {
+
+// ConfigureTrustedProxies is called once at startup. Only these peers may
+// supply X-Forwarded-For; walk the chain from the server toward the client.
+func (s *OrganizationService) ConfigureTrustedProxies(raw string) error {
+	var prefixes []netip.Prefix
+	if strings.TrimSpace(raw) != "" {
+		for _, entry := range strings.Split(raw, ",") {
+			entry = strings.TrimSpace(entry)
+			prefix, err := netip.ParsePrefix(entry)
+			if err != nil {
+				addr, addrErr := netip.ParseAddr(entry)
+				if addrErr != nil {
+					return fmt.Errorf("invalid AUTH_TRUSTED_PROXIES entry %q", entry)
+				}
+				prefix = netip.PrefixFrom(addr, addr.BitLen())
+			}
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	s.trustedProxies = prefixes
+	return nil
+}
+func (s *OrganizationService) trustedProxy(addr netip.Addr) bool {
+	for _, prefix := range s.trustedProxies {
+		if prefix.Contains(addr.Unmap()) {
+			return true
+		}
+	}
+	return false
+}
+func (s *OrganizationService) ClientIP(remote, forwarded string) string {
+	peer, err := netip.ParseAddrPort(remote)
+	var addr netip.Addr
+	if err == nil {
+		addr = peer.Addr().Unmap()
+	} else {
+		addr, err = netip.ParseAddr(remote)
+		if err != nil {
+			return remote
+		}
+		addr = addr.Unmap()
+	}
+	fallback := addr.String()
+	if !s.trustedProxy(addr) || forwarded == "" {
+		return fallback
+	}
+	chain := strings.Split(forwarded, ",")
+	for i := len(chain) - 1; i >= 0 && s.trustedProxy(addr); i-- {
+		next, err := netip.ParseAddr(strings.TrimSpace(chain[i]))
+		if err != nil {
+			return fallback
+		}
+		addr = next.Unmap()
+	}
+	return addr.String()
+}
+
+// Reserve before password hashing so concurrent attempts cannot bypass limits.
+// Successful authentication releases its reservation; failures last 15 minutes.
+func (s *OrganizationService) BeginLogin(ip, username string) (func(bool), bool) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	sum := sha256.Sum256([]byte(username))
+	account := hex.EncodeToString(sum[:])
+	keys := []string{"login-pair:" + ip + ":" + account, "login-account:" + account, "login-ip:" + ip}
+	starts, ok := s.reserveAttempts(keys, []int{10, 100, 100})
+	if !ok {
+		return nil, false
+	}
+	var once sync.Once
+	return func(failed bool) {
+		once.Do(func() {
+			if failed {
+				return
+			}
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			for i, key := range keys {
+				v, exists := s.attempts[key]
+				if exists && v.Start.Equal(starts[i]) {
+					v.Count--
+					if v.Count == 0 {
+						delete(s.attempts, key)
+					} else {
+						s.attempts[key] = v
+					}
+				}
+			}
+		})
+	}, true
+}
+func (s *OrganizationService) AllowSignup(ip string) bool {
+	_, ok := s.reserveAttempts([]string{"signup:" + ip}, []int{30})
+	return ok
+}
+func (s *OrganizationService) reserveAttempts(keys []string, limits []int) ([]time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
 	for k, v := range s.attempts {
-		if now.Sub(v.Start) > 15*time.Minute {
+		if now.Sub(v.Start) >= 15*time.Minute {
 			delete(s.attempts, k)
 		}
 	}
-	v, ok := s.attempts[key]
-	if !ok {
-		if len(s.attempts) >= 4096 {
-			return false
+	missing := 0
+	for i, key := range keys {
+		v, ok := s.attempts[key]
+		if !ok {
+			missing++
 		}
-		v.Start = now
+		if v.Count >= limits[i] {
+			return nil, false
+		}
 	}
-	v.Count++
-	s.attempts[key] = v
-	return v.Count <= 10
+	if len(s.attempts)+missing > 16384 {
+		return nil, false
+	}
+	starts := make([]time.Time, len(keys))
+	for i, key := range keys {
+		v, ok := s.attempts[key]
+		if !ok {
+			v.Start = now
+		}
+		v.Count++
+		s.attempts[key] = v
+		starts[i] = v.Start
+	}
+	return starts, true
 }
 func (s *OrganizationService) VerifyCredentials(ctx context.Context, username, password string) (*models.OrgUser, error) {
 	user, err := s.Store.UserByUsername(ctx, strings.TrimSpace(username))

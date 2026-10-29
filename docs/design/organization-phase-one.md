@@ -42,3 +42,29 @@ Tests cover migration upgrade/rollback with existing projects and settings, conc
 ## Message attribution
 
 Migration 217 also records the sending account ID and username for new execution messages and queued/steering inputs. The initial task prompt retains its creator's name, even when another member starts it. Thread bubbles use the saved name for live responses and reloaded history; queue promotion preserves the original sender. Existing messages without recorded attribution continue to display “User”; their sender is not guessed. This is display attribution, not project authorization or durable background-job run-as enforcement.
+
+## Login limits and trusted proxies
+
+Local login allows 10 failed attempts per account/client-IP combination in a
+15-minute window. Broader limits allow 100 failures per account across IPs and
+100 failures per IP across accounts in that window. Successful logins do not
+consume failure limits. In-flight checks reserve capacity until they finish.
+Signup has a separate limit of 30 submissions per client IP per 15 minutes.
+Counters are in memory and reset on restart.
+
+By default, client IP means the connection's peer address; forwarded headers
+are ignored. Direct access (including localhost) needs no configuration.
+If a reverse proxy fronts the app, configure its addresses explicitly:
+
+```sh
+AUTH_TRUSTED_PROXIES="127.0.0.1/32,::1/128"
+```
+
+This example trusts a proxy on the same host. For Docker or remote proxies,
+list their actual IPs or dedicated CIDR ranges instead. Invalid entries prevent
+startup. The proxy must overwrite or append the actual connecting client's IP
+to `X-Forwarded-For`. The app walks that chain from right to left, skipping only
+trusted proxy addresses, and uses the first untrusted address. Malformed chains
+fall back to the peer address. Do not trust arbitrary client networks or all IPs.
+The setting affects authentication rate limits only; it does not configure
+forwarded host or scheme handling.

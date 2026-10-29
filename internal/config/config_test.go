@@ -387,3 +387,14 @@ func TestDatabaseDriverDefaultsToSQLite(t *testing.T) {
 		t.Fatalf("zero-value DatabaseDriver = %q, want %q", cfg.DatabaseDriver, DatabaseDriverSQLite)
 	}
 }
+
+func TestLoadTrustedAuthProxies(t *testing.T) {
+	t.Setenv("AUTH_TRUSTED_PROXIES", "127.0.0.1/32,::1/128")
+	if got := Load().AuthTrustedProxies; got != "127.0.0.1/32,::1/128" {
+		t.Fatalf("unexpected trusted proxies %q", got)
+	}
+	t.Setenv("AUTH_TRUSTED_PROXIES", "")
+	if got := Load().AuthTrustedProxies; got != "" {
+		t.Fatalf("expected no trusted proxies, got %q", got)
+	}
+}

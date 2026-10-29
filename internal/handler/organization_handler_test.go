@@ -244,3 +244,44 @@ func TestOrganizationSignupShowsReadableValidationAndAllowsRetry(t *testing.T) {
 	accepted := orgRequest(e, http.MethodPost, "/invite", form, nil)
 	require.Equal(t, http.StatusSeeOther, accepted.Code)
 }
+
+func TestOrganizationLoginFailuresDoNotBlockOtherAccounts(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	// Unknown-account failures must not prevent the owner signing in from
+	// the same direct/proxy address. Successful logins never consume failures.
+	for i := 0; i < 10; i++ {
+		rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"unknown"}, "password": {"wrong"}}, nil)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+	}
+	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"unknown"}, "password": {"wrong"}}, nil)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	for i := 0; i < 12; i++ {
+		rec = orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
+		require.Equal(t, http.StatusFound, rec.Code, rec.Body.String())
+	}
+	require.NoError(t, tc.handler.organizationSvc.ConfigureTrustedProxies("127.0.0.1/32"))
+	for _, ip := range []string{"198.51.100.1", "198.51.100.2"} {
+		for i := 0; i < 10; i++ {
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/login", strings.NewReader(url.Values{"username": {"unknown"}, "password": {"wrong"}}.Encode()))
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set("Origin", "http://example.com")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("X-Forwarded-For", ip)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusUnauthorized, rec.Code)
+		}
+	}
+}
+
+func TestOrganizationLoginCannotBeBypassedThroughSignup(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	for i := 0; i < 10; i++ {
+		rec := orgRequest(e, http.MethodPost, "/invite", url.Values{"token": {token}, "username": {"alice"}, "password": {"wrong-password"}}, nil)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	}
+	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"wrong"}}, nil)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
