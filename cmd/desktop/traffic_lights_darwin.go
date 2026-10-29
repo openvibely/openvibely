@@ -126,8 +126,8 @@ static void ovAttachTrafficLights(NSWindow *window) {
     if (controls.superview != content) [content addSubview:controls positioned:NSWindowAbove relativeTo:nil];
     controls.hidden = ovTrafficLightsHidden;
     if (ovTrafficLightsAppearanceName) controls.appearance = [NSAppearance appearanceNamed:ovTrafficLightsAppearanceName];
-    CGFloat y = content.isFlipped ? (46 - NSHeight(controls.frame)) / 2 :
-        NSHeight(content.bounds) - (46 + NSHeight(controls.frame)) / 2;
+    CGFloat y = content.isFlipped ? (54 - NSHeight(controls.frame)) / 2 :
+        NSHeight(content.bounds) - (54 + NSHeight(controls.frame)) / 2;
     [controls setFrameOrigin:NSMakePoint(16, y)];
     [controls refresh];
 }

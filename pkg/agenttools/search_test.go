@@ -6,7 +6,69 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
+
+func TestSearchFilesUTF8Truncation(t *testing.T) {
+	const maxLineLength = 200
+	asciiPrefix := strings.Repeat("a", maxLineLength-1)
+	longASCII := strings.Repeat("a", maxLineLength+1)
+	tests := []struct {
+		name     string
+		line     []byte
+		wantText string
+	}{
+		{
+			name:     "three-byte rune crossing cutoff",
+			line:     []byte(asciiPrefix + "界needle"),
+			wantText: asciiPrefix + "...",
+		},
+		{
+			name:     "four-byte rune crossing cutoff",
+			line:     []byte(asciiPrefix + "🌱needle"),
+			wantText: asciiPrefix + "...",
+		},
+		{
+			name:     "long ASCII preserves excerpt length",
+			line:     []byte(longASCII + "needle"),
+			wantText: longASCII[:maxLineLength] + "...",
+		},
+		{
+			name:     "short Unicode line is unchanged",
+			line:     []byte("短い🌱 needle"),
+			wantText: "短い🌱 needle",
+		},
+		{
+			name:     "invalid UTF-8 is made valid",
+			line:     []byte{0xff, 'n', 'e', 'e', 'd', 'l', 'e'},
+			wantText: "\uFFFDneedle",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "match.txt"), tt.line, 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			matches, err := SearchFiles(context.Background(), root, "needle", SearchOptions{
+				MaxLineLength: maxLineLength,
+				DisplayPath:   filepath.Base,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "match.txt:1: " + tt.wantText
+			if len(matches) != 1 || matches[0] != want {
+				t.Fatalf("matches=%q, want [%q]", matches, want)
+			}
+			if !utf8.ValidString(matches[0]) {
+				t.Fatalf("match is not valid UTF-8: %q", matches[0])
+			}
+		})
+	}
+}
 
 func TestSearchFilesPoliciesAndLimits(t *testing.T) {
 	root := t.TempDir()

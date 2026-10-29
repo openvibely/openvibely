@@ -28,6 +28,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -1271,11 +1272,10 @@ func (h *Handler) GetTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] GetTask id=%s defaultTab=%s", taskID, defaultTab)
 
-	// HTMX request: return just the task detail content partial
+	if defaultTab == "chat" || c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
+		return h.getTaskThread(c, data, defaultTab)
+	}
 	if isHTMX {
-		if c.Request().Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
-			return h.getTaskThread(c, data, defaultTab)
-		}
 		return h.renderTaskDetailContentData(c, data, defaultTab)
 	}
 
@@ -3671,6 +3671,10 @@ func (h *Handler) getTaskThread(c echo.Context, detail *taskDetailContentData, s
 	}
 	if detail != nil {
 		c.SetRequest(c.Request().WithContext(components.WithTaskFiles(c.Request().Context(), detail.files)))
+		if !isHTMX(c) {
+			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+			return render(c, http.StatusOK, pages.TaskDetailPage(projects, detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
+		}
 		return render(c, http.StatusOK, pages.TaskDetailContent(detail.task, detail.taskGoal, &detail.executionMetrics, detail.schedules, detail.agents, detail.agentDefs, detail.attachments, selectedTab, detail.reviewComments, thread))
 	}
 	return render(c, http.StatusOK, thread)
@@ -3823,4 +3827,17 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		"task-thread-view",
 		task.ProjectID,
 	))
+}
+
+func (h *Handler) TaskListPanel(c echo.Context) error {
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+	sortPrefs := getSortPreferences(c)
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks)))
 }

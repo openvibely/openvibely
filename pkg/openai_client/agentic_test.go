@@ -1611,7 +1611,16 @@ func TestSendAgentic_APIKeyGPT56UsesResponsesLiteWebSocket(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T) {
+func TestSendAgentic_OAuthResponsesLiteStandaloneWebSearch(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-6.1-sol"} {
+		t.Run(model, func(t *testing.T) {
+			testOAuthResponsesLiteStandaloneWebSearch(t, model)
+		})
+	}
+}
+
+func testOAuthResponsesLiteStandaloneWebSearch(t *testing.T, model string) {
+	t.Helper()
 	var searchRequests atomic.Int32
 	var callbackResult WebSearchResult
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1649,6 +1658,10 @@ func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T
 				t.Errorf("decode first Responses request: %v", err)
 				return
 			}
+			metadata, _ := first["client_metadata"].(map[string]any)
+			if first["model"] != model || metadata[responsesLiteMetadataKey] != "true" {
+				t.Errorf("model/Lite metadata = %v/%#v", first["model"], metadata)
+			}
 			if _, ok := first["tools"]; ok {
 				t.Error("Responses Lite request unexpectedly contains top-level tools")
 			}
@@ -1670,7 +1683,7 @@ func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T
 			}
 			for _, event := range []string{
 				`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"web-1","namespace":"web","name":"run","arguments":"{\"search_query\":[{\"q\":\"OpenAI news\"}]}"}}`,
-				`{"type":"response.completed","response":{"id":"resp-1","status":"completed","model":"gpt-5.6-sol"}}`,
+				fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp-1","status":"completed","model":%q}}`, model),
 			} {
 				if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
 					t.Errorf("write first response event: %v", err)
@@ -1701,7 +1714,7 @@ func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T
 			}
 			for _, event := range []string{
 				`{"type":"response.output_text.delta","delta":"done"}`,
-				`{"type":"response.completed","response":{"id":"resp-2","status":"completed","model":"gpt-5.6-sol"}}`,
+				fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp-2","status":"completed","model":%q}}`, model),
 			} {
 				if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
 					t.Errorf("write second response event: %v", err)
@@ -1721,7 +1734,7 @@ func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(24*time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "Search", &AgenticOptions{
-		Model: "gpt-5.6-sol", DisableTools: true, WebSearchEnabled: true, MaxTurns: 2,
+		Model: model, DisableTools: true, WebSearchEnabled: true, MaxTurns: 2,
 		OnWebSearchResult: func(result WebSearchResult) { callbackResult = result },
 	})
 	if err != nil {

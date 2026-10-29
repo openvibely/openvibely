@@ -39,11 +39,14 @@ templ TaskWorkspaceScript() {
 			width = Math.max(340, Math.min(720, Number(value) || 420));
 			// Keep desktop windows docked, reducing the displayed panel width before
 			// falling back to a sheet. Preserve the user's preferred width on resize.
-			var displayedWidth = titlebar ? Math.min(width, Math.max(340, root.clientWidth - 340)) : width;
+			// A 320px thread keeps the inspector docked in windowed desktop
+				// layouts after the sidebar and shell gutters consume their space.
+				var minimumThreadWidth = 320, minimumPanelWidth = 340;
+				var displayedWidth = titlebar ? Math.min(width, Math.max(minimumPanelWidth, root.clientWidth - minimumThreadWidth)) : width;
 			root.style.setProperty('--task-panel-width', displayedWidth + 'px');
 			divider.setAttribute('aria-valuenow', String(width));
 			store('task-inspector-width', width);
-			var overlay = titlebar ? root.clientWidth < 680 : root.clientWidth < width + 560;
+			var overlay = titlebar ? root.clientWidth < minimumPanelWidth + minimumThreadWidth : root.clientWidth < width + 560;
 			panel.dataset.overlay = String(overlay);
 			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
 			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);

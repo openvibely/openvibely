@@ -25,6 +25,10 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	var priority atomic.Int32
 	priority.Store(2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -150,7 +154,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("in-app task navigation settled", `String(window.gutterNavigationSettled)`, "true")
 		b.waitFor("saved details ready", `String(Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertFooter := func() {
-			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-25)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
+			b.waitFor("actions inset from panel bottom and left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect();return String(Math.abs(panel.bottom-first.bottom-12)<1 && Math.abs(first.left-panel.left-25)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
 		}
 		assertTabGutters()
 		b.evaluate(`window.beforeGutterReload=true; 'marked'`)
@@ -238,6 +242,10 @@ func TestBrowserFunctional_TaskMetadataBadgesAtMinimumPanelWidth(t *testing.T) {
 	agentID := "long-agent"
 	task := &models.Task{ID: "badge-task", Status: models.StatusRunning, Category: models.CategoryActive, Priority: 2, AgentDefinitionID: &agentID}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -268,6 +276,10 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	var unexpected atomic.Int32
 	var sends atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -348,7 +360,8 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.click("#task-details-opener")
 		b.waitFor("draft inspector", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1100, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
-		b.waitFor("breadcrumb and panel toggle do not overlap", `(function(){var caret=document.getElementById('task-resource-selector-button').getBoundingClientRect(),toggle=document.getElementById('task-details-opener').getBoundingClientRect();return String(caret.right+8<=toggle.left)})()`, "true")
+		// Allow subpixel flex-layout rounding while retaining the intended 8px gap.
+		b.waitFor("breadcrumb and panel toggle do not overlap", `(function(){var caret=document.getElementById('task-resource-selector-button').getBoundingClientRect(),toggle=document.getElementById('task-details-opener').getBoundingClientRect();return caret.right+8<=toggle.left+0.5 ? 'true' : JSON.stringify({caret:caret.toJSON(),toggle:toggle.toJSON(),header:document.querySelector('#task-detail-content > [data-page-header]').getBoundingClientRect().toJSON()})})()`, "true")
 
 		b.click(`[data-tab="schedules"]`)
 		b.click(`[aria-label="Add schedule"]`)
@@ -416,6 +429,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		executions = append(executions, models.Execution{ID: fmt.Sprintf("execution-%d", i), TaskID: task.ID, Status: models.ExecCompleted, DurationMs: 12000, PromptSent: strings.Repeat("Reading history ", 20), StartedAt: time.Unix(int64(i+1), 0)})
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -465,13 +482,13 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.click("#task-details-opener")
 		b.waitFor("panel opened", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
-		b.waitFor("inspector below project titlebar and flush with viewport", `(function(){var r=document.getElementById('task-details-panel').getBoundingClientRect();return [Math.round(r.top),Math.round(innerWidth-r.right),Math.round(innerHeight-r.bottom)].join(':')})()`, "46:0:0")
+		b.waitFor("inspector below project titlebar with shell inset", `(function(){var r=document.getElementById('task-details-panel').getBoundingClientRect();return [Math.round(r.top),Math.round(innerWidth-r.right),Math.round(innerHeight-r.bottom)].join(':')})()`, "46:10:10")
 		b.waitFor("task outer shell cannot rubber-band away from fixed inspector", `(function(){return String([document.documentElement,document.body,document.getElementById('main-content')].every(function(el){return getComputedStyle(el).overscrollBehaviorY==='none'}))})()`, "true")
 		b.waitFor("single toggle and no panel heading", `String(document.querySelector('#task-details-panel h2')===null && document.querySelector('#task-details-panel [aria-label="Collapse details panel"]')===null && document.querySelector('#task-details-opener line').getAttribute('x1')==='15')`, "true")
 		b.waitFor("symmetric thread gutters", `(function(){var chat=document.getElementById('tab-chat').getBoundingClientRect(),main=document.getElementById('main-content').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(Math.abs((panel.left-chat.right)-(chat.left-main.left))<1)})()`, "true")
 		b.waitFor("reference tab vertical spacing", `(function(){var row=getComputedStyle(document.querySelector('#task-details-panel [role="tablist"]')),tab=getComputedStyle(document.getElementById('inspector-tab-details'));return [row.marginTop,row.marginBottom,tab.paddingTop,tab.paddingBottom,tab.lineHeight,tab.fontWeight].join(':')})()`, "8px:16px:6px:6px:20px:400")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1100, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
-		b.waitFor("desktop windowed panel below titlebar and docked", `(function(){var p=document.getElementById('task-details-panel'),r=p.getBoundingClientRect(),chat=document.getElementById('tab-chat').getBoundingClientRect();return String(r.top===46 && r.bottom===innerHeight && p.dataset.overlay==='false' && chat.right<r.left)})()`, "true")
+		b.waitFor("desktop windowed panel below titlebar and docked", `(function(){var p=document.getElementById('task-details-panel'),r=p.getBoundingClientRect(),chat=document.getElementById('tab-chat').getBoundingClientRect();return String(r.top===46 && r.bottom===innerHeight-10 && p.dataset.overlay==='false' && chat.right<r.left)})()`, "true")
 		b.evaluate(`document.getElementById('desktop-project-titlebar').style.height='54px'; 'resized'`)
 		b.waitFor("desktop titlebar height tracked", `String(document.getElementById('task-details-panel').getBoundingClientRect().top)`, "54")
 		b.evaluate(`document.getElementById('desktop-project-titlebar').style.height=''; 'restored'`)
@@ -538,6 +555,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("windowed desktop diff inspector docked below titlebar", `(function(){var p=document.getElementById('task-details-panel'),r=p.getBoundingClientRect(),diff=document.getElementById('tab-changes');return String(r.top===46 && p.dataset.overlay==='false' && !diff.inert && diff.getBoundingClientRect().right<r.left)})()`, "true")
 		b.click("#task-details-opener")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("back control ready after resize", `String((()=>{const e=document.getElementById("task-workspace-back"),r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})())`, "true")
 		b.click("#task-workspace-back")
 		b.waitFor("draft and exact scroll restored", `(window.savedComposer===document.getElementById('task-message-input'))+':'+document.getElementById('task-message-input').value+':'+(document.getElementById('task-thread-messages').scrollTop===window.savedScroll)`, "true:Keep this draft:true")
 		b.navigateHistory(-1)
@@ -609,6 +627,10 @@ func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testin
 	task := &models.Task{ID: "sticky-task", ProjectID: project.ID, Title: "Sticky headers", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 	diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1,100 +1,100 @@\n" + strings.Repeat(" unchanged line\n", 100)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -639,6 +661,10 @@ func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testin
 func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -708,6 +734,10 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 	var interval atomic.Int32
 	interval.Store(30)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -805,6 +835,10 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{ID: "hover-task", ProjectID: "hover-project", Title: "Current task", Category: models.CategoryBacklog}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -881,6 +915,10 @@ func TestBrowserFunctional_BreadcrumbOpensBeforeHTMXInitialization(t *testing.T)
 	}))
 	page := `<!doctype html><html><head><script src="` + static.URL("vendor/htmx.min.js") + `"></script><script defer src="/open.js"></script></head><body>` + selector + `</body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tasks/sidebar" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}

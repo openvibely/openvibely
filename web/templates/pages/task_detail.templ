@@ -34,9 +34,9 @@ templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComment
 	</div>
 }
 
-templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment, initialThread ...templ.Component) {
 	@layout.Base(task.Title, projects, task.ProjectID) {
-		@TaskDetailContent(task, goal, metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments)
+		@TaskDetailContent(task, goal, metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments, initialThread...)
 	}
 }
 
@@ -1536,11 +1536,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                 if len(initialThread) > 0 {
                     @initialThread[0]
                 } else {
-				<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden">
-					<div class="card-body flex-1 flex flex-col min-h-0">
-						<h4 class="text-lg font-bold mb-3">Thread</h4>
-						<p class="text-sm opacity-60">Thread is loading...</p>
-					</div>
+				<div class="flex-1 flex items-center justify-center min-h-0" data-thread-loading role="status">
+					<span class="loading loading-spinner loading-sm opacity-50" aria-hidden="true"></span>
+					<span class="sr-only">Thread is loading...</span>
 				</div>
                 }
 			</div>

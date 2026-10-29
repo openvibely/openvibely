@@ -100,6 +100,10 @@ func (b *chatInputRequestBroker) create(projectID, execID string, questions []ch
 }
 
 func (b *chatInputRequestBroker) wait(ctx context.Context, id string) ([]chatInputRequestAnswer, error) {
+	return b.waitUntil(ctx, id, nil)
+}
+
+func (b *chatInputRequestBroker) waitUntil(ctx context.Context, id string, interrupt <-chan struct{}) ([]chatInputRequestAnswer, error) {
 	if b == nil {
 		return nil, fmt.Errorf("input request broker unavailable")
 	}
@@ -110,6 +114,9 @@ func (b *chatInputRequestBroker) wait(ctx context.Context, id string) ([]chatInp
 		return nil, fmt.Errorf("input request missing")
 	}
 	select {
+	case <-interrupt:
+		// Keep the question available; the persisted answer resumes after the update.
+		return nil, context.Canceled
 	case answers := <-req.answerCh:
 		return answers, nil
 	case <-time.After(time.Until(req.ExpiresAt)):

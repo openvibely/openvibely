@@ -100,9 +100,10 @@ func TestCatalogAutomationGraphAndYAMLContrastRoles(t *testing.T) {
 
 func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T) {
 	type runtimeTheme struct {
-		ID    string            `json:"id"`
-		CSS   map[string]string `json:"css"`
-		Roles [7]string         `json:"r"`
+		ID         string            `json:"id"`
+		CSS        map[string]string `json:"css"`
+		SurfaceCSS map[string]string `json:"surfaceCSS"`
+		Roles      [7]string         `json:"r"`
 	}
 	var runtime []runtimeTheme
 	if err := json.Unmarshal([]byte(RuntimeCatalogJSON()), &runtime); err != nil {
@@ -120,6 +121,11 @@ func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T)
 		expectedTheme, ok := expected[theme.ID]
 		if !ok {
 			t.Fatalf("runtime catalog contains unknown theme %s", theme.ID)
+		}
+		for name, value := range expectedTheme.SurfaceCSS {
+			if theme.SurfaceCSS[name] != value {
+				t.Fatalf("theme %s lost surface role %s", theme.ID, name)
+			}
 		}
 		if theme.Roles != toggleRuntimeRoles(expectedTheme) {
 			t.Fatalf("runtime theme %s lost derived toggle roles", theme.ID)

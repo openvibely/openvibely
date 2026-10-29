@@ -489,6 +489,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		toolPolicy := runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)
 		restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
+			PublishGeneratedImage:    openAIImagePublisher(rt),
 			OmitExecutionEnvironment: rawDirectPrompt || lifecycleHookCall,
 			Model:                    agent.Model,
 			ContextWindow:            agent.ContextWindow,
@@ -588,6 +589,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
+		PublishGeneratedImage:     openAIImagePublisher(rt),
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
 		MaxOutputTokens:           openAIAgenticOutputBudget,
@@ -731,6 +733,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
+		PublishGeneratedImage:     openAIImagePublisher(rt),
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
 		MaxOutputTokens:           openAIAgenticOutputBudget,

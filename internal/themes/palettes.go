@@ -14,8 +14,11 @@ type paletteSpec struct {
 	text                             string
 	muted, accent, link, codeBg      string
 	tabDivider                       string
+	shellChrome, shellRail           string
+	shellRowSelected, border         string
 	info, success, warning, error    string
 	syntax                           map[string]string
+	semanticOverrides                map[string]string
 }
 
 func PaletteThemes() []Theme {
@@ -29,6 +32,28 @@ func PaletteThemes() []Theme {
 
 func paletteSpecs() []paletteSpec {
 	return []paletteSpec{
+		{
+			id: "openvibely-graphite", name: "OpenVibely Graphite", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
+			canvas: "#111111", column: "#1D1D1D", surface: "#2B2B2B", raised: "#2B2B2B", text: "#E6E6E6", muted: "#9A9A9A", accent: "#7C83F7", codeBg: "#222222",
+			shellRail: "#151515", shellRowSelected: "#262626",
+			info: "#6EA8FE", success: "#4CC38A", warning: "#E5B454", error: "#F07178",
+			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#E6E6E6", "comment": "#7A7A7A", "title": "#82AAFF"},
+		},
+		{
+			id: "openvibely-layered", name: "OpenVibely Layered", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
+			canvas: "#15191E", column: "#1D232A", surface: "#191E24", raised: "#1D232A", text: "#A6ADBB", muted: "#A6ADBB", accent: "#7480FF", link: "#7480FF", codeBg: "#111418",
+			shellChrome: "#1D232A", shellRail: "#191E24", border: "#1D232A", tabDivider: "#3F4652",
+			semanticOverrides: map[string]string{"primaryForeground": "#050617", "focus": "#7480FF", "buttonFg": "#050617", "buttonHoverBg": "#646FE4", "buttonHoverFg": "#050617", "selectionBg": "rgba(100, 111, 228, 0.32)"},
+			info:              "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
+			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#C8CED8", "comment": "#6B7480", "title": "#82AAFF"},
+		},
+		{
+			id: "openvibely-slate", name: "OpenVibely Slate", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
+			canvas: "#1E2329", column: "#16191E", surface: "#252B34", raised: "#2B323C", text: "#D5DAE1", muted: "#949CA8", accent: "#7480FF", codeBg: "#181C21",
+			shellRail: "#1A1E23",
+			info:      "#4EA8DE", success: "#46C08A", warning: "#E6B450", error: "#EF6B73",
+			syntax: map[string]string{"keyword": "#C792EA", "string": "#A5D6A7", "number": "#F78C6C", "function": "#82AAFF", "type": "#FFCB6B", "variable": "#D5DAE1", "comment": "#6B7480", "title": "#82AAFF"},
+		},
 		{
 			id: "openvibely-midnight", name: "OpenVibely Midnight", source: "OpenVibely palette", upstream: "OpenVibely", mode: "dark",
 			canvas: "#0E1217", column: "#080A0D", surface: "#141A21", raised: "#1B232C", text: "#CDD6E0", muted: "#8A97A6", accent: "#2EC4B6",
@@ -128,8 +153,15 @@ func paletteTheme(spec paletteSpec) Theme {
 			codeBg = mixHex(spec.canvas, spec.text, 0.04)
 		}
 	}
-	border := mixHex(spec.surface, spec.text, 0.10)
+	border := spec.border
+	if border == "" {
+		border = mixHex(spec.surface, spec.text, 0.10)
+	}
 	borderStrong := ensureContrast(mixHex(spec.surface, spec.text, 0.20), []string{raised, codeBg}, 1.5, spec.text)
+	inputBorder := borderStrong
+	if spec.border != "" {
+		inputBorder = spec.border
+	}
 	link := spec.link
 	if link == "" {
 		link = spec.accent
@@ -145,7 +177,7 @@ func paletteTheme(spec paletteSpec) Theme {
 		"text": spec.text, "textMuted": muted, "border": border, "borderStrong": borderStrong,
 		"automationNodeBorder": borderStrong, "automationEdge": ensureContrast(muted, []string{spec.surface}, 3, spec.text), "yamlIndentRail": borderStrong,
 		"primary": spec.accent, "primaryForeground": readableOn(spec.accent), "focus": spec.accent, "link": link,
-		"inputBg": spec.surface, "inputBorder": borderStrong,
+		"inputBg": spec.surface, "inputBorder": inputBorder,
 		"buttonBg": spec.accent, "buttonFg": readableOn(spec.accent), "buttonHoverBg": buttonHover, "buttonHoverFg": readableOn(buttonHover),
 		"buttonSecondaryBg": mixHex(spec.surface, spec.text, 0.08), "buttonSecondaryFg": spec.text,
 		"selectionBg": withAlpha(spec.accent, 0.28), "hoverBg": withAlpha(spec.text, 0.07),
@@ -157,6 +189,9 @@ func paletteTheme(spec paletteSpec) Theme {
 		"diffModifyBg": withAlpha(spec.warning, 0.16), "diffModifyFg": spec.warning,
 		"diffDeleteBg": mixHex(spec.canvas, spec.error, 0.16), "diffDeleteFg": spec.error,
 		"codeBg": codeBg, "codeFg": spec.text,
+	}
+	for key, value := range spec.semanticOverrides {
+		semantic[key] = value
 	}
 	syntax := map[string]string{"background": codeBg, "foreground": spec.text}
 	tokens := map[string]string{"error": spec.error}
@@ -177,12 +212,21 @@ func paletteTheme(spec paletteSpec) Theme {
 		css["--ov-project-tab-divider"] = spec.tabDivider
 	}
 	css["--ov-accent-tint"] = accentTintColor(spec.accent)
+	if spec.shellChrome != "" {
+		css["--ov-shell-chrome"] = spec.shellChrome
+	}
+	if spec.shellRail != "" {
+		css["--ov-shell-rail"] = spec.shellRail
+	}
+	if spec.shellRowSelected != "" {
+		css["--ov-shell-row-selected"] = spec.shellRowSelected
+	}
 	css["--ov-daisy-primary"], css["--ov-daisy-primary-content"] = daisyPrimaryColors(link, spec.canvas)
 	kind := KindLight
 	if dark {
 		kind = KindDark
 	}
-	return Theme{
+	theme := Theme{
 		ID: spec.id, Name: spec.name, Source: spec.source, Kind: kind, Mode: spec.mode, Upstream: spec.upstream,
 		Semantic: semantic, Syntax: syntax, CSS: css,
 		Preview: map[string]string{
@@ -191,6 +235,8 @@ func paletteTheme(spec paletteSpec) Theme {
 		},
 		SearchText: spec.name + " " + kind + " " + spec.source + " palette app theme",
 	}
+	applySurfacePalette(&theme)
+	return theme
 }
 
 func mixHex(from, to string, amount float64) string {

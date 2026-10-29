@@ -217,3 +217,23 @@ func TestBrowserFunctional_NestedToolOutputStaysInCard(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_ToolGeometryStableAcrossLiveAndSavedRendering(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const text = '[Using tool: shell | echo example]\n[Tool shell done]\n' + 'output line\n'.repeat(8) + '[/Tool]\nDone.';
+ const sizes = [];
+ for (const live of [true, false, true]) {
+  stream.style.fontSize = live ? '14px' : '16px';
+  stream.style.lineHeight = live ? '1.625' : '1.5';
+  await window.renderStreamingContent(stream, text, live);
+  sizes.push(Array.from(stream.querySelectorAll('.stream-tool-output-text')).map(el => ({
+   height: el.getBoundingClientRect().height,
+   font: getComputedStyle(el).fontSize,
+   line: getComputedStyle(el).lineHeight
+  })));
+ }
+ assert(sizes[0].length === 2, 'expected input and output boxes');
+ assert(JSON.stringify(sizes[0]) === JSON.stringify(sizes[1]) && JSON.stringify(sizes[1]) === JSON.stringify(sizes[2]), 'tool geometry changed between live and saved rendering: ' + JSON.stringify(sizes));
+ return {};
+ `)
+}

@@ -188,6 +188,6 @@ window.addEventListener('DOMContentLoaded',function(){
 	stopHandlerBrowserProcess(cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
 	require.EqualValues(t, 2, warmRequests.Load(), "returns from the list pages must exercise the thread cache")
-	require.EqualValues(t, 1, threadRequests.Load(), "only the cold thread visit should use lazy loading")
+	require.Zero(t, threadRequests.Load(), "a full page load embeds the thread")
 
 }
