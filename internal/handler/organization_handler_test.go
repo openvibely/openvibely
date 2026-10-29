@@ -179,3 +179,23 @@ func TestOrganizationHostedLogoutRevokesSignedCookie(t *testing.T) {
 	require.Equal(t, http.StatusFound, orgRequest(e, http.MethodPost, "/logout", nil, cookie).Code)
 	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
 }
+
+func TestOrganizationUsesAppShellAndHTMXFragments(t *testing.T) {
+	_, e := organizationTestApp(t, false)
+	full := orgRequest(e, http.MethodGet, "/organization", nil, nil)
+	require.Equal(t, http.StatusOK, full.Code)
+	require.Contains(t, full.Body.String(), `id="main-content"`)
+	require.Contains(t, full.Body.String(), `data-nav-base="/organization"`)
+	require.Contains(t, full.Body.String(), `hx-get="/organization?project_id=`)
+	require.Contains(t, full.Body.String(), `id="organization-container"`)
+	require.NotContains(t, full.Body.String(), "Back to OpenVibely")
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/organization", nil)
+	req.Header.Set("HX-Request", "true")
+	fragment := httptest.NewRecorder()
+	e.ServeHTTP(fragment, req)
+	require.Equal(t, http.StatusOK, fragment.Code)
+	require.Contains(t, fragment.Body.String(), `id="organization-container"`)
+	require.NotContains(t, fragment.Body.String(), "<html")
+	require.NotContains(t, fragment.Body.String(), `id="main-content"`)
+	require.Contains(t, fragment.Body.String(), `hx-post="/organization" hx-target="#main-content"`)
+}
