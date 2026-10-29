@@ -7,12 +7,13 @@ import "strings"
 type PromptProfile string
 
 const (
-	PromptProfileCodexReserve   PromptProfile = "codex/gpt-reserve.md"
-	PromptProfileCodexGPT6Astra PromptProfile = "codex/gpt-6-astra.md"
-	PromptProfileCodexGPT6Sol   PromptProfile = "codex/gpt-6-sol.md"
-	PromptProfileCodexGPT6Luna  PromptProfile = "codex/gpt-6-luna.md"
-	PromptProfileCodexGPT55     PromptProfile = "codex/gpt-5.5.md"
-	PromptProfileClaudeCode     PromptProfile = "anthropic_system_prompt.md"
+	PromptProfileCodexGPT61Terra PromptProfile = "codex/gpt-6.1-terra.md"
+	PromptProfileCodexReserve    PromptProfile = "codex/gpt-reserve.md"
+	PromptProfileCodexGPT6Astra  PromptProfile = "codex/gpt-6-astra.md"
+	PromptProfileCodexGPT6Sol    PromptProfile = "codex/gpt-6-sol.md"
+	PromptProfileCodexGPT6Luna   PromptProfile = "codex/gpt-6-luna.md"
+	PromptProfileCodexGPT55      PromptProfile = "codex/gpt-5.5.md"
+	PromptProfileClaudeCode      PromptProfile = "anthropic_system_prompt.md"
 )
 
 // ChatCompletionsReasoningMode describes legacy Chat Completions reasoning
@@ -67,7 +68,9 @@ var modelCatalog = []ModelSpec{
 	// OpenAI models.
 	{Provider: ProviderOpenAI, ID: "gpt-6-astra", Label: "gpt-6-astra", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Astra, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true},
 	{Provider: ProviderOpenAI, ID: "gpt-6.1-sol", Label: "gpt-6.1-sol", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningRequired},
-	{Provider: ProviderOpenAI, ID: "gpt-6.1-terra", Label: "gpt-6.1-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
+	// Codex 0.164.0 models_cache.json (2026-10-29): Terra 6.1 uses low effort,
+	// a 500K default context, and its own prompt. Keep API-supported none effort.
+	{Provider: ProviderOpenAI, ID: "gpt-6.1-terra", Label: "gpt-6.1-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "low", ContextWindow: 500000, PromptProfile: PromptProfileCodexGPT61Terra, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
 	{Provider: ProviderOpenAI, ID: "gpt-6-sol", Label: "gpt-6-sol", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Sol, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
 	{Provider: ProviderOpenAI, ID: "gpt-6-luna", Label: "gpt-6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Luna, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
 	{Provider: ProviderOpenAI, ID: "gpt-5.6-sol", Label: "gpt-5.6-sol", Default: true, ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
