@@ -645,17 +645,18 @@ Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus
 ### Phase 0: Groundwork (partly complete; remaining work needs sizing)
 - **Project-boundary audit performed:** findings, fixes, coverage, and remaining limits are recorded in [Project access audit](project-access-audit.md). Shared task/input guards and scoped review/webhook/chat-status operations are added. This is not user authorization; legacy unscoped requests and global settings remain until the users/policy phases.
 - **Complete:** backend-neutral persistence interfaces and SQLite implementation (§2.6).
-- **Remaining:** define `Principal`/`AccessScope` and expand the audit into a resource-wide authorization matrix, including legacy unscoped requests, before sizing the remaining work.
+- **Remaining:** `Principal` is now implemented in Phase 1; define `AccessScope` and expand the audit into a resource-wide authorization matrix, including legacy unscoped requests, before sizing the remaining work.
 - **IDOR hardening:** task-route ownership is now covered by a route-walking contract test; review, webhook, queued-input, and chat-status fixes have regression tests. Extend coverage beyond these route families as described in the audit.
 - Live transport now uses WebSockets with project/task ownership checks. Preserve these checks and add per-subscription principal authorization and revocation in Phase 2 (§3.2).
 - Milestone: persistence boundary retained; route ownership and event-stream contract tests green.
 
-### Phase 1: Users (2–3 weeks)
-- `users`, `user_identities`, `organizations`, `org_memberships`, and `user_sessions` migrations, with bootstrap user and default org backfill (§8 steps 1–3, 6).
-- `AuthMiddleware` puts a `Principal` in the context. Disabled mode → bootstrap principal. Local auth → DB users (env seeds the admin). Hosted SSO → `user_identities`.
-- `user_preferences` replaces `ui.*` in `app_settings`.
-- Admin UI: list users, create user or invite link, disable user. `/auth/me` returns the user ID and roles.
-- Milestone: two local users can log in. Each has their own theme and selected project. Everyone still sees everything.
+### Phase 1: Users (implemented initial milestone)
+- Implementation and operating instructions: [Organization accounts: Phase 1](organization-phase-one.md).
+- Migration 217 adds users, identities, organization membership, revocable sessions, invitations, and personal preferences through `OrganizationStore`. A default owner/org is backfilled; `project_organizations` associates existing and new projects without changing the existing project schema.
+- `AuthMiddleware` attaches a principal. Auth-off uses the bootstrap owner and is refused for multi-member installations. Local auth uses database accounts seeded once from the configured credentials. Hosted SSO binds the verified workspace owner and retains single-owner access.
+- Organization UI: rename, member listing, role changes/removal, expiring single-use invitation links, and invitation acceptance. Owner/admin boundaries and last-owner protection apply to organization administration.
+- `ui.*` settings are per-user. Logout and membership removal revoke sessions; WebSockets revalidate membership before delivering queued frames and on change notifications.
+- Milestone: two local users can log in with separate preferences. Everyone still sees every project. Resource-wide roles, durable run attribution, password management UI, and hosted multi-member onboarding are not delivered by this milestone.
 
 ### Phase 2: Sharing and app policy (3–4 weeks)
 - `projects.org_id/owner_user_id/visibility` and `project_members`. `service/authz.Authorizer` with the matrix in §3.1.

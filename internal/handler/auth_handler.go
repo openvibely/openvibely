@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 )
 
@@ -59,7 +60,7 @@ func (h *Handler) authEnabled() bool {
 }
 
 func (h *Handler) isAuthPublicPath(path string) bool {
-	if path == "/login" || path == "/logout" || path == "/auth/me" || path == "/auth/sso/start" || path == "/auth/sso/callback" || path == "/logged-out" || path == "/api/system/health" || path == "/favicon.png" || path == "/favicon.ico" {
+	if path == "/invite" || path == "/login" || path == "/logout" || path == "/auth/me" || path == "/auth/sso/start" || path == "/auth/sso/callback" || path == "/logged-out" || path == "/api/system/health" || path == "/favicon.png" || path == "/favicon.ico" {
 		return true
 	}
 	if strings.HasPrefix(path, "/swagger/") || strings.HasPrefix(path, static.Prefix) {
@@ -84,6 +85,7 @@ const (
 )
 
 type sessionRecognition struct {
+	orgUser           *models.OrgUser
 	localUser         *auth.User
 	hostedClaims      *auth.SessionClaims
 	hostedCookieState hostedCookieState
@@ -103,9 +105,30 @@ func (h *Handler) recognizeSession(request *http.Request, now time.Time) session
 		if err != nil {
 			return sessionRecognition{hostedCookieState: hostedCookieInvalid}
 		}
+		if h.organizationSvc != nil {
+			user, bindErr := h.organizationSvc.HostedSession(request.Context(), cookie.Value)
+			if bindErr != nil || user == nil || user.Disabled || user.Role == "" {
+				return sessionRecognition{hostedCookieState: hostedCookieInvalid, err: bindErr}
+			}
+			return sessionRecognition{orgUser: user, hostedClaims: claims, hostedCookieState: hostedCookieValid}
+		}
 		return sessionRecognition{hostedClaims: claims, hostedCookieState: hostedCookieValid}
 	}
 	if h.authMode == auth.AuthModeLocal && h.authCfg != nil {
+		if h.organizationSvc != nil {
+			cookie, err := request.Cookie(h.authCfg.CookieName)
+			if err != nil {
+				return sessionRecognition{err: err}
+			}
+			user, err := h.organizationSvc.Session(request.Context(), cookie.Value)
+			if err != nil {
+				return sessionRecognition{err: err}
+			}
+			if user == nil {
+				return sessionRecognition{err: auth.ErrInvalidToken}
+			}
+			return sessionRecognition{orgUser: user, localUser: &auth.User{Username: user.Username, Display: user.DisplayName}}
+		}
 		user, err := auth.UserFromRequest(request, *h.authCfg, now)
 		return sessionRecognition{localUser: user, err: err}
 	}
@@ -117,6 +140,9 @@ func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			if err := h.consumeNativeLiveTicket(c); err != nil {
 				return err
+			}
+			if h.organizationSvc != nil {
+				return h.organizationAuth(c, next)
 			}
 			if !h.authEnabled() {
 				return next(c)
@@ -240,6 +266,9 @@ func (h *Handler) AuthLogin(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/")
 	}
 
+	if h.organizationSvc != nil {
+		return h.organizationLogin(c)
+	}
 	now := time.Now()
 	username := strings.TrimSpace(c.FormValue("username"))
 	if h.isConfiguredLoginUser(username) && h.isLoginLocked(now) {
@@ -384,6 +413,15 @@ func (h *Handler) HostedSSOCallback(c echo.Context) error {
 	if err != nil {
 		return h.hostedRetryPage(c, http.StatusBadGateway, tx.Destination)
 	}
+	if h.organizationSvc != nil {
+		user, err := h.organizationSvc.Store.BindHostedOwner(c.Request().Context(), identity.Subject)
+		if err != nil || user == nil || user.Disabled || user.Role == "" {
+			return h.hostedRetryPage(c, http.StatusForbidden, tx.Destination)
+		}
+		if err := h.organizationSvc.RegisterHostedSession(c.Request().Context(), token, user.UserID, claims.ExpiresAt); err != nil {
+			return err
+		}
+	}
 	c.SetCookie(h.hostedSessionCookie(token, now))
 	return c.Redirect(http.StatusFound, tx.Destination)
 }
@@ -504,6 +542,11 @@ func (h *Handler) pruneLoginFailuresLocked(now time.Time) {
 
 func (h *Handler) authPrincipalID(c echo.Context) string {
 	if c != nil {
+		if p, ok := models.PrincipalFromContext(c.Request().Context()); ok {
+			return "user:" + p.UserID
+		}
+	}
+	if c != nil {
 		if value := c.Get("auth_user"); value != nil {
 			if user, ok := value.(*auth.User); ok && strings.TrimSpace(user.Username) != "" {
 				return "web:" + strings.TrimSpace(user.Username)
@@ -520,8 +563,25 @@ func (h *Handler) AuthLogout(c echo.Context) error {
 		if len(origins) != 1 || origins[0] != h.appBaseURL {
 			return c.NoContent(http.StatusForbidden)
 		}
+		if h.organizationSvc != nil {
+			if cookie, err := c.Cookie(auth.DefaultCookieName); err == nil {
+				if err := h.organizationSvc.Logout(c.Request().Context(), cookie.Value); err != nil {
+					return err
+				}
+			}
+		}
 		c.SetCookie(h.hostedSessionDeletionCookie())
 		return c.Redirect(http.StatusFound, "/logged-out")
+	}
+	if h.organizationSvc != nil {
+		if err := requireOrgSameOrigin(c); err != nil {
+			return err
+		}
+		if cookie, err := c.Cookie(h.authCfg.CookieName); err == nil {
+			if err := h.organizationSvc.Logout(c.Request().Context(), cookie.Value); err != nil {
+				return err
+			}
+		}
 	}
 	if h.authCfg != nil {
 		secure := c.Scheme() == "https"
@@ -531,6 +591,9 @@ func (h *Handler) AuthLogout(c echo.Context) error {
 }
 
 func (h *Handler) AuthMe(c echo.Context) error {
+	if h.organizationSvc != nil {
+		return h.organizationMe(c)
+	}
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.authMode == auth.AuthModeHostedSSO {
 		session := h.recognizeSession(c.Request(), time.Now())

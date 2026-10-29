@@ -26,6 +26,7 @@ import (
 )
 
 type Handler struct {
+	organizationSvc            *service.OrganizationService
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService
 	swarmSvc                   *service.SwarmService
@@ -765,6 +766,13 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/login", h.AuthLogin)
 	e.POST("/logout", h.AuthLogout)
 	e.GET("/auth/me", h.AuthMe)
+	e.GET("/organization", h.OrganizationPage)
+	e.POST("/organization", h.RenameOrganization)
+	e.POST("/organization/invitations", h.CreateOrgInvitation)
+	e.POST("/organization/invitations/:id/revoke", h.RevokeOrgInvitation)
+	e.POST("/organization/members/:id", h.ChangeOrgMember)
+	e.GET("/invite", h.OrgInvitePage)
+	e.POST("/invite", h.AcceptOrgInvitation)
 	e.GET("/auth/sso/start", h.HostedSSOStart)
 	e.GET("/auth/sso/callback", h.HostedSSOCallback)
 	e.GET("/logged-out", h.LoggedOut)
