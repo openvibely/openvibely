@@ -113,7 +113,7 @@ func (h *Handler) organizationMe(c echo.Context) error {
 		p, claims := session.orgUser.Principal, session.hostedClaims
 		return c.JSON(http.StatusOK, map[string]any{
 			"authenticated": true, "user_id": p.UserID, "org_id": p.OrgID, "role": p.Role,
-			"username": claims.Email, "display": claims.Display, "email": claims.Email,
+			"username": p.Username, "display": p.DisplayName, "email": p.Username,
 			"subject": claims.Subject, "auth_source": auth.HostedAuthSource,
 		})
 	}

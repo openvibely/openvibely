@@ -361,7 +361,9 @@ func TestOrganizationHostedIdentityReplacesPlaceholder(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
 	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
-	// Also covers existing sessions issued before profile synchronization.
+	// A fresh verified SSO exchange updates the profile before issuing a session.
+	_, err = h.organizationSvc.Store.BindHostedOwner(t.Context(), claims.Subject, claims.Email)
+	require.NoError(t, err)
 	me := orgRequest(e, http.MethodGet, "/auth/me", nil, cookie)
 	require.Equal(t, http.StatusOK, me.Code, me.Body.String())
 	var data map[string]any
@@ -433,4 +435,42 @@ func TestOrganizationPendingPreferencesRequireMatchingAccount(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOrganizationOldHostedCookieDoesNotOverwriteProfile(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "same-owner", Email: "old@example.com", Display: "old@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	_, err := tc.stores.Organizations.BindHostedOwner(t.Context(), claims.Subject, claims.Email)
+	require.NoError(t, err)
+	token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+	// A later SSO exchange supplies an updated email for the same account.
+	_, err = tc.stores.Organizations.BindHostedOwner(t.Context(), claims.Subject, "new@example.com")
+	require.NoError(t, err)
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	me := orgRequest(e, http.MethodGet, "/auth/me", nil, cookie)
+	require.Equal(t, http.StatusOK, me.Code)
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &data))
+	require.Equal(t, "new@example.com", data["username"])
+	require.Equal(t, "new@example.com", data["display"])
+	require.Equal(t, "new@example.com", data["email"])
+	require.Equal(t, auth.HostedAuthSource, data["auth_source"])
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.AddCookie(cookie)
+	session := h.recognizeSession(req, now)
+	require.NotNil(t, session.orgUser)
+	require.Equal(t, "new@example.com", session.orgUser.Username)
+	saved, err := tc.stores.Organizations.UserByID(t.Context(), models.BootstrapUserID)
+	require.NoError(t, err)
+	require.Equal(t, "new@example.com", saved.Username)
+	require.Equal(t, "new@example.com", saved.DisplayName)
+	require.NoError(t, h.organizationSvc.Logout(t.Context(), token))
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
 }
