@@ -47,6 +47,26 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  (async function(){
  function wait(predicate){return new Promise((resolve,reject)=>{let deadline=Date.now()+12000;(function poll(){if(predicate() && !document.querySelector('.htmx-request, .htmx-settling, .htmx-swapping'))return resolve();if(Date.now()>deadline)return reject(Error('timeout: '+predicate));setTimeout(poll,30)})();})}
  function assert(ok,msg){if(!ok)throw Error(msg)}
+ async function verifyStableRefresh(cardSelector){
+   let root=document.getElementById('all-projects-results');
+   async function poll(){await htmx.ajax('GET',root.getAttribute('hx-get'),{source:root,target:root,swap:'outerHTML'});await wait(()=>true);}
+   await poll(); assert(root===document.getElementById('all-projects-results'),'unchanged poll replaced cards');
+   let card=root.querySelector(cardSelector);card.focus();
+   const marker=document.createElement('span');marker.textContent='stale render';card.append(marker);
+   await poll();assert(root.isConnected && document.activeElement===card && marker.isConnected,'poll interrupted keyboard focus');
+   card.blur();await wait(()=>document.getElementById('all-projects-results')!==root);
+   assert(!marker.isConnected,'deferred update did not apply after focus left');
+   root=document.getElementById('all-projects-results');card=root.querySelector(cardSelector);
+   card.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerId:17,isPrimary:true,button:0}));
+   const pointerMarker=document.createElement('span');pointerMarker.textContent='stale pointer render';card.append(pointerMarker);
+   await poll();assert(root.isConnected && pointerMarker.isConnected,'poll interrupted pointer press');
+   card.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:17,isPrimary:true,button:0}));
+   let clicked=false;
+   card.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();clicked=card.isConnected},{capture:true,once:true});
+   card.click();assert(clicked,'refresh dropped click');
+   await wait(()=>document.getElementById('all-projects-results')!==root);
+ }
+
  try{
  await wait(()=>window.openVibelyProjectTabsSync && window.htmx);
  const originalLive=window.openVibelyLive.live;
@@ -59,6 +79,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(document.getElementById('project-selector').value==='__all_projects__','selection mismatch');
  const card=Array.from(document.querySelectorAll('[data-all-projects-task]')).find(c=>c.textContent.includes('Cross project browser task'));assert(card && card.textContent.includes('Cross project browser task'),'missing cross project task');
  assert(!window._sidebarSSE,'virtual project opened live connection');
+ await verifyStableRefresh('[data-all-projects-task]');
  await window.openVibelyNavigate('/tasks?project_id=__all_projects__&search=Cross');
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
 
@@ -111,6 +132,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
  assert(new URL(location.href).searchParams.get('offset')==='0','empty automation page did not recover');
  assert(new URL(location.href).searchParams.get('page_size')==='1','recovery lost page size');
+ await verifyStableRefresh('[data-all-projects-automation]');
  document.querySelector('[data-all-projects-automation]').click();
  await wait(()=>document.getElementById('automation-live'));
  assert(document.getElementById('project-selector').value==='__all_projects__','automation switched tabs');

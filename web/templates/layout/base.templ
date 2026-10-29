@@ -5114,6 +5114,43 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     document.addEventListener('htmx:sendAbort', function(event) {
                         if (event.detail.target && event.detail.target.id === 'main-content' && !currentPageRequest) clearPageLoading();
                     });
+                    // Polls must not replace cards during a click or keyboard navigation.
+                    const allProjectsInteractions = new WeakMap();
+                    function allProjectsInteraction(root) {
+                        let state = allProjectsInteractions.get(root);
+                        if (!state) { state = {pointers: new Set(), deferred: false}; allProjectsInteractions.set(root, state); }
+                        return state;
+                    }
+                    function retryAllProjectsRefresh(root) {
+                        setTimeout(function() {
+                            if (!root.isConnected || root !== document.getElementById('all-projects-results') || currentPageRequest !== renderedPageRequest) return;
+                            const state = allProjectsInteraction(root);
+                            if (state.deferred && !state.pointers.size && !root.contains(document.activeElement)) {
+                                state.deferred = false;
+                                htmx.trigger(root, 'allProjectsRefresh');
+                            }
+                        }, 0);
+                    }
+                    document.addEventListener('pointerdown', function(event) {
+                        const root = event.target.closest('#all-projects-results');
+                        if (root) allProjectsInteraction(root).pointers.add(event.pointerId);
+                    }, true);
+                    function endAllProjectsPress(event) {
+                        const root = document.getElementById('all-projects-results');
+                        if (!root) return;
+                        allProjectsInteraction(root).pointers.delete(event.pointerId);
+                        retryAllProjectsRefresh(root);
+                    }
+                    document.addEventListener('pointerup', endAllProjectsPress, true);
+                    document.addEventListener('pointercancel', endAllProjectsPress, true);
+                    window.addEventListener('blur', function() {
+                        const root = document.getElementById('all-projects-results');
+                        if (root) { allProjectsInteraction(root).pointers.clear(); retryAllProjectsRefresh(root); }
+                    });
+                    document.addEventListener('focusout', function(event) {
+                        const root = event.target.closest('#all-projects-results');
+                        if (root) retryAllProjectsRefresh(root);
+                    });
                     document.addEventListener('htmx:beforeSwap', function(event) {
                         const detail = event.detail;
                         const recovery = detail.xhr && detail.xhr.getResponseHeader('X-OpenVibely-All-Projects-Location');
@@ -5127,6 +5164,19 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                                 });
                             }
                             return;
+                        }
+                        if (detail.target && detail.target.id === 'all-projects-results' && detail.shouldSwap) {
+                            const root = detail.target;
+                            const incoming = new DOMParser().parseFromString(detail.serverResponse, 'text/html').getElementById('all-projects-results');
+                            const state = allProjectsInteraction(root);
+                            const stale = root !== document.getElementById('all-projects-results') || detail.xhr.openVibelyOriginPageRequest !== currentPageRequest;
+                            const unchanged = incoming && incoming.innerHTML === root.innerHTML;
+                            const interacting = state.pointers.size > 0 || root.contains(document.activeElement);
+                            if (stale || unchanged || interacting) {
+                                detail.shouldSwap = false;
+                                event.preventDefault();
+                                if (!stale) state.deferred = !unchanged && interacting;
+                            }
                         }
                         if (detail.target && detail.target.id === 'main-content' && detail.xhr !== currentPageRequest) {
                             detail.shouldSwap = false;

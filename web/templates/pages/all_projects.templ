@@ -135,7 +135,7 @@ templ AllProjectsContent(data AllProjectsData) {
 }
 
 templ AllProjectsTaskResults(data AllProjectsData) {
-	<div id="all-projects-results" hx-get={ data.URL(0) } hx-trigger="every 10s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
+	<div id="all-projects-results" hx-get={ data.URL(0) } hx-trigger="every 10s [!document.hidden], allProjectsRefresh" hx-target="this" hx-swap="outerHTML">
 		<p class="text-sm opacity-60 mb-3">{ strconv.Itoa(len(data.Tasks)) } tasks · Open a task to view its thread</p>
 		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));">
 			for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryScheduled, models.CategoryCompleted} {
@@ -158,7 +158,7 @@ templ AllProjectsTaskResults(data AllProjectsData) {
 }
 
 templ AllProjectsAutomationResults(data AllProjectsData) {
-	<div id="all-projects-results" hx-get={ data.URL(data.Offset) } hx-trigger="every 15s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
+	<div id="all-projects-results" hx-get={ data.URL(data.Offset) } hx-trigger="every 15s [!document.hidden], allProjectsRefresh" hx-target="this" hx-swap="outerHTML">
 		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));">
 			for _, card := range data.Automations {
 				<a class="block bg-base-100 border border-base-300 rounded-lg p-4 hover:border-primary" data-all-projects-automation={ card.Automation.ID } data-owner-project={ card.Automation.ProjectID } href={ templ.URL("/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(models.AllProjectsID)) } hx-get={ "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(models.AllProjectsID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">

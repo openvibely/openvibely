@@ -612,7 +612,7 @@ func AllProjectsTaskResults(data AllProjectsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" hx-trigger=\"every 10s [!document.hidden]\" hx-target=\"this\" hx-swap=\"outerHTML\"><p class=\"text-sm opacity-60 mb-3\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" hx-trigger=\"every 10s [!document.hidden], allProjectsRefresh\" hx-target=\"this\" hx-swap=\"outerHTML\"><p class=\"text-sm opacity-60 mb-3\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -832,7 +832,7 @@ func AllProjectsAutomationResults(data AllProjectsData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" hx-trigger=\"every 15s [!document.hidden]\" hx-target=\"this\" hx-swap=\"outerHTML\"><div class=\"grid gap-4\" style=\"grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "\" hx-trigger=\"every 15s [!document.hidden], allProjectsRefresh\" hx-target=\"this\" hx-swap=\"outerHTML\"><div class=\"grid gap-4\" style=\"grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
