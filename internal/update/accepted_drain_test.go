@@ -39,6 +39,7 @@ func TestAcceptedUpdateRenewsDrainAndRecoversExpiry(t *testing.T) {
 				t.Fatal(err)
 			}
 			c.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now().Add(24 * time.Hour)}}
+			configureAcceptedOffer(t, c)
 			c.staged = *c.release
 			c.state = StateAvailable
 			ctx, cancel := context.WithCancel(context.Background())
@@ -116,6 +117,8 @@ func TestAcceptedUpdateRestartAfterLeaseExpiry(t *testing.T) {
 				t.Fatal(err)
 			}
 			old.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now().Add(24 * time.Hour)}}
+			configureAcceptedOffer(t, old)
+			build = old.current
 			old.staged = *old.release
 			old.state, old.operationGeneration = StateWaitingForIdle, status.Generation
 			old.accepted, old.acceptanceLease = true, 10*time.Minute
