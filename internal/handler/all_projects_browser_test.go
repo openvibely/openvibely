@@ -29,6 +29,13 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 	project := createProject(t, h, "Second browser project")
 	task := models.Task{ProjectID: project.ID, Title: "Cross project browser task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+	other := models.Task{ProjectID: "default", Title: "Other project task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, stores.Tasks.Create(t.Context(), &other))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC(), RepeatType: models.RepeatOnce, RepeatInterval: 1}
+	require.NoError(t, stores.Schedules.Create(t.Context(), &schedule))
+	_, _, err := stores.Automations.PublishRegistered(t.Context(), models.AutomationRegisteredPublication{ProjectID: project.ID, StableKey: "browser", Name: "Browser automation", AutomationType: "scheduled", AdapterKey: "custom", CreatedVia: "test", Resources: []models.AutomationResourceBinding{{NodeKey: "trigger", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"}}, Nodes: []models.AutomationNodeSpec{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "trigger"}}})
+	require.NoError(t, err)
+
 	runner := `<script>
  (async function(){
  function wait(predicate){return new Promise((resolve,reject)=>{let deadline=Date.now()+12000;(function poll(){if(predicate() && !document.querySelector('.htmx-request, .htmx-settling, .htmx-swapping'))return resolve();if(Date.now()>deadline)return reject(Error('timeout: '+predicate));setTimeout(poll,30)})();})}
@@ -38,10 +45,10 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  if(innerWidth<1024){const select=document.getElementById('project-selector');select.value='__all_projects__';select.dispatchEvent(new Event('change',{bubbles:true}));}else{document.querySelector('[data-project-tab="__all_projects__"]').click();}
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
  assert(document.getElementById('project-selector').value==='__all_projects__','selection mismatch');
- const card=document.querySelector('[data-all-projects-task]');assert(card && card.textContent.includes('Cross project browser task'),'missing cross project task');
+ const card=Array.from(document.querySelectorAll('[data-all-projects-task]')).find(c=>c.textContent.includes('Cross project browser task'));assert(card && card.textContent.includes('Cross project browser task'),'missing cross project task');
  assert(!window._sidebarSSE,'virtual project opened live connection');
  await wait(()=>document.querySelector('#task-list-groups [data-task-list-project]'));
- const row=document.querySelector('#task-list-groups [data-task-list-row]');
+ const row=Array.from(document.querySelectorAll('#task-list-groups [data-task-list-row]')).find(r=>r.textContent.includes('Second browser project'));
  assert(row.textContent.includes('Second browser project'),'task list missing project label');
  assert(new URL(row.href).searchParams.get('project_id')==='__all_projects__','task list lost workspace scope');
  if(innerWidth>=1024){
@@ -55,7 +62,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
  }
 
- document.querySelector('[data-all-projects-task]').click();
+ Array.from(document.querySelectorAll('[data-all-projects-task]')).find(c=>c.textContent.includes('Cross project browser task')).click();
  await wait(()=>document.getElementById('task-detail-content'));
  assert(document.getElementById('project-selector').value==='__all_projects__','opening board task switched tabs');
  assert(new URL(location.href).searchParams.get('project_id')==='__all_projects__','task URL lost scope');
@@ -65,6 +72,12 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.getElementById('task-detail-content'));
  assert(document.getElementById('task-detail-content').dataset.projectId===owner,'edit lost task owner');
  assert(document.getElementById('project-selector').value==='__all_projects__','edit switched tabs');
+ document.getElementById('task-resource-selector-button').click();
+ await wait(()=>Array.from(document.querySelectorAll('#task-resource-selector-dialog a')).some(a=>a.textContent.includes('Other project task')));
+ Array.from(document.querySelectorAll('#task-resource-selector-dialog a')).find(a=>a.textContent.includes('Other project task')).click();
+ await wait(()=>document.getElementById('task-detail-content').dataset.projectId==='default');
+ assert(document.getElementById('project-selector').value==='__all_projects__','task dropdown switched tabs');
+
 
  document.getElementById('task-back-btn').click();
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
@@ -73,14 +86,29 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.querySelector('[data-all-projects-usage]'));
  document.querySelector('nav[aria-label="All projects views"] a[href^="/automations"]').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
+ document.querySelector('[data-all-projects-automation]').click();
+ await wait(()=>document.getElementById('automation-live'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','automation switched tabs');
+ assert(document.getElementById('automation-live').dataset.projectId===owner,'automation lost owner');
+ document.querySelector('[data-automation-breadcrumb] a').click();
+ await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
+
  document.querySelector('nav[aria-label="All projects views"] a[href^="/tasks"]').click();
  await wait(()=>document.querySelector('[data-all-projects-task]'));
  document.querySelector('#all-projects-page a[href^="/tasks/new"]').click();
  await wait(()=>document.getElementById('all-projects-choose'));
  const destination=Array.from(document.querySelectorAll('#all-projects-choose a')).find(a=>a.textContent==='Second browser project');
  assert(destination,'missing project choice');destination.click();
- await wait(()=>location.pathname==='/tasks/new' && document.getElementById('project-selector').value!=='__all_projects__');
+ await wait(()=>location.pathname==='/tasks/new' && document.getElementById('task-detail-content'));
  assert(!document.getElementById('all-projects-choose'),'chooser did not navigate');
+ assert(document.getElementById('project-selector').value==='__all_projects__','destination choice switched tabs');
+ assert(new URL(document.getElementById('task-thread-form').getAttribute('hx-post'),location.href).searchParams.get('destination_project')===owner,'creation lost destination');
+ const form=document.getElementById('task-thread-form');
+ await htmx.ajax('POST',form.getAttribute('hx-post'),{source:form,target:'#main-content',swap:'innerHTML',values:{title:'Created without switching '+innerWidth,message:'Save this task',category:'backlog',priority:'2'}});
+ await wait(()=>document.getElementById('task-detail-content').dataset.taskId);
+ assert(document.getElementById('project-selector').value==='__all_projects__','creating task switched tabs');
+ assert(document.getElementById('task-detail-content').dataset.projectId===owner,'created task lost destination');
+
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href+' select='+document.getElementById('project-selector').value+' content='+document.getElementById('main-content').innerText.slice(0,1000)})}
  })();</script>`

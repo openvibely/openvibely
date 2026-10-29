@@ -57,13 +57,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<div id="task-breadcrumb-toolbar" data-page-header class="flex items-center gap-2 flex-shrink-0 min-w-0">
 			<a
 				id="task-automations-back-btn"
-				href={ templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", task.ProjectID)) }
-				hx-get={ fmt.Sprintf("/automations?project_id=%s", task.ProjectID) }
+				href={ templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, task.ProjectID))) }
+				hx-get={ fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, task.ProjectID)) }
 				hx-target="#main-content"
 				hx-swap="innerHTML"
 				hx-push-url="true"
 				class="text-2xl text-base-content/50 hover:text-base-content/80 transition-colors flex-shrink-0"
-				data-automations-url={ fmt.Sprintf("/automations?project_id=%s", task.ProjectID) }
+				data-automations-url={ fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, task.ProjectID)) }
 				hidden
 			>
 				Automations
@@ -81,7 +81,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				data-schedule-url={ fmt.Sprintf("/schedule?project_id=%s", task.ProjectID) }
 				data-chat-url={ fmt.Sprintf("/chat?project_id=%s", task.ProjectID) }
 				data-alerts-url={ fmt.Sprintf("/alerts?project_id=%s", task.ProjectID) }
-				data-project-id={ task.ProjectID }
+				data-project-id={ layout.WorkspaceProjectID(ctx, task.ProjectID) }
 				data-automation-url-base="/automations/"
 			>
 				Tasks
@@ -91,9 +91,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				<button id="task-breadcrumb-title" data-breadcrumb-title type="button" class="min-w-0 truncate text-2xl font-bold text-left" disabled onclick="window.taskWorkspace.openThread()">{ task.Title }</button>
 				@components.BreadcrumbSelector(models.BreadcrumbSelector{
 					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
-					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),
+					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", layout.WorkspaceProjectID(ctx, task.ProjectID), task.ID),
 					ContextName: "tab", ContextValue: defaultTab, CaretOnly: true,
-					CreateURL: fmt.Sprintf("/tasks/new?project_id=%s", task.ProjectID), CreateLabel: "Create New Task",
+					CreateURL: fmt.Sprintf("/tasks/new?project_id=%s", layout.WorkspaceProjectID(ctx, task.ProjectID)), CreateLabel: "Create New Task",
 					OriginName: "from",
 				})
 				<span id="task-breadcrumb-changes" class="flex-shrink-0 text-sm" aria-current="page" hidden><span class="mx-1 text-base-content/30" aria-hidden="true">/</span> Changes</span>

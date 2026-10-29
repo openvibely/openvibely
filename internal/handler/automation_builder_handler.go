@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -233,7 +234,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
 		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
 	if isHTMX(c) {
-		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/builder?project_id="+projectID)
+		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/builder?project_id="+layout.WorkspaceProjectID(c.Request().Context(), projectID))
 	}
 	if isOpenRequest || (!updateTemplate && !automationBuilderSaveRequested(c)) {
 		return h.renderAutomationBuilder(c, page)
@@ -319,7 +320,7 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 }
 
 func (h *Handler) redirectToAutomation(c echo.Context, projectID, automationID string) error {
-	url := "/automations/" + automationID + "?project_id=" + projectID
+	url := "/automations/" + automationID + "?project_id=" + layout.WorkspaceProjectID(c.Request().Context(), projectID)
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Redirect", url)
 		return c.NoContent(http.StatusNoContent)
@@ -737,7 +738,7 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 	if isHTMX(c) {
 		return h.GetAutomationLive(c)
 	}
-	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
+	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+layout.WorkspaceProjectID(c.Request().Context(), projectID))
 }
 
 func firstStartedAutomationInvocationID(invocations []models.AutomationInvocation) string {
@@ -790,7 +791,7 @@ func (h *Handler) DeleteAutomation(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	listPage := parseCardPageRequest(c)
-	listURL := pages.CardListURL("automations", automationCardListState(projectID, automationCardListFilter(c, listPage)))
+	listURL := pages.CardListURL("automations", automationCardListState(layout.WorkspaceProjectID(c.Request().Context(), projectID), automationCardListFilter(c, listPage)))
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Redirect", listURL)
 		return c.NoContent(http.StatusNoContent)
@@ -822,7 +823,7 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 		}
 		return c.Redirect(http.StatusSeeOther, "/automations?project_id="+projectID)
 	}
-	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
+	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+layout.WorkspaceProjectID(c.Request().Context(), projectID))
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {

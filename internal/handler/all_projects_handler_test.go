@@ -74,7 +74,7 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Contains(t, secondPage, "Second workspace automation")
 	require.NotContains(t, secondPage, "First workspace automation")
 	chooser := get("/tasks/new?project_id=" + models.AllProjectsID).Body.String()
-	require.Contains(t, chooser, `/tasks/new?project_id=`+first.ID)
+	require.Contains(t, chooser, `destination_project=`+first.ID)
 	require.Contains(t, chooser, `id="all-projects-choose"`)
 	require.Contains(t, get("/projects/new?project_id="+models.AllProjectsID).Body.String(), `id="new_project_modal"`)
 	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+models.AllProjectsID, nil)
@@ -213,4 +213,60 @@ func TestAllProjectsTaskWorkspaceKeepsOwnerForEdits(t *testing.T) {
 	app.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("HX-Redirect"))
+}
+
+func TestAllProjectsResourceNavigationAndCreation(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
+	first := createProject(t, h, "Navigation first")
+	second := createProject(t, h, "Navigation second")
+	var tasks []models.Task
+	var automationID string
+	for _, project := range []*models.Project{first, second} {
+		task := models.Task{ProjectID: project.ID, Title: project.Name + " task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+		tasks = append(tasks, task)
+		schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC(), RepeatType: models.RepeatOnce, RepeatInterval: 1}
+		require.NoError(t, stores.Schedules.Create(t.Context(), &schedule))
+		definition, _, err := stores.Automations.PublishRegistered(t.Context(), models.AutomationRegisteredPublication{ProjectID: project.ID, StableKey: "navigation", Name: project.Name + " automation", AutomationType: "scheduled", AdapterKey: "custom", CreatedVia: "test", Resources: []models.AutomationResourceBinding{{NodeKey: "trigger", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"}}, Nodes: []models.AutomationNodeSpec{{Key: "trigger", Name: "Trigger", Type: models.AutomationNodeTrigger, Role: "trigger"}}})
+		require.NoError(t, err)
+		automationID = definition.Automation.ID
+	}
+	get := func(path string) string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return rec.Body.String()
+	}
+	for _, resource := range []string{"tasks", "automations"} {
+		body := get("/breadcrumb-selectors/" + resource + "?project_id=" + models.AllProjectsID)
+		require.Contains(t, body, "Navigation first")
+		require.Contains(t, body, "Navigation second")
+		require.Contains(t, body, "project_id="+models.AllProjectsID)
+		scoped := get("/breadcrumb-selectors/" + resource + "?project_id=" + first.ID)
+		require.NotContains(t, scoped, "Navigation second")
+	}
+	searched := get("/breadcrumb-selectors/tasks?project_id=" + models.AllProjectsID + "&search=second&current_id=" + tasks[1].ID)
+	require.Contains(t, searched, tasks[1].Title)
+	require.NotContains(t, searched, tasks[0].Title)
+	live := get("/automations/" + automationID + "?project_id=" + models.AllProjectsID)
+	require.Contains(t, live, `value="__all_projects__" selected`)
+	require.Contains(t, live, `data-project-id="`+second.ID+`"`)
+	require.Contains(t, live, `data-refresh-url="/automations/`+automationID+`?project_id=__all_projects__"`)
+	form := get("/tasks/new?project_id=" + models.AllProjectsID + "&destination_project=" + second.ID)
+	require.Contains(t, form, `value="__all_projects__" selected`)
+	require.Contains(t, form, "destination_project="+second.ID)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+models.AllProjectsID+"&destination_project="+second.ID+"&from=new&thread=1", strings.NewReader("title=Created+in+All&message=New+task&category=backlog&priority=2"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	app.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	id := rec.Header().Get("X-Created-Task-ID")
+	require.NotEmpty(t, id)
+	require.Equal(t, "/tasks/"+id+"?project_id="+models.AllProjectsID, rec.Header().Get("HX-Push-Url"))
+	task, err := stores.Tasks.GetByID(t.Context(), id)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, task.ProjectID)
 }

@@ -2,6 +2,7 @@ package pages
 
 import (
 	"encoding/json"
+ "context"
 	"fmt"
  "math"
 	"net/url"
@@ -102,7 +103,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 											type="button"
 											class="w-full"
 											data-automation-card-edit={ card.Automation.ID }
-											data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+											data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) }
 											data-project-id={ currentProjectID }
 											onclick="event.stopPropagation(); openAutomationCardEdit(this)"
 										>
@@ -116,7 +117,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 												type="button"
 												class="w-full"
 												data-automation-card-update-template={ card.Automation.ID }
-												data-automation-update-template-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+												data-automation-update-template-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) }
 												data-project-id={ currentProjectID }
 												onclick="event.stopPropagation(); openAutomationCardUpdateTemplate(this)"
 											>
@@ -386,7 +387,7 @@ templ automationLiveNodeShape(node models.AutomationLiveNode) {
 }
 
 templ AutomationLive(projects []models.Project, currentProjectID string, graph models.AutomationLiveGraph, deleteAvailable bool) {
-	@layout.Base(graph.Automation.Name, projects, currentProjectID) {
+	@layout.Base(graph.Automation.Name, projects, layout.WorkspaceProjectID(ctx, currentProjectID)) {
 		@automationLiveContent(graph, currentProjectID, deleteAvailable)
 	}
 }
@@ -471,7 +472,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 	@automationNodePanelScript()
 		@automationYAMLSharedScript()
 		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
-			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }>
+			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) }>
 			@layout.PageTitle(graph.Automation.Name)
 			<div class="mb-6 flex flex-wrap items-start justify-between gap-3" data-page-header data-automation-live-header>
 				<div class="min-w-0 flex-1">
@@ -485,15 +486,15 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 </div>
 				</div>
 			</div>
-						<div class="min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas data-automation-view-root>						<form id="automation-live-edit-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;">
+						<div class="min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas data-automation-view-root>						<form id="automation-live-edit-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;">
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
 				</form>
 				if graph.Automation.LifecycleState == models.AutomationActive {
-					<form id="automation-live-run-now-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, currentProjectID)) } onsubmit="event.preventDefault(); Promise.resolve(window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action'))).then(function() { window.openVibelyAutomationLiveRefresh('GET'); }); return false;"><input type="hidden" name="project_id" value={ currentProjectID }/></form>
-					<form id="automation-live-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+					<form id="automation-live-run-now-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID))) } onsubmit="event.preventDefault(); Promise.resolve(window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action'))).then(function() { window.openVibelyAutomationLiveRefresh('GET'); }); return false;"><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+					<form id="automation-live-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID))) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
 				}
 				if graph.Automation.LifecycleState == models.AutomationPaused {
-					<form id="automation-live-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+					<form id="automation-live-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID))) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
 				}
 					<div class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden" data-automation-graph-panel role="region" aria-label="Live automation graph">
 
@@ -544,7 +545,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
 						<div class="modal-action">
 							<button class="btn" type="button" onclick="document.getElementById('update-automation-template-modal').close()">Cancel</button>
-							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
+							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
 						</div>
 					</div>
 					<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
@@ -559,7 +560,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Automation-owned trigger tasks and schedules will be deleted. Implementation, outcome, issue-created, and other independent tasks remain. This cannot be undone.</div>
 						<div class="modal-action">
 							<button class="btn" type="button" onclick="document.getElementById('delete-automation-modal').close()">Cancel</button>
-							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, currentProjectID) } hx-swap="none"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-error" type="submit">Delete automation</button></form>
+							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-post={ fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-swap="none"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-error" type="submit">Delete automation</button></form>
 						</div>
 					</div>
 					<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
@@ -939,7 +940,7 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProjec
 				<section data-automation-live-node-detail={ node.NodeKey } hidden>
                     <h3 class="text-sm font-semibold mb-3" data-inspector-type-heading>{ automationNodeDetailsHeading(node.NodeType) }</h3>
 
-                    if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
+                    if taskURL := automationLiveNodeTaskURL(node, graph.Resources, layout.WorkspaceProjectID(ctx, currentProjectID), graph.Automation.ID, graph.Automation.Name); taskURL != "" {
                         <a class="btn btn-outline btn-sm mb-4" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-node-task>Open task</a>
                     }
 					<dl class="grid grid-cols-1 gap-3 text-sm">
@@ -980,7 +981,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 	@components.SidePanel("automation-node-panel", "automation-node-divider", "Node details") {
 		@automationNodePanelHeader(false)
 	<div data-automation-details-panel class="inspector-body">
-		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" data-automation-details-form>
+		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationWorkspacePostURL(ctx, page, currentProjectID)) } hx-post={ automationWorkspacePostURL(ctx, page, currentProjectID) } hx-target="#main-content" data-automation-details-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="builder_source" value={ page.Source }/>
 			<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/>
@@ -1064,7 +1065,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 }
 
 templ AutomationBuilder(projects []models.Project, currentProjectID string, page models.AutomationBuilderPage) {
-	@layout.Base(automationBuilderPageTitle(page), projects, currentProjectID) {
+	@layout.Base(automationBuilderPageTitle(page), projects, layout.WorkspaceProjectID(ctx, currentProjectID)) {
 		@AutomationBuilderContent(page, currentProjectID)
 	}
 }
@@ -1137,7 +1138,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Automation-owned trigger tasks and schedules will be deleted. Implementation, outcome, issue-created, and other independent tasks remain. This cannot be undone.</div>
 					<div class="modal-action">
 						<button class="btn" type="button" onclick="document.getElementById('delete-automation-modal').close()">Cancel</button>
-						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, currentProjectID) } hx-swap="none"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-error" type="submit">Delete automation</button></form>
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-post={ fmt.Sprintf("/automations/%s/delete?project_id=%s", page.AutomationID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-swap="none"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-error" type="submit">Delete automation</button></form>
 					</div>
 				</div>
 				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
@@ -1152,7 +1153,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
 					<div class="modal-action">
 						<button class="btn" type="button" onclick="document.getElementById('update-automation-template-modal').close()">Cancel</button>
-						<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
+						<form method="post" action={ templ.SafeURL(automationWorkspacePostURL(ctx, page, currentProjectID)) } hx-post={ automationWorkspacePostURL(ctx, page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
 					</div>
 				</div>
 				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
@@ -1189,12 +1190,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 
 				<span class="sr-only" data-automation-connect-status aria-live="polite"></span>
 						if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
-						<form id="automation-builder-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, currentProjectID)) }>
+						<form id="automation-builder-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, layout.WorkspaceProjectID(ctx, currentProjectID))) }>
 							<input type="hidden" name="project_id" value={ currentProjectID }/>
 						</form>
 					}
 					if page.AutomationID != "" && page.LifecycleState == models.AutomationPaused {
-						<form id="automation-builder-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, currentProjectID)) }>
+						<form id="automation-builder-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, layout.WorkspaceProjectID(ctx, currentProjectID))) }>
 							<input type="hidden" name="project_id" value={ currentProjectID }/>
 						</form>
 					}
@@ -1216,7 +1217,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability or restore a removed template step, then connect supported handoffs.</p>
 							}
 						</div>
-					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content">
+					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(automationWorkspacePostURL(ctx, page, currentProjectID)) } hx-post={ automationWorkspacePostURL(ctx, page, currentProjectID) } hx-target="#main-content">
 						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/>
 						<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/><input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="automation_yaml" value={ page.YAML } data-automation-yaml-submission/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
@@ -1326,7 +1327,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul></div>
 				</div>
 			}
-			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
+			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationWorkspacePostURL(ctx, page, currentProjectID)) } hx-post={ automationWorkspacePostURL(ctx, page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
 				<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<input type="hidden" name="builder_source" value={ page.Source }/>
 					<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/>
@@ -2238,6 +2239,13 @@ const (
 	automationGraphPadding    = 60.0
 )
 
+func automationWorkspacePostURL(ctx context.Context, page models.AutomationBuilderPage, ownerID string) string {
+ scope := layout.WorkspaceProjectID(ctx, ownerID)
+ destination := automationBuilderPostURL(page, scope)
+ if scope == models.AllProjectsID && page.AutomationID == "" { destination += "&destination_project=" + url.QueryEscape(ownerID) }
+ return destination
+}
+
 func automationBuilderPostURL(page models.AutomationBuilderPage, currentProjectID string) string {
 	if page.AutomationID != "" {
 		return fmt.Sprintf("/automations/%s/builder?project_id=%s", page.AutomationID, currentProjectID)
@@ -2554,29 +2562,29 @@ templ automationNewEditableBreadcrumb(currentProjectID string, automationName st
 
 templ automationEditableBreadcrumb(currentProjectID string, automationID string, automationName string) {
 	<nav class="flex min-w-0 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb" data-page-header data-automation-breadcrumb data-automation-editable-breadcrumb>
-		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
+		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-get={ fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		<span class="ml-2 flex-shrink-0 text-2xl text-base-content/30">/</span>
 		<input class="input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
 		@components.BreadcrumbSelector(models.BreadcrumbSelector{
 			ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
-			SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=edit", currentProjectID, automationID),
+			SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=edit", layout.WorkspaceProjectID(ctx, currentProjectID), automationID),
 			CaretOnly: true,
 		})
 	</nav>
 }templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string, withBottomMargin bool) {
 	<nav class={ "flex min-w-0 flex-shrink-0 items-center gap-2", templ.KV("mb-6", withBottomMargin) } aria-label="Breadcrumb" data-page-header data-automation-breadcrumb>
-		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
+		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-get={ fmt.Sprintf("/automations?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		if automationName != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
 			<div class="min-w-0 flex-1 flex items-center gap-1">
 				if currentLabel != "" && automationID != "" {
-					<a data-breadcrumb-title class="min-w-0 truncate" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true">{ automationName }</a>
+					<a data-breadcrumb-title class="min-w-0 truncate" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content" hx-push-url="true">{ automationName }</a>
 				} else {
 					<span data-breadcrumb-title class="min-w-0 truncate">{ automationName }</span>
 				}
 				@components.BreadcrumbSelector(models.BreadcrumbSelector{
 					ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
-					SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
+					SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", layout.WorkspaceProjectID(ctx, currentProjectID), automationID),
 					CaretOnly: true,
 				})
 			</div>
@@ -2590,13 +2598,13 @@ templ automationEditableBreadcrumb(currentProjectID string, automationID string,
 
 templ automationCardDuplicateAction(automationID string, currentProjectID string, adapterKey string) {
 	if adapterKey != "vision_driver" {
-		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-card-duplicate={ automationID } onclick="event.stopPropagation(); event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
+		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content" hx-push-url="true" data-automation-card-duplicate={ automationID } onclick="event.stopPropagation(); event.preventDefault(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
 	}
 }
 
 templ automationLiveDuplicateAction(automationID string, currentProjectID string, adapterKey string) {
 	if adapterKey != "vision_driver" {
-		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" data-automation-live-duplicate onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
+		<li><a href={ templ.URL(fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, layout.WorkspaceProjectID(ctx, currentProjectID))) } hx-get={ fmt.Sprintf("/automations/%s/duplicate?project_id=%s", automationID, layout.WorkspaceProjectID(ctx, currentProjectID)) } hx-target="#main-content" hx-push-url="true" data-automation-live-duplicate onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Duplicate</a></li>
 	}
 }
 

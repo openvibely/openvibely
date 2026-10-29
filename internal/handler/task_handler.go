@@ -673,7 +673,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		c.Response().Header().Set("X-Created-Task-ID", t.ID)
 		c.Response().Header().Set("HX-Retarget", "#main-content")
 		c.Response().Header().Set("HX-Reswap", "innerHTML")
-		c.Response().Header().Set("HX-Push-Url", "/tasks/"+t.ID+"?project_id="+url.QueryEscape(t.ProjectID))
+		c.Response().Header().Set("HX-Push-Url", "/tasks/"+t.ID+"?project_id="+url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), t.ProjectID)))
 		return h.GetTaskThread(c)
 	}
 
@@ -695,7 +695,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 
 	if c.QueryParam("from") == "new" {
-		destination := "/tasks/" + t.ID + "?project_id=" + url.QueryEscape(projectID)
+		destination := "/tasks/" + t.ID + "?project_id=" + url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), projectID))
 		if isHTMX(c) {
 			c.Response().Header().Set("HX-Location", destination)
 			return c.NoContent(http.StatusOK)
@@ -3060,7 +3060,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		c.Response().Header().Set("X-Created-Task-ID", taskID)
 		c.Response().Header().Set("HX-Retarget", "#main-content")
 		c.Response().Header().Set("HX-Reswap", "innerHTML")
-		c.Response().Header().Set("HX-Push-Url", "/tasks/"+taskID+"?project_id="+url.QueryEscape(task.ProjectID))
+		c.Response().Header().Set("HX-Push-Url", "/tasks/"+taskID+"?project_id="+url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), task.ProjectID)))
 		return h.GetTaskThread(c)
 	}
 

@@ -161,7 +161,7 @@ templ AllProjectsAutomationResults(data AllProjectsData) {
 	<div id="all-projects-results" hx-get={ data.URL(data.Offset) } hx-trigger="every 15s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
 		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));">
 			for _, card := range data.Automations {
-				<a class="block bg-base-100 border border-base-300 rounded-lg p-4 hover:border-primary" data-all-projects-automation={ card.Automation.ID } data-owner-project={ card.Automation.ProjectID } href={ templ.URL("/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID)) } hx-get={ "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+				<a class="block bg-base-100 border border-base-300 rounded-lg p-4 hover:border-primary" data-all-projects-automation={ card.Automation.ID } data-owner-project={ card.Automation.ProjectID } href={ templ.URL("/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(models.AllProjectsID)) } hx-get={ "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(models.AllProjectsID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
 					<span class="badge badge-sm badge-outline mb-2">{ allProjectName(data.Projects, card.Automation.ProjectID) }</span>
 					<h3 class="font-semibold break-words">{ card.Automation.Name }</h3>
 					<p class="text-sm opacity-60 mt-2">{ card.Automation.Description }</p>
@@ -242,7 +242,11 @@ templ AllProjectsChooseContent(projects []models.Project, path string) {
 if destination == "/automations/new" {
 	destination = "/automations"
 }
-destination += "?project_id=" + url.QueryEscape(project.ID) }}
+if destination == "/tasks/new" {
+ destination += "?project_id=" + models.AllProjectsID + "&destination_project=" + url.QueryEscape(project.ID)
+} else {
+ destination += "?project_id=" + url.QueryEscape(project.ID)
+} }}
 				<a class="block border border-base-300 rounded-lg p-4 hover:border-primary" href={ templ.URL(destination) } hx-get={ destination } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ project.Name }</a>
 			}
 		</div>

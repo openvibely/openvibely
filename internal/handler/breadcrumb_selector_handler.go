@@ -22,7 +22,7 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if project == nil {
+	if project == nil && projectID != models.AllProjectsID {
 		return echo.NewHTTPError(http.StatusNotFound, "selector unavailable")
 	}
 

@@ -43,6 +43,47 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		if path == "/projects/new" || path == "/projects/pick-folder" || path == "/projects" || strings.HasPrefix(path, "/ui/") {
 			return next(c)
 		}
+		if strings.HasPrefix(path, "/breadcrumb-selectors/") && c.Request().Method == http.MethodGet {
+			return next(c)
+		}
+		if path == "/tasks/new" || ((path == "/tasks" || path == "/automations/builder") && c.Request().Method == http.MethodPost) {
+			destination := c.QueryParam("destination_project")
+			if destination == "" {
+				if c.Request().Method == http.MethodGet {
+					return h.AllProjectsChooseProject(c)
+				}
+				return echo.NewHTTPError(http.StatusBadRequest, "Choose a destination project.")
+			}
+			project, err := h.projectSvc.GetByID(c.Request().Context(), destination)
+			if err != nil {
+				return err
+			}
+			if project == nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "Unknown destination project.")
+			}
+			c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+			q := c.QueryParams()
+			q.Set("project_id", project.ID)
+			c.Request().URL.RawQuery = q.Encode()
+			return next(c)
+		}
+		if strings.HasPrefix(path, "/automations/") && c.Param("automationId") != "" {
+			if h.automationGraphSvc == nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "Automations unavailable")
+			}
+			definition, _, err := h.automationGraphSvc.GetDefinition(c.Request().Context(), models.AllProjectsID, c.Param("automationId"))
+			if err != nil {
+				return err
+			}
+			if definition == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+			}
+			c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+			q := c.QueryParams()
+			q.Set("project_id", definition.Automation.ProjectID)
+			c.Request().URL.RawQuery = q.Encode()
+			return next(c)
+		}
 		// Task routes resolve their real owner while retaining the virtual
 		// workspace for rendering. Never substitute the task's stored ProjectID.
 		if strings.HasPrefix(path, "/tasks/") && c.Param("taskId") != "" {

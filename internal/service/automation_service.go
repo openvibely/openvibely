@@ -560,7 +560,7 @@ func (s *AutomationGraphService) GetDefinition(ctx context.Context, projectID, a
 	if err != nil || definition == nil {
 		return definition, nil, err
 	}
-	resources, err := s.repo.ListResourceSummaries(ctx, projectID, automationID, definition.Version.ID, 100)
+	resources, err := s.repo.ListResourceSummaries(ctx, definition.Automation.ProjectID, automationID, definition.Version.ID, 100)
 	return definition, resources, err
 }
 

@@ -496,6 +496,11 @@ func (r *TaskRepo) listEmptyBreadcrumbSelector(ctx context.Context, projectID, c
 }
 
 func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string, capacity int, args ...any) ([]models.BreadcrumbSelectorItem, error) {
+	// The explicit virtual workspace broadens this bounded read only.
+	if len(args) > 0 && args[0] == models.AllProjectsID {
+		query = strings.ReplaceAll(query, "project_id = ?", "? = '__all_projects__'")
+	}
+
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing task breadcrumb selector: %w", err)

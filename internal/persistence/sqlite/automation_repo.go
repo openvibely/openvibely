@@ -33,11 +33,11 @@ func (r *AutomationRepo) ListBreadcrumbSelector(ctx context.Context, projectID, 
 		FROM automations a
 		JOIN automation_versions v ON v.id = a.published_version_id
 			AND v.project_id = a.project_id AND v.automation_id = a.id AND v.state = 'published'
-			WHERE a.project_id = ? AND (? = '' OR INSTR(LOWER(a.name), ?) > 0)
+			WHERE (? = '__all_projects__' OR a.project_id = ?) AND (? = '' OR INSTR(LOWER(a.name), ?) > 0)
 		ORDER BY CASE WHEN a.id = ? THEN 0 ELSE 1 END,
 			CASE WHEN LOWER(a.name) = ? THEN 0 WHEN LOWER(a.name) LIKE ? || '%' THEN 1 ELSE 2 END,
 			a.updated_at DESC, a.id ASC
-		LIMIT ?`, projectID, search, search, currentID, search, search, limit)
+		LIMIT ?`, projectID, projectID, search, search, currentID, search, search, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing automation breadcrumb selector: %w", err)
 	}
@@ -338,7 +338,7 @@ func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automatio
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
 		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
-		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID), &a)
+		created_via, created_at, updated_at, archived_at FROM automations WHERE (? = '__all_projects__' OR project_id = ?) AND id = ?`, projectID, projectID, automationID), &a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

@@ -586,7 +586,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
                         function retargetLiveEventsForCurrentLocation() {
 							var selected = projectSelector && projectSelector.value;
-                            var task = document.getElementById('task-detail-content');
+                            var task = document.getElementById('task-detail-content') || document.getElementById('automation-live');
                             var owner = selected === '__all_projects__' && task ? task.dataset.projectId : selected;
                             retargetLiveEvents(owner, currentTaskID());
 						}
