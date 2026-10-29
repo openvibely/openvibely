@@ -41,27 +41,27 @@ const executionOutputSelectAlias = `COALESCE(e.output, '') || COALESCE((
 	), '')`
 
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, reasoning_content, error_message,
-		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END`
+		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END, author_user_id, author_name`
 
 // executionSelectColumnsLight omits reasoning_content and diff_output (substituting
 // empty strings) so list/pagination queries don't load potentially very large blobs.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
 // resulting Execution will have ReasoningContent == "" and DiffOutput == "".
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, '' AS reasoning_content, error_message,
-		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END`
+		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END, author_user_id, author_name`
 
 const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, e.reasoning_content, e.error_message,
-			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END`
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END, e.author_user_id, e.author_name`
 
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, '' AS reasoning_content, e.error_message,
-			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END`
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END, e.author_user_id, e.author_name`
 
 const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
 
 // taskThreadExecutionSelectColumns contains only the fields needed to render a
 // runtime task-thread transcript. It deliberately omits execution metadata and
 // detail-only payloads that the formatter never reads.
-const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, ` + executionOutputSelect + `, error_message, is_followup, started_at, rowid`
+const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, ` + executionOutputSelect + `, error_message, is_followup, started_at, rowid, author_user_id, author_name`
 
 const taskExecutionChronologicalPageSQL = `SELECT ` + taskThreadExecutionSelectColumns + ` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?`
 
@@ -78,7 +78,7 @@ func scanExecutionRow(scanner interface {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
 		&e.Output, &e.ReasoningContent, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
-		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt, &e.HistoryOrder)
+		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt, &e.HistoryOrder, &e.AuthorUserID, &e.AuthorName)
 	return e, err
 }
 
@@ -86,7 +86,7 @@ func scanTaskThreadExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (models.Execution, error) {
 	var e models.Execution
-	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt, &e.HistoryOrder)
+	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt, &e.HistoryOrder, &e.AuthorUserID, &e.AuthorName)
 	return e, err
 }
 
@@ -294,15 +294,18 @@ func (r *ExecutionRepo) CreateInTx(ctx context.Context, tx persistence.Tx, e *mo
 }
 
 func createExecutionWithExecutor(ctx context.Context, exec sqlExecutor, e *models.Execution) error {
+	if err := resolveExecutionAuthor(ctx, exec, e); err != nil {
+		return err
+	}
 	isFollowup := 0
 	if e.IsFollowup {
 		isFollowup = 1
 	}
 	err := exec.QueryRowContext(ctx,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
-			 VALUES (COALESCE(NULLIF(?, ''), lower(hex(randomblob(16)))), ?, NULLIF(?, ''), ?, ?, ?, ?)
+		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context, author_user_id, author_name)
+			 VALUES (COALESCE(NULLIF(?, ''), lower(hex(randomblob(16)))), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
 			 RETURNING id, started_at, rowid`,
-		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt, &e.HistoryOrder)
+		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext, e.AuthorUserID, e.AuthorName).Scan(&e.ID, &e.StartedAt, &e.HistoryOrder)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
 	}
@@ -418,10 +421,13 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 			isFollowup = 1
 		}
 		e.Status = models.ExecQueued
+		if err := resolveExecutionAuthor(ctx, dbexec, e); err != nil {
+			return err
+		}
 		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
-			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
-			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
-			RETURNING id, started_at, rowid`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
+			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context, author_user_id, author_name)
+			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?)
+			RETURNING id, started_at, rowid`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext, e.AuthorUserID, e.AuthorName).
 			Scan(&e.ID, &e.StartedAt, &e.HistoryOrder); err != nil {
 			return fmt.Errorf("creating direct task follow-up execution: %w", err)
 		}

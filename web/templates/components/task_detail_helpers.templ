@@ -1341,11 +1341,11 @@ templ TaskThreadFollowupResponse(message string, execID string, attachments []mo
 	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID, execution...)
 }
 
-templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) {
+templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string, author ...string) {
 	if len(attachments) > 0 {
-		@ChatBubbleWithAttachments("User", message, attachments, projectID)
+		@ChatBubbleWithAttachments("User", message, attachments, projectID, author...)
 	} else {
-		@ChatBubble("User", message)
+		@ChatBubble("User", message, author...)
 	}
 	@ChatBubble("Assistant", "Queued. This message will be sent to the model after the active response finishes.")
 }

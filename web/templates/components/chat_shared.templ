@@ -47,6 +47,10 @@ func ChatExecutionRevision(exec models.Execution) string {
 	write(exec.ID)
 	write(string(exec.Status))
 	write(exec.PromptSent)
+ if exec.AuthorUserID != "" || exec.AuthorName != "" {
+ write(exec.AuthorUserID)
+ write(exec.AuthorName)
+ }
 	write(exec.Output)
 	write(exec.ErrorMessage)
 	write(fmt.Sprintf("%t", exec.IsFollowup))
@@ -71,6 +75,10 @@ func ChatTranscriptRevision(executions []models.Execution, pendingInputs []model
 		write(string(input.InputStatus))
 		write(input.ExpectedTurnID)
 		write(input.Content)
+ if input.AuthorUserID != "" || input.AuthorName != "" {
+ write(input.AuthorUserID)
+ write(input.AuthorName)
+ }
 		write(input.AttachmentSessionID)
 	}
 	return fmt.Sprintf("%x-%016x", len(executions)+len(pendingInputs), hash)
@@ -199,10 +207,10 @@ templ ChatLoadingDots(size string) {
 }
 
 // ChatBubble renders a static chat message bubble (completed or failed text).
-templ ChatBubble(role, content string) {
+templ ChatBubble(role, content string, author ...string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
-			{ role }
+			{ chatAuthorLabel(role, author) }
 		</div>
 		<div class="chat-bubble-inner">
 			if role == "User" {
@@ -274,10 +282,10 @@ templ ChatBubbleRunning(role, partialOutput string) {
 }
 
 // ChatBubbleWithAttachments renders a message with inline attachment display.
-templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string) {
+templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string, author ...string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2 flex items-center gap-2">
-			{ role }
+			{ chatAuthorLabel(role, author) }
 			if len(attachments) > 0 {
 				<span class="badge badge-sm badge-neutral">
 					<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1241,8 +1249,8 @@ templ ChatStreamingResumeInitScript() {
 	</script>
 }
 
-templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments bool) {
-	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "")
+templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments bool, author ...string) {
+	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "", author...)
 }
 
 templ pendingAttachmentBadge(label, title string) {
@@ -1254,8 +1262,9 @@ templ pendingAttachmentBadge(label, title string) {
 	</div>
 }
 
-templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
+templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string, author ...string) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" data-tooltip-disabled>
+		<span class="text-xs font-semibold">{ chatAuthorLabel("User", author) }</span>
 		<div class="min-w-0 flex-1 truncate" data-pending-input-content>{ message }</div>
 		if hasAttachments {
 			@pendingAttachmentBadge("Attachments queued", "Attachments queued with this follow-up")
@@ -1274,24 +1283,24 @@ templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttac
 	</div>
 }
 
-templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string, hasAttachments bool) {
-	@ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint, hasAttachments, "")
+templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string, hasAttachments bool, author ...string) {
+	@ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint, hasAttachments, "", author...)
 }
 
-templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
+templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string, author ...string) {
 	<div id="pending-thread-inputs" data-task-id={ taskID } hx-swap-oob={ pendingInputsOOBTarget(taskID) }>
-		@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, taskID)
+		@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, taskID, author...)
 	</div>
 }
 
-templ ChatSteeringInputRow(inputID, message string, hasAttachments bool) {
-	@ChatSteeringInputRowForTask(inputID, message, hasAttachments, "")
+templ ChatSteeringInputRow(inputID, message string, hasAttachments bool, author ...string) {
+	@ChatSteeringInputRowForTask(inputID, message, hasAttachments, "", author...)
 }
 
-templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string) {
+templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string, author ...string) {
 	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" data-tooltip-disabled>
 		<div class="min-w-0 flex-1">
-			<div class="text-xs font-semibold opacity-70">Steering pending</div>
+			<div class="text-xs font-semibold opacity-70">{ chatAuthorLabel("User", author) } · Steering pending</div>
 			<div class="truncate" data-pending-input-content>{ message }</div>
 			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
@@ -1317,7 +1326,7 @@ templ ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpo
 	<div id="pending-thread-inputs" class="space-y-1.5" data-task-id={ taskID }>
 		for _, input := range inputs {
 			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
-				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID)
+				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID, input.AuthorName)
 			} else if input.InputMode == models.ThreadInputModeSteering {
 				@chatPendingSteeringInputRowForTask(input, taskID)
 			}
@@ -1360,9 +1369,9 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 	<!-- User message: show for followups and first non-followup only -->
 	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
+			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID, exec.AuthorName)
 		} else {
-			@ChatBubble("User", chatUserContent(exec, task, executions, index))
+			@ChatBubble("User", chatUserContent(exec, task, executions, index), exec.AuthorName)
 		}
 	}
 	<!-- Assistant response -->
@@ -1407,9 +1416,9 @@ templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTar
 		}
 	>
 		if len(attachments) > 0 {
-			@ChatBubbleWithAttachments("User", message, attachments, projectID)
+			@ChatBubbleWithAttachments("User", message, attachments, projectID, executionAuthorName(execution))
 		} else {
-			@ChatBubble("User", message)
+			@ChatBubble("User", message, executionAuthorName(execution))
 		}
 		@ChatBubbleStreaming("Assistant", execID, messagesContainerID, pausePollingTargetID, isThread)
 	</div>
@@ -6594,7 +6603,7 @@ func chatPendingSteeringInputRowForTask(input models.ThreadInput, taskID string)
 	if input.ProviderSteeringState == "accepted_ambiguous" {
 		return ChatAmbiguousSteeringInputRowForTask(input.ID, input.Content, taskID)
 	}
-	return ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", taskID)
+	return ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", taskID, input.AuthorName)
 }
 
 templ ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string) {
@@ -6637,4 +6646,13 @@ func pickerDefaultDetail(agents []models.LLMConfig, defaultID string) string {
 		detail += " · " + agent.Model
 	}
 	return detail
+}
+
+func chatAuthorLabel(role string, author []string) string {
+ if role == "User" && len(author) > 0 && strings.TrimSpace(author[0]) != "" { return author[0] }
+ return role
+}
+func executionAuthorName(executions []models.Execution) string {
+ if len(executions) > 0 { return executions[0].AuthorName }
+ return ""
 }
