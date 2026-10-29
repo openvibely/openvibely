@@ -6037,15 +6037,15 @@ func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 	insightsIdx := strings.Index(body, `>Insights</span>`)
 	systemIdx := strings.Index(body, `>System</span>`)
 	alertsIdx := strings.Index(body, `data-nav-base="/alerts"`)
-	modelsIdx := strings.Index(body, `data-nav-base="/models"`)
-	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || modelsIdx < 0 {
-		t.Fatal("sidebar missing Insights/System/Alerts/Models markers")
+	settingsIdx := strings.Index(body, `data-nav-base="/themes"`)
+	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || settingsIdx < 0 {
+		t.Fatal("sidebar missing Insights/System/Alerts/Settings markers")
 	}
 	if !(insightsIdx < systemIdx) {
 		t.Fatal("Insights section must appear before System section")
 	}
-	if !(systemIdx < alertsIdx && alertsIdx < modelsIdx) {
-		t.Fatal("Alerts nav item must be grouped under System, before Models")
+	if !(systemIdx < alertsIdx && alertsIdx < settingsIdx) {
+		t.Fatal("Alerts nav item must be grouped under System, before Settings")
 	}
 	if strings.Contains(body[:systemIdx], `data-nav-base="/alerts"`) {
 		t.Fatal("Alerts nav item must not appear before the System section")
