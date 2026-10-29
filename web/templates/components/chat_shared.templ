@@ -3713,6 +3713,10 @@ templ ChatAutoScrollScript() {
 						var el = self.element;
 						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
 						if (self._userInteracting) {
+							// Moving toward newer output never leaves bottom-following: a smooth
+							// follow scroll can reach the end after the gesture window expires.
+							var followingDown = !self.userScrolledUp && self._interactionUp !== true &&
+								el.scrollTop > self._interactionScrollTop;
 							// Smooth keyboard/wheel scrolling can outlast the original input
 							// event. Extend its lifetime while it is still moving downward,
 							// but not for height corrections or a stationary boundary event.
@@ -3730,7 +3734,7 @@ templ ChatAutoScrollScript() {
 							// Follow again only when the reader reaches the actual end. The wider
 							// near-bottom threshold is for UI affordances, not scroll ownership:
 							// re-pinning inside it makes layout updates finish the gesture for them.
-							self.userScrolledUp = !atBottom;
+							self.userScrolledUp = !atBottom && !followingDown;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
 						}
