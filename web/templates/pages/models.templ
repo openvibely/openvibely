@@ -2711,7 +2711,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				}
 						updateOAuthConnectionField();
 							updateModelConnectionControls();
-						setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);						updateTemperatureField(provider, activeModel);
+						setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
+						updateTemperatureField(provider, activeModel);
+						updateFastModeField(provider, activeModel);
 					}
 
                 function updateModelOAuthBadge(status) {

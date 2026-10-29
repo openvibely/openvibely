@@ -29,6 +29,7 @@ func TestBrowserFunctional_ModelContextLimitsFollowSelection(t *testing.T) {
 <select id="model_provider"><option>openai_compatible_vllm</option><option>openai</option></select>
 <select id="model_id" onchange="handleModelChange()"><option value="large">large</option><option value="small">small</option><option value="unknown">unknown</option></select>
 <input id="model_reasoning_effort"><input id="model_openai_compatible_custom_model">
+<div id="model_fast_mode_field"></div><input id="model_fast_mode" type="checkbox"><input id="model_service_tier">
 <input id="model_provider_context_window"><input id="model_provider_max_output_tokens">
 <p id="model_provider_context_display"></p><p id="model_provider_max_output_display"></p>
 <input id="model_context_window_cap"><input id="model_default_max_tokens"><input id="model_compaction_threshold">
@@ -122,6 +123,13 @@ func TestBrowserFunctional_ModelContextDiscoveryAndEdit(t *testing.T) {
   if(new FormData(field('model_form')).get('default_max_tokens')!=='65536') throw Error('Ollama output budget not submitted');
   field('model_provider').value='openai';toggleProviderFields();
   if(!field('model_default_max_tokens').disabled || !field('model_output_limit_field').classList.contains('hidden')) throw Error('unsupported output control exposed');
+  Object.assign(edit.dataset,{modelProvider:'openai',modelModel:'gpt-6.1-sol',modelServiceTier:'priority',modelPresetSlug:''});
+  populateModelEditForm(edit);
+  if(field('model_fast_mode_field').classList.contains('hidden') || field('model_service_tier').disabled || !field('model_fast_mode').checked) throw Error('opening supported model did not initialize Fast mode');
+  if(new FormData(field('model_form')).get('service_tier')!=='priority') throw Error('saved Fast default missing from form');
+  field('model_provider').value='openai_compatible_vllm';toggleProviderFields();
+  if(!field('model_fast_mode_field').classList.contains('hidden') || !field('model_service_tier').disabled || field('model_fast_mode').checked) throw Error('unsupported provider retained Fast mode control');
+  if(new FormData(field('model_form')).has('service_tier')) throw Error('unsupported provider submits Fast mode');
   result.setAttribute('data-test-result','pass');
  }catch(e){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(e.stack));}
  })();</script>`
