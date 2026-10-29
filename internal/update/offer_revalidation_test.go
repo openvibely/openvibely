@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -139,5 +140,65 @@ func TestValidateOfferRejectsChangedTargetAndLowerPromotion(t *testing.T) {
 		if state.HighestAcceptedVersion != "0.6.0" {
 			t.Fatalf("rollback floor changed: %s", state.HighestAcceptedVersion)
 		}
+	}
+}
+
+func TestAcceptedUpdateInstallsDuringServiceOutageWithoutRetry(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests, 0, http.StatusOK} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			tracker := NewWorkTracker()
+			done, err := tracker.Start(WorkTask)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer done()
+			drain := NewDrainManager(tracker.Active, nil, 0, time.Now)
+			drain.SetWorkTracker(tracker)
+			client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json")})
+			installer := &countingInstaller{}
+			c := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, installer, false, "", nil)
+			c.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: time.Now().Add(time.Hour)}}
+			configureAcceptedOffer(t, c)
+			c.staged, c.state = *c.release, StateAvailable
+			if _, _, err := client.CheckIfDue(context.Background(), c.current); err != nil {
+				t.Fatal(err)
+			}
+			var requests atomic.Int32
+			releaseRequest := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				if status == 0 || status == http.StatusOK {
+					if status == http.StatusOK {
+						w.WriteHeader(http.StatusOK)
+						w.(http.Flusher).Flush()
+					}
+					select {
+					case <-r.Context().Done():
+					case <-releaseRequest:
+					}
+					return
+				}
+				http.Error(w, "unavailable", status)
+			}))
+			defer server.Close()
+			defer close(releaseRequest)
+			client.cfg.ServiceURL = server.URL
+			client.cfg.HTTPClient.Timeout = 50 * time.Millisecond
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c.StartRecovery(ctx)
+			if err := c.Accept(ctx, 10*time.Minute); err != nil {
+				t.Fatal(err)
+			}
+			waitForCoordinatorState(t, c, StateWaitingForIdle)
+			done()
+			waitForCoordinatorState(t, c, StateSucceeded)
+			if requests.Load() != 1 || installer.applies.Load() != 1 {
+				t.Fatalf("requests=%d applies=%d; want one of each", requests.Load(), installer.applies.Load())
+			}
+			if !tracker.Admit() {
+				t.Fatal("outage left tasks blocked")
+			}
+		})
 	}
 }

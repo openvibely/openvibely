@@ -874,7 +874,7 @@ func waitForUpdateRetry(ctx context.Context, delay time.Duration) bool {
 }
 
 func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease, staged any, installer Installer, generation string, preserveOnCancel bool) {
-	var nextOfferCheck time.Time
+	offerChecked := false
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -940,23 +940,21 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 				c.abortGeneration(generation, err)
 				return
 			}
-			if accepted {
-				if time.Now().Before(nextOfferCheck) {
-					continue
+			if accepted && !offerChecked {
+				err := c.client.ValidateOffer(ctx, release, c.current)
+				if ctx.Err() != nil {
+					return // Preserve approval for startup recovery.
 				}
-				if err := c.client.ValidateOffer(ctx, release, c.current); err != nil {
-					if ctx.Err() != nil {
-						return // Preserve approval for startup recovery.
-					}
-					if errors.Is(err, ErrUpdateOfferChanged) {
-						c.abortGeneration(generation, err)
-						return
-					}
-					// Unreachable or unverifiable is not withdrawn. Retain approval
-					// and keep renewing the lease, but never install cached metadata.
-					nextOfferCheck = time.Now().Add(30 * time.Second)
-					c.setOperationState(generation, StateWaitingForIdle, "waiting to confirm update availability: "+err.Error())
-					continue
+				if err != nil && !errors.Is(err, ErrUpdateOfferUnavailable) {
+					c.abortGeneration(generation, err)
+					return
+				}
+				// An outage does not revoke approval of the verified download.
+				// Check once per handoff; never keep tasks queued for a retry.
+				offerChecked = true
+				if err := c.client.ValidateForInstall(release, c.current); err != nil {
+					c.abortGeneration(generation, err)
+					return
 				}
 			}
 			if !c.drain.TakeOwnership(status.Generation) && !(preserveOnCancel && c.drain.Owns(generation)) {
