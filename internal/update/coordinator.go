@@ -874,7 +874,6 @@ func waitForUpdateRetry(ctx context.Context, delay time.Duration) bool {
 }
 
 func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease, staged any, installer Installer, generation string, preserveOnCancel bool) {
-	offerChecked := false
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -939,23 +938,6 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 			if err := c.client.ValidateForInstall(release, c.current); err != nil {
 				c.abortGeneration(generation, err)
 				return
-			}
-			if accepted && !offerChecked {
-				err := c.client.ValidateOffer(ctx, release, c.current)
-				if ctx.Err() != nil {
-					return // Preserve approval for startup recovery.
-				}
-				if err != nil && !errors.Is(err, ErrUpdateOfferUnavailable) {
-					c.abortGeneration(generation, err)
-					return
-				}
-				// An outage does not revoke approval of the verified download.
-				// Check once per handoff; never keep tasks queued for a retry.
-				offerChecked = true
-				if err := c.client.ValidateForInstall(release, c.current); err != nil {
-					c.abortGeneration(generation, err)
-					return
-				}
 			}
 			if !c.drain.TakeOwnership(status.Generation) && !(preserveOnCancel && c.drain.Owns(generation)) {
 				continue

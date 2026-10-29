@@ -2,6 +2,8 @@ package update
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -33,13 +35,19 @@ func TestAcceptedUpdateRenewsDrainAndRecoversExpiry(t *testing.T) {
 				t.Fatal(err)
 			}
 			client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: now})
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "release service unavailable", http.StatusServiceUnavailable)
+			}))
+			t.Cleanup(server.Close)
+			client.cfg.ServiceURL = server.URL
 			installer := &countingInstaller{}
 			c := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, installer, false, "", nil)
 			if err := c.SetPersistence(filepath.Join(root, "coordinator.json")); err != nil {
 				t.Fatal(err)
 			}
 			c.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now().Add(24 * time.Hour)}}
-			configureAcceptedOffer(t, c)
 			c.staged = *c.release
 			c.state = StateAvailable
 			ctx, cancel := context.WithCancel(context.Background())
@@ -73,6 +81,12 @@ func TestAcceptedUpdateRenewsDrainAndRecoversExpiry(t *testing.T) {
 			}
 			done()
 			waitForCoordinatorState(t, c, StateSucceeded)
+			if got := requests.Load(); got != 0 {
+				t.Fatalf("accepted update contacted release server %d times", got)
+			}
+			if installer.applies.Load() != 1 {
+				t.Fatal("accepted update did not install exactly once")
+			}
 		})
 	}
 }
@@ -117,8 +131,6 @@ func TestAcceptedUpdateRestartAfterLeaseExpiry(t *testing.T) {
 				t.Fatal(err)
 			}
 			old.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now().Add(24 * time.Hour)}}
-			configureAcceptedOffer(t, old)
-			build = old.current
 			old.staged = *old.release
 			old.state, old.operationGeneration = StateWaitingForIdle, status.Generation
 			old.accepted, old.acceptanceLease = true, 10*time.Minute

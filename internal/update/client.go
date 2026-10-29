@@ -210,37 +210,15 @@ func NewClient(cfg ClientConfig) *Client {
 }
 
 func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*VerifiedRelease, bool, error) {
-	return c.check(ctx, current, false)
-}
-
-// ValidateOffer bypasses discovery cooldowns and never authorizes installation
-// from a cached response. A fresh offer must identify the exact staged target.
-func (c *Client) ValidateOffer(ctx context.Context, release VerifiedRelease, current CurrentBuild) error {
-	ctx, cancel := context.WithTimeout(ctx, httpclient.UpdateTimeout)
-	defer cancel()
-	offer, _, err := c.check(ctx, current, true)
-	if err != nil {
-		return err
-	}
-	if offer == nil || !offer.ApplySupported || offer.Metadata.Version != release.Metadata.Version || offer.Target != release.Target {
-		return ErrUpdateOfferChanged
-	}
-	return c.ValidateForInstall(*offer, current)
-}
-
-var ErrUpdateOfferChanged = errors.New("accepted update is no longer offered by the update service")
-var ErrUpdateOfferUnavailable = errors.New("update service unavailable")
-
-func (c *Client) check(ctx context.Context, current CurrentBuild, force bool) (*VerifiedRelease, bool, error) {
 	state, err := c.loadState()
 	if err != nil {
 		return nil, false, fmt.Errorf("load update rollback-protection state: %w", err)
 	}
 	now := c.cfg.Now()
-	if !force && !state.LastSuccessfulCheck.IsZero() && now.Sub(state.LastSuccessfulCheck) < 24*time.Hour {
+	if !state.LastSuccessfulCheck.IsZero() && now.Sub(state.LastSuccessfulCheck) < 24*time.Hour {
 		return c.cachedReleaseForCurrent(state, current, now), false, nil
 	}
-	if !force && now.Before(state.NextAttempt) {
+	if now.Before(state.NextAttempt) {
 		return c.cachedReleaseForCurrent(state, current, now), false, nil
 	}
 	// Once the daily cooldown expires, allow a fresh batch of three attempts.
@@ -284,28 +262,15 @@ func (c *Client) check(ctx context.Context, current CurrentBuild, force bool) (*
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	var resp *http.Response
-	if force {
-		// The final availability check is best effort: one request, no retries.
-		resp, err = c.cfg.HTTPClient.Do(req)
-	} else {
-		resp, err = httpretry.DoRequest(c.cfg.HTTPClient, req)
-	}
+	resp, err := httpretry.DoRequest(c.cfg.HTTPClient, req)
 	if err != nil {
-		if force {
-			err = errors.Join(ErrUpdateOfferUnavailable, err)
-		}
 		c.recordFailure(&state, now)
 		return c.cachedReleaseForCurrent(state, current, now), true, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		c.recordFailure(&state, now)
-		err := fmt.Errorf("update check returned HTTP %d", resp.StatusCode)
-		if force && (resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusRequestTimeout) {
-			err = errors.Join(ErrUpdateOfferUnavailable, err)
-		}
-		return c.cachedReleaseForCurrent(state, current, now), true, err
+		return c.cachedReleaseForCurrent(state, current, now), true, fmt.Errorf("update check returned HTTP %d", resp.StatusCode)
 	}
 	var response CheckResponse
 	limited := io.LimitReader(resp.Body, (4<<20)+1)
@@ -313,9 +278,6 @@ func (c *Client) check(ctx context.Context, current CurrentBuild, force bool) (*
 	if readErr != nil || len(data) > 4<<20 {
 		c.recordFailure(&state, now)
 		if readErr != nil {
-			if force {
-				readErr = errors.Join(ErrUpdateOfferUnavailable, readErr)
-			}
 			return c.cachedReleaseForCurrent(state, current, now), true, readErr
 		}
 		return c.cachedReleaseForCurrent(state, current, now), true, errors.New("update response exceeds size limit")
@@ -344,21 +306,12 @@ func (c *Client) check(ctx context.Context, current CurrentBuild, force bool) (*
 	}
 	var verified *VerifiedRelease
 	if response.Release != nil {
-		highest := state.HighestAcceptedVersion
-		if force {
-			// A lower promoted version can withdraw an accepted offer. Verify
-			// its signature, but never lower the durable rollback floor.
-			highest = ""
-		}
-		verified, err = c.verifyRelease(response, current, highest, now)
+		verified, err = c.verifyRelease(response, current, state.HighestAcceptedVersion, now)
 		if err != nil {
 			c.recordFailure(&state, now)
 			return c.cachedReleaseForCurrent(state, current, now), true, err
 		}
-		if state.HighestAcceptedVersion == "" || compareVersions(verified.Metadata.Version, state.HighestAcceptedVersion) > 0 {
-			state.HighestAcceptedVersion = verified.Metadata.Version
-		}
-		state.MetadataExpiresAt, state.Cached = verified.Metadata.ExpiresAt, verified
+		state.HighestAcceptedVersion, state.MetadataExpiresAt, state.Cached = verified.Metadata.Version, verified.Metadata.ExpiresAt, verified
 	} else {
 		state.Cached = nil
 	}
