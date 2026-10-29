@@ -16,6 +16,8 @@ const (
 )
 
 type Execution struct {
+	AuthorUserID string `json:"author_user_id,omitempty"`
+	AuthorName   string `json:"author_name,omitempty"`
 	// HistoryOrder is the server tie-breaker for equal start times in transcript windows.
 	HistoryOrder int64 `json:"-"`
 

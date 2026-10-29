@@ -904,7 +904,7 @@ func TaskThreadFollowupResponse(message string, execID string, attachments []mod
 	})
 }
 
-func TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) templ.Component {
+func TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string, author ...string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -922,12 +922,12 @@ func TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatA
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if len(attachments) > 0 {
-			templ_7745c5c3_Err = ChatBubbleWithAttachments("User", message, attachments, projectID).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatBubbleWithAttachments("User", message, attachments, projectID, author...).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = ChatBubble("User", message).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatBubble("User", message, author...).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

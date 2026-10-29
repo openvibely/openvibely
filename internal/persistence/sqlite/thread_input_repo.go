@@ -45,7 +45,7 @@ func defaultThreadTaskJSON(raw string) string {
 	return raw
 }
 
-const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), reasoning_effort, service_tier, COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(retry_source_execution_id, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at`
+const threadInputSelectColumns = `id, scope, project_id, COALESCE(task_id, ''), COALESCE(run_execution_id, ''), COALESCE(agent_config_id, ''), input_mode, input_status, COALESCE(turn_id, ''), COALESCE(expected_turn_id, ''), content, COALESCE(attachment_session_id, ''), queue_position, COALESCE(chat_mode, ''), reasoning_effort, service_tier, COALESCE(source, ''), COALESCE(origin_agent, ''), COALESCE(retry_source_execution_id, ''), COALESCE(telegram_chat_id, 0), COALESCE(slack_team_id, ''), COALESCE(slack_channel_id, ''), COALESCE(slack_thread_ts, ''), COALESCE(slack_user_id, ''), COALESCE(email_from, ''), COALESCE(email_message_id, ''), COALESCE(email_references, ''), COALESCE(email_subject, ''), COALESCE(email_session_key, ''), COALESCE(discord_channel_id, ''), COALESCE(discord_thread_id, ''), COALESCE(discord_message_id, ''), COALESCE(discord_user_id, ''), COALESCE(x_account_id, ''), COALESCE(x_conversation_id, ''), COALESCE(x_reply_to_tweet_id, ''), COALESCE(x_user_id, ''), COALESCE(x_username, ''), created_at, updated_at, applied_at, author_user_id, author_name`
 
 func scanThreadInput(scanner interface {
 	Scan(dest ...interface{}) error
@@ -92,6 +92,7 @@ func scanThreadInput(scanner interface {
 		&input.CreatedAt,
 		&input.UpdatedAt,
 		&input.AppliedAt,
+		&input.AuthorUserID, &input.AuthorName,
 	)
 	return input, err
 }
@@ -265,7 +266,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 			return fmt.Errorf("creating steering input: %w", err)
 		}
 		*input = created
-		return nil
+		return saveInputAuthor(ctx, tx, input)
 	})
 	if err == nil {
 		r.notifySteeringWakeups(activeExecutionID)
@@ -405,7 +406,7 @@ func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecut
 		return fmt.Errorf("creating thread input: %w", err)
 	}
 	*input = created
-	return nil
+	return saveInputAuthor(ctx, exec, input)
 }
 
 func (r *ThreadInputRepo) GetByID(ctx context.Context, id string) (*models.ThreadInput, error) {
@@ -1125,10 +1126,11 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			isFollowup = 1
 		}
 		exec.Status = models.ExecQueued
+		exec.AuthorUserID, exec.AuthorName = promoted.AuthorUserID, promoted.AuthorName
 		if err := dbexec.QueryRowContext(ctx, `
-					INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-					RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+					INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, author_user_id, author_name)
+					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
+					RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup, promoted.AuthorUserID, promoted.AuthorName).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating promoted task execution: %w", err)
 		}
 		if exec.IsFollowup {
@@ -1262,10 +1264,11 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 			isFollowup = 1
 		}
 		exec.TaskID = task.ID
+		exec.AuthorUserID, exec.AuthorName = promoted.AuthorUserID, promoted.AuthorName
 		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-			RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+			INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, author_user_id, author_name)
+			VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup, promoted.AuthorUserID, promoted.AuthorName).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating queued chat execution: %w", err)
 		}
 

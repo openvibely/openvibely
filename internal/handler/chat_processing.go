@@ -1680,8 +1680,9 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		task.CreatedVia = models.TaskOriginX
 	}
 	exec := &models.Execution{AgentConfigID: agent.ID,
-		Status:     models.ExecRunning,
-		PromptSent: input.Content,
+		Status:       models.ExecRunning,
+		PromptSent:   input.Content,
+		AuthorUserID: input.AuthorUserID, AuthorName: input.AuthorName,
 	}
 	var slackContext *models.SlackTaskContext
 	if input.Source == models.TaskOriginSlack {
@@ -2151,7 +2152,8 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			AgentConfigID: agent.ID,
 			Status:        models.ExecQueued,
 			PromptSent:    input.Content,
-			IsFollowup:    true,
+			AuthorUserID:  input.AuthorUserID, AuthorName: input.AuthorName,
+			IsFollowup: true,
 		}
 		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID, agent)
 		if errors.Is(err, persistence.ErrTaskModelChanged) {

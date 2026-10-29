@@ -38,3 +38,7 @@ The implementation uses the database-neutral `OrganizationStore`; SQLite impleme
 ## Validation
 
 Tests cover migration upgrade/rollback with existing projects and settings, concurrent invitation acceptance, concurrent last-owner demotion, role escalation denial, expired and revoked invites, account login/logout, preference separation, auth-off restrictions, hosted identity binding and session revocation, HTTP invitation flows, cross-origin rejection, and removal during a WebSocket connection.
+
+## Message attribution
+
+Migration 218 records the sending account ID and username for new execution messages and queued/steering inputs. The initial task prompt retains its creator's name, even when another member starts it. Thread bubbles use the saved name for live responses and reloaded history; queue promotion preserves the original sender. Existing messages without recorded attribution continue to display “User”; their sender is not guessed. This is display attribution, not project authorization or durable background-job run-as enforcement.
