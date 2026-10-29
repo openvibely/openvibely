@@ -1,0 +1,17 @@
+package pages
+
+import (
+    "github.com/openvibely/openvibely/internal/models"
+    "github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Organization(projects []models.Project, currentProjectID string, content templ.Component) {
+    @layout.Base("Organization", projects, currentProjectID) {
+        @OrganizationContent(content)
+    }
+}
+
+templ OrganizationContent(content templ.Component) {
+    @layout.PageTitle("Organization")
+    @content
+}

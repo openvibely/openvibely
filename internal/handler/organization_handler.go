@@ -2,8 +2,12 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/web/templates/pages"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -175,9 +179,9 @@ type organizationPageData struct {
 	SignedIn    bool
 }
 
-var organizationTemplate = template.Must(template.New("organization").Parse(`<!doctype html>
+var organizationTemplate = template.Must(template.New("organization").Parse(`{{if .Joining}}<!doctype html>
 <html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Organization - OpenVibely</title><link href="{{.CSS}}" rel="stylesheet"><link href="{{.Utilities}}" rel="stylesheet"></head>
-<body class="min-h-screen bg-base-200 p-6"><main class="max-w-3xl mx-auto space-y-6"><a href="/" class="link">Back to OpenVibely</a>
+<body class="min-h-screen bg-base-200 p-6"><main class="max-w-3xl mx-auto space-y-6"><a href="/" class="link">Back to OpenVibely</a>{{else}}<div id="organization-container" class="max-w-3xl mx-auto space-y-6"><h1 class="text-2xl font-bold mb-6">Organization</h1>{{end}}
 <section class="card bg-base-100 border border-base-300"><div class="card-body"><h1 class="card-title text-2xl">{{if .Joining}}Join {{end}}{{.Org.Name}}</h1>
 {{if .Joining}}
 <p>All organization members currently have access to every project. Join only an organization you trust.</p>
@@ -191,19 +195,19 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`<!d
 <p>Signed in as {{.Principal.Username}} · {{.Principal.Role}}</p>
 <p>All members currently share access to every project. Private projects are not available yet.</p>
 {{if .AuthOff}}<p>Authentication is off. Anyone who can reach this app acts as the owner. Enable authentication before inviting people.</p>{{end}}
-{{if .Admin}}<form method="post" action="/organization" class="flex gap-2"><input aria-label="Organization name" class="input input-bordered flex-1" name="name" value="{{.Org.Name}}" maxlength="100" required><button class="btn" type="submit">Rename</button></form>{{end}}
+{{if .Admin}}<form method="post" action="/organization" hx-post="/organization" hx-target="#main-content" class="flex gap-2"><input aria-label="Organization name" class="input input-bordered flex-1" name="name" value="{{.Org.Name}}" maxlength="100" required><button class="btn" type="submit">Rename</button></form>{{end}}
 </div></section>
 <section class="card bg-base-100 border border-base-300"><div class="card-body"><h2 class="card-title">Members</h2>
 {{range .Members}}<div class="flex flex-wrap items-center gap-2 py-2 border-b border-base-300"><span class="flex-1">{{.Username}} · {{.Role}}</span>
-{{if and $.Admin $.Local (or (eq $.Principal.Role "owner") (eq .Role "member"))}}<form method="post" action="/organization/members/{{.UserID}}" class="flex gap-2"><select aria-label="New role for {{.Username}}" name="role" class="select select-bordered"><option value="member" {{if eq .Role "member"}}selected{{end}}>Member</option>{{if eq $.Principal.Role "owner"}}<option value="admin" {{if eq .Role "admin"}}selected{{end}}>Admin</option><option value="owner" {{if eq .Role "owner"}}selected{{end}}>Owner</option>{{end}}</select><button class="btn" name="action" value="role">Save role</button><button class="btn btn-outline" name="action" value="remove">Remove</button></form>{{end}}</div>{{end}}
+{{if and $.Admin $.Local (or (eq $.Principal.Role "owner") (eq .Role "member"))}}<form method="post" action="/organization/members/{{.UserID}}" hx-post="/organization/members/{{.UserID}}" hx-target="#main-content" class="flex gap-2"><select aria-label="New role for {{.Username}}" name="role" class="select select-bordered"><option value="member" {{if eq .Role "member"}}selected{{end}}>Member</option>{{if eq $.Principal.Role "owner"}}<option value="admin" {{if eq .Role "admin"}}selected{{end}}>Admin</option><option value="owner" {{if eq .Role "owner"}}selected{{end}}>Owner</option>{{end}}</select><button class="btn" name="action" value="role">Save role</button><button class="btn btn-outline" name="action" value="remove">Remove</button></form>{{end}}</div>{{end}}
 </div></section>
 {{if .Admin}}<section class="card bg-base-100 border border-base-300"><div class="card-body"><h2 class="card-title">Invitations</h2>
-{{if .Local}}<p>Links expire in seven days and work once. Anyone with the link can join.</p><form method="post" action="/organization/invitations" class="flex gap-2"><select name="role" aria-label="Invitation role" class="select select-bordered"><option value="member">Member</option>{{if eq .Principal.Role "owner"}}<option value="admin">Admin</option>{{end}}</select><button class="btn btn-primary" type="submit">Create invite link</button></form>
+{{if .Local}}<p>Links expire in seven days and work once. Anyone with the link can join.</p><form method="post" action="/organization/invitations" hx-post="/organization/invitations" hx-target="#main-content" class="flex gap-2"><select name="role" aria-label="Invitation role" class="select select-bordered"><option value="member">Member</option>{{if eq .Principal.Role "owner"}}<option value="admin">Admin</option>{{end}}</select><button class="btn btn-primary" type="submit">Create invite link</button></form>
 {{if .InviteURL}}<label class="form-control">Share this link (shown only once)<input class="input input-bordered" readonly value="{{.InviteURL}}"></label>{{end}}
-{{range .Invitations}}<div class="flex flex-wrap items-center gap-2 py-2"><span class="flex-1">{{.Role}} · {{if .Used}}Accepted{{else if .Revoked}}Revoked{{else}}Pending{{end}}</span>{{if and (not .Used) (not .Revoked)}}<form method="post" action="/organization/invitations/{{.ID}}/revoke"><button class="btn btn-sm" type="submit">Revoke</button></form>{{end}}</div>{{end}}
+{{range .Invitations}}<div class="flex flex-wrap items-center gap-2 py-2"><span class="flex-1">{{.Role}} · {{if .Used}}Accepted{{else if .Revoked}}Revoked{{else}}Pending{{end}}</span>{{if and (not .Used) (not .Revoked)}}<form method="post" action="/organization/invitations/{{.ID}}/revoke" hx-post="/organization/invitations/{{.ID}}/revoke" hx-target="#main-content"><button class="btn btn-sm" type="submit">Revoke</button></form>{{end}}</div>{{end}}
 {{else}}<p>{{if .AuthOff}}Enable local authentication to create invitations.{{else}}Hosted invitations are managed through workspace settings when hosted teams support is available.{{end}}</p>{{end}}
 </div></section>{{end}}{{end}}
-</main></body></html>`))
+{{if .Joining}}</main></body></html>{{else}}</div>{{end}}`))
 
 func (h *Handler) renderOrganization(c echo.Context, data organizationPageData) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
@@ -214,7 +218,25 @@ func (h *Handler) renderOrganization(c echo.Context, data organizationPageData) 
 	if err := organizationTemplate.Execute(&b, data); err != nil {
 		return err
 	}
-	return c.HTML(http.StatusOK, b.String())
+	if data.Joining {
+		return c.HTML(http.StatusOK, b.String())
+	}
+	content := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+		_, err := io.WriteString(w, b.String())
+		return err
+	})
+	if isHTMX(c) {
+		return render(c, http.StatusOK, pages.OrganizationContent(content))
+	}
+	currentProjectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	projects, err := h.projectSvc.List(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, pages.Organization(projects, currentProjectID, content))
 }
 func (h *Handler) organizationData(c echo.Context) (organizationPageData, error) {
 	if h.organizationSvc == nil {
