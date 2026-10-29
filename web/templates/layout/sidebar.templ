@@ -213,7 +213,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         return target.pathname + target.search + target.hash;
                     }
                     document.addEventListener('click', function(event) {
-                        const link = event.target.closest('#task-back-btn, #task-automations-back-btn, [data-automation-breadcrumb] a');
+                        const link = event.target.closest('#task-back-btn, #task-automations-back-btn, [data-automation-breadcrumb] a, [data-workspace-list-return]');
                         if (!link) return;
                         const url = new URL(link.href, location.href);
                         if (url.origin !== location.origin || url.searchParams.get('project_id') !== '__all_projects__' || !['/tasks', '/automations'].includes(url.pathname)) return;

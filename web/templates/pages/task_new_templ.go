@@ -111,14 +111,14 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div data-page-header class=\"flex items-center gap-2 mb-6 flex-shrink-0 min-w-0\"><nav class=\"flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-page-header><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div data-page-header class=\"flex items-center gap-2 mb-6 flex-shrink-0 min-w-0\"><nav class=\"flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-page-header><a data-workspace-list-return class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.URL("/tasks?project_id=" + layout.WorkspaceProjectID(ctx, project.ID))).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 31, Col: 187}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 31, Col: 214}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -131,7 +131,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/tasks?project_id=" + layout.WorkspaceProjectID(ctx, project.ID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 31, Col: 264}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 31, Col: 291}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {

@@ -158,6 +158,8 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 
  document.querySelector('nav[aria-label="All projects views"] a[href^="/tasks"]').click();
  await wait(()=>document.querySelector('[data-all-projects-task]'));
+ await window.openVibelyNavigate('/tasks?project_id=__all_projects__&search=Cross&filter_project='+owner);
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
  document.querySelector('#all-projects-page a[href^="/tasks/new"]').click();
  await wait(()=>document.getElementById('all-projects-choose'));
  const destination=Array.from(document.querySelectorAll('#all-projects-choose a')).find(a=>a.textContent==='Second browser project');
@@ -166,6 +168,13 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(!document.getElementById('all-projects-choose'),'chooser did not navigate');
  assert(document.getElementById('project-selector').value==='__all_projects__','destination choice switched tabs');
  assert(new URL(document.getElementById('task-thread-form').getAttribute('hx-post'),location.href).searchParams.get('destination_project')===owner,'creation lost destination');
+ document.querySelector('[data-workspace-list-return]').click();
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
+ assert(new URL(location.href).searchParams.get('search')==='Cross','new-task breadcrumb lost search');
+ assert(new URL(location.href).searchParams.get('filter_project')===owner,'new-task breadcrumb lost project filter');
+ assert(document.getElementById('project-selector').value==='__all_projects__','new-task breadcrumb switched tabs');
+ await window.openVibelyNavigate('/tasks/new?project_id=__all_projects__&destination_project='+owner);
+ await wait(()=>location.pathname==='/tasks/new' && document.getElementById('task-thread-form'));
  const form=document.getElementById('task-thread-form');
  await htmx.ajax('POST',form.getAttribute('hx-post'),{source:form,target:'#main-content',swap:'innerHTML',values:{title:'Created without switching '+innerWidth,message:'Save this task',category:'backlog',priority:'2'}});
  await wait(()=>document.getElementById('task-detail-content').dataset.taskId);
