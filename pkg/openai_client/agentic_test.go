@@ -4012,11 +4012,11 @@ func TestOpenAIAutoCompactionTokenLimit_GPT6AstraUsesFullContext(t *testing.T) {
 	}
 }
 
-func TestOpenAIAutoCompactionTokenLimit_GPT61SolUsesStandardEffectiveContext(t *testing.T) {
-	got := openAIAutoCompactionTokenLimit("gpt-6.1-sol")
-	want := (272000 * 90) / 100
-	if got != want {
-		t.Fatalf("openAIAutoCompactionTokenLimit(gpt-6.1-sol) = %d, want %d", got, want)
+func TestOpenAIAutoCompactionTokenLimit_GPT61UsesCodexEffectiveContext(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6.1-terra"} {
+		if got := openAIAutoCompactionTokenLimit(model); got != 450000 {
+			t.Errorf("openAIAutoCompactionTokenLimit(%q) = %d, want 450000", model, got)
+		}
 	}
 }
 
@@ -5110,61 +5110,65 @@ func TestOpenAIAgenticCompactionTranscriptAndImageHelpers(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_GPT6LunaConfigurationUpdatePreservesRequestEffort(t *testing.T) {
-	requests := make(chan map[string]any, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-			return
-		}
-		requests <- body
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed","model":"gpt-6-luna"}}`})))
-	}))
-	defer srv.Close()
+func TestSendAgentic_GPT6ConfigurationUpdatePreservesRequestEffort(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			requests := make(chan map[string]any, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				requests <- body
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q}}`, model)})))
+			}))
+			defer srv.Close()
 
-	original := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/v1/"
-	defer func() { OpenAIAPIBaseURL = original }()
+			original := OpenAIAPIBaseURL
+			OpenAIAPIBaseURL = srv.URL + "/v1/"
+			defer func() { OpenAIAPIBaseURL = original }()
 
-	client := newHTTPTestAPIKeyClient("sk-test")
-	client.responsesTransportState.websocketDisabled.Store(true)
-	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
-	client.responsesTransportState.setAstraReasoningEffort("gpt-6-luna", "medium")
-	if _, err := client.SendAgentic(context.Background(), "next", &AgenticOptions{
-		Model:                          "gpt-6-luna",
-		ReasoningEffort:                "high",
-		SkipDefaultTools:               true,
-		EnableAstraConfigurationUpdate: true,
-	}); err != nil {
-		t.Fatalf("SendAgentic: %v", err)
-	}
-	request := <-requests
-	reasoning, _ := request["reasoning"].(map[string]any)
-	if reasoning["effort"] != "medium" {
-		t.Fatalf("request-level reasoning.effort = %#v, want previous medium", reasoning["effort"])
-	}
-	input, _ := request["input"].([]any)
-	var configUpdate map[string]any
-	for _, raw := range input {
-		item, _ := raw.(map[string]any)
-		if item["type"] == "configuration_update" {
-			configUpdate = item
-		}
-	}
-	if configUpdate == nil {
-		t.Fatalf("input missing configuration_update: %#v", input)
-	}
-	updateReasoning, _ := configUpdate["reasoning"].(map[string]any)
-	if updateReasoning["effort"] != "high" {
-		t.Fatalf("configuration_update reasoning.effort = %#v, want high", updateReasoning["effort"])
-	}
-	if _, exists := configUpdate["configuration"]; exists {
-		t.Fatalf("configuration_update contains unsupported configuration wrapper: %#v", configUpdate)
-	}
-	if got := client.responsesTransportState.lastAstraReasoningEffort("gpt-6-luna"); got != "high" {
-		t.Fatalf("remembered GPT-6 Luna effort = %q, want high", got)
+			client := newHTTPTestAPIKeyClient("sk-test")
+			client.responsesTransportState.websocketDisabled.Store(true)
+			client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
+			client.responsesTransportState.setAstraReasoningEffort(model, "medium")
+			if _, err := client.SendAgentic(context.Background(), "next", &AgenticOptions{
+				Model:                          model,
+				ReasoningEffort:                "high",
+				SkipDefaultTools:               true,
+				EnableAstraConfigurationUpdate: true,
+			}); err != nil {
+				t.Fatalf("SendAgentic: %v", err)
+			}
+			request := <-requests
+			reasoning, _ := request["reasoning"].(map[string]any)
+			if reasoning["effort"] != "medium" {
+				t.Fatalf("request-level reasoning.effort = %#v, want previous medium", reasoning["effort"])
+			}
+			input, _ := request["input"].([]any)
+			var configUpdate map[string]any
+			for _, raw := range input {
+				item, _ := raw.(map[string]any)
+				if item["type"] == "configuration_update" {
+					configUpdate = item
+				}
+			}
+			if configUpdate == nil {
+				t.Fatalf("input missing configuration_update: %#v", input)
+			}
+			updateReasoning, _ := configUpdate["reasoning"].(map[string]any)
+			if updateReasoning["effort"] != "high" {
+				t.Fatalf("configuration_update reasoning.effort = %#v, want high", updateReasoning["effort"])
+			}
+			if _, exists := configUpdate["configuration"]; exists {
+				t.Fatalf("configuration_update contains unsupported configuration wrapper: %#v", configUpdate)
+			}
+			if got := client.responsesTransportState.lastAstraReasoningEffort(model); got != "high" {
+				t.Fatalf("remembered reasoning effort = %q, want high", got)
+			}
+		})
 	}
 }
 

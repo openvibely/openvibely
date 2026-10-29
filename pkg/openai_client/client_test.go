@@ -440,7 +440,7 @@ func TestSend_OAuthLunaUsesResponsesLiteWebSocket(t *testing.T) {
 }
 
 func TestResponsesLiteWebSocketModels(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-sol", " GPT-6.1-SOL ", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", " GPT-6-SOL "} {
+	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-sol", " GPT-6.1-SOL ", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", " GPT-6-SOL "} {
 		if !isResponsesLiteWebsocketModel(model) {
 			t.Errorf("isResponsesLiteWebsocketModel(%q) = false, want true", model)
 		}
@@ -453,12 +453,12 @@ func TestResponsesLiteWebSocketModels(t *testing.T) {
 }
 
 func TestGPT6WorkflowModels(t *testing.T) {
-	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", " GPT-6-SOL "} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", " GPT-6-SOL "} {
 		if !isGPT6WorkflowModel(model) {
 			t.Errorf("isGPT6WorkflowModel(%q) = false, want true", model)
 		}
 	}
-	for _, model := range []string{"gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.5", "gpt-6", ""} {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.5", "gpt-6", ""} {
 		if isGPT6WorkflowModel(model) {
 			t.Errorf("isGPT6WorkflowModel(%q) = true, want false", model)
 		}
@@ -466,7 +466,7 @@ func TestGPT6WorkflowModels(t *testing.T) {
 }
 
 func TestSend_GPT6SolModelsAPIKeyUsesResponsesLiteWebSocket(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6-astra", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if got := r.Header.Get("OpenAI-Beta"); got != openAIResponsesWebsocketBeta {
@@ -522,7 +522,7 @@ func TestSend_GPT6SolModelsAPIKeyUsesResponsesLiteWebSocket(t *testing.T) {
 }
 
 func TestSendAgentic_GPT6SolModelsAPIKeyWebSearchUsesResponsesLiteNamespace(t *testing.T) {
-	for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6-astra", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			var request map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -601,6 +601,9 @@ func TestBuildResponsesLiteWebsocketPayload_ModelDefaultsAndHostedTools(t *testi
 		model  string
 		effort string
 	}{
+		{model: "gpt-6-astra", effort: "medium"},
+		{model: "gpt-6.1-sol", effort: "low"},
+		{model: "gpt-6.1-terra", effort: "low"},
 		{model: "gpt-5.6-sol", effort: "medium"},
 		{model: "gpt-5.6-terra", effort: "medium"},
 		{model: "gpt-5.6-luna", effort: "medium"},
