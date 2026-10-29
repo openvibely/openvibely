@@ -12,10 +12,11 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
+	"net/url"
 )
 
 // ReviewCommentList renders a list of review comments (used for HTMX responses).
-func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Component {
+func ReviewCommentList(comments []models.ReviewComment, taskID string, projectID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -39,7 +40,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templruntime.NewAttributeExpression(taskID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 10, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 11, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
@@ -52,7 +53,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", len(comments))).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 10, Col: 109}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 11, Col: 109}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
@@ -71,7 +72,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templruntime.NewAttributeExpression(comment.ID).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 14, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 15, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 				if templ_7745c5c3_Err != nil {
@@ -84,7 +85,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression(comment.FilePath).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 15, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 16, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 				if templ_7745c5c3_Err != nil {
@@ -97,7 +98,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", comment.LineNumber)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 16, Col: 61}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 17, Col: 61}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 				if templ_7745c5c3_Err != nil {
@@ -110,7 +111,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templruntime.NewAttributeExpression(comment.LineType).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 17, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 18, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
@@ -123,7 +124,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(comment.ReviewedBy)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 21, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 22, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -136,7 +137,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(comment.FilePath)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 23, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 24, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -149,7 +150,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", comment.LineNumber))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 23, Col: 102}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 24, Col: 102}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
@@ -162,7 +163,7 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(comment.CommentText)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 25, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 26, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
@@ -173,9 +174,9 @@ func ReviewCommentList(comments []models.ReviewComment, taskID string) templ.Com
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var12 string
-				templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/reviews/%s", comment.ID)).Resolve(ctx)
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/reviews/%s?project_id=%s", comment.ID, url.QueryEscape(projectID))).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 29, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 30, Col: 98}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
@@ -221,7 +222,7 @@ func ReviewToolbar(taskID string, commentCount int) templ.Component {
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/reviews/submit", taskID)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 50, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/review_comments.templ`, Line: 51, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {

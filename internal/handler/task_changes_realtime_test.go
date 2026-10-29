@@ -695,7 +695,11 @@ func TestTaskChangesSummaryAuthoritativePreservedDiffAndScope(t *testing.T) {
 	}
 	for _, scope := range []string{"", foreign.ID} {
 		rec := requestWithAccept(tc, http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+scope, "application/json", "")
-		if rec.Code != http.StatusBadRequest {
+		want := http.StatusBadRequest
+		if scope != "" {
+			want = http.StatusNotFound
+		}
+		if rec.Code != want {
 			t.Fatalf("scope %q: %d %s", scope, rec.Code, rec.Body.String())
 		}
 	}

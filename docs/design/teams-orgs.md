@@ -641,10 +641,11 @@ Note the project rules: never touch `openvibely.db` destructively, follow the ta
 Sizing: S ≈ ≤3 days, M ≈ 1–2 weeks, L ≈ 3–4 weeks (one engineer plus agent assistance).
 
 ### Phase 0: Groundwork (partly complete; remaining work needs sizing)
+- **Project-boundary audit performed:** findings, fixes, coverage, and remaining limits are recorded in [Project access audit](project-access-audit.md). Shared task/input guards and scoped review/webhook/chat-status operations are added. This is not user authorization; legacy unscoped requests and global settings remain until the users/policy phases.
 - **Complete:** backend-neutral persistence interfaces and SQLite implementation (§2.6).
-- **Remaining:** define `Principal`/`AccessScope` for the authorization work. Re-audit route ownership and event streams against the current code before sizing the remaining work.
-- **IDOR hardening now, independent of users**: ensure every ID-addressed route verifies the row belongs to the request project (`GetTask`, `GetTaskExecutions`, attachments, SSE `ChatStreamSSE`). Add a route-walking ownership contract test. This is valuable even for single-user instances.
-- Scope live event streams to the right project.
+- **Remaining:** define `Principal`/`AccessScope` and expand the audit into a resource-wide authorization matrix, including legacy unscoped requests, before sizing the remaining work.
+- **IDOR hardening:** task-route ownership is now covered by a route-walking contract test; review, webhook, queued-input, and chat-status fixes have regression tests. Extend coverage beyond these route families as described in the audit.
+- Live transport now uses WebSockets with project/task ownership checks. Preserve these checks and add principal-based authorization in Phase 2; the original SSE references above describe the earlier architecture.
 - Milestone: persistence boundary retained; route ownership and event-stream contract tests green.
 
 ### Phase 1: Users (2–3 weeks)

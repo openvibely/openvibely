@@ -1228,7 +1228,14 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				lineRow.classList.add('diff-review-line-open');
 			}
 
-			function updateReviewComment(formRow) {
+			function reviewMutationURL(commentId) {
+                var detail = document.getElementById('task-detail-content');
+                var projectId = detail && detail.dataset ? detail.dataset.projectId : '';
+                if (!projectId) projectId = new URLSearchParams(window.location.search).get('project_id') || '';
+                return '/reviews/' + encodeURIComponent(commentId) + (projectId ? '?project_id=' + encodeURIComponent(projectId) : '');
+            }
+
+            function updateReviewComment(formRow) {
 				if (!formRow) return;
 				var viewer = document.getElementById('diff-viewer');
 				var taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';
@@ -1240,7 +1247,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				if (!text) return;
 				var formData = new URLSearchParams();
 				formData.append('comment_text', text);
-				fetch('/reviews/' + commentId, {
+				fetch(reviewMutationURL(commentId), {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
 					body: formData.toString()
@@ -1288,7 +1295,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				var commentId = row.dataset.commentId;
 				if (!commentId) return;
 				var lineRow = findLineRowForComment(row);
-				fetch('/reviews/' + commentId, {
+				fetch(reviewMutationURL(commentId), {
 					method: 'DELETE',
 					headers: { 'HX-Request': 'true' }
 				})
