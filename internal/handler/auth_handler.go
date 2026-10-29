@@ -110,14 +110,6 @@ func (h *Handler) recognizeSession(request *http.Request, now time.Time) session
 			if bindErr != nil || user == nil || user.Disabled || user.Role == "" {
 				return sessionRecognition{hostedCookieState: hostedCookieInvalid, err: bindErr}
 			}
-			// Refresh pre-upgrade sessions once, after signature and stored-session
-			// checks. Background work reloads this same profile for attribution.
-			if user.Username != claims.Email || user.DisplayName != claims.Display {
-				user, bindErr = h.organizationSvc.Store.BindHostedOwner(request.Context(), claims.Subject, claims.Email)
-				if bindErr != nil {
-					return sessionRecognition{hostedCookieState: hostedCookieInvalid, err: bindErr}
-				}
-			}
 			return sessionRecognition{orgUser: user, hostedClaims: claims, hostedCookieState: hostedCookieValid}
 		}
 		return sessionRecognition{hostedClaims: claims, hostedCookieState: hostedCookieValid}
