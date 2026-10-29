@@ -90,7 +90,8 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Equal(t, 400, rec.Code)
 	rec = httptest.NewRecorder()
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks?project_id="+models.AllProjectsID+"&filter_project=missing", nil))
-	require.Equal(t, 400, rec.Code)
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("Location"))
 	project, err := h.projectSvc.GetByID(t.Context(), models.AllProjectsID)
 	require.NoError(t, err)
 	require.Nil(t, project)
@@ -151,4 +152,28 @@ func TestAllProjectsDesktopLaunchKeepsRestorationBootstrap(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `data-openvibely-runtime="desktop"`)
 	require.Contains(t, rec.Body.String(), `/analytics?project_id=__all_projects__&amp;range=7d#usage`)
 	require.Contains(t, rec.Body.String(), `data-all-projects-view="tasks"`)
+}
+
+func TestAllProjectsStaleFilterRefreshesWholeView(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
+	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
+	for _, page := range []string{"tasks", "automations", "analytics"} {
+		for _, target := range []string{"main-content", "all-projects-results"} {
+			t.Run(page+"/"+target, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/"+page+"?project_id="+models.AllProjectsID+"&filter_project=deleted&search=retained&range=7d&offset=20&card_page=1", nil)
+				req.Header.Set("HX-Request", "true")
+				req.Header.Set("HX-Target", target)
+				rec := httptest.NewRecorder()
+				app.ServeHTTP(rec, req)
+				require.Equal(t, 200, rec.Code)
+				require.Equal(t, "#main-content", rec.Header().Get("HX-Retarget"))
+				require.Equal(t, "innerHTML", rec.Header().Get("HX-Reswap"))
+				require.Equal(t, "/"+page+"?project_id="+models.AllProjectsID+"&range=7d&search=retained", rec.Header().Get("HX-Replace-Url"))
+				require.Contains(t, rec.Body.String(), `data-all-projects-view="`+page+`"`)
+				require.Contains(t, rec.Body.String(), `name="filter_project"`)
+				require.NotContains(t, rec.Body.String(), "filter_project=deleted")
+			})
+		}
+	}
 }

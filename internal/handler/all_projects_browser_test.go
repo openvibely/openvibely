@@ -165,3 +165,71 @@ func TestAllProjectsDesktopRestoresSavedLocationInChrome(t *testing.T) {
 		t.Fatal("desktop restoration timed out")
 	}
 }
+
+func TestAllProjectsStaleFilterRecoversInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
+	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
+	project := createProject(t, h, "Second browser project")
+	task := models.Task{ProjectID: project.ID, Title: "Cross project browser task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+	runner := `<script>
+    (async()=>{try{
+      while(!window.openVibelyProjectTabsSync || document.readyState!=='complete')await new Promise(r=>setTimeout(r,30));
+      sessionStorage.setItem('openvibely.project-location.__all_projects__','/tasks?project_id=__all_projects__&filter_project=deleted-project');
+      let finished=false;
+      document.body.addEventListener('htmx:afterRequest',e=>{if((e.detail.requestConfig.path||'').includes('filter_project=deleted-project'))finished=true;});
+      document.querySelector('[data-project-tab="__all_projects__"]').click();
+      const deadline=Date.now()+10000;
+      while(!finished || window.openVibelyProtectedProjectID){if(Date.now()>deadline)throw Error('request timeout');await new Promise(r=>setTimeout(r,30));}
+      if(document.getElementById('project-selector').value!=='__all_projects__')throw Error('All projects tab failed to open: selection='+document.getElementById('project-selector').value+' URL='+location.href);
+      if(new URL(location.href).searchParams.has('filter_project'))throw Error('stale filter remains in URL');
+      if(!document.querySelector('[data-all-projects-view="tasks"]'))throw Error('aggregate page not loaded');
+      await fetch('/browser-result',{method:'POST',body:'pass'});
+    }catch(e){await fetch('/browser-result',{method:'POST',body:String(e)})}})();</script>`
+	result := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8000))
+			select {
+			case result <- string(body):
+			default:
+			}
+			w.WriteHeader(204)
+			return
+		}
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, r)
+		for key, values := range rec.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = io.WriteString(w, strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1))
+	}))
+	defer server.Close()
+	for _, size := range []string{"1280,900"} {
+		t.Run(size, func(t *testing.T) {
+			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+t.TempDir(), "--window-size="+size, server.URL+"/tasks?project_id=default")
+			require.NoError(t, startHandlerBrowserProcess(cmd))
+			defer stopHandlerBrowserProcess(cmd)
+			select {
+			case outcome := <-result:
+				require.Equal(t, "pass", outcome)
+			case <-time.After(50 * time.Second):
+				t.Fatal("browser timed out")
+			}
+		})
+	}
+}

@@ -98,9 +98,26 @@ func (h *Handler) AllProjects(c echo.Context) error {
 			}
 		}
 		if !found {
-			return echo.NewHTTPError(http.StatusBadRequest, "Unknown project filter")
+			// A remembered filter can outlive its project. Clear the stale
+			// filter and page boundary rather than preventing tab navigation.
+			query := c.QueryParams()
+			for _, key := range []string{"filter_project", "offset", "page", "card_page"} {
+				query.Del(key)
+			}
+			location := c.Request().URL.Path + "?" + query.Encode()
+			if !isHTMX(c) {
+				return c.Redirect(http.StatusSeeOther, location)
+			}
+			c.Request().URL.RawQuery = query.Encode()
+			data.FilterProject = ""
+			// Polls must refresh the filter controls as well as the results.
+			c.Request().Header.Set("HX-Target", "main-content")
+			c.Response().Header().Set("HX-Replace-Url", location)
+			c.Response().Header().Set("HX-Retarget", "#main-content")
+			c.Response().Header().Set("HX-Reswap", "innerHTML")
+		} else {
+			projectID = data.FilterProject
 		}
-		projectID = data.FilterProject
 	}
 	switch data.Section {
 	case "tasks":
