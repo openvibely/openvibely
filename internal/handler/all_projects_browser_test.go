@@ -40,6 +40,18 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(document.getElementById('project-selector').value==='__all_projects__','selection mismatch');
  const card=document.querySelector('[data-all-projects-task]');assert(card && card.textContent.includes('Cross project browser task'),'missing cross project task');
  assert(!window._sidebarSSE,'virtual project opened live connection');
+ await wait(()=>document.querySelector('#task-list-groups [data-task-list-project]'));
+ const row=document.querySelector('#task-list-groups [data-task-list-row]');
+ assert(row.textContent.includes('Second browser project'),'task list missing project label');
+ assert(new URL(row.href).searchParams.get('project_id')===row.querySelector('[data-task-list-project]').dataset.taskListProject,'task list owner URL mismatch');
+ if(innerWidth>=1024){
+ assert(getComputedStyle(document.getElementById('task-list-panel')).display!=='none','task list hidden');
+ row.click();
+ await wait(()=>document.getElementById('task-detail-content') && document.getElementById('project-selector').value!=='__all_projects__');
+ document.querySelector('[data-project-tab="__all_projects__"]').click();
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
+ }
+
  document.querySelector('nav[aria-label="All projects views"] a[href^="/analytics"]').click();
  await wait(()=>document.querySelector('[data-all-projects-usage]'));
  document.querySelector('nav[aria-label="All projects views"] a[href^="/automations"]').click();

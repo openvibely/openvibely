@@ -76,10 +76,6 @@ templ AllProjects(data AllProjectsData) {
 }
 
 templ allProjectsHeading(section string) {
-	<style>
-		/* The aggregate view has its own project filter and task board. */
-		html:has(#all-projects-page, #all-projects-choose) :is(#task-list-panel, #task-list-divider, #task-list-search-toggle, #task-list-toggle) { display: none !important; }
-	</style>
 	@layout.PageTitle("All projects")
 	<div data-page-header class="flex flex-wrap items-center justify-between gap-4 mb-6">
 		<div><h2 class="text-2xl font-bold">All projects</h2><p class="text-sm opacity-60 mt-1">{ strings.ToUpper(section[:1]) + section[1:] } across your projects</p></div>

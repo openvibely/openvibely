@@ -34,7 +34,9 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		switch path {
 		case "/tasks", "/automations", "/analytics":
 			return h.AllProjects(c)
-		case "/alerts/unread-count", "/tasks/sidebar":
+		case "/tasks/sidebar":
+			return h.TaskListPanel(c)
+		case "/alerts/unread-count":
 			return c.NoContent(http.StatusOK)
 		case "/events":
 			// Aggregate pages refresh their own content without opening a stream

@@ -3420,5 +3420,16 @@ func (h *Handler) TaskListPanel(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	if projectID == models.AllProjectsID {
+		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		names := make(map[string]string, len(projects))
+		for _, project := range projects {
+			names[project.ID] = project.Name
+		}
+		return render(c, http.StatusOK, layout.TaskListPanelContentWithProjects(projectID, layout.TaskListGroups(tasks), names))
+	}
 	return render(c, http.StatusOK, layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks)))
 }

@@ -54,6 +54,21 @@ func taskListAge(t time.Time) string {
 }
 
 templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
+    @TaskListPanelContentWithProjects(projectID, groups, nil)
+}
+
+func taskListRowURL(projectID string, task models.Task) string {
+    path := fmt.Sprintf("/tasks/%s?from=tasks", task.ID)
+    if projectID == models.AllProjectsID { path += "&project_id=" + url.QueryEscape(task.ProjectID) }
+    return path
+}
+
+func taskListSearchTitle(task models.Task, names map[string]string) string {
+    if name := names[task.ProjectID]; name != "" { return task.Title + " " + name }
+    return task.Title
+}
+
+templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup, names map[string]string) {
 	if len(groups) == 0 {
 		<div class="task-list-empty">No tasks yet.</div>
 	}
@@ -68,17 +83,20 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 				<a
 					class="task-list-row"
 					data-task-list-row={ task.ID }
-					data-task-list-title={ task.Title }
+					data-task-list-title={ taskListSearchTitle(task, names) }
 					data-task-list-extra?={ i >= taskListGroupLimit }
 					data-task-list-age={ taskListAge(task.UpdatedAt) }
-					href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)) }
-					hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
+					href={ templ.SafeURL(taskListRowURL(projectID, task)) }
+					hx-get={ taskListRowURL(projectID, task) }
 					hx-target="#main-content"
 					hx-swap="innerHTML"
 					hx-push-url="true"
 				>
 					@taskstate.Icon(task)
 					<span class="task-list-title">{ task.Title }</span>
+                    if name := names[task.ProjectID]; name != "" {
+                        <span data-task-list-project={ task.ProjectID } title={ name } style="max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; opacity: .65;">{ name }</span>
+                    }
 					if task.Prompt != "" {
 						<template data-task-list-prompt>{ task.Prompt }</template>
 					}
@@ -598,6 +616,10 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				refreshSoon(300);
 			});
 			window.addEventListener('sse-live-connected', function() { refreshSoon(300); });
+            // The virtual scope has no project stream. Keep the shared list fresh.
+            setInterval(function() {
+                if (!document.hidden && currentProjectID() === '__all_projects__') refreshSoon(0);
+            }, 10000);
 			document.body.addEventListener('htmx:afterRequest', function(e) {
 				var cfg = e.detail && e.detail.requestConfig;
 				if (!cfg || !e.detail.successful || cfg.verb === 'get' || e.detail.target === groups) return;

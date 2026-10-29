@@ -39,6 +39,16 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 		require.Equal(t, 200, rec.Code, rec.Body.String())
 		return rec
 	}
+	sidebar := get("/tasks/sidebar?project_id=" + models.AllProjectsID).Body.String()
+	require.Contains(t, sidebar, "First workspace task")
+	require.Contains(t, sidebar, "Second workspace task")
+	require.Contains(t, sidebar, `data-task-list-project="`+first.ID+`"`)
+	require.Contains(t, sidebar, `&amp;project_id=`+second.ID)
+	require.NotContains(t, sidebar, "Private chat title")
+	require.NotContains(t, sidebar, "all-projects-choose")
+	scopedSidebar := get("/tasks/sidebar?project_id=" + first.ID).Body.String()
+	require.NotContains(t, scopedSidebar, "Second workspace task")
+	require.NotContains(t, scopedSidebar, "data-task-list-project")
 	body := get("/tasks?project_id=" + models.AllProjectsID).Body.String()
 	require.Contains(t, body, `data-project-tab="`+models.AllProjectsID+`"`)
 	require.Contains(t, body, "First workspace task")
