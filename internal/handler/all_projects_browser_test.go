@@ -106,3 +106,62 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 		})
 	}
 }
+
+func TestAllProjectsDesktopRestoresSavedLocationInChrome(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetDesktopMode(true)
+	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	require.NoError(t, h.settingsRepo.Set(t.Context(), "ui.project_locations", `{"__all_projects__":"/analytics?project_id=__all_projects__&range=7d#usage"}`))
+	runner := `<script>
+ (async()=>{try{
+ const deadline=Date.now()+12000;
+ while(!document.querySelector('[data-all-projects-usage]') || document.querySelector('.htmx-request,.htmx-settling')){if(Date.now()>deadline)throw Error('restore timeout: '+location.href);await new Promise(r=>setTimeout(r,30));}
+ if(location.pathname+location.search+location.hash!=='/analytics?project_id=__all_projects__&range=7d#usage')throw Error('wrong location '+location.href);
+ if(document.getElementById('project-selector').value!=='__all_projects__')throw Error('wrong project');
+ if(document.querySelector('select[name="range"]').value!=='7d')throw Error('lost range');
+ await fetch('/browser-result',{method:'POST',body:'pass'});
+ }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)})}})();
+ </script>`
+	result := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8000))
+			select {
+			case result <- string(body):
+			default:
+			}
+			w.WriteHeader(204)
+			return
+		}
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, r)
+		for key, values := range rec.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = io.WriteString(w, strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1))
+	}))
+	defer server.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--user-data-dir="+t.TempDir(), "--window-size=1280,900", server.URL+"/chat")
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	defer stopHandlerBrowserProcess(cmd)
+	select {
+	case outcome := <-result:
+		require.Equal(t, "pass", outcome)
+	case <-time.After(30 * time.Second):
+		t.Fatal("desktop restoration timed out")
+	}
+}

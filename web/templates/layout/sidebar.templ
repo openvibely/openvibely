@@ -186,7 +186,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     const restoreDesktopLocation = desktopProjectNavigation && location.pathname === '/chat' && !location.search;
                     const recoveredProjectID = recoveredPreferences.project_id;
                     const startupProjectID = restoreDesktopLocation && Array.from(sel.options).some(function(option) { return option.value === recoveredProjectID; }) ? recoveredProjectID : sel.value;
-                    if (restoreDesktopLocation && (projectLocations.has(startupProjectID) || startupProjectID !== sel.value)) {
+                    if (restoreDesktopLocation && (projectLocations.has(startupProjectID) || startupProjectID !== sel.value || startupProjectID === '__all_projects__')) {
                         const restored = projectLocation(startupProjectID);
                         document.addEventListener('DOMContentLoaded', function() { navigateProject(restored, startupProjectID); }, {once: true});
                     }

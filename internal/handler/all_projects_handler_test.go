@@ -111,3 +111,44 @@ func TestAllProjectsPreferenceSurvivesLaunch(t *testing.T) {
 	require.Equal(t, 303, rec.Code)
 	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("Location"))
 }
+
+func TestAllProjectsSavedSelectionOnWorkspaceEntry(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
+	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
+	project := createProject(t, h, "Explicit project")
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	for _, page := range []string{"tasks", "analytics", "automations"} {
+		t.Run(page, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/"+page+"?search=needle&range=7d", nil)
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, req)
+			require.Equal(t, 200, rec.Code)
+			require.Contains(t, rec.Body.String(), `data-all-projects-view="`+page+`"`)
+			require.Equal(t, "needle", req.URL.Query().Get("search"))
+			require.Equal(t, "7d", req.URL.Query().Get("range"))
+		})
+	}
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/new", nil))
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, rec.Body.String(), `id="all-projects-choose"`)
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil))
+	require.Equal(t, 200, rec.Code)
+	require.NotContains(t, rec.Body.String(), `data-all-projects-view="tasks"`)
+}
+
+func TestAllProjectsDesktopLaunchKeepsRestorationBootstrap(t *testing.T) {
+	h, app, _ := setupTestHandler(t)
+	h.SetDesktopMode(true)
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	require.NoError(t, h.settingsRepo.Set(t.Context(), "ui.project_locations", `{"__all_projects__":"/analytics?project_id=__all_projects__&range=7d#usage"}`))
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/chat", nil))
+	require.Equal(t, 200, rec.Code)
+	require.Empty(t, rec.Header().Get("Location"), "the original launch URL must reach the shell's saved-location/outbox restoration")
+	require.Contains(t, rec.Body.String(), `data-openvibely-runtime="desktop"`)
+	require.Contains(t, rec.Body.String(), `/analytics?project_id=__all_projects__&amp;range=7d#usage`)
+	require.Contains(t, rec.Body.String(), `data-all-projects-view="tasks"`)
+}

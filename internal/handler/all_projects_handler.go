@@ -14,16 +14,30 @@ import (
 // can resolve a default project. The scope has no database row or write authority.
 func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		if c.Request().Method == http.MethodGet && c.Request().URL.Path == "/chat" && c.QueryParam("project_id") == "" && h.settingsRepo != nil {
+		// Resolve the saved virtual selection before real-project fallback.
+		// Only workspace entry pages inherit it; item/API requests keep their
+		// existing ownership and scope resolution.
+		path := c.Request().URL.Path
+		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations"
+		if c.Request().Method == http.MethodGet && !isHTMX(c) && workspaceEntry && c.QueryParam("project_id") == "" && h.settingsRepo != nil {
 			selected, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
 			if err == nil && selected == models.AllProjectsID {
-				return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+models.AllProjectsID)
+				if path == "/chat" {
+					if h.desktopMode && c.Request().URL.RawQuery == "" {
+						// Keep the launch URL intact so the shell can restore
+						// saved locations and replay any newer preference outbox.
+						return h.AllProjects(c)
+					}
+					return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+models.AllProjectsID)
+				}
+				query := c.QueryParams()
+				query.Set("project_id", models.AllProjectsID)
+				c.Request().URL.RawQuery = query.Encode()
 			}
 		}
 		if c.QueryParam("project_id") != models.AllProjectsID {
 			return next(c)
 		}
-		path := c.Request().URL.Path
 		// These controls create or configure the shell itself, not a scoped item.
 		if path == "/projects/new" || path == "/projects/pick-folder" || path == "/projects" || strings.HasPrefix(path, "/ui/") {
 			return next(c)
@@ -70,6 +84,10 @@ func (h *Handler) AllProjects(c echo.Context) error {
 		return err
 	}
 	data := pages.AllProjectsData{Projects: projects, Section: strings.TrimPrefix(c.Request().URL.Path, "/"), Search: strings.TrimSpace(c.QueryParam("search")), FilterProject: c.QueryParam("filter_project"), Range: c.QueryParam("range")}
+	if data.Section == "chat" {
+		// Desktop launch bootstrap; the shell restores the remembered page.
+		data.Section = "tasks"
+	}
 	projectID := models.AllProjectsID
 	if data.FilterProject != "" {
 		found := false
