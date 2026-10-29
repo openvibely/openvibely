@@ -462,6 +462,7 @@ func buildTestDBWithDSN(tb testing.TB, driverName, dsn string, maxOpenConns int)
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
+		"PRAGMA temp_store=MEMORY",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
 			db.Close()
@@ -488,6 +489,7 @@ func openFileBackedWriter(tb testing.TB, driverName, dsn string) *sql.DB {
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
+		"PRAGMA temp_store=MEMORY",
 	} {
 		if _, err := writer.Exec(pragma); err != nil {
 			writer.Close()
@@ -512,6 +514,7 @@ func openFileBackedReader(tb testing.TB, driverName, dsn string) *sql.DB {
 	for _, pragma := range []string{
 		"PRAGMA foreign_keys=ON",
 		"PRAGMA busy_timeout=5000",
+		"PRAGMA temp_store=MEMORY",
 		"PRAGMA query_only=ON",
 	} {
 		if _, err := reader.Exec(pragma); err != nil {

@@ -28,6 +28,14 @@ How to use these columns:
 
 You can drag cards between categories and active sub-lanes to change where work sits in the flow.
 
+## Task Sidebar and Appearance
+
+On wider windows, the task sidebar keeps project tasks beside the current page. Tasks are grouped into Active, Completed, Backlog, and Scheduled, with status icons and search. Expand a group to see more tasks; search temporarily expands matching groups. The list follows saved task sorting and updates when task state changes.
+
+Drag the divider to resize the list or collapse it to make more room. Its width and collapsed state are remembered.
+
+Open **Appearance** to choose a floating or unified task list, attached or detached project tabs, and default or layered surfaces. Conversation controls offer full or focused width, optional assistant bubbles, and a bubble/composer color step. Task-board columns offer Faint tint, Filled, Inset cards, or Tint + header strip. Visual previews show each option with your selected theme.
+
 ## Create a Task
 
 1. Click the plus button (`Add Task`) to open a new task workspace.
