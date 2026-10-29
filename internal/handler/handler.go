@@ -666,11 +666,11 @@ func (h *Handler) mutationProjectID(c echo.Context) string {
 }
 
 // getCurrentProjectID resolves the current project ID from the query param.
-// If project_id is provided and valid, it uses GetByID to verify it exists.
-// Otherwise it falls back to the first compact selector option.
+// Explicit non-default IDs must exist. Omitted/default selection uses the
+// selected-project preference, then the first compact selector option.
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	ctx := c.Request().Context()
-	projectID := c.QueryParam("project_id")
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID != "" && projectID != "default" {
 		p, err := h.projectSvc.GetByID(ctx, projectID)
 		if err != nil {
@@ -679,6 +679,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 		if p != nil {
 			return projectID, nil
 		}
+		return "", echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 	if h.settingsRepo != nil {
 		selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
@@ -728,6 +729,7 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.Use(h.taskProjectBoundary, h.threadInputProjectBoundary)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			c.Set("handler", h)

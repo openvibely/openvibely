@@ -541,7 +541,7 @@ func TestWebhookInboundAndTest_RejectIncompatibleLegacyAssignment(t *testing.T) 
 		t.Fatalf("inbound accepted incompatible legacy assignment: %s", inboundRec.Body.String())
 	}
 
-	testReq := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
+	testReq := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test?project_id="+endpoint.ProjectID, nil)
 	testRec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(testRec, testReq)
 	if testRec.Code == http.StatusAccepted {
@@ -857,7 +857,7 @@ func TestWebhookCRUD_CreateAndUpdateNormalizeEditableFieldsAndAgents(t *testing.
 		"prompt_template":     {"  Updated prompt  "},
 		"agent_ids":           {agent3.ID + "," + agent1.ID},
 	}
-	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID, strings.NewReader(updateForm.Encode()))
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID+"?project_id="+created.ProjectID, strings.NewReader(updateForm.Encode()))
 	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	updateRec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(updateRec, updateReq)
@@ -909,7 +909,7 @@ func TestWebhookCRUD_BlankNameLifecycleBehavior(t *testing.T) {
 		"name":             {"   "},
 		"default_priority": {"2"},
 	}
-	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+existing.ID, strings.NewReader(updateForm.Encode()))
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+existing.ID+"?project_id="+existing.ProjectID, strings.NewReader(updateForm.Encode()))
 	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	updateRec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(updateRec, updateReq)
@@ -964,7 +964,7 @@ func TestWebhookCRUD_DefaultPriorityMatchesCanonicalScale(t *testing.T) {
 			"name":             {"Priority Hook Updated"},
 			"default_priority": {strconv.Itoa(other)},
 		}
-		updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID, strings.NewReader(updateForm.Encode()))
+		updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID+"?project_id="+created.ProjectID, strings.NewReader(updateForm.Encode()))
 		updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		updateRec := httptest.NewRecorder()
 		wtc.echo.ServeHTTP(updateRec, updateReq)
@@ -1017,7 +1017,7 @@ func TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero(t *testing.T) 
 		"name":             {"Blank Priority Hook"},
 		"default_priority": {""},
 	}
-	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+webhooks[0].ID, strings.NewReader(updateForm.Encode()))
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+webhooks[0].ID+"?project_id="+webhooks[0].ProjectID, strings.NewReader(updateForm.Encode()))
 	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	updateRec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(updateRec, updateReq)
@@ -1158,7 +1158,7 @@ func TestWebhookCRUD_HTMXMutationsTriggerChannelsRefresh(t *testing.T) {
 		"default_priority":      {"3"},
 		"webhook_agent_ids_csv": {agent.ID},
 	}
-	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+endpoint.ID, strings.NewReader(updateForm.Encode()))
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+endpoint.ID+"?project_id="+endpoint.ProjectID, strings.NewReader(updateForm.Encode()))
 	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	updateReq.Header.Set("HX-Request", "true")
 	updateRec := httptest.NewRecorder()
@@ -1174,7 +1174,7 @@ func TestWebhookCRUD_HTMXMutationsTriggerChannelsRefresh(t *testing.T) {
 	}
 
 	oldSecret := updated.Secret
-	rotateReq := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/rotate-secret", nil)
+	rotateReq := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/rotate-secret?project_id="+endpoint.ProjectID, nil)
 	rotateReq.Header.Set("HX-Request", "true")
 	rotateRec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(rotateRec, rotateReq)
@@ -1228,7 +1228,7 @@ func TestWebhookCRUD_RotateSecret(t *testing.T) {
 	endpoint := wtc.createEndpoint(t, project.ID, "Rotate", true)
 	origSecret := endpoint.Secret
 
-	req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/rotate-secret", nil)
+	req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/rotate-secret?project_id="+endpoint.ProjectID, nil)
 	rec := httptest.NewRecorder()
 	wtc.echo.ServeHTTP(rec, req)
 
@@ -1319,7 +1319,7 @@ func TestWebhookCRUD_TestRepeatedClicksCreateUniqueTasksWithAgentsAndWorkerSubmi
 	}
 
 	for i := 1; i <= 2; i++ {
-		req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
+		req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test?project_id="+endpoint.ProjectID, nil)
 		rec := httptest.NewRecorder()
 		wtc.echo.ServeHTTP(rec, req)
 

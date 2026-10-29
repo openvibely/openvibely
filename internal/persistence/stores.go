@@ -536,6 +536,8 @@ type ProjectStore interface {
 
 // ReviewCommentStore persists task review comments.
 type ReviewCommentStore interface {
+	UpdateTextForProject(ctx context.Context, projectID, id, commentText string) error
+	DeleteForProject(ctx context.Context, projectID, id string) error
 	Create(ctx context.Context, c *models.ReviewComment) error
 	Delete(ctx context.Context, id string) error
 	DeleteByTask(ctx context.Context, taskID string) error
