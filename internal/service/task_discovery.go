@@ -68,6 +68,7 @@ type ViewSwarmRequest struct {
 // title) plus lightweight triage fields.
 type taskDiscoverySummary struct {
 	TaskID       string `json:"task_id"`
+	ProjectID    string `json:"project_id"`
 	Title        string `json:"title"`
 	Category     string `json:"category"`
 	Status       string `json:"status"`
@@ -181,7 +182,9 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo persistence.TaskStore, p
 
 	summaries := make([]taskDiscoverySummary, 0, len(tasks))
 	for i := range tasks {
-		summaries = append(summaries, buildTaskDiscoverySummary(tasks[i]))
+		summary := buildTaskDiscoverySummary(tasks[i])
+		summary.ProjectID = projectID
+		summaries = append(summaries, summary)
 	}
 
 	result := taskDiscoveryResult{

@@ -117,6 +117,7 @@ func canonicalListTasksRuntimeInput(input json.RawMessage) string {
 		payload = "{}"
 	}
 	var request struct {
+		ProjectID   string `json:"project_id,omitempty"`
 		Query       string `json:"query"`
 		Category    string `json:"category"`
 		Status      string `json:"status"`
@@ -139,6 +140,7 @@ func canonicalListTasksRuntimeInput(input json.RawMessage) string {
 		offset = 0
 	}
 	encoded, err := json.Marshal(struct {
+		ProjectID   string `json:"project_id,omitempty"`
 		Query       string `json:"query"`
 		Category    string `json:"category"`
 		Status      string `json:"status"`
@@ -146,6 +148,7 @@ func canonicalListTasksRuntimeInput(input json.RawMessage) string {
 		Limit       int    `json:"limit"`
 		Offset      int    `json:"offset"`
 	}{
+		ProjectID:   strings.TrimSpace(request.ProjectID),
 		Query:       strings.TrimSpace(request.Query),
 		Category:    strings.ToLower(strings.TrimSpace(request.Category)),
 		Status:      strings.ToLower(strings.TrimSpace(request.Status)),

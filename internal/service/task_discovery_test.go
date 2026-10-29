@@ -467,12 +467,12 @@ func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 		{
 			name:  "optional fields present",
 			query: `{"query":"Discovery JSON optional"}`,
-			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON optional","category":"active","status":"running","priority":4,"updated_at":"2024-01-02T03:04:05Z","parent_task_id":"%s","swarm_role":"worker"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON optional","category":"","status":""}}`,
+			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","project_id":"default","title":"Discovery JSON optional","category":"active","status":"running","priority":4,"updated_at":"2024-01-02T03:04:05Z","parent_task_id":"%s","swarm_role":"worker"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON optional","category":"","status":""}}`,
 				withOptionalFields.ID, parent.ID)},
 		{
 			name:  "nullable optional fields omitted",
 			query: `{"query":"Discovery JSON nullable"}`,
-			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON nullable","category":"backlog","status":"pending","priority":2,"updated_at":"2024-01-02T03:04:05Z"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON nullable","category":"","status":""}}`,
+			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","project_id":"default","title":"Discovery JSON nullable","category":"backlog","status":"pending","priority":2,"updated_at":"2024-01-02T03:04:05Z"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON nullable","category":"","status":""}}`,
 				withoutOptionalFields.ID)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

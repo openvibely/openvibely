@@ -295,7 +295,7 @@ func (h *Handler) buildAPIChatActionToolRuntime(params streamingResponseParams, 
 // chatActionExecutor returns a RuntimeToolExecutor that uses the canonical
 // chatcontrol execution engine with a surface-aware action handler map.
 func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) llmcontracts.RuntimeToolExecutor {
-	handlers := h.chatActionHandlers(params, collector, mode, surface)
+	handlers := h.projectSelectedChatHandlers(params, collector, mode, surface)
 	return chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers)
 }
 

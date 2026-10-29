@@ -4071,7 +4071,7 @@ func (h *Handler) executeListProjects(ctx context.Context, projectID string) str
 			if p.Description != "" {
 				desc = fmt.Sprintf(" — %s", p.Description)
 			}
-			sb.WriteString(fmt.Sprintf("- **%s**%s%s\n", p.Name, desc, marker))
+			sb.WriteString(fmt.Sprintf("- **%s** (project_id: %s)%s%s\n", p.Name, p.ID, desc, marker))
 		}
 	}
 
