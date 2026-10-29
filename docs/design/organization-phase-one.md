@@ -23,7 +23,7 @@ Links expire after seven days, work once, and can be revoked. Anyone possessing 
 
 Owners can change member roles and remove members. Admins can invite and remove ordinary members but cannot manage owners or admins. The last owner cannot be removed or demoted. Removing membership deletes sessions and prevents later requests; connected WebSockets also recheck membership and terminate. Unused invitations from removed members or members demoted out of administration are revoked.
 
-Personal `ui.*` preferences follow the authenticated user. Other application settings remain shared. Background callers without a user context use the bootstrap owner's preferences; durable job attribution belongs to Phase 2.
+Personal `ui.*` preferences follow the authenticated user. Pending browser saves for selected/pinned projects and project locations are keyed by internal user ID. Switching accounts stops retries; the server checks `X-Preference-User-ID` before applying these writes. Auth-off uses the default owner ID. Legacy pending saves without an owner are discarded rather than assigned to the next person signing in. Other application settings remain shared. Background callers without a user context use the bootstrap owner's preferences; durable job attribution belongs to Phase 2.
 
 ## Hosted behavior
 

@@ -384,3 +384,53 @@ func TestOrganizationHostedIdentityReplacesPlaceholder(t *testing.T) {
 	require.NoError(t, h.organizationSvc.Logout(t.Context(), token))
 	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
 }
+
+func TestOrganizationPendingPreferencesRequireMatchingAccount(t *testing.T) {
+	for _, mode := range []string{"local", "hosted", "disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			tc, e := organizationTestApp(t, mode != "disabled")
+			id := models.BootstrapUserID
+			var cookie *http.Cookie
+			if mode == "local" {
+				invite, err := tc.handler.organizationSvc.Invite(t.Context(), id, "member")
+				require.NoError(t, err)
+				user, err := tc.handler.organizationSvc.Accept(t.Context(), invite, "bob", "bob-long-password", "")
+				require.NoError(t, err)
+				id = user.UserID
+				token, err := tc.handler.organizationSvc.NewSession(t.Context(), id, time.Hour)
+				require.NoError(t, err)
+				cookie = &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+			} else if mode == "hosted" {
+				h := tc.handler
+				h.authMode = auth.AuthModeHostedSSO
+				h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+				h.hostedSSOInstanceID = "instance"
+				now := time.Now()
+				claims := auth.SessionClaims{Version: 1, Subject: "hosted-owner", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+				token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+				require.NoError(t, err)
+				require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, id, claims.ExpiresAt))
+				cookie = &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+			}
+			for _, expected := range []string{"", "another-account", id} {
+				req := httptest.NewRequest(http.MethodPost, "http://example.com/ui/preferences", strings.NewReader(`{"project_locations":{"default":"/tasks?project_id=default"}}`))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-Preference-User-ID", expected)
+				if cookie != nil {
+					req.AddCookie(cookie)
+				}
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				prefs, err := tc.stores.Organizations.Preferences(t.Context(), id, []string{"ui.project_locations"})
+				require.NoError(t, err)
+				if expected != id {
+					require.Equal(t, http.StatusConflict, rec.Code)
+					require.Empty(t, prefs["ui.project_locations"])
+				} else {
+					require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+					require.Contains(t, prefs["ui.project_locations"], "default")
+				}
+			}
+		})
+	}
+}
