@@ -4504,7 +4504,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 			ReasoningContent: "first private reasoning plus detail",
 		},
 		{
-			UserContent:      formatSteeringInstruction("continue with this constraint"),
+			UserContent:      "continue with this constraint",
 			AssistantContent: "final answer",
 			ReasoningContent: "final private reasoning",
 		},
@@ -4528,7 +4528,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	require.Equal(t, 1, batch.count())
 	require.Len(t, params.ChatHistory, 1)
 	require.Equal(t, replay[exec.ID], params.ChatHistory[0].ReplayMessages)
-	require.Equal(t, formatSteeringInstruction("late completion constraint"), params.Message)
+	require.Equal(t, "late completion constraint", params.Message)
 }
 
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {
