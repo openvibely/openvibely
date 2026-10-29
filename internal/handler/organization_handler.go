@@ -407,6 +407,15 @@ func (h *Handler) OrgInvitePage(c echo.Context) error {
 	p, ok := models.PrincipalFromContext(c.Request().Context())
 	return h.renderOrganization(c, organizationPageData{Org: org, Principal: p, SignedIn: ok, Joining: true, Token: c.QueryParam("token")})
 }
+func (h *Handler) invitationError(c echo.Context, status int, message string) error {
+	org, err := h.organizationSvc.Store.Organization(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	p, signedIn := models.PrincipalFromContext(c.Request().Context())
+	return h.renderOrganization(c, organizationPageData{Org: org, Principal: p, SignedIn: signedIn, Joining: true, Token: c.FormValue("token"), Username: c.FormValue("username"), Error: message, Status: status})
+}
+
 func (h *Handler) AcceptOrgInvitation(c echo.Context) error {
 	if h.organizationSvc == nil || h.authMode != auth.AuthModeLocal {
 		return echo.NewHTTPError(http.StatusForbidden, "local authentication is required to join")
@@ -415,7 +424,7 @@ func (h *Handler) AcceptOrgInvitation(c echo.Context) error {
 		return err
 	}
 	if !h.organizationSvc.AllowSignup(h.orgAttemptKey(c)) {
-		return echo.NewHTTPError(http.StatusTooManyRequests, "too many attempts; try again later")
+		return h.invitationError(c, http.StatusTooManyRequests, "Too many attempts. Try again later.")
 	}
 	existing := ""
 	if p, ok := models.PrincipalFromContext(c.Request().Context()); ok {
@@ -428,7 +437,7 @@ func (h *Handler) AcceptOrgInvitation(c echo.Context) error {
 		var allowed bool
 		finish, allowed = h.organizationSvc.BeginLogin(h.orgAttemptKey(c), c.FormValue("username"))
 		if !allowed {
-			return echo.NewHTTPError(http.StatusTooManyRequests, "too many attempts; try again later")
+			return h.invitationError(c, http.StatusTooManyRequests, "Too many attempts. Try again later.")
 		}
 	}
 	user, err := h.organizationSvc.Accept(c.Request().Context(), c.FormValue("token"), c.FormValue("username"), c.FormValue("password"), existing)
@@ -437,12 +446,7 @@ func (h *Handler) AcceptOrgInvitation(c echo.Context) error {
 	}
 	if err != nil {
 		if errors.Is(err, service.ErrOrgCredentials) || errors.Is(err, service.ErrOrgLogin) || errors.Is(err, persistence.ErrInvitationInvalid) || errors.Is(err, persistence.ErrAccountExists) {
-			org, loadErr := h.organizationSvc.Store.Organization(c.Request().Context())
-			if loadErr != nil {
-				return loadErr
-			}
-			p, signedIn := models.PrincipalFromContext(c.Request().Context())
-			return h.renderOrganization(c, organizationPageData{Org: org, Principal: p, SignedIn: signedIn, Joining: true, Token: c.FormValue("token"), Username: c.FormValue("username"), Error: err.Error(), Status: http.StatusBadRequest})
+			return h.invitationError(c, http.StatusBadRequest, err.Error())
 		}
 		return err
 	}
