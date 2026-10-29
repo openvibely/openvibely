@@ -212,7 +212,9 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`{{i
 
 func (h *Handler) renderOrganization(c echo.Context, data organizationPageData) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
-	c.Response().Header().Set("Referrer-Policy", "no-referrer")
+	// Preserve the origin on HTTP form submissions without exposing the
+	// invitation token in a Referer URL. no-referrer can produce Origin: null.
+	c.Response().Header().Set("Referrer-Policy", "strict-origin")
 	data.CSS = static.URL("app.css")
 	data.Utilities = static.URL("app-utilities.css")
 	var b bytes.Buffer

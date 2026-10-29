@@ -199,3 +199,26 @@ func TestOrganizationUsesAppShellAndHTMXFragments(t *testing.T) {
 	require.NotContains(t, fragment.Body.String(), `id="main-content"`)
 	require.Contains(t, fragment.Body.String(), `hx-post="/organization" hx-target="#main-content"`)
 }
+
+func TestOrganizationInviteReferrerPolicyAndOriginValidation(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	page := orgRequest(e, http.MethodGet, "/invite?token="+token, nil, nil)
+	require.Equal(t, http.StatusOK, page.Code)
+	// Browsers may send Origin: null for HTTP POST forms under no-referrer.
+	// strict-origin retains the submitting origin but omits the token-bearing URL.
+	require.Equal(t, "strict-origin", page.Header().Get("Referrer-Policy"))
+	form := url.Values{"token": {token}, "username": {"bob"}, "password": {"bob-password-long"}}
+	for _, origin := range []string{"null", "http://evil.example", "http://example.com:9999"} {
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/invite", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusForbidden, rec.Code, origin)
+	}
+	// Rejections must not consume the invitation.
+	accepted := orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusSeeOther, accepted.Code, accepted.Body.String())
+}
