@@ -8,7 +8,6 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"html/template"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -73,22 +72,19 @@ func (h *Handler) organizationAuth(c echo.Context, next echo.HandlerFunc) error 
 	}
 	return c.Redirect(http.StatusFound, loginURL)
 }
-func orgAttemptKey(c echo.Context) string {
-	// Do not trust client-supplied forwarding headers for the rate-limit key.
-	host, _, err := net.SplitHostPort(c.Request().RemoteAddr)
-	if err != nil {
-		return c.Request().RemoteAddr
-	}
-	return host
+func (h *Handler) orgAttemptKey(c echo.Context) string {
+	return h.organizationSvc.ClientIP(c.Request().RemoteAddr, strings.Join(c.Request().Header.Values("X-Forwarded-For"), ","))
 }
 func (h *Handler) organizationLogin(c echo.Context) error {
 	if err := requireOrgSameOrigin(c); err != nil {
 		return err
 	}
-	if !h.organizationSvc.AllowAttempt(orgAttemptKey(c)) {
+	finish, allowed := h.organizationSvc.BeginLogin(h.orgAttemptKey(c), c.FormValue("username"))
+	if !allowed {
 		return echo.NewHTTPError(http.StatusTooManyRequests, "too many attempts; try again later")
 	}
 	token, err := h.organizationSvc.Login(c.Request().Context(), c.FormValue("username"), c.FormValue("password"), h.authCfg.SessionTTL)
+	finish(errors.Is(err, service.ErrOrgLogin))
 	if err != nil {
 		if errors.Is(err, service.ErrOrgLogin) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid credentials or unavailable account")
@@ -393,14 +389,27 @@ func (h *Handler) AcceptOrgInvitation(c echo.Context) error {
 	if err := requireOrgSameOrigin(c); err != nil {
 		return err
 	}
-	if !h.organizationSvc.AllowAttempt(orgAttemptKey(c)) {
+	if !h.organizationSvc.AllowSignup(h.orgAttemptKey(c)) {
 		return echo.NewHTTPError(http.StatusTooManyRequests, "too many attempts; try again later")
 	}
 	existing := ""
 	if p, ok := models.PrincipalFromContext(c.Request().Context()); ok {
 		existing = p.UserID
 	}
+	// Joining can authenticate an existing account too. Keep that path under
+	// the same credential-failure limits so it cannot bypass /login protection.
+	var finish func(bool)
+	if existing == "" {
+		var allowed bool
+		finish, allowed = h.organizationSvc.BeginLogin(h.orgAttemptKey(c), c.FormValue("username"))
+		if !allowed {
+			return echo.NewHTTPError(http.StatusTooManyRequests, "too many attempts; try again later")
+		}
+	}
 	user, err := h.organizationSvc.Accept(c.Request().Context(), c.FormValue("token"), c.FormValue("username"), c.FormValue("password"), existing)
+	if finish != nil {
+		finish(errors.Is(err, service.ErrOrgLogin))
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrOrgCredentials) || errors.Is(err, service.ErrOrgLogin) || errors.Is(err, persistence.ErrInvitationInvalid) || errors.Is(err, persistence.ErrAccountExists) {
 			org, loadErr := h.organizationSvc.Store.Organization(c.Request().Context())

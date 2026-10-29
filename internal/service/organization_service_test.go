@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -210,4 +211,134 @@ func TestOrganizationPreferenceAtomicUpdatesAreUserScoped(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, changed)
 	require.Error(t, env.Settings.SetMany(bobCtx, map[string]string{"ui.theme": "dark", "shared": "value"}))
+}
+
+func TestOrganizationLoginLimitsSeparateAccountsAndSignup(t *testing.T) {
+	s := NewOrganizationService(nil, "secret")
+	for i := 0; i < 20; i++ {
+		finish, ok := s.BeginLogin("192.0.2.1", "alice")
+		require.True(t, ok)
+		finish(false)
+	}
+	for i := 0; i < 10; i++ {
+		finish, ok := s.BeginLogin("192.0.2.1", " Alice ")
+		require.True(t, ok)
+		finish(true)
+	}
+	_, ok := s.BeginLogin("192.0.2.1", "ALICE")
+	require.False(t, ok)
+	finish, ok := s.BeginLogin("192.0.2.1", "bob")
+	require.True(t, ok)
+	finish(false)
+	finish, ok = s.BeginLogin("192.0.2.2", "alice")
+	require.True(t, ok)
+	finish(false)
+	for i := 0; i < 30; i++ {
+		require.True(t, s.AllowSignup("192.0.2.1"))
+	}
+	require.False(t, s.AllowSignup("192.0.2.1"))
+	finish, ok = s.BeginLogin("192.0.2.1", "bob")
+	require.True(t, ok)
+	finish(false)
+	// Expired failures no longer block login.
+	s.mu.Lock()
+	for k, v := range s.attempts {
+		v.Start = time.Now().Add(-16 * time.Minute)
+		s.attempts[k] = v
+	}
+	s.mu.Unlock()
+	finish, ok = s.BeginLogin("192.0.2.1", "alice")
+	require.True(t, ok)
+	finish(false)
+}
+
+func TestOrganizationLoginBroaderLimitsAndReservations(t *testing.T) {
+	s := NewOrganizationService(nil, "secret")
+	// In-flight password checks count too; releasing a successful check frees it.
+	var finishes []func(bool)
+	for i := 0; i < 10; i++ {
+		finish, ok := s.BeginLogin("client", "alice")
+		require.True(t, ok)
+		finishes = append(finishes, finish)
+	}
+	_, ok := s.BeginLogin("client", "alice")
+	require.False(t, ok)
+	finishes[0](false)
+	finishes[0](false) // completion is idempotent
+	finish, ok := s.BeginLogin("client", "alice")
+	require.True(t, ok)
+	finish(true)
+	_, ok = s.BeginLogin("client", "alice")
+	require.False(t, ok)
+	for _, mode := range []string{"account", "ip"} {
+		t.Run(mode, func(t *testing.T) {
+			s := NewOrganizationService(nil, "secret")
+			for i := 0; i < 100; i++ {
+				ip, user := "client", "alice"
+				if mode == "account" {
+					ip = fmt.Sprint(i)
+				} else {
+					user = fmt.Sprint(i)
+				}
+				finish, ok := s.BeginLogin(ip, user)
+				require.True(t, ok)
+				finish(true)
+			}
+			ip, user := "client", "alice"
+			if mode == "account" {
+				ip = "new-client"
+			} else {
+				user = "new-user"
+			}
+			_, ok := s.BeginLogin(ip, user)
+			require.False(t, ok)
+		})
+	}
+}
+
+func TestOrganizationTrustedProxyIP(t *testing.T) {
+	for _, tc := range []struct{ name, trusted, remote, header, want string }{
+		{"direct ignores spoof", "", "192.0.2.1:123", "198.51.100.1", "192.0.2.1"},
+		{"untrusted peer", "127.0.0.1/32", "192.0.2.1:123", "198.51.100.1", "192.0.2.1"},
+		{"trusted peer", "127.0.0.1", "127.0.0.1:123", "198.51.100.1", "198.51.100.1"},
+		{"forged left prefix", "127.0.0.1", "127.0.0.1:123", "203.0.113.1, 198.51.100.1", "198.51.100.1"},
+		{"trusted chain", "127.0.0.1,10.0.0.0/24", "127.0.0.1:123", "198.51.100.1, 10.0.0.2", "198.51.100.1"},
+		{"malformed", "127.0.0.1", "127.0.0.1:123", "invalid", "127.0.0.1"},
+		{"ipv6", "::1/128", "[::1]:123", "2001:db8::1", "2001:db8::1"},
+		{"mapped peer", "127.0.0.1/32", "[::ffff:127.0.0.1]:123", "198.51.100.1", "198.51.100.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewOrganizationService(nil, "secret")
+			require.NoError(t, s.ConfigureTrustedProxies(tc.trusted))
+			require.Equal(t, tc.want, s.ClientIP(tc.remote, tc.header))
+		})
+	}
+	s := NewOrganizationService(nil, "secret")
+	require.Error(t, s.ConfigureTrustedProxies("not-a-network"))
+}
+
+func TestOrganizationLoginConcurrentAttempts(t *testing.T) {
+	s := NewOrganizationService(nil, "secret")
+	var wg sync.WaitGroup
+	accepted := make(chan func(bool), 50)
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if finish, ok := s.BeginLogin("same-client", "alice"); ok {
+				accepted <- finish
+			}
+		}()
+	}
+	wg.Wait()
+	close(accepted)
+	count := 0
+	for finish := range accepted {
+		count++
+		finish(false)
+	}
+	require.Equal(t, 10, count)
+	finish, ok := s.BeginLogin("same-client", "alice")
+	require.True(t, ok)
+	finish(false)
 }

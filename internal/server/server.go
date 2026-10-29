@@ -516,6 +516,10 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	// Stores
 	stores := backend.Stores()
 	organizationSvc := service.NewOrganizationService(stores.Organizations, authCfg.SessionSecret)
+	if err := organizationSvc.ConfigureTrustedProxies(cfg.AuthTrustedProxies); err != nil {
+		closeDatabase()
+		return nil, err
+	}
 	bootstrapUsername, bootstrapPassword := "", ""
 	if cfg.AuthMode == auth.AuthModeLocal {
 		bootstrapUsername, bootstrapPassword = authCfg.Username, authCfg.Password
