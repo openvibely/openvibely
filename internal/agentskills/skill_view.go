@@ -72,19 +72,29 @@ type AgentInspector interface {
 // SkillRuntimeTools returns request-scoped runtime tools lifecycle hooks use for
 // read-only standalone skill discovery.
 func SkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, false)
+	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, false, nil)
 }
 
 // SelectedSkillRuntimeTools returns skill_view scoped to the permitted turn catalog.
 // The main model receives that catalog as an index; broader library discovery
 // tools are reserved for maintenance.
 func SelectedSkillRuntimeTools(catalog *Catalog) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, "", "", nil, false, true)
+	return skillRuntimeTools(catalog, "", "", nil, false, true, nil)
 }
 
-func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector, includeLibraryTools, prepareDependencies bool) *llmcontracts.RuntimeTools {
+func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector, includeLibraryTools, prepareDependencies bool, includePath func(string) bool) *llmcontracts.RuntimeTools {
 	if catalog == nil {
 		return nil
+	}
+
+	if includePath != nil {
+		var entries []Entry
+		for _, entry := range catalog.Entries() {
+			if includePath(entry.AbsolutePath) {
+				entries = append(entries, entry)
+			}
+		}
+		catalog = NewCatalog(catalog.TurnID(), entries)
 	}
 
 	definitions := []llmcontracts.RuntimeToolDefinition{skillView}
@@ -156,7 +166,7 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 				if !includeLibraryTools {
 					break
 				}
-				body, err := resolveSkillsList(globalRoot, projectRoot, input)
+				body, err := resolveSkillsListFiltered(globalRoot, projectRoot, input, includePath)
 				if err != nil {
 					return err.Error(), true, true, nil
 				}
@@ -197,20 +207,30 @@ func skillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspect
 	}
 }
 
+// FilteredSkillRuntimeTools provides inspection-only library tools with the same
+// path policy applied to discovery and skill_view (including support files).
+func FilteredSkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector, includePath func(string) bool) *llmcontracts.RuntimeTools {
+	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, false, includePath)
+}
+
 func resolveSkillsList(globalRoot, projectRoot string, input json.RawMessage) (string, error) {
+	return resolveSkillsListFiltered(globalRoot, projectRoot, input, nil)
+}
+
+func resolveSkillsListFiltered(globalRoot, projectRoot string, input json.RawMessage, includePath func(string) bool) (string, error) {
 	scope := parseScope(input)
 	var out strings.Builder
 	hits := 0
 	if (scope == "global" || scope == "all") && globalRoot != "" {
 		skillsDir := filepath.Join(globalRoot, SkillsDir)
-		if body, ok := filteredIndexBody(SkillsIndexPath(globalRoot), skillsDir, ""); ok {
+		if body, ok := filteredIndexBodyWithFilter(SkillsIndexPath(globalRoot), skillsDir, "", includePath); ok {
 			fmt.Fprintf(&out, "=== global ===\n%s\n", strings.TrimRight(body, "\n"))
 			hits++
 		}
 	}
 	if (scope == "project" || scope == "all") && projectRoot != "" {
 		skillsDir := filepath.Join(projectRoot, SkillsDir)
-		if body, ok := filteredIndexBody(SkillsIndexPath(projectRoot), skillsDir, ""); ok {
+		if body, ok := filteredIndexBodyWithFilter(SkillsIndexPath(projectRoot), skillsDir, "", includePath); ok {
 			if hits > 0 {
 				out.WriteString("\n")
 			}
@@ -221,7 +241,7 @@ func resolveSkillsList(globalRoot, projectRoot string, input json.RawMessage) (s
 	if hits == 0 {
 		return "(no top-level skills/SKILLS.md found for the requested scope)", nil
 	}
-	handles, err := standaloneViewHandlesFromCatalog(scope, globalRoot, projectRoot)
+	handles, err := standaloneViewHandlesFromCatalogFiltered(scope, globalRoot, projectRoot, includePath)
 	if err != nil {
 		return "", err
 	}
@@ -235,6 +255,10 @@ func resolveSkillsList(globalRoot, projectRoot string, input json.RawMessage) (s
 }
 
 func standaloneViewHandlesFromCatalog(scope, globalRoot, projectRoot string) ([]string, error) {
+	return standaloneViewHandlesFromCatalogFiltered(scope, globalRoot, projectRoot, nil)
+}
+
+func standaloneViewHandlesFromCatalogFiltered(scope, globalRoot, projectRoot string, includePath func(string) bool) ([]string, error) {
 	useGlobal := scope == "global" || scope == "all"
 	useProject := scope == "project" || scope == "all"
 	catalogGlobal := ""
@@ -251,6 +275,9 @@ func standaloneViewHandlesFromCatalog(scope, globalRoot, projectRoot string) ([]
 	}
 	var handles []string
 	for _, entry := range catalog.Entries() {
+		if includePath != nil && !includePath(entry.AbsolutePath) {
+			continue
+		}
 		for _, handle := range qualifiedSkillHandles(entry) {
 			if strings.HasPrefix(handle, "standalone:") {
 				handles = append(handles, handle)
@@ -588,13 +615,13 @@ var agentView = llmcontracts.RuntimeToolDefinition{
 
 // InspectSelectedSkillRuntimeTools reads selected metadata without installing or running tools.
 func InspectSelectedSkillRuntimeTools(catalog *Catalog) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, "", "", nil, false, false)
+	return skillRuntimeTools(catalog, "", "", nil, false, false, nil)
 }
 
 // ExecutingSkillRuntimeTools also prepares dependencies when an executing agent
 // explicitly loads an authorized skill from the library.
 func ExecutingSkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, true)
+	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, true, nil)
 }
 
 func prepareSkillView(ctx context.Context, output string) (string, error) {

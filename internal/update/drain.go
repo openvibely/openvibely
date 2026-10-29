@@ -116,6 +116,7 @@ type DrainManager struct {
 	stateWriter        func(string, []byte) error
 	tracker            *WorkTracker
 	reopened           chan struct{}
+	draining           chan struct{}
 	supervisorInterval time.Duration
 	expiryOnce         sync.Once
 }
@@ -130,7 +131,24 @@ func NewDrainManager(active func() ActiveWork, queued func() int, quiet time.Dur
 	if now == nil {
 		now = time.Now
 	}
-	return &DrainManager{active: active, queued: queued, quietInterval: quiet, now: now, state: DrainStateIdle, reopened: make(chan struct{}, 1)}
+	return &DrainManager{active: active, queued: queued, quietInterval: quiet, now: now, state: DrainStateIdle, reopened: make(chan struct{}, 1), draining: make(chan struct{})}
+}
+
+// Draining closes when an update closes admission. Human-input waits can yield
+// their execution while keeping their durable question available for a late answer.
+func (m *DrainManager) Draining() <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.expireLocked()
+	return m.draining
+}
+
+func (m *DrainManager) signalDrainingLocked() {
+	select {
+	case <-m.draining:
+	default:
+		close(m.draining)
+	}
 }
 
 // Reopened reports successful transitions back to idle so durable queued work
@@ -202,8 +220,11 @@ func (m *DrainManager) SetPersistence(path string) error {
 	}
 	m.state, m.generation, m.expiresAt, m.zeroSince, m.owned = state.State, state.Generation, state.ExpiresAt, state.ZeroSince, state.Owned
 	m.expireLocked()
-	if m.state != DrainStateIdle && m.tracker != nil {
-		m.tracker.Close()
+	if m.state != DrainStateIdle {
+		m.signalDrainingLocked()
+		if m.tracker != nil {
+			m.tracker.Close()
+		}
 	}
 	return nil
 }
@@ -280,6 +301,7 @@ func (m *DrainManager) BeginDrain(req DrainRequest) (DrainStatus, error) {
 		}
 		return DrainStatus{}, errors.Join(ErrUpdateRetryable, err)
 	}
+	m.signalDrainingLocked()
 	return m.statusLocked(), nil
 }
 
@@ -382,6 +404,9 @@ func (m *DrainManager) resetLocked() bool {
 		m.state, m.generation = previousState, previousGeneration
 		m.expiresAt, m.zeroSince, m.owned = previousExpiresAt, previousZeroSince, previousOwned
 		return false
+	}
+	if previousState != DrainStateIdle {
+		m.draining = make(chan struct{})
 	}
 	if m.tracker != nil {
 		m.tracker.Open()
