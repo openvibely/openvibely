@@ -167,6 +167,12 @@ func TestAllProjectsStaleFilterRefreshesWholeView(t *testing.T) {
 				rec := httptest.NewRecorder()
 				app.ServeHTTP(rec, req)
 				require.Equal(t, 200, rec.Code)
+				if target == "all-projects-results" {
+					require.Equal(t, "/"+page+"?project_id="+models.AllProjectsID+"&range=7d&search=retained", rec.Header().Get("X-OpenVibely-All-Projects-Location"))
+					require.Empty(t, rec.Header().Get("HX-Retarget"))
+					require.Empty(t, rec.Body.String())
+					return
+				}
 				require.Equal(t, "#main-content", rec.Header().Get("HX-Retarget"))
 				require.Equal(t, "innerHTML", rec.Header().Get("HX-Reswap"))
 				require.Equal(t, "/"+page+"?project_id="+models.AllProjectsID+"&range=7d&search=retained", rec.Header().Get("HX-Replace-Url"))

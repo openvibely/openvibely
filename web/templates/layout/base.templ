@@ -5063,6 +5063,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     }, true);
                     document.addEventListener('htmx:beforeRequest', function(event) {
                         const detail = event.detail;
+                        if (!event.defaultPrevented && detail.target && detail.target.id === 'all-projects-results') {
+                            detail.xhr.openVibelyOriginPageRequest = currentPageRequest;
+                        }
                         if (event.defaultPrevented || !detail.target || detail.target.id !== 'main-content') return;
                         const previous = currentPageRequest;
                         currentPageRequest = detail.xhr;
@@ -5089,6 +5092,18 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     });
                     document.addEventListener('htmx:beforeSwap', function(event) {
                         const detail = event.detail;
+                        const recovery = detail.xhr && detail.xhr.getResponseHeader('X-OpenVibely-All-Projects-Location');
+                        if (recovery) {
+                            detail.shouldSwap = false;
+                            event.preventDefault();
+                            // Only a poll from the still-current view may initiate recovery.
+                            if (detail.target && detail.target.isConnected && detail.target === document.getElementById('all-projects-results') && detail.xhr.openVibelyOriginPageRequest === currentPageRequest) {
+                                window.openVibelyNavigate(recovery).catch(function() {
+                                    if (window.showToast) window.showToast('Could not refresh All projects. Try again.', 'failed');
+                                });
+                            }
+                            return;
+                        }
                         if (detail.target && detail.target.id === 'main-content' && detail.xhr !== currentPageRequest) {
                             detail.shouldSwap = false;
                             event.preventDefault();

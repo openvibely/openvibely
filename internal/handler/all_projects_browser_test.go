@@ -233,3 +233,138 @@ func TestAllProjectsStaleFilterRecoversInChrome(t *testing.T) {
 		})
 	}
 }
+
+func TestAllProjectsStalePollRecoversInChrome(t *testing.T) {
+	for _, race := range []bool{false, true} {
+		name := "recover"
+		if race {
+			name = "newer-navigation"
+		}
+		t.Run(name, func(t *testing.T) { runAllProjectsStalePollScenario(t, race) })
+	}
+}
+
+func runAllProjectsStalePollScenario(t *testing.T, race bool) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome unavailable")
+	}
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
+	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
+	project := createProject(t, h, "Second browser project")
+	task := models.Task{ProjectID: project.ID, Title: "Cross project browser task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+	runner := `<script>
+    (async()=>{try{
+      while(!window.openVibelyNavigate || document.readyState!=='complete')await new Promise(r=>setTimeout(r,30));
+      const race=location.hash==='#race';
+      const project=Array.from(document.getElementById('project-selector').options).find(o=>o.textContent.trim()==='Second browser project').value;
+      await window.openVibelyNavigate('/tasks?project_id=__all_projects__&filter_project='+project);
+      while(document.querySelector('.htmx-settling,.htmx-request'))await new Promise(r=>setTimeout(r,30));
+      const response=await fetch('/audit-delete-project',{method:'POST'});if(!response.ok)throw Error('fixture deletion failed');
+      const results=document.getElementById('all-projects-results');
+      if(race){
+        const pending=htmx.ajax('GET',results.getAttribute('hx-get'),{source:results,target:results,swap:'outerHTML',headers:{'X-Test-Hold-Poll':'true'}});
+        await fetch('/test-wait-poll');
+        await window.openVibelyNavigate('/tasks?project_id=default');
+        await fetch('/test-release-poll',{method:'POST'});
+        await pending;
+        if(new URL(location.href).searchParams.get('project_id')!=='default' || document.getElementById('all-projects-page'))throw Error('stale poll replaced newer navigation');
+      }else{
+      await htmx.ajax('GET',results.getAttribute('hx-get'),{source:results,target:results,swap:'outerHTML'});
+      const deadline=Date.now()+10000;
+      while(new URL(location.href).searchParams.has('filter_project') || document.querySelector('.htmx-request,.htmx-settling')){if(Date.now()>deadline)throw Error('recovery timeout');await new Promise(r=>setTimeout(r,30));}
+      if(document.querySelector('select[name="filter_project"]').value!=='')throw Error('stale poll was not recovered: filter='+document.querySelector('select[name="filter_project"]').value+' url='+location.href);
+      }
+      await fetch('/browser-result',{method:'POST',body:'pass'});
+    }catch(e){await fetch('/browser-result',{method:'POST',body:String(e)})}})();</script>`
+	result := make(chan string, 1)
+	pollStarted := make(chan struct{})
+	releasePoll := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/test-wait-poll" {
+			select {
+			case <-pollStarted:
+			case <-r.Context().Done():
+				return
+			case <-time.After(10 * time.Second):
+				http.Error(w, "poll not started", 500)
+				return
+			}
+			w.WriteHeader(204)
+			return
+		}
+		if r.URL.Path == "/test-release-poll" {
+			close(releasePoll)
+			w.WriteHeader(204)
+			return
+		}
+		if r.URL.Path == "/audit-delete-project" {
+			if err := h.projectSvc.Delete(t.Context(), project.ID); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			w.WriteHeader(204)
+			return
+		}
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/browser-result" {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 8000))
+			select {
+			case result <- string(body):
+			default:
+			}
+			w.WriteHeader(204)
+			return
+		}
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, r)
+		if r.Header.Get("X-Test-Hold-Poll") == "true" {
+			close(pollStarted)
+			select {
+			case <-releasePoll:
+			case <-r.Context().Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+		}
+		for key, values := range rec.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(rec.Code)
+		_, _ = io.WriteString(w, strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1))
+	}))
+	defer func() {
+		select {
+		case <-releasePoll:
+		default:
+			close(releasePoll)
+		}
+		server.Close()
+	}()
+	suffix := ""
+	if race {
+		suffix = "#race"
+	}
+	for _, size := range []string{"1280,900"} {
+		t.Run(size, func(t *testing.T) {
+			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+t.TempDir(), "--window-size="+size, server.URL+"/tasks?project_id=default"+suffix)
+			require.NoError(t, startHandlerBrowserProcess(cmd))
+			defer stopHandlerBrowserProcess(cmd)
+			select {
+			case outcome := <-result:
+				require.Equal(t, "pass", outcome)
+			case <-time.After(50 * time.Second):
+				t.Fatal("browser timed out")
+			}
+		})
+	}
+}

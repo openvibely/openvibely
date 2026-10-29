@@ -108,9 +108,15 @@ func (h *Handler) AllProjects(c echo.Context) error {
 			if !isHTMX(c) {
 				return c.Redirect(http.StatusSeeOther, location)
 			}
+			if c.Request().Header.Get("HX-Target") == "all-projects-results" {
+				// A poll cannot retarget itself into the main page: the shell
+				// must start a fresh navigation after checking it is still current.
+				c.Response().Header().Set("X-OpenVibely-All-Projects-Location", location)
+				return c.NoContent(http.StatusOK)
+			}
 			c.Request().URL.RawQuery = query.Encode()
 			data.FilterProject = ""
-			// Polls must refresh the filter controls as well as the results.
+			// Main-page requests can replace their URL and filter controls directly.
 			c.Request().Header.Set("HX-Target", "main-content")
 			c.Response().Header().Set("HX-Replace-Url", location)
 			c.Response().Header().Set("HX-Retarget", "#main-content")
