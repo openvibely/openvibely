@@ -3472,6 +3472,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
 	if err := h.startStreamingResponse(streamingResponseParams{
+		PrincipalID:       h.authPrincipalID(c),
 		ExecID:            exec.ID,
 		TaskID:            taskID,
 		Message:           message,

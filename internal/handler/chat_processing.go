@@ -307,6 +307,15 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.updateWorkDone != nil {
 		defer params.updateWorkDone()
 	}
+	baseCtx := context.Background()
+	if h.organizationSvc != nil && strings.HasPrefix(params.PrincipalID, "user:") {
+		user, err := h.organizationSvc.Store.UserByID(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
+		if err != nil || user == nil || user.Disabled || user.Role == "" {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "initiating user no longer has organization access", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = models.WithPrincipal(baseCtx, user.Principal)
+	}
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
 	// relevant project memory reaches Chat without triggering after_complete memory
@@ -318,11 +327,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
-	waitCtx := context.Background()
+	waitCtx := baseCtx
 	var waitCancel context.CancelFunc
 	var waitCancelRegistration uint64
 	if params.IsTaskFollowup && h.workerSvc != nil {
-		waitCtx, waitCancel = context.WithCancel(context.Background())
+		waitCtx, waitCancel = context.WithCancel(baseCtx)
 		waitCancelRegistration = h.registerTaskCancellation(params.TaskID, waitCancel)
 	}
 	cleanupWaitCancellation := func() {
@@ -346,14 +355,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if ctx != nil {
 			return ctx
 		}
-		return context.Background()
+		return baseCtx
 	}
 	startRuntimeCancellation := func() {
 		if ctx != nil {
 			return
 		}
 		var resetInactivity func()
-		ctx, cancel, resetInactivity = withInactivityTimeout(context.Background(), timeout)
+		ctx, cancel, resetInactivity = withInactivityTimeout(baseCtx, timeout)
 		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
 		runtimeCancelRegistration = h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true

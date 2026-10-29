@@ -29,6 +29,9 @@ func HoldProjectRead(db *sql.DB) func(context.Context) (func() error, error) {
 	}
 }
 func SettingsReadObservers(store persistence.SettingsStore) func(func(), func()) {
+	if scoped, ok := store.(*persistence.UserSettings); ok {
+		store = scoped.SettingsStore
+	}
 	repo := store.(*sqlite.SettingsRepo)
 	wrap := func(callback func()) func(string) {
 		if callback == nil {
