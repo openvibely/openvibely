@@ -43,14 +43,31 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.querySelector('#task-list-groups [data-task-list-project]'));
  const row=document.querySelector('#task-list-groups [data-task-list-row]');
  assert(row.textContent.includes('Second browser project'),'task list missing project label');
- assert(new URL(row.href).searchParams.get('project_id')===row.querySelector('[data-task-list-project]').dataset.taskListProject,'task list owner URL mismatch');
+ assert(new URL(row.href).searchParams.get('project_id')==='__all_projects__','task list lost workspace scope');
  if(innerWidth>=1024){
  assert(getComputedStyle(document.getElementById('task-list-panel')).display!=='none','task list hidden');
  row.click();
- await wait(()=>document.getElementById('task-detail-content') && document.getElementById('project-selector').value!=='__all_projects__');
- document.querySelector('[data-project-tab="__all_projects__"]').click();
+ await wait(()=>document.getElementById('task-detail-content'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','opening left-list task switched tabs');
+ assert(document.getElementById('task-detail-content').dataset.projectId===row.querySelector('[data-task-list-project]').dataset.taskListProject,'task owner changed');
+ assert(document.querySelector('#task-list-groups [data-task-list-project]'),'combined left list lost');
+ document.getElementById('task-back-btn').click();
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
  }
+
+ document.querySelector('[data-all-projects-task]').click();
+ await wait(()=>document.getElementById('task-detail-content'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','opening board task switched tabs');
+ assert(new URL(location.href).searchParams.get('project_id')==='__all_projects__','task URL lost scope');
+ const detail=document.getElementById('task-detail-content');
+ const owner=detail.dataset.projectId;
+ await htmx.ajax('PUT','/tasks/'+detail.dataset.taskId,{source:detail,target:'#main-content',swap:'innerHTML',values:{title:'Cross project browser task',prompt:'Saved from All projects',priority:'2',category:'backlog'}});
+ await wait(()=>document.getElementById('task-detail-content'));
+ assert(document.getElementById('task-detail-content').dataset.projectId===owner,'edit lost task owner');
+ assert(document.getElementById('project-selector').value==='__all_projects__','edit switched tabs');
+
+ document.getElementById('task-back-btn').click();
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
 
  document.querySelector('nav[aria-label="All projects views"] a[href^="/analytics"]').click();
  await wait(()=>document.querySelector('[data-all-projects-usage]'));

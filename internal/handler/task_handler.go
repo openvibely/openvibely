@@ -1734,7 +1734,7 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 
 	// If redirect=list (from task detail page), redirect to the safe return target.
 	if isHTMX(c) && c.QueryParam("redirect") == "list" {
-		redirectURL := "/tasks?project_id=" + projectID
+		redirectURL := "/tasks?project_id=" + layout.WorkspaceProjectID(c.Request().Context(), projectID)
 		if c.QueryParam("return_to") == "schedule" {
 			redirectURL = "/schedule?project_id=" + projectID
 		}

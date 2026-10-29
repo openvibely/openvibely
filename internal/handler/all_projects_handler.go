@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -42,6 +43,22 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		if path == "/projects/new" || path == "/projects/pick-folder" || path == "/projects" || strings.HasPrefix(path, "/ui/") {
 			return next(c)
 		}
+		// Task routes resolve their real owner while retaining the virtual
+		// workspace for rendering. Never substitute the task's stored ProjectID.
+		if strings.HasPrefix(path, "/tasks/") && c.Param("taskId") != "" {
+			task, err := h.taskSvc.GetByID(c.Request().Context(), c.Param("taskId"))
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "task not found")
+			}
+			c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+			q := c.QueryParams()
+			q.Set("project_id", task.ProjectID)
+			c.Request().URL.RawQuery = q.Encode()
+			return next(c)
+		}
 		if c.Request().Method != http.MethodGet {
 			return echo.NewHTTPError(http.StatusBadRequest, "Choose a project before making changes.")
 		}
@@ -57,19 +74,7 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			// against a nonexistent project.
 			return c.NoContent(http.StatusNoContent)
 		}
-		// A direct link to a real item may inherit the shell's scope. Resolve the
-		// item's owner, rather than interpreting the virtual ID as a project.
-		if strings.HasPrefix(path, "/tasks/") && c.Param("taskId") != "" {
-			task, err := h.taskSvc.GetByID(c.Request().Context(), c.Param("taskId"))
-			if err != nil {
-				return err
-			}
-			if task != nil {
-				q := c.QueryParams()
-				q.Set("project_id", task.ProjectID)
-				return c.Redirect(http.StatusSeeOther, path+"?"+q.Encode())
-			}
-		}
+
 		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/events") {
 			return echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this operation.")
 		}

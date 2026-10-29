@@ -90,7 +90,7 @@ func TaskListPanelContent(projectID string, groups []TaskListGroup) templ.Compon
 func taskListRowURL(projectID string, task models.Task) string {
 	path := fmt.Sprintf("/tasks/%s?from=tasks", task.ID)
 	if projectID == models.AllProjectsID {
-		path += "&project_id=" + url.QueryEscape(task.ProjectID)
+		path += "&project_id=" + url.QueryEscape(projectID)
 	}
 	return path
 }

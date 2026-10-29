@@ -43,7 +43,7 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Contains(t, sidebar, "First workspace task")
 	require.Contains(t, sidebar, "Second workspace task")
 	require.Contains(t, sidebar, `data-task-list-project="`+first.ID+`"`)
-	require.Contains(t, sidebar, `&amp;project_id=`+second.ID)
+	require.Contains(t, sidebar, `&amp;project_id=`+models.AllProjectsID)
 	require.NotContains(t, sidebar, "Private chat title")
 	require.NotContains(t, sidebar, "all-projects-choose")
 	scopedSidebar := get("/tasks/sidebar?project_id=" + first.ID).Body.String()
@@ -182,4 +182,35 @@ func TestAllProjectsStaleFilterRefreshesWholeView(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestAllProjectsTaskWorkspaceKeepsOwnerForEdits(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	project := createProject(t, h, "Task owner")
+	task := models.Task{ProjectID: project.ID, Title: "Original", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+	path := "/tasks/" + task.ID + "?project_id=" + models.AllProjectsID
+	full := httptest.NewRecorder()
+	app.ServeHTTP(full, httptest.NewRequest(http.MethodGet, path, nil))
+	require.Equal(t, http.StatusOK, full.Code)
+	require.Contains(t, full.Body.String(), `value="__all_projects__" selected`)
+	require.Contains(t, full.Body.String(), `data-project-id="`+project.ID+`"`)
+
+	req := httptest.NewRequest(http.MethodPut, path, strings.NewReader("title=Updated&prompt=Keep+owner&priority=2&category=backlog"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	saved, err := stores.Tasks.GetByID(t.Context(), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Updated", saved.Title)
+	require.Equal(t, project.ID, saved.ProjectID)
+	require.Contains(t, rec.Body.String(), "/tasks?project_id="+models.AllProjectsID)
+	req = httptest.NewRequest(http.MethodDelete, path+"&redirect=list", nil)
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("HX-Redirect"))
 }

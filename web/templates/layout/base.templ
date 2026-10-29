@@ -9,6 +9,18 @@ import (
 	"github.com/openvibely/openvibely/web/static"
 )
 
+type workspaceProjectContextKey struct{}
+
+// WithWorkspaceProject keeps navigation scope separate from an item's owner.
+func WithWorkspaceProject(ctx context.Context, projectID string) context.Context {
+ return context.WithValue(ctx, workspaceProjectContextKey{}, projectID)
+}
+
+func WorkspaceProjectID(ctx context.Context, ownerID string) string {
+ if id, _ := ctx.Value(workspaceProjectContextKey{}).(string); id != "" { return id }
+ return ownerID
+}
+
 type desktopModeContextKey struct{}
 type nativeWindowContextKey struct{}
 type buildVersionContextKey struct{}

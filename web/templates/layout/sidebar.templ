@@ -397,6 +397,15 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					// startup preference most recently written by a different browser tab.
 					document.addEventListener('htmx:configRequest', function(event) {
 						var detail = event.detail;
+                        if (sel.value === '__all_projects__' && detail.verb !== 'get') {
+                            var task = document.getElementById('task-detail-content');
+                            var action = new URL(detail.path, location.href);
+                            var prefix = task && '/tasks/' + encodeURIComponent(task.dataset.taskId);
+                            if (prefix && action.origin === location.origin && (action.pathname === prefix || action.pathname.startsWith(prefix + '/')) && !action.searchParams.has('project_id')) {
+                                action.searchParams.set('project_id', sel.value);
+                                detail.path = action.pathname + action.search;
+                            }
+                        }
 						if (!sel.value || detail.verb !== 'get') return;
 						var url = new URL(detail.path, window.location.href);
 						if (url.origin === window.location.origin && !url.searchParams.has('project_id') && !detail.parameters.project_id) detail.parameters.project_id = sel.value;
@@ -576,7 +585,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         }
 
                         function retargetLiveEventsForCurrentLocation() {
-							retargetLiveEvents(projectSelector && projectSelector.value, currentTaskID());
+							var selected = projectSelector && projectSelector.value;
+                            var task = document.getElementById('task-detail-content');
+                            var owner = selected === '__all_projects__' && task ? task.dataset.projectId : selected;
+                            retargetLiveEvents(owner, currentTaskID());
 						}
 
 						window.openVibelyRetargetLiveEvents = retargetLiveEvents;

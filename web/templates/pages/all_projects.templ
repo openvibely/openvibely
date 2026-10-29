@@ -81,7 +81,7 @@ templ allProjectsHeading(section string) {
 		<div><h2 class="text-2xl font-bold">All projects</h2><p class="text-sm opacity-60 mt-1">{ strings.ToUpper(section[:1]) + section[1:] } across your projects</p></div>
 		<nav class="flex gap-2" aria-label="All projects views">
 			for _, item := range []string{"tasks", "analytics", "automations"} {
-				<a class={ "btn btn-sm", templ.KV("btn-primary", section == item), templ.KV("btn-ghost", section != item) } href={ templ.URL(allProjectsURL(item)) } hx-get={ allProjectsURL(item) } hx-target="#main-content" hx-push-url="true">{ strings.ToUpper(item[:1]) + item[1:] }</a>
+				<a class={ "btn btn-sm", templ.KV("btn-primary", section == item), templ.KV("btn-ghost", section != item) } href={ templ.URL(allProjectsURL(item)) } hx-get={ allProjectsURL(item) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ strings.ToUpper(item[:1]) + item[1:] }</a>
 			}
 		</nav>
 	</div>
@@ -90,7 +90,7 @@ templ allProjectsHeading(section string) {
 templ AllProjectsContent(data AllProjectsData) {
 	<div id="all-projects-page" data-all-projects-view={ data.Section } class="h-full min-h-0 overflow-y-auto">
 		@allProjectsHeading(data.Section)
-		<form class="flex flex-wrap items-end gap-3 mb-6" method="get" action={ templ.URL("/" + data.Section) } hx-get={ "/" + data.Section } hx-target="#main-content" hx-push-url="true">
+		<form class="flex flex-wrap items-end gap-3 mb-6" method="get" action={ templ.URL("/" + data.Section) } hx-get={ "/" + data.Section } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
 			<input type="hidden" name="project_id" value={ models.AllProjectsID }/>
 			<label class="form-control">
 				<span class="label-text mb-1">Project</span>
@@ -116,10 +116,10 @@ templ AllProjectsContent(data AllProjectsData) {
 			<button class="btn btn-sm" type="submit">Apply</button>
 			<a class="btn btn-sm btn-ghost" href={ templ.URL(data.URL(data.Offset)) } hx-get={ data.URL(data.Offset) } hx-target="#main-content" aria-label="Refresh all projects">Refresh</a>
 			if data.Section == "tasks" {
-				<a class="btn btn-sm btn-primary" href={ templ.URL("/tasks/new?project_id=" + models.AllProjectsID) } hx-get={ "/tasks/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-push-url="true">New task</a>
+				<a class="btn btn-sm btn-primary" href={ templ.URL("/tasks/new?project_id=" + models.AllProjectsID) } hx-get={ "/tasks/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">New task</a>
 			}
 			if data.Section == "automations" {
-				<a class="btn btn-sm btn-primary" href={ templ.URL("/automations/new?project_id=" + models.AllProjectsID) } hx-get={ "/automations/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-push-url="true">New automation</a>
+				<a class="btn btn-sm btn-primary" href={ templ.URL("/automations/new?project_id=" + models.AllProjectsID) } hx-get={ "/automations/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">New automation</a>
 			}
 		</form>
 		if data.Section == "tasks" {
@@ -136,13 +136,13 @@ templ AllProjectsContent(data AllProjectsData) {
 
 templ AllProjectsTaskResults(data AllProjectsData) {
 	<div id="all-projects-results" hx-get={ data.URL(0) } hx-trigger="every 10s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
-		<p class="text-sm opacity-60 mb-3">{ strconv.Itoa(len(data.Tasks)) } tasks · Open a task to work in its project</p>
+		<p class="text-sm opacity-60 mb-3">{ strconv.Itoa(len(data.Tasks)) } tasks · Open a task to view its thread</p>
 		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));">
 			for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryScheduled, models.CategoryCompleted} {
 				<section class="bg-base-200 rounded-lg p-3 min-w-0" data-all-projects-category={ string(category) }>
 					<h3 class="font-semibold mb-3">{ strings.ToUpper(string(category)[:1])+string(category)[1:] } <span class="badge badge-sm badge-ghost">{ strconv.Itoa(len(allProjectTasks(data.Tasks, category))) }</span></h3>
 					for _, task := range allProjectTasks(data.Tasks, category) {
-						<a class="block bg-base-100 border border-base-300 rounded-lg p-3 mb-2 hover:border-primary" data-all-projects-task={ task.ID } data-owner-project={ task.ProjectID } href={ templ.URL("/tasks/" + url.PathEscape(task.ID) + "?project_id=" + url.QueryEscape(task.ProjectID)) } hx-get={ "/tasks/" + url.PathEscape(task.ID) + "?project_id=" + url.QueryEscape(task.ProjectID) } hx-target="#main-content" hx-push-url="true">
+						<a class="block bg-base-100 border border-base-300 rounded-lg p-3 mb-2 hover:border-primary" data-all-projects-task={ task.ID } data-owner-project={ task.ProjectID } href={ templ.URL("/tasks/" + url.PathEscape(task.ID) + "?project_id=" + url.QueryEscape(models.AllProjectsID)) } hx-get={ "/tasks/" + url.PathEscape(task.ID) + "?project_id=" + url.QueryEscape(models.AllProjectsID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
 							<span class="badge badge-sm badge-outline mb-2">{ allProjectName(data.Projects, task.ProjectID) }</span>
 							<h4 class="font-semibold break-words">{ task.Title }</h4>
 							<div class="flex flex-wrap gap-2 text-xs opacity-60 mt-2"><span>{ string(task.Status) }</span><span>{ fmt.Sprintf("Priority %d", task.Priority) }</span></div>
@@ -161,7 +161,7 @@ templ AllProjectsAutomationResults(data AllProjectsData) {
 	<div id="all-projects-results" hx-get={ data.URL(data.Offset) } hx-trigger="every 15s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
 		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));">
 			for _, card := range data.Automations {
-				<a class="block bg-base-100 border border-base-300 rounded-lg p-4 hover:border-primary" data-all-projects-automation={ card.Automation.ID } data-owner-project={ card.Automation.ProjectID } href={ templ.URL("/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID)) } hx-get={ "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID) } hx-target="#main-content" hx-push-url="true">
+				<a class="block bg-base-100 border border-base-300 rounded-lg p-4 hover:border-primary" data-all-projects-automation={ card.Automation.ID } data-owner-project={ card.Automation.ProjectID } href={ templ.URL("/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID)) } hx-get={ "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
 					<span class="badge badge-sm badge-outline mb-2">{ allProjectName(data.Projects, card.Automation.ProjectID) }</span>
 					<h3 class="font-semibold break-words">{ card.Automation.Name }</h3>
 					<p class="text-sm opacity-60 mt-2">{ card.Automation.Description }</p>
@@ -174,11 +174,11 @@ templ AllProjectsAutomationResults(data AllProjectsData) {
 		}
 		<nav class="flex justify-between items-center mt-6" aria-label="Automation pages">
 			if data.Offset > 0 {
-				<a class="btn btn-sm" href={ templ.URL(data.URL(max(0, data.Offset-data.PageSize))) } hx-get={ data.URL(max(0, data.Offset-data.PageSize)) } hx-target="#main-content" hx-push-url="true">Previous</a>
+				<a class="btn btn-sm" href={ templ.URL(data.URL(max(0, data.Offset-data.PageSize))) } hx-get={ data.URL(max(0, data.Offset-data.PageSize)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Previous</a>
 			}
 			<span class="text-sm opacity-60">{ fmt.Sprintf("Showing %d automations", len(data.Automations)) }</span>
 			if data.HasMore {
-				<a class="btn btn-sm" href={ templ.URL(data.URL(data.Offset + data.PageSize)) } hx-get={ data.URL(data.Offset + data.PageSize) } hx-target="#main-content" hx-push-url="true">Next</a>
+				<a class="btn btn-sm" href={ templ.URL(data.URL(data.Offset + data.PageSize)) } hx-get={ data.URL(data.Offset + data.PageSize) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Next</a>
 			}
 		</nav>
 	</div>
@@ -243,7 +243,7 @@ if destination == "/automations/new" {
 	destination = "/automations"
 }
 destination += "?project_id=" + url.QueryEscape(project.ID) }}
-				<a class="block border border-base-300 rounded-lg p-4 hover:border-primary" href={ templ.URL(destination) } hx-get={ destination } hx-target="#main-content" hx-push-url="true">{ project.Name }</a>
+				<a class="block border border-base-300 rounded-lg p-4 hover:border-primary" href={ templ.URL(destination) } hx-get={ destination } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ project.Name }</a>
 			}
 		</div>
 		if len(projects) == 0 {
