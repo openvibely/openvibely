@@ -261,6 +261,10 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
 		WHERE a.project_id = ? AND v.state = 'published'`
 	args := []any{projectID}
+	if projectID == models.AllProjectsID {
+		query = strings.Replace(query, "a.project_id = ? AND ", "", 1)
+		args = nil
+	}
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER(
 			COALESCE(a.name, '') || ' ' || COALESCE(a.description, '') || ' ' ||

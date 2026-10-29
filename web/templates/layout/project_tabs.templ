@@ -8,12 +8,26 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func withAllProjectsOption(projects []models.Project) []models.Project {
+	for _, project := range projects {
+		if project.ID == models.AllProjectsID {
+			return projects
+		}
+	}
+	out := append([]models.Project(nil), projects...)
+	return append(out, models.AllProjectsOption())
+}
+
 func pinnedProjects(projects []models.Project, ids []string) []models.Project {
 	byID := make(map[string]models.Project, len(projects))
 	for _, project := range projects {
 		byID[project.ID] = project
 	}
-	result := make([]models.Project, 0, len(ids))
+	result := make([]models.Project, 0, len(ids)+1)
+	if all, ok := byID[models.AllProjectsID]; ok {
+		result = append(result, all)
+		delete(byID, models.AllProjectsID)
+	}
 	for _, id := range ids {
 		if project, ok := byID[id]; ok {
 			result = append(result, project)
@@ -154,7 +168,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab" data-selected={ fmtBool(project.ID == currentProjectID) }>
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID }>{ project.Name }</button>
-					<button type="button" disabled?={ len(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) <= 1 } data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
+					if project.ID != models.AllProjectsID {
+					<button type="button" disabled?={ len(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) <= 2 } data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
+                    }
 				</div>
 			}
 		if serverRuntimeMode(ctx) == "desktop" {
@@ -252,6 +268,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var ids = Array.from(new Set((Array.isArray(recoveredTabs) ? recoveredTabs : JSON.parse(bar.dataset.pinnedProjects)).filter(function(id) {
     return Array.from(select.options).some(function(option) { return option.value === id; });
    })));
+   if (Array.from(select.options).some(function(option) { return option.value === '__all_projects__'; }) && !ids.includes('__all_projects__')) ids.unshift('__all_projects__');
    bar.dataset.pinnedProjects = JSON.stringify(ids);
  var closedActive = "";
  var pendingCloses = new Set();
@@ -275,7 +292,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
     });
     list.querySelectorAll('[data-close-project]').forEach(function(close) {
-     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
+     close.disabled = close.dataset.closeProject === '__all_projects__' || ids.filter(function(id) { return id !== '__all_projects__'; }).length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
     });
     var activeTab = list.querySelector('[aria-selected="true"]');
     if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});
@@ -288,8 +305,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
      var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim();
      var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg>'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
-     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
-     wrapper.append(tab, close); list.append(wrapper);
+     close.disabled = close.dataset.closeProject === '__all_projects__' || ids.filter(function(id) { return id !== '__all_projects__'; }).length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
+     wrapper.append(tab); if (id !== '__all_projects__') wrapper.append(close); list.append(wrapper);
     });
     list.append(add);
     sync();
@@ -311,7 +328,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var others = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node !== drag.wrapper; });
     // Hit-test layout positions, not animated bounds, to avoid oscillating slots.
     var origin = list.getBoundingClientRect().left - list.scrollLeft;
-    var tabs = Array.from(list.querySelectorAll('.desktop-project-tab'));
+    var tabs = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node.querySelector('[data-project-tab]').dataset.projectTab !== '__all_projects__'; });
     // Clamp to resting tab slots, excluding the gap before +. Neither end
     // should need a corrective slide when the pointer is released.
     var first = tabs[0];
@@ -341,6 +358,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var tab = event.target.closest('[data-project-tab]');
     if (!tab || event.button !== 0 || !event.isPrimary) return;
     if (!switchProject(tab.dataset.projectTab)) return;
+    if (tab.dataset.projectTab === '__all_projects__') return;
     drag = {pointer: event.pointerId, startX: event.clientX, grabOffset: event.clientX - tab.parentElement.getBoundingClientRect().left, x: event.clientX, wrapper: tab.parentElement, started: false};
    });
    document.addEventListener('pointermove', function(event) {
@@ -382,6 +400,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    }, true);
    list.addEventListener('dragstart', function(event) { if (event.target.closest('[data-project-tab]')) event.preventDefault(); });
    function openMenu(tab, x, y) {
+    if (!tab || tab.dataset.projectTab === '__all_projects__') return;
     menuTab = tab;
     if (typeof menu.showPopover === 'function') menu.showPopover();
     else menu.setAttribute('data-menu-open', '');
@@ -427,7 +446,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     // Pointer activation already happened on press; retain keyboard activation.
     if (tab) { if (event.detail === 0) switchProject(tab.dataset.projectTab); return; }
     var close = event.target.closest('[data-close-project]');
-    if (!close || ids.length <= 1) return;
+    if (!close || ids.filter(function(id) { return id !== '__all_projects__'; }).length <= 1) return;
     var index = ids.indexOf(close.dataset.closeProject);
     var next = ids[index + 1] || ids[index - 1];
     var closingID = close.dataset.closeProject;
@@ -442,7 +461,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      }
      // Navigation may have allowed other tab changes while this close was pending.
      index = ids.indexOf(closingID);
-     if (index < 0 || ids.length <= 1) return;
+     if (index < 0 || ids.filter(function(id) { return id !== '__all_projects__'; }).length <= 1) return;
      closedActive = closingID;
      ids.splice(index, 1); render(); saveTabs();
      var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
@@ -462,7 +481,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     else if (event.key === 'ArrowLeft') index = (index + tabs.length - 1) % tabs.length;
     else if (event.key === 'Home') index = 0;
     else if (event.key === 'End') index = tabs.length - 1;
-    else if (event.key === 'Delete') { event.preventDefault(); tab.parentElement.querySelector('[data-close-project]').click(); return; }
+    else if (event.key === 'Delete') { event.preventDefault(); var close = tab.parentElement.querySelector('[data-close-project]'); if (close) close.click(); return; }
     else return;
     event.preventDefault();
     tabs.forEach(function(item) { item.tabIndex = -1; });

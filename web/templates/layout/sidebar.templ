@@ -210,9 +210,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								return url.pathname + url.search + url.hash;
 							}
 						}
-						return '/chat?project_id=' + encodeURIComponent(id);
+						return (id === '__all_projects__' ? '/tasks' : '/chat') + '?project_id=' + encodeURIComponent(id);
 					}
 					function syncProjectSelector() {
+                        const settingsButton = document.getElementById('project-settings-btn');
+                        if (settingsButton) settingsButton.disabled = sel.value === '__all_projects__';
 						if (window.openVibelySearchableSelector && typeof window.openVibelySearchableSelector.sync === 'function') {
 							window.openVibelySearchableSelector.sync(sel.closest('[data-searchable-selector]'), sel.value);
 						}
@@ -324,6 +326,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						}
 
+						if (newProjectId === '__all_projects__' && !['/tasks', '/analytics', '/automations'].includes(currentPath)) newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						rememberProjectLocation();
 						if (desktopProjectNavigation || matchMedia('(min-width: 1024px)').matches) newUrl = projectLocation(newProjectId);
 
@@ -338,7 +341,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         // the selector already shows the optimistic destination.
                         window.openVibelyProtectedProjectID = new URLSearchParams(location.search).get('project_id');
                         if (window.openVibelyProjectTabsSync) window.openVibelyProjectTabsSync();
-                        const fallback = '/chat?project_id=' + encodeURIComponent(id);
+                        const fallback = (id === '__all_projects__' ? '/tasks' : '/chat') + '?project_id=' + encodeURIComponent(id);
                         try {
                             try { await window.openVibelyNavigate(url); }
                             catch (error) {
@@ -569,7 +572,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             if (scope === liveScope) return;
                             liveScope = scope;
                             if (window._sidebarSSE) window._sidebarSSE.close();
-                            window._sidebarSSE = projectID ? window.openVibelyLive.live(projectID, taskID, liveSSEHandlers) : null;
+                            window._sidebarSSE = projectID && projectID !== '__all_projects__' ? window.openVibelyLive.live(projectID, taskID, liveSSEHandlers) : null;
                         }
 
                         function retargetLiveEventsForCurrentLocation() {
@@ -1134,7 +1137,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				btn.addEventListener('click', function(e) {
 					e.preventDefault();
 					const sel = document.getElementById('project-selector');
-					if (!sel || !sel.value) return;
+					if (!sel || !sel.value || sel.value === '__all_projects__') return;
 					const container = document.getElementById('project-settings-container');
 					htmx.ajax('GET', '/projects/' + sel.value + '/edit', {
 						target: container,
@@ -1156,6 +1159,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
                         if serverRuntimeMode(ctx) != "desktop" {
 						<button
 							id="project-settings-btn"
+                            disabled?={ currentProjectID == models.AllProjectsID }
 							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
 							aria-label="Project Settings" data-tooltip-disabled
 						>

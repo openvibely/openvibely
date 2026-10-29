@@ -300,12 +300,12 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollLeft = 0)`)
 				dragTab("p00", 130)
-				browser.waitFor("drag right", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p01,p00")
+				browser.waitFor("drag right", `Array.from(document.querySelectorAll('[data-project-tab]')).filter(t=>t.dataset.projectTab!=='__all_projects__').slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p01,p00")
 				browser.waitFor("drag preserves active project", `document.getElementById('project-selector').value`, "p00")
-				browser.waitFor("reordered pins saved", `JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).slice(0,2).join(',')`, "p01,p00")
+				browser.waitFor("reordered pins saved", `JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).filter(id=>id!=='__all_projects__').slice(0,2).join(',')`, "p01,p00")
 				for deadline := time.Now().Add(3 * time.Second); ; {
 					mu.Lock()
-					savedOrder := strings.Join(pins[:2], ",")
+					savedOrder := strings.Join(pins[1:3], ",")
 					mu.Unlock()
 					if savedOrder == "p01,p00" {
 						break
@@ -316,7 +316,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					time.Sleep(10 * time.Millisecond)
 				}
 				dragTab("p00", -130)
-				browser.waitFor("drag left", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p00,p01")
+				browser.waitFor("drag left", `Array.from(document.querySelectorAll('[data-project-tab]')).filter(t=>t.dataset.projectTab!=='__all_projects__').slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p00,p01")
 				// Drag the last tab into the + section without releasing the mouse.
 				browser.evaluate(`document.getElementById('desktop-project-tabs').scrollLeft = 100000; 'ready'`)
 				var wall struct{ X, Y float64 }
@@ -394,7 +394,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("tab typography must match sidebar and plus must use label inset with a compact icon", got)
 				}
 
-				if got := browser.evaluate(`(function(){return String(Array.from(document.querySelectorAll('.desktop-project-tab')).filter(function(tab){return !tab.querySelector('[aria-selected="true"]');}).every(function(tab){var separator=getComputedStyle(tab,'::after'),rect=tab.getBoundingClientRect(),close=tab.querySelector('[data-close-project]').getBoundingClientRect();return Math.abs(rect.top+parseFloat(separator.top)-(close.top+close.bottom)/2)<0.5;}));})()`); got != "true" {
+				if got := browser.evaluate(`(function(){return String(Array.from(document.querySelectorAll('.desktop-project-tab')).filter(function(tab){return !tab.querySelector('[aria-selected="true"]') && tab.querySelector('[data-close-project]');}).every(function(tab){var separator=getComputedStyle(tab,'::after'),rect=tab.getBoundingClientRect(),close=tab.querySelector('[data-close-project]').getBoundingClientRect();return Math.abs(rect.top+parseFloat(separator.top)-(close.top+close.bottom)/2)<0.5;}));})()`); got != "true" {
 					t.Fatal("inactive separators must share the close buttons' vertical center", got)
 				}
 
@@ -515,11 +515,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.waitFor("select tab to keep", `document.getElementById('project-selector').value`, "p02")
 					browser.waitFor("selected tab navigation", `location.search`, "?project_id=p02")
 					browser.evaluate(`(function(){var ids=Array.from(document.querySelectorAll('[data-close-project]')).map(button=>button.dataset.closeProject).filter(id=>id!=='p02');ids.forEach(id=>document.querySelector('[data-close-project="'+id+'"]').click());return 'closed';})()`)
-					browser.waitFor("last tab cannot close", `String(document.querySelectorAll('[data-project-tab]').length === 1 && document.querySelector('[data-close-project]').disabled)`, "true")
-					browser.waitFor("one tab does not overflow", `(function(){var list=document.getElementById('desktop-project-tabs');return String(list.scrollWidth===list.clientWidth && list.scrollHeight===list.clientHeight);})()`, "true")
+					browser.waitFor("last tab cannot close", `String(document.querySelectorAll('[data-project-tab]').length === 2 && document.querySelector('[data-close-project]').disabled)`, "true")
+					browser.waitFor("all projects and last project do not overflow", `(function(){var list=document.getElementById('desktop-project-tabs');return String(list.scrollWidth===list.clientWidth && list.scrollHeight===list.clientHeight);})()`, "true")
 					browser.waitFor("tab strip suppresses native scrollbar chrome", `(function(){var style=getComputedStyle(document.getElementById('desktop-project-tabs'));return style.overflowY+':'+style.scrollbarWidth;})()`, "hidden:none")
 					browser.evaluate(`(function(){document.querySelector('[data-close-project]').click(); document.querySelector('[data-project-tab]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete', bubbles: true}));return 'attempted';})()`)
-					browser.waitFor("last tab survives click and Delete", `String(document.querySelectorAll('[data-project-tab]').length === 1)`, "true")
+					browser.waitFor("last tab survives click and Delete", `String(document.querySelectorAll('[data-project-tab]').length === 2)`, "true")
 				})
 			}
 			mu.Lock()

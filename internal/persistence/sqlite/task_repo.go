@@ -605,6 +605,10 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	query := `SELECT ` + selectColumns + `
 				 FROM tasks t WHERE t.project_id = ?`
 	args := []any{projectID}
+	if projectID == models.AllProjectsID {
+		query = `SELECT ` + selectColumns + ` FROM tasks t WHERE t.category != 'chat'`
+		args = nil
+	}
 	if category != "" {
 		query += ` AND category = ?`
 		args = append(args, category)

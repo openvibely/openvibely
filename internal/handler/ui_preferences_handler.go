@@ -133,7 +133,7 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		available := make(map[string]bool, len(projects))
+		available := map[string]bool{models.AllProjectsID: true}
 		for _, project := range projects {
 			available[project.ID] = true
 		}
@@ -191,7 +191,7 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		if project == nil {
+		if project == nil && projectID != models.AllProjectsID {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid project")
 		}
 		if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, projectID); err != nil {

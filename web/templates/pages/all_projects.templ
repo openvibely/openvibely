@@ -1,0 +1,257 @@
+package pages
+
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+type AllProjectsData struct {
+	Projects      []models.Project
+	Section       string
+	FilterProject string
+	Search        string
+	Range         string
+	Tasks         []models.Task
+	Automations   []models.AutomationCard
+	Usage         *models.AnalyticsUsageViewModel
+	Offset        int
+	PageSize      int
+	HasMore       bool
+}
+
+func allProjectsURL(section string) string {
+	return "/" + section + "?project_id=" + models.AllProjectsID
+}
+func allProjectName(projects []models.Project, id string) string {
+	for _, project := range projects {
+		if project.ID == id {
+			return project.Name
+		}
+	}
+	return id
+}
+func allProjectTasks(tasks []models.Task, category models.TaskCategory) []models.Task {
+	var out []models.Task
+	for _, task := range tasks {
+		if task.Category == category {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+func (d AllProjectsData) URL(offset int) string {
+	q := url.Values{"project_id": {models.AllProjectsID}}
+	if d.FilterProject != "" {
+		q.Set("filter_project", d.FilterProject)
+	}
+	if d.Search != "" {
+		q.Set("search", d.Search)
+	}
+	if d.Range != "" {
+		q.Set("range", d.Range)
+	}
+	if offset > 0 {
+		q.Set("card_page", "1")
+		q.Set("offset", strconv.Itoa(offset))
+		q.Set("page_size", strconv.Itoa(d.PageSize))
+	}
+	return "/" + d.Section + "?" + q.Encode()
+}
+func allUsageCost(value *float64) string {
+	if value == nil {
+		return "Unavailable"
+	}
+	return fmt.Sprintf("$%.4f", *value)
+}
+
+templ AllProjects(data AllProjectsData) {
+	@layout.Base("All projects", data.Projects, models.AllProjectsID) {
+		@AllProjectsContent(data)
+	}
+}
+
+templ allProjectsHeading(section string) {
+	<style>
+		/* The aggregate view has its own project filter and task board. */
+		html:has(#all-projects-page, #all-projects-choose) :is(#task-list-panel, #task-list-divider, #task-list-search-toggle, #task-list-toggle) { display: none !important; }
+	</style>
+	@layout.PageTitle("All projects")
+	<div data-page-header class="flex flex-wrap items-center justify-between gap-4 mb-6">
+		<div><h2 class="text-2xl font-bold">All projects</h2><p class="text-sm opacity-60 mt-1">{ strings.ToUpper(section[:1]) + section[1:] } across your projects</p></div>
+		<nav class="flex gap-2" aria-label="All projects views">
+			for _, item := range []string{"tasks", "analytics", "automations"} {
+				<a class={ "btn btn-sm", templ.KV("btn-primary", section == item), templ.KV("btn-ghost", section != item) } href={ templ.URL(allProjectsURL(item)) } hx-get={ allProjectsURL(item) } hx-target="#main-content" hx-push-url="true">{ strings.ToUpper(item[:1]) + item[1:] }</a>
+			}
+		</nav>
+	</div>
+}
+
+templ AllProjectsContent(data AllProjectsData) {
+	<div id="all-projects-page" data-all-projects-view={ data.Section } class="h-full min-h-0 overflow-y-auto">
+		@allProjectsHeading(data.Section)
+		<form class="flex flex-wrap items-end gap-3 mb-6" method="get" action={ templ.URL("/" + data.Section) } hx-get={ "/" + data.Section } hx-target="#main-content" hx-push-url="true">
+			<input type="hidden" name="project_id" value={ models.AllProjectsID }/>
+			<label class="form-control">
+				<span class="label-text mb-1">Project</span>
+				<select name="filter_project" class="select select-bordered select-sm" aria-label="Filter by project">
+					<option value="">All projects</option>
+					for _, project := range data.Projects {
+						<option value={ project.ID } selected?={ data.FilterProject == project.ID }>{ project.Name }</option>
+					}
+				</select>
+			</label>
+			if data.Section == "analytics" {
+				<label class="form-control">
+					<span class="label-text mb-1">Date range</span>
+					<select name="range" class="select select-bordered select-sm" aria-label="Date range">
+						for _, option := range []struct{Value, Label string}{{"7d", "Last 7 days"}, {"30d", "Last 30 days"}, {"90d", "Last 90 days"}, {"all", "All time"}} {
+							<option value={ option.Value } selected?={ data.Range == option.Value || (data.Range == "" && option.Value == "30d") }>{ option.Label }</option>
+						}
+					</select>
+				</label>
+			} else {
+				<label class="form-control flex-1"><span class="label-text mb-1">Search</span><input name="search" value={ data.Search } type="search" class="input input-bordered input-sm" placeholder={ "Search " + data.Section }/></label>
+			}
+			<button class="btn btn-sm" type="submit">Apply</button>
+			<a class="btn btn-sm btn-ghost" href={ templ.URL(data.URL(data.Offset)) } hx-get={ data.URL(data.Offset) } hx-target="#main-content" aria-label="Refresh all projects">Refresh</a>
+			if data.Section == "tasks" {
+				<a class="btn btn-sm btn-primary" href={ templ.URL("/tasks/new?project_id=" + models.AllProjectsID) } hx-get={ "/tasks/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-push-url="true">New task</a>
+			}
+			if data.Section == "automations" {
+				<a class="btn btn-sm btn-primary" href={ templ.URL("/automations/new?project_id=" + models.AllProjectsID) } hx-get={ "/automations/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-push-url="true">New automation</a>
+			}
+		</form>
+		if data.Section == "tasks" {
+			@AllProjectsTaskResults(data)
+		}
+		if data.Section == "automations" {
+			@AllProjectsAutomationResults(data)
+		}
+		if data.Section == "analytics" && data.Usage != nil {
+			@allProjectsAnalytics(data.Usage)
+		}
+	</div>
+}
+
+templ AllProjectsTaskResults(data AllProjectsData) {
+	<div id="all-projects-results" hx-get={ data.URL(0) } hx-trigger="every 10s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
+		<p class="text-sm opacity-60 mb-3">{ strconv.Itoa(len(data.Tasks)) } tasks · Open a task to work in its project</p>
+		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));">
+			for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryActive, models.CategoryScheduled, models.CategoryCompleted} {
+				<section class="bg-base-200 rounded-lg p-3 min-w-0" data-all-projects-category={ string(category) }>
+					<h3 class="font-semibold mb-3">{ strings.ToUpper(string(category)[:1])+string(category)[1:] } <span class="badge badge-sm badge-ghost">{ strconv.Itoa(len(allProjectTasks(data.Tasks, category))) }</span></h3>
+					for _, task := range allProjectTasks(data.Tasks, category) {
+						<a class="block bg-base-100 border border-base-300 rounded-lg p-3 mb-2 hover:border-primary" data-all-projects-task={ task.ID } data-owner-project={ task.ProjectID } href={ templ.URL("/tasks/" + url.PathEscape(task.ID) + "?project_id=" + url.QueryEscape(task.ProjectID)) } hx-get={ "/tasks/" + url.PathEscape(task.ID) + "?project_id=" + url.QueryEscape(task.ProjectID) } hx-target="#main-content" hx-push-url="true">
+							<span class="badge badge-sm badge-outline mb-2">{ allProjectName(data.Projects, task.ProjectID) }</span>
+							<h4 class="font-semibold break-words">{ task.Title }</h4>
+							<div class="flex flex-wrap gap-2 text-xs opacity-60 mt-2"><span>{ string(task.Status) }</span><span>{ fmt.Sprintf("Priority %d", task.Priority) }</span></div>
+						</a>
+					}
+					if len(allProjectTasks(data.Tasks, category)) == 0 {
+						<p class="text-sm opacity-50 py-6 text-center">No tasks</p>
+					}
+				</section>
+			}
+		</div>
+	</div>
+}
+
+templ AllProjectsAutomationResults(data AllProjectsData) {
+	<div id="all-projects-results" hx-get={ data.URL(data.Offset) } hx-trigger="every 15s [!document.hidden]" hx-target="this" hx-swap="outerHTML">
+		<div class="grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));">
+			for _, card := range data.Automations {
+				<a class="block bg-base-100 border border-base-300 rounded-lg p-4 hover:border-primary" data-all-projects-automation={ card.Automation.ID } data-owner-project={ card.Automation.ProjectID } href={ templ.URL("/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID)) } hx-get={ "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(card.Automation.ProjectID) } hx-target="#main-content" hx-push-url="true">
+					<span class="badge badge-sm badge-outline mb-2">{ allProjectName(data.Projects, card.Automation.ProjectID) }</span>
+					<h3 class="font-semibold break-words">{ card.Automation.Name }</h3>
+					<p class="text-sm opacity-60 mt-2">{ card.Automation.Description }</p>
+					<p class="text-xs mt-3">{ string(card.Automation.LifecycleState) } · { string(card.Automation.HealthState) }</p>
+				</a>
+			}
+		</div>
+		if len(data.Automations) == 0 {
+			<p class="p-8 text-center opacity-60">No automations match these filters.</p>
+		}
+		<nav class="flex justify-between items-center mt-6" aria-label="Automation pages">
+			if data.Offset > 0 {
+				<a class="btn btn-sm" href={ templ.URL(data.URL(max(0, data.Offset-data.PageSize))) } hx-get={ data.URL(max(0, data.Offset-data.PageSize)) } hx-target="#main-content" hx-push-url="true">Previous</a>
+			}
+			<span class="text-sm opacity-60">{ fmt.Sprintf("Showing %d automations", len(data.Automations)) }</span>
+			if data.HasMore {
+				<a class="btn btn-sm" href={ templ.URL(data.URL(data.Offset + data.PageSize)) } hx-get={ data.URL(data.Offset + data.PageSize) } hx-target="#main-content" hx-push-url="true">Next</a>
+			}
+		</nav>
+	</div>
+}
+
+templ allProjectsAnalytics(usage *models.AnalyticsUsageViewModel) {
+	<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" data-all-projects-usage>
+		<div class="card bg-base-200 p-5"><span class="text-sm opacity-60">Total tokens</span><strong class="text-2xl mt-2" data-all-total-tokens>{ strconv.Itoa(usage.Totals.TotalTokens) }</strong></div>
+		<div class="card bg-base-200 p-5"><span class="text-sm opacity-60">Model calls</span><strong class="text-2xl mt-2">{ strconv.Itoa(usage.Totals.CallCount) }</strong></div>
+		<div class="card bg-base-200 p-5"><span class="text-sm opacity-60">Known usage cost</span><strong class="text-2xl mt-2">{ allUsageCost(usage.Totals.CostUSD) }</strong><span class="text-xs opacity-60">Excludes unpriced usage and subscription fees</span></div>
+	</div>
+	<section class="card border border-base-300 p-4 mb-6">
+		<h3 class="font-semibold mb-3">Usage over time</h3>
+		<div class="overflow-x-auto">
+			<table class="table table-sm">
+				<thead><tr><th>Period</th><th>Tokens</th><th>Calls</th><th>Known cost</th></tr></thead>
+				<tbody>
+					for _, point := range usage.DailyUsage {
+						<tr><td>{ point.Period }</td><td>{ strconv.Itoa(point.TotalTokens) }</td><td>{ strconv.Itoa(point.CallCount) }</td><td>{ allUsageCost(point.CostUSD) }</td></tr>
+					}
+					if len(usage.DailyUsage) == 0 {
+						<tr><td colspan="4">No recorded usage in this period.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</section>
+	<section class="card border border-base-300 p-4">
+		<h3 class="font-semibold mb-3">Usage by model</h3>
+		<div class="overflow-x-auto">
+			<table class="table table-sm">
+				<thead><tr><th>Model</th><th>Provider</th><th>Tokens</th><th>Calls</th><th>Known cost</th></tr></thead>
+				<tbody>
+					for _, model := range usage.ModelBreakdown {
+						<tr><td>{ model.Model }</td><td>{ model.Provider }</td><td>{ strconv.Itoa(model.TotalTokens) }</td><td>{ strconv.Itoa(model.CallCount) }</td><td>{ allUsageCost(model.CostUSD) }</td></tr>
+					}
+					if len(usage.ModelBreakdown) == 0 {
+						<tr><td colspan="5">No recorded model usage.</td></tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	</section>
+}
+
+templ AllProjectsChoose(projects []models.Project, path string) {
+	@layout.Base("Choose a project", projects, models.AllProjectsID) {
+		@AllProjectsChooseContent(projects, path)
+	}
+}
+
+templ AllProjectsChooseContent(projects []models.Project, path string) {
+	<div id="all-projects-choose" class="h-full overflow-y-auto">
+		@layout.PageTitle("Choose a project")
+		@allProjectsHeading("tasks")
+		<h3 class="text-xl font-semibold mb-2">Choose a project</h3>
+		<p class="text-sm opacity-60 mb-6">Select the project to use for this page or new item.</p>
+		<div class="grid gap-3" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));">
+			for _, project := range projects {
+				{{ destination := path
+if destination == "/automations/new" {
+	destination = "/automations"
+}
+destination += "?project_id=" + url.QueryEscape(project.ID) }}
+				<a class="block border border-base-300 rounded-lg p-4 hover:border-primary" href={ templ.URL(destination) } hx-get={ destination } hx-target="#main-content" hx-push-url="true">{ project.Name }</a>
+			}
+		</div>
+		if len(projects) == 0 {
+			<p>No projects yet. Use the project selector to create one.</p>
+		}
+	</div>
+}

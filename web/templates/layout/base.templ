@@ -78,6 +78,7 @@ templ PageTitle(title string) {
 }
 
 templ Base(title string, projects []models.Project, currentProjectID string) {
+	{{ projects = withAllProjectsOption(projects) }}
 	<!DOCTYPE html>
 	<html
 		lang="en"

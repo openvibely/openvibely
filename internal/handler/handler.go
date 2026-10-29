@@ -673,6 +673,9 @@ func (h *Handler) mutationProjectID(c echo.Context) string {
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	ctx := c.Request().Context()
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == models.AllProjectsID {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this operation.")
+	}
 	if projectID != "" && projectID != "default" {
 		p, err := h.projectSvc.GetByID(ctx, projectID)
 		if err != nil {
@@ -738,6 +741,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 			return next(c)
 		}
 	})
+	e.Use(h.allProjectsScope)
 	e.GET("/files", h.ListFilesPanel)
 	e.GET("/files/:id", h.GeneratedFileContent)
 	e.POST("/files/:id", h.saveDesktopFile(h.GeneratedFileContent))
