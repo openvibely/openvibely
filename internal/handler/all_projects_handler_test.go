@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -279,7 +280,7 @@ func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
 	validator := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(tc.stores.Automations, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(tc.stores.Automations), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(tc.stores.Automations, tc.scheduleRepo))
 	seed, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
 	require.NoError(t, err)
 	seed.Name = "Source automation"
@@ -313,4 +314,28 @@ func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
 	definitions, err := tc.stores.Automations.ListPortfolioCards(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Len(t, definitions, 1, "opening drafts must not save them")
+	returnList := "/automations?project_id=__all_projects__&search=Source&filter_project=" + project.ID
+	deleted := tc.HTMX().Post("/automations/" + saved.Definition.Automation.ID + "/delete?project_id=__all_projects__&return_list=" + url.QueryEscape(returnList)).Execute()
+	require.Equal(t, http.StatusNoContent, deleted.Code, deleted.Body.String())
+	require.Equal(t, returnList, deleted.Header().Get("HX-Redirect"))
+
+}
+
+func TestAllProjectsDeleteTaskReturnList(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	project := createProject(t, h, "Delete destination")
+	for _, returnList := range []string{"/tasks?project_id=__all_projects__&search=Review&filter_project=" + project.ID, "https://example.com/tasks?project_id=__all_projects__", "//example.com/tasks?project_id=__all_projects__", "/automations?project_id=__all_projects__", "/tasks?project_id=default"} {
+		task := models.Task{ProjectID: project.ID, Title: "Review", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+		req := httptest.NewRequest(http.MethodDelete, "/tasks/"+task.ID+"?project_id=__all_projects__&redirect=list&return_list="+url.QueryEscape(returnList), nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		expected := "/tasks?project_id=__all_projects__"
+		if strings.HasPrefix(returnList, expected+"&") {
+			expected = returnList
+		}
+		require.Equal(t, expected, rec.Header().Get("HX-Redirect"))
+	}
 }

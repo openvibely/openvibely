@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -238,4 +239,16 @@ func (h *Handler) AllProjectsChooseProject(c echo.Context) error {
 		return render(c, http.StatusOK, pages.AllProjectsChooseContent(projects, path))
 	}
 	return render(c, http.StatusOK, pages.AllProjectsChoose(projects, path))
+}
+
+// workspaceListReturnURL only accepts a relative list URL for this workspace.
+func workspaceListReturnURL(c echo.Context, path, fallback string) string {
+	if layout.WorkspaceProjectID(c.Request().Context(), "") != models.AllProjectsID {
+		return fallback
+	}
+	target, err := url.Parse(c.QueryParam("return_list"))
+	if err != nil || target.IsAbs() || target.Host != "" || target.Path != path || target.Query().Get("project_id") != models.AllProjectsID {
+		return fallback
+	}
+	return target.String()
 }

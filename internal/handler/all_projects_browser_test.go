@@ -147,6 +147,23 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.getElementById('task-detail-content').dataset.taskId);
  assert(document.getElementById('project-selector').value==='__all_projects__','creating task switched tabs');
  assert(document.getElementById('task-detail-content').dataset.projectId===owner,'created task lost destination');
+ const createdID=document.getElementById('task-detail-content').dataset.taskId;
+ const returnList='/tasks?project_id=__all_projects__&search=Created&filter_project='+owner;
+ await window.openVibelyNavigate(returnList);
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
+ await window.openVibelyNavigate('/tasks/'+createdID+'?project_id=__all_projects__');
+ await wait(()=>document.getElementById('task-detail-content'));
+ let deleteReturn;
+ function captureDelete(e){if(e.detail.xhr.getResponseHeader('HX-Redirect')){deleteReturn=e.detail.xhr.getResponseHeader('HX-Redirect');e.preventDefault();}}
+ document.body.addEventListener('htmx:beforeOnLoad',captureDelete);
+ document.getElementById('delete-task-confirm-button').click();
+ await wait(()=>deleteReturn);
+ document.body.removeEventListener('htmx:beforeOnLoad',captureDelete);
+ assert(deleteReturn===returnList,'delete lost list filters: '+deleteReturn);
+ await window.openVibelyNavigate(deleteReturn);
+ await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
+ assert(document.getElementById('project-selector').value==='__all_projects__','delete switched tabs');
+
 
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href+' select='+document.getElementById('project-selector').value+' content='+document.getElementById('main-content').innerText.slice(0,1000)})}

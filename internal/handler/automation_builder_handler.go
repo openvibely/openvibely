@@ -812,6 +812,7 @@ func (h *Handler) DeleteAutomation(c echo.Context) error {
 	}
 	listPage := parseCardPageRequest(c)
 	listURL := pages.CardListURL("automations", automationCardListState(layout.WorkspaceProjectID(c.Request().Context(), projectID), automationCardListFilter(c, listPage)))
+	listURL = workspaceListReturnURL(c, "/automations", listURL)
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Redirect", listURL)
 		return c.NoContent(http.StatusNoContent)

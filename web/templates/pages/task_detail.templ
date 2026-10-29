@@ -2246,10 +2246,10 @@ templ SwarmContextPanel(task *models.Task) {
 						for _, child := range task.SwarmChildren {
 							<div class="flex flex-wrap items-center gap-2 text-sm">
 								<span class={ "badge badge-sm", components.StatusBadgeClass(child.Status) }>{ components.StatusLabelForTask(child.Status, child.Category) }</span>
-								<a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ child.Title }</a>
+								<a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?project_id=%s", child.ID, layout.WorkspaceProjectID(ctx, task.ProjectID))) } hx-get={ fmt.Sprintf("/tasks/%s?project_id=%s", child.ID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ child.Title }</a>
 									<span class="opacity-60">{ components.SwarmRoleDisplayName(child.SwarmRole) }</span>
 								if child.WorktreeBranch != "" {
-									<a class="link" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes", child.ID)) } hx-get={ fmt.Sprintf("/tasks/%s?tab=changes", child.ID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">diff</a>
+									<a class="link" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes&project_id=%s", child.ID, layout.WorkspaceProjectID(ctx, task.ProjectID))) } hx-get={ fmt.Sprintf("/tasks/%s?tab=changes&project_id=%s", child.ID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">diff</a>
 								}
 							</div>
 						}
@@ -2263,7 +2263,7 @@ templ SwarmContextPanel(task *models.Task) {
 				<h3 class="font-semibold mb-2">Swarm Context</h3>
 				<div class="space-y-1 text-sm">
 					if task.ParentTaskID != nil {
-						<div>Part of swarm: <a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s", *task.ParentTaskID)) } hx-get={ fmt.Sprintf("/tasks/%s", *task.ParentTaskID) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ *task.ParentTaskID }</a></div>
+						<div>Part of swarm: <a class="link link-primary" href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID))) } hx-get={ fmt.Sprintf("/tasks/%s?project_id=%s", *task.ParentTaskID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">{ *task.ParentTaskID }</a></div>
 					}
 					<div>Role: { components.SwarmRoleDisplayName(task.SwarmRole) }</div>
 					if task.WorktreeBranch != "" {

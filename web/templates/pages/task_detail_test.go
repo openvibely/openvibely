@@ -9,6 +9,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestTaskDividerPreservesPointerFocusAcrossWindowBlur(t *testing.T) {
@@ -1151,5 +1152,29 @@ func TestTaskGoalPanelOmitsPreviewButPreservesEditorValue(t *testing.T) {
 	}
 	if !strings.Contains(output, `data-value="`+objective+`"`) {
 		t.Fatal("editor must retain full goal")
+	}
+}
+
+func TestSwarmLinksPreserveWorkspaceInHref(t *testing.T) {
+	parentID := "parent"
+	child := models.Task{ID: "child", ProjectID: "owner", Title: "Child", SwarmRole: models.SwarmRoleWorker, ParentTaskID: &parentID, WorktreeBranch: "branch"}
+	parent := models.Task{ID: parentID, ProjectID: "owner", SwarmRole: models.SwarmRoleParent, SwarmChildren: []models.Task{child}}
+	for _, scope := range []string{"owner", models.AllProjectsID} {
+		ctx := layout.WithWorkspaceProject(context.Background(), scope)
+		for _, task := range []*models.Task{&parent, &child} {
+			var out bytes.Buffer
+			if err := SwarmContextPanel(task).Render(ctx, &out); err != nil {
+				t.Fatal(err)
+			}
+			targets := []string{"/tasks/parent?project_id=" + scope}
+			if task.ID == parentID {
+				targets = []string{"/tasks/child?project_id=" + scope, "/tasks/child?tab=changes&amp;project_id=" + scope}
+			}
+			for _, target := range targets {
+				if !strings.Contains(out.String(), `href="`+target+`"`) {
+					t.Fatalf("missing standalone link %s: %s", target, out.String())
+				}
+			}
+		}
 	}
 }

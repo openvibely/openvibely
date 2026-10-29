@@ -203,18 +203,23 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     document.addEventListener('htmx:historyRestore', rememberAllProjectsList);
                     window.addEventListener('popstate', rememberAllProjectsList);
                     rememberAllProjectsList();
+                    function savedAllProjectsList(path) {
+                        let saved = allProjectsLists.get(path);
+                        try { saved = saved || sessionStorage.getItem('openvibely.all-projects-list.' + path); } catch (_) {}
+                        if (!saved) return '';
+                        const target = new URL(saved, location.href);
+                        if (target.origin !== location.origin || target.pathname !== path || target.searchParams.get('project_id') !== '__all_projects__') return '';
+                        return target.pathname + target.search + target.hash;
+                    }
                     document.addEventListener('click', function(event) {
                         const link = event.target.closest('#task-back-btn, #task-automations-back-btn, [data-automation-breadcrumb] a');
                         if (!link) return;
                         const url = new URL(link.href, location.href);
                         if (url.origin !== location.origin || url.searchParams.get('project_id') !== '__all_projects__' || !['/tasks', '/automations'].includes(url.pathname)) return;
-                        let saved = allProjectsLists.get(url.pathname);
-                        try { saved = saved || sessionStorage.getItem('openvibely.all-projects-list.' + url.pathname); } catch (_) {}
+                        const saved = savedAllProjectsList(url.pathname);
                         if (!saved) return;
-                        const target = new URL(saved, location.href);
-                        if (target.origin !== location.origin || target.pathname !== url.pathname || target.searchParams.get('project_id') !== '__all_projects__') return;
-                        link.href = target.pathname + target.search + target.hash;
-                        link.setAttribute('hx-get', link.getAttribute('href'));
+                        link.href = saved;
+                        link.setAttribute('hx-get', saved);
                         htmx.process(link);
                     }, true);
 					function rememberProjectLocation() {
@@ -427,6 +432,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         if (sel.value === '__all_projects__' && detail.verb !== 'get') {
                             var task = document.getElementById('task-detail-content');
                             var action = new URL(detail.path, location.href);
+                            if (action.origin === location.origin) {
+                                const listPath = detail.verb === 'delete' && /^\/tasks\/[^/]+$/.test(action.pathname) ? '/tasks' : detail.verb === 'post' && /^\/automations\/[^/]+\/delete$/.test(action.pathname) ? '/automations' : '';
+                                const saved = listPath && savedAllProjectsList(listPath);
+                                if (saved) {
+                                    action.searchParams.set('return_list', saved);
+                                    detail.path = action.pathname + action.search;
+                                }
+                            }
                             var prefix = task && '/tasks/' + encodeURIComponent(task.dataset.taskId);
                             if (prefix && action.origin === location.origin && (action.pathname === prefix || action.pathname.startsWith(prefix + '/')) && !action.searchParams.has('project_id')) {
                                 action.searchParams.set('project_id', sel.value);
