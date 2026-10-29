@@ -285,3 +285,37 @@ func TestOrganizationLoginCannotBeBypassedThroughSignup(t *testing.T) {
 	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"wrong"}}, nil)
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 }
+
+func TestOrganizationHostedSameSecondSessionsAreIndependent(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	h.appBaseURL = "http://example.com"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "owner-subject", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	// Identical identity and timestamps reproduce the original collision.
+	first, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	second, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NotEqual(t, first, second)
+	for _, token := range []string{first, second} {
+		verified, err := auth.VerifyHostedSession(token, h.hostedSSOKey, h.hostedSSOInstanceID, now)
+		require.NoError(t, err)
+		require.NotEmpty(t, verified.SessionID)
+		require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+		require.Equal(t, http.StatusOK, orgRequest(e, http.MethodGet, "/auth/me", nil, &http.Cookie{Name: auth.DefaultCookieName, Value: token}).Code)
+	}
+	firstCookie := &http.Cookie{Name: auth.DefaultCookieName, Value: first}
+	secondCookie := &http.Cookie{Name: auth.DefaultCookieName, Value: second}
+	require.Equal(t, http.StatusFound, orgRequest(e, http.MethodPost, "/logout", nil, firstCookie).Code)
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, firstCookie).Code)
+	require.Equal(t, http.StatusOK, orgRequest(e, http.MethodGet, "/auth/me", nil, secondCookie).Code)
+	// Another login in that same second must not resurrect the logged-out token.
+	third, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), third, models.BootstrapUserID, claims.ExpiresAt))
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, firstCookie).Code)
+}

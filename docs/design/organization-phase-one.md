@@ -8,7 +8,7 @@ Migration 217 creates a default organization and owner, associates existing proj
 
 With local authentication enabled, `AUTH_USERNAME` and `AUTH_PASSWORD` seed the owner's account once. Passwords are stored as bcrypt hashes. After initialization, changing those environment values does not change the stored account. Password reset/change UI is not included in this phase.
 
-Existing browser sessions must sign in again after the upgrade. New local sessions are random tokens; only their hashes are stored. Hosted sessions retain signature validation and also require a stored, revocable session.
+Existing browser sessions must sign in again after the upgrade. New local sessions are random tokens; only their hashes are stored. Hosted sessions retain signature validation and also require a stored, revocable session. Each new hosted login includes a random session ID, so simultaneous logins remain independent and logging out of one does not revoke another. Existing signed sessions without that ID remain readable and still require their stored session record.
 
 With authentication off, every request acts as the default local owner. Invitations and membership changes require local authentication. Startup refuses auth-off mode if another member exists or the default user is no longer the sole owner.
 
