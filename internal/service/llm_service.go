@@ -1497,7 +1497,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			preparedSteering = append(preparedSteering, inputs...)
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			return formatSteeringInstruction(combinedSteeringContent(inputs)), nil
+			return FormatQueuedSteeringText(inputs), nil
 		})
 		callCtx = llmcontracts.WithLocalSteeringCallback(callCtx, func(callbackCtx context.Context) (llmcontracts.LocalSteeringInput, error) {
 			inputs, steeringErr := s.threadInputRepo.PreparePendingSteering(callbackCtx, exec.ID, exec.ID)
@@ -2019,20 +2019,6 @@ func taskFailedSteeringIDs(err error) []string {
 		return nil
 	}
 	return target.FailedSteeringIDs()
-}
-
-func combinedSteeringContent(inputs []models.ThreadInput) string {
-	parts := make([]string, 0, len(inputs))
-	for _, input := range inputs {
-		if content := strings.TrimSpace(input.Content); content != "" {
-			parts = append(parts, content)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func formatSteeringInstruction(steeringMessage string) string {
-	return strings.TrimSpace(steeringMessage)
 }
 
 // hydrateTaskSteeringAttachments reads pending steering uploads. Image bytes
