@@ -454,7 +454,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								if (eventType === 'alert_created' && projectSelector) {
 									const currentProjectID = projectSelector.value;
 									if (data.project_id === currentProjectID) {
-										console.log('[SSE-Alerts] Alert created, refreshing badge');
+										if (data.alert_source === 'account_usage' && typeof window.showToast === 'function') {
+											window.showToast(data.alert_title, 'info', '', {toastKey:'account-usage:'+data.alert_id, clickURL: data.alert_url && data.alert_url.startsWith('/analytics?') ? data.alert_url : '/alerts'});
+										}
 										htmx.trigger('body', 'alertUpdate');
 									}
 								}

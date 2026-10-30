@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"io"
 	"math"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 )
 
 type UsageAnalyticsService struct {
+	accountReads            singleflight.Group
 	usageRepo               persistence.UsageStore
 	llmConfigRepo           persistence.LLMConfigStore
 	oauthRecovery           *llmoauth.Manager
@@ -145,6 +147,16 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 }
 
 func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
+	if filter.AccountGroupKey == "" {
+		return s.buildAnalyticsAccountLimits(ctx, filter)
+	}
+	value, err := s.sharedAccountRead(ctx, "limits:"+filter.AccountGroupKey, func(work context.Context) (any, error) { return s.buildAnalyticsAccountLimits(work, filter) })
+	if err != nil {
+		return nil, err
+	}
+	return value.(*models.AnalyticsUsageAccountLimitsViewModel), nil
+}
+func (s *UsageAnalyticsService) buildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
 	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
 	if err != nil {
 		return nil, err
