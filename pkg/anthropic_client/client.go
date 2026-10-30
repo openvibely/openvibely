@@ -50,7 +50,7 @@ const (
 	OAuthBetaHeader     = "oauth-2025-04-20"
 	// ClaudeCodeVersion identifies the compatible Claude Code request shape used
 	// for Anthropic subscription OAuth billing attribution.
-	ClaudeCodeVersion = "2.1.280"
+	ClaudeCodeVersion = "2.1.314"
 
 	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	oauthScope    = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
