@@ -1722,8 +1722,9 @@ templ analyticsContent(currentProject *models.Project) {
 											return;
 										}
 										const accountHTML = accounts.map((account, index) => {
-											let accountLimits = account.limits || [];
-											if (accountLimits.length === 0) {
+											const failed = Boolean(account.error);
+											let accountLimits = failed ? [] : (account.limits || []);
+											if (!failed && accountLimits.length === 0) {
 												if (account.primary_limit) accountLimits.push(account.primary_limit);
 												if (account.secondary_limit) accountLimits.push(account.secondary_limit);
 												accountLimits = accountLimits.concat(account.extra_limits || []);
@@ -1738,7 +1739,7 @@ templ analyticsContent(currentProject *models.Project) {
 											const error = account.error ? `\x3cdiv class="alert alert-warning py-2 text-xs mt-2">${escapeHTML(account.error)}\x3c/div>` : '';
 											const providerName = (account.provider || '').toLowerCase();
 											const providerTitle = providerName === 'openai' ? 'OpenAI' : (providerName === 'anthropic' ? 'Anthropic' : 'OAuth account');
-											const identity = account.error ? '' : (account.account_identity || '');
+											const identity = failed ? '' : (account.account_identity || '');
 											const identityHtml = identity ? '\x3cdiv class="text-xs opacity-70">Account: ' + escapeHTML(identity) + '\x3c/div>' : '';
 											const subscription = account.plan_type || '';
 
@@ -1750,8 +1751,9 @@ templ analyticsContent(currentProject *models.Project) {
 											const subscriptionHtml = subscription ? '\x3cdiv class="text-sm opacity-90">' + escapeHTML(subscription) + '\x3c/div>' : '';
 											const metaHtml = meta ? '\x3cdiv class="text-xs opacity-80">' + escapeHTML(meta) + '\x3c/div>' : '';
 											const detailHtml = detail ? '\x3cdiv class="text-xs opacity-60">' + escapeHTML(detail) + '\x3c/div>' : '';
+											const snapshotHtml = failed ? '' : subscriptionHtml + metaHtml + detailHtml + extraUsage + (limits || '\x3cdiv class="text-xs opacity-50 mt-2">No live limit snapshot yet\x3c/div>');
 											const span = accounts.length % 2 === 1 && index === accounts.length - 1 ? ' lg:col-span-2' : '';
-											return '\x3cdiv class="card bg-base-100 shadow-sm border border-base-300 h-full' + span + '">\x3cdiv class="card-body">\x3cdiv class="font-semibold">' + escapeHTML(providerTitle) + '\x3c/div>' + identityHtml + subscriptionHtml + metaHtml + detailHtml + extraUsage + (limits || '\x3cdiv class="text-xs opacity-50 mt-2">No live limit snapshot yet\x3c/div>') + error + '\x3c/div>\x3c/div>';
+											return '\x3cdiv class="card bg-base-100 shadow-sm border border-base-300 h-full' + span + '">\x3cdiv class="card-body">\x3cdiv class="font-semibold">' + escapeHTML(providerTitle) + '\x3c/div>' + identityHtml + snapshotHtml + error + '\x3c/div>\x3c/div>';
 										}).join('');
 										accountContainers.forEach(function(container){container.removeAttribute('aria-busy');container.innerHTML=accountHTML;});
 									}
