@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations"
 	"github.com/pressly/goose/v3"
@@ -146,7 +147,7 @@ func TestTranscriptUpgradeFromMain218(t *testing.T) {
 	require.NoError(t, initializeSQLite(db))
 }
 
-func TestConsolidatedOffsetIndexAdoptsUnpublished220(t *testing.T) {
+func TestConsolidatedOffsetIndexPreservesMigrationHistory(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "offset-index.db"))
 	require.NoError(t, initializeSQLite(db))
 	_, err := db.Exec(`INSERT INTO goose_db_version(version_id,is_applied) VALUES(220,1)`)
@@ -155,7 +156,7 @@ func TestConsolidatedOffsetIndexAdoptsUnpublished220(t *testing.T) {
 		require.NoError(t, initializeSQLite(db))
 		version, err := goose.GetDBVersion(db)
 		require.NoError(t, err)
-		require.EqualValues(t, 219, version)
+		require.EqualValues(t, 220, version)
 		var count int
 		require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='index' AND name='execution_stream_offsets'`).Scan(&count))
 		require.Equal(t, 1, count)
@@ -167,4 +168,22 @@ func TestConsolidatedOffsetIndexAdoptsUnpublished220(t *testing.T) {
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='execution_stream_offsets'`).Scan(&count))
 	require.Equal(t, 1, count)
+}
+
+// A later migration must remain applied when startup adopts an older transcript
+// schema. The offset index is also present on fresh 219 databases, so it cannot
+// identify the abandoned development migration 220.
+func TestTranscriptAdoptionPreservesFutureMigration(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "future.db"))
+	require.NoError(t, initializeSQLite(db))
+	goose.SetBaseFS(fstest.MapFS{"220_future.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nCREATE TABLE future_feature(id INTEGER PRIMARY KEY);\n-- +goose Down\nDROP TABLE future_feature;\n")}})
+	defer goose.SetBaseFS(migrations.FS)
+	require.NoError(t, goose.Up(db, ".", goose.WithAllowMissing()))
+	for range 2 {
+		require.NoError(t, migrations.NormalizeTranscriptDevelopmentVersions(context.Background(), db))
+		version, err := goose.GetDBVersion(db)
+		require.NoError(t, err)
+		require.EqualValues(t, 220, version)
+		require.NoError(t, goose.Up(db, ".", goose.WithAllowMissing()))
+	}
 }
