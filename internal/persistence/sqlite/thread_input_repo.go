@@ -1064,13 +1064,9 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 				(currentAgentID.Valid && currentAgentID.String != *expectedAgentID) {
 				return persistence.ErrTaskModelChanged
 			}
-			claimedTier, err = modelServiceTier(ctx, dbexec, exec.TaskID, *agent)
+			claimedEffort, claimedTier, err = modelOverrides(ctx, dbexec, exec.TaskID, *agent)
 			if err != nil {
-				return err
-			}
-			claimedEffort, err = modelEffort(ctx, dbexec, exec.TaskID, *agent)
-			if err != nil {
-				return fmt.Errorf("reading task effort before queued claim: %w", err)
+				return fmt.Errorf("reading task model overrides before queued claim: %w", err)
 			}
 		}
 		var activeCount int
