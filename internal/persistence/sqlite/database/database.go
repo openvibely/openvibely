@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	fileDatabasePoolSize       = 2
-	fileDatabaseReaderPoolSize = 1
+	fileDatabasePoolSize = 2
+	// Analytics can read local usage, task activity, and three account cards together.
+	// Keep one reader available so those projections don't queue navigation.
+	fileDatabaseReaderPoolSize = 6
 	sqliteBusyTimeoutMS        = 5000
 )
 

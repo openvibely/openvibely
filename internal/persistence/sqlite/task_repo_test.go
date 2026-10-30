@@ -723,8 +723,8 @@ func newTaskDetailActionMetadataFixture(tb testing.TB) *taskDetailActionMetadata
 			tb.Errorf("close production-topology database: %v", err)
 		}
 	})
-	if connections.Reader == connections.Writer || connections.Reader.Stats().MaxOpenConnections != 1 || connections.Writer.Stats().MaxOpenConnections != 1 {
-		tb.Fatalf("task detail action fixture must use production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
+	if connections.Reader == connections.Writer || connections.Reader.Stats().MaxOpenConnections != 6 || connections.Writer.Stats().MaxOpenConnections != 1 {
+		tb.Fatalf("task detail action fixture must use production 1W + 6R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
 			connections.Reader, connections.Writer, connections.Reader.Stats().MaxOpenConnections, connections.Writer.Stats().MaxOpenConnections)
 	}
 	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
