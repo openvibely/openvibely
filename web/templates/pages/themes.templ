@@ -302,7 +302,7 @@ templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabe
 	<fieldset>
 		<legend class="text-sm font-medium mb-2">{ label }</legend>
 		if pref == "output" {
-            <p class="text-xs opacity-60 mb-2">Compact keeps tool inputs and results folded until you expand them. Assistant messages stay visible.</p>
+            <p class="text-xs opacity-60 mb-2">Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.</p>
         }
 		if pref == "step" {
 			<p class="text-xs opacity-60 mb-2">Lift chat bubbles and the composer one shade above cards.</p>
@@ -322,7 +322,11 @@ templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabe
                                         } else {
                                             <span>⌄</span>
                                         }
-                                        Read file
+                                        if opt[0] == "compact" {
+                                            2 tool calls
+                                        } else {
+                                            Read file
+                                        }
                                     </span>
                                     if opt[0] == "full" {
                                         <div class="opacity-50 mt-2 font-mono">IN · app.go<br/>OUT · File contents…</div>
