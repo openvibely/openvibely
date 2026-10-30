@@ -252,6 +252,10 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimits(ctx context.Context,
 }
 
 func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
+	return s.buildAnalyticsAccountLimitBaseUsing(ctx, filter, s.refreshAccountSnapshots)
+}
+
+func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBaseUsing(ctx context.Context, filter persistence.UsageFilter, fetch func(context.Context, []models.LLMConfig, string, bool) ([]models.AccountUsageSnapshot, map[string]string)) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, nil, nil, fmt.Errorf("usage analytics service is not configured")
 	}
@@ -300,7 +304,7 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Conte
 				configsByID[configs[i].ID] = configs[i]
 			}
 			view.AccountLimits = append(view.AccountLimits, s.oauthAccountPlaceholders(configs, filter.Provider)...)
-			if fetched, errs := s.refreshAccountSnapshots(ctx, configs, filter.Provider, filter.Refresh); len(fetched) > 0 || len(errs) > 0 {
+			if fetched, errs := fetch(ctx, configs, filter.Provider, filter.Refresh); len(fetched) > 0 || len(errs) > 0 {
 				view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, fetched, configsByID)
 				for key, value := range errs {
 					refreshErrors[key] = value
