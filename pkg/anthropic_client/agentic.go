@@ -1472,6 +1472,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 			return nil, err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("User-Agent", claudeCodeUserAgent)
 		httpReq.Header.Set("Accept", "text/event-stream")
 		httpReq.Header.Set("anthropic-version", AnthropicAPIVersion)
 		httpReq.Header.Set("anthropic-beta", strings.Join(betaHeaders, ","))

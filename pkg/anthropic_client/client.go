@@ -50,7 +50,8 @@ const (
 	OAuthBetaHeader     = "oauth-2025-04-20"
 	// ClaudeCodeVersion identifies the compatible Claude Code request shape used
 	// for Anthropic subscription OAuth billing attribution.
-	ClaudeCodeVersion = "2.1.314"
+	ClaudeCodeVersion   = "2.1.314"
+	claudeCodeUserAgent = "claude-cli/" + ClaudeCodeVersion + " (external, cli)"
 
 	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	oauthScope    = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
@@ -400,6 +401,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 					return nil, err
 				}
 				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.Header.Set("User-Agent", claudeCodeUserAgent)
 				if opts.Stream {
 					httpReq.Header.Set("Accept", "text/event-stream")
 				}
