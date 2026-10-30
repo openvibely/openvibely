@@ -1208,13 +1208,6 @@ func estimateAgenticResponseItemModelVisibleBytes(item any) int {
 	return raw
 }
 
-// marshalAgenticItemWithoutImagePayload computes the JSON size of a Responses
-// message without copying a large base64 image URL into the marshaled buffer.
-func marshalAgenticItemWithoutImagePayload(item any) (int, error) {
-	serialized, _, _, _, err := marshalAgenticItemAndImageAdjustment(item)
-	return serialized, err
-}
-
 func marshalAgenticItemAndImageAdjustment(item any) (int, int, int, bool, error) {
 	marshalFallback := func() (int, int, int, bool, error) {
 		serialized, err := json.Marshal(item)

@@ -1,6 +1,6 @@
-# Transcript persistence map
+# Historical transcript persistence map
 
-Scope: current repository implementation, traced from database writers/readers through provider adapters, compaction/recovery, and display delivery. This is a source audit, not a live memory profile or a schema proposal. No production persistence changes are included.
+Status: historical source audit from before the transcript-store implementation. Table names and code paths below describe that earlier implementation, not the current schema. See [the consolidated migration](transcript-migration-consolidation.md) for the implemented migration and [latest measured results](../scripts/replay-memory-bench/RESULTS.md) for performance evidence.
 
 Follow-up: the requested implementation scope now includes display rendering and catch-up in the same project. See [shared-store feasibility](shared-transcript-store-feasibility.md) for the one-new-table design check and planned removal of both old replay and output-chunk tables.
 

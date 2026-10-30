@@ -449,3 +449,10 @@ func TestAgenticTextAndToolSizeMatchesMarshal(t *testing.T) {
 		}
 	}
 }
+
+// marshalAgenticItemWithoutImagePayload computes the JSON size of a Responses
+// message without copying a large base64 image URL into the marshaled buffer.
+func marshalAgenticItemWithoutImagePayload(item any) (int, error) {
+	serialized, _, _, _, err := marshalAgenticItemAndImageAdjustment(item)
+	return serialized, err
+}

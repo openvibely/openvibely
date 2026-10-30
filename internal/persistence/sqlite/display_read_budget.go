@@ -10,22 +10,6 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-// ReadDisplayTail reads complete finalized blocks, newest first up to a source
-// byte target. A single oversized block is returned intact, never cut through
-// Markdown or a tool marker. before is an opaque current-row sequence cursor.
-func (r *ExecutionRepo) ReadDisplayTail(ctx context.Context, id string, before int64, budget int) (models.DisplayTail, error) {
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return models.DisplayTail{}, err
-	}
-	defer tx.Rollback()
-	result, err := readDisplayTail(ctx, tx, id, before, budget)
-	if err != nil {
-		return result, err
-	}
-	return result, tx.Commit()
-}
-
 // ReadProjectDisplayTail authorizes before reading payloads and keeps ownership
 // and the output cursor in the same snapshot. It avoids loading the latest window
 // merely to fetch the preceding one.

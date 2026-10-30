@@ -44,8 +44,8 @@ type Writer struct {
 	persistedOffset       int // byte offset through buf successfully appended to the database
 	afterPeriodicSnapshot func(string)
 	done                  chan struct{}
-	isError               bool   // true if CLI result event had is_error=true
-	sessionID             string // CLI session ID for --resume on subsequent calls
+	isError               bool   // true after a canonical error event
+	sessionID             string // provider session/thread ID for subsequent calls
 }
 
 func NewWriterWithPublisher(execID, taskID string, repo persistence.ExecutionStore, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {

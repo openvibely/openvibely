@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/stretchr/testify/require"
 )
 
@@ -77,11 +78,14 @@ func TestDisplayByteWindowsRoundTripAndIsolation(t *testing.T) {
 	_, err := repo.AppendConversationChanges(ctx, owner, changes)
 	require.NoError(t, err)
 	require.NoError(t, repo.Complete(ctx, owner.ExecutionID, models.ExecCompleted, "", "", 0, 0))
+	unauthorized, err := repo.ReadProjectDisplayTail(ctx, "other-project", owner.ExecutionID, 0, 1000)
+	require.ErrorIs(t, err, persistence.ErrNotFound)
+	require.Empty(t, unauthorized.Text)
 	var cursor int64
 	var joined string
 	pages := 0
 	for {
-		page, err := repo.ReadDisplayTail(ctx, owner.ExecutionID, cursor, 1000)
+		page, err := repo.ReadProjectDisplayTail(ctx, "default", owner.ExecutionID, cursor, 1000)
 		require.NoError(t, err)
 		require.LessOrEqual(t, len(page.Text), 1000)
 		require.NotContains(t, page.Text, "PRIVATE")
@@ -97,11 +101,11 @@ func TestDisplayByteWindowsRoundTripAndIsolation(t *testing.T) {
 	}
 	require.Equal(t, want.String(), joined)
 	require.Greater(t, pages, 1)
-	full, err := repo.ReadDisplayTail(ctx, owner.ExecutionID, 0, len(want.String()))
+	full, err := repo.ReadProjectDisplayTail(ctx, "default", owner.ExecutionID, 0, len(want.String()))
 	require.NoError(t, err)
 	require.Zero(t, full.Before, "SQL batching must not impose an item-count window")
 	require.Equal(t, want.String(), full.Text)
-	_, err = repo.ReadDisplayTail(ctx, owner.ExecutionID, 999999, 1000)
+	_, err = repo.ReadProjectDisplayTail(ctx, "default", owner.ExecutionID, 999999, 1000)
 	require.Error(t, err)
 }
 
@@ -109,12 +113,12 @@ func TestDisplayByteWindowOversizedBlockAndStreaming(t *testing.T) {
 	_, repo, owner := conversationTestRepo(t)
 	output := "```text\n" + strings.Repeat("oversized ", 300000) + "\n```"
 	require.NoError(t, repo.AppendOutput(t.Context(), owner.ExecutionID, output))
-	running, err := repo.ReadDisplayTail(t.Context(), owner.ExecutionID, 0, 1024)
+	running, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, 0, 1024)
 	require.NoError(t, err)
 	require.Equal(t, output, running.Text)
 	require.Zero(t, running.Before)
 	require.NoError(t, repo.Complete(t.Context(), owner.ExecutionID, models.ExecCompleted, "", "", 0, 0))
-	done, err := repo.ReadDisplayTail(t.Context(), owner.ExecutionID, 0, 1024)
+	done, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, 0, 1024)
 	require.NoError(t, err)
 	require.Equal(t, output, done.Text)
 	require.Zero(t, done.Before)
@@ -205,11 +209,11 @@ func TestDisplayByteWindowKeepsParallelToolGroups(t *testing.T) {
 			output := prefix + group
 			require.NoError(t, repo.Complete(t.Context(), owner.ExecutionID, models.ExecCompleted, output, "", 0, 0))
 			// Even a budget smaller than a result must preserve both FIFO calls.
-			tail, err := repo.ReadDisplayTail(t.Context(), owner.ExecutionID, 0, 10)
+			tail, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, 0, 10)
 			require.NoError(t, err)
 			require.Equal(t, group, tail.Text)
 			require.NotZero(t, tail.Before)
-			earlier, err := repo.ReadDisplayTail(t.Context(), owner.ExecutionID, tail.Before, 10)
+			earlier, err := repo.ReadProjectDisplayTail(t.Context(), "default", owner.ExecutionID, tail.Before, 10)
 			require.NoError(t, err)
 			require.Equal(t, prefix, earlier.Text)
 			require.Zero(t, earlier.Before)

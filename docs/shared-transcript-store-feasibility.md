@@ -1,4 +1,6 @@
-# Shared transcript store: table-count feasibility
+# Historical shared transcript store feasibility
+
+Status: pre-implementation design exploration. The table budget below is a historical proposal, not the final schema. See [the consolidated migration](transcript-migration-consolidation.md) for the implemented migration and [latest measured results](../scripts/replay-memory-bench/RESULTS.md) for performance evidence.
 
 This checks the combined scope requested after the [persistence audit](transcript-persistence-map.md): provider persistence, compaction/recovery, display rendering, streaming and reconnect are to move together. Leaving output chunks and the old display implementation as a permanent parallel path is not the target.
 
