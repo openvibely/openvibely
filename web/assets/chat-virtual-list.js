@@ -5,7 +5,7 @@
     const lists = new Map();
     let nextID = 0;
     let suspended = false;
-    const rowSelector = '.chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
+    const rowSelector = '.stream-activity, .chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
     const messagesSelector = '#chat-messages, #task-thread-messages';
     const element = row => row.node?.isConnected ? row.node : row.placeholder;
     const hasVisibleArea = messages => messages.isConnected && messages.clientWidth > 0 &&
@@ -425,7 +425,30 @@
         }
         return true;
     };
+    window.regroupChatActivity = function () {
+        document.querySelectorAll('[data-chat-virtual-owner]').forEach(owner => {
+            const data = owner._chatVirtualData;
+            const work = model => model.kind === 'using' || model.kind === 'thinking';
+            if (owner._chatVirtualRender && data?.sourceModels?.some((model, index, all) => index > 0 && work(model) && work(all[index - 1]))) window.installChatVirtualRows(owner, data, owner._chatVirtualRender);
+        });
+    };
     window.installChatVirtualRows = function (owner, data, render) {
+        owner._chatVirtualRender = render;
+        const compact = document.documentElement.getAttribute('data-output-detail') === 'compact';
+        data.sourceModels ||= data.models;
+        if (data.activityMode !== compact) {
+            const grouped = [];
+            data.sourceModels.forEach(model => {
+                const previous = grouped[grouped.length - 1];
+                if (compact && (model.kind === 'using' || model.kind === 'thinking') && previous && (previous.kind === 'using' || previous.kind === 'thinking')) {
+                    previous.segments.push(...model.segments);
+                    delete previous.height;
+                } else grouped.push(compact ? {...model, segments: model.segments.slice()} : model);
+            });
+            data.models = grouped;
+            data.activityMode = compact;
+        }
+
         const messages = owner.closest(messagesSelector);
         const list = ensureList(messages);
         const width = messages.clientWidth;
