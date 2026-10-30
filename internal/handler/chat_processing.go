@@ -4070,44 +4070,6 @@ func (h *Handler) executeListProjects(ctx context.Context, projectID string) str
 	return sb.String()
 }
 
-// executeListAlerts returns alerts for the current project.
-func (h *Handler) executeListAlerts(ctx context.Context, projectID string) string {
-	if h.alertSvc == nil {
-		return "Alert Results:\n- Alert service not available"
-	}
-
-	alerts, err := h.alertSvc.ListSummariesByProject(ctx, projectID, 50)
-	if err != nil {
-		return "Alert Results:\n- Error retrieving alerts: " + err.Error()
-	}
-
-	var sb strings.Builder
-	sb.WriteString("\n\n---\nAlert Results:\n")
-	if len(alerts) == 0 {
-		sb.WriteString("No alerts found. You're all clear!\n")
-	} else {
-		unreadCount, _ := h.alertSvc.CountUnread(ctx, projectID)
-		sb.WriteString(fmt.Sprintf("Found %d alerts (%d unread):\n", len(alerts), unreadCount))
-		for _, a := range alerts {
-			readStr := "unread"
-			if a.IsRead {
-				readStr = "read"
-			}
-			taskStr := ""
-			if a.TaskID != nil {
-				taskStr = fmt.Sprintf(" | task: %s", *a.TaskID)
-			}
-			sb.WriteString(fmt.Sprintf("- **%s** (id: `%s`, type: %s, severity: %s, %s%s) — %s\n",
-				a.Title, a.ID, a.Type, a.Severity, readStr, taskStr, a.CreatedAt.Format("Jan 2, 2006 3:04 PM")))
-			if a.Message != "" {
-				sb.WriteString(fmt.Sprintf("  Message: %s\n", a.Message))
-			}
-		}
-	}
-
-	return sb.String()
-}
-
 // executeCreateAlertRequests creates alerts from typed runtime-tool requests.
 func (h *Handler) executeCreateAlertRequests(ctx context.Context, projectID string, requests []service.CreateAlertRequest) string {
 	if len(requests) == 0 {

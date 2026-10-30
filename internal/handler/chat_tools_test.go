@@ -32,7 +32,7 @@ func TestExecuteChatTaskCreations(t *testing.T) {
 		{Title: "Task Two", Prompt: "Do task two", Category: "active", Priority: 1},
 	}
 
-	summary := executeChatTaskCreations(context.Background(), requests, project.ID, taskSvc)
+	_, summary := service.ExecuteTaskCreationsWithReturn(context.Background(), requests, project.ID, taskSvc)
 
 	if summary == "" {
 		t.Fatal("expected non-empty summary")
@@ -135,7 +135,7 @@ func TestExecuteChatTaskCreations_DuplicateTitle(t *testing.T) {
 		{Title: "Existing Task", Prompt: "Duplicate", Category: "backlog", Priority: 2},
 	}
 
-	summary := executeChatTaskCreations(context.Background(), requests, project.ID, taskSvc)
+	_, summary := service.ExecuteTaskCreationsWithReturn(context.Background(), requests, project.ID, taskSvc)
 
 	if !contains(summary, "Failed to create 1 task(s)") {
 		t.Errorf("expected failure summary, got %q", summary)
@@ -160,7 +160,7 @@ func TestExecuteChatTaskCreations_InvalidCategory(t *testing.T) {
 		{Title: "Task Invalid Category", Prompt: "Test", Category: "invalid", Priority: 2},
 	}
 
-	summary := executeChatTaskCreations(context.Background(), requests, project.ID, taskSvc)
+	_, summary := service.ExecuteTaskCreationsWithReturn(context.Background(), requests, project.ID, taskSvc)
 	if !contains(summary, "Created 1 task(s)") {
 		t.Errorf("expected success with defaulted category, got %q", summary)
 	}
@@ -173,7 +173,7 @@ func TestExecuteChatTaskCreations_InvalidCategory(t *testing.T) {
 }
 
 func TestExecuteChatTaskCreations_Empty(t *testing.T) {
-	summary := executeChatTaskCreations(context.Background(), nil, "proj1", nil)
+	_, summary := service.ExecuteTaskCreationsWithReturn(context.Background(), nil, "proj1", nil)
 	if summary != "" {
 		t.Errorf("expected empty summary for nil requests, got %q", summary)
 	}
@@ -185,7 +185,7 @@ func TestBuildTaskContextString(t *testing.T) {
 		{ID: "def456", Title: "Fix bugs", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 3, Prompt: ""},
 	}
 
-	result := buildTaskContextString(tasks)
+	result := service.BuildTaskContextString(tasks)
 	if !contains(result, "Auth system") {
 		t.Errorf("expected result to contain 'Auth system', got %q", result)
 	}
@@ -211,7 +211,7 @@ func TestBuildTaskContextString_FullPromptIncluded(t *testing.T) {
 		{Title: "agent delete fix", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: longPrompt},
 	}
 
-	result := buildTaskContextString(tasks)
+	result := service.BuildTaskContextString(tasks)
 	// The full prompt should be included (it's under 500 chars)
 	if !contains(result, longPrompt) {
 		t.Errorf("expected full prompt to be included for prompts under 500 chars, got %q", result)
@@ -232,7 +232,7 @@ func TestBuildTaskContextString_VeryLongPromptTruncated(t *testing.T) {
 		{Title: "big task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: longPrompt},
 	}
 
-	result := buildTaskContextString(tasks)
+	result := service.BuildTaskContextString(tasks)
 	if !contains(result, "...") {
 		t.Errorf("expected truncation marker '...' for long prompts, got %q", result)
 	}
@@ -243,7 +243,7 @@ func TestBuildTaskContextString_VeryLongPromptTruncated(t *testing.T) {
 }
 
 func TestBuildTaskContextString_Empty(t *testing.T) {
-	result := buildTaskContextString(nil)
+	result := service.BuildTaskContextString(nil)
 	if !contains(result, "No tasks exist") {
 		t.Errorf("expected empty message, got %q", result)
 	}
@@ -266,7 +266,7 @@ func TestBuildTaskContextString_ExcludesChatTasks(t *testing.T) {
 		}
 	}
 
-	result := buildTaskContextString(nonChatTasks)
+	result := service.BuildTaskContextString(nonChatTasks)
 
 	// Should include real tasks
 	if !contains(result, "agent delete fix") {

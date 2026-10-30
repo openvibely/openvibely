@@ -699,8 +699,6 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	require.Contains(t, tc.handler.executeProjectInfo(ctx, project.ID), "Total tasks:** 1")
 	require.Contains(t, tc.handler.executeListProjects(ctx, project.ID), "Runtime Summary Project")
 
-	missingAlerts := (&Handler{}).executeListAlerts(ctx, project.ID)
-	require.Contains(t, missingAlerts, "Alert service not available")
 	createOut := tc.handler.executeCreateAlertRequests(ctx, project.ID, []service.CreateAlertRequest{
 		{Title: "Runtime warning", Message: "needs attention", Severity: "warning", Type: "task_needs_followup", TaskID: task.ID},
 		{Title: "Bad severity", Severity: "severe"},
@@ -712,9 +710,6 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	alerts, err := tc.alertRepo.ListByProject(ctx, project.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, alerts, 1)
-	listOut := tc.handler.executeListAlerts(ctx, project.ID)
-	require.Contains(t, listOut, "Runtime warning")
-	require.Contains(t, listOut, "unread")
 	toggleOut := tc.handler.executeToggleAlertRequests(ctx, project.ID, []service.ToggleAlertRequest{{AlertID: alerts[0].ID}, {AlertID: "missing"}})
 	require.Contains(t, toggleOut, "Marked alert")
 	require.Contains(t, toggleOut, "Error marking alert")

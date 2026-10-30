@@ -8,24 +8,10 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 )
 
-// executeChatTaskCreations creates tasks from typed action requests and returns a summary.
-// Delegates to the shared service.ExecuteTaskCreations.
-// If agents is provided, auto-selects an agent for each task based on prompt complexity.
-func executeChatTaskCreations(ctx context.Context, requests []service.TaskCreationRequest, projectID string, taskSvc *service.TaskService, agents ...[]models.LLMConfig) string {
-	_, summary := service.ExecuteTaskCreationsWithReturn(ctx, requests, projectID, taskSvc, agents...)
-	return summary
-}
-
 // executeChatTaskEdits applies typed task-edit requests and returns a summary.
 // Delegates to the shared service.ExecuteTaskEdits with attachment support.
 func executeChatTaskEdits(ctx context.Context, requests []service.TaskEditRequest, projectID string, taskSvc *service.TaskService, attachmentRepo persistence.AttachmentStore, uploadsDir string) string {
 	return service.ExecuteTaskEdits(ctx, requests, projectID, taskSvc, attachmentRepo, uploadsDir)
-}
-
-// buildTaskContextString creates a summary of existing tasks for the chat system prompt.
-// Delegates to the shared service.BuildTaskContextString.
-func buildTaskContextString(tasks []models.Task) string {
-	return service.BuildTaskContextString(tasks)
 }
 
 // executeChatTaskExecutions executes tasks matching typed action requests and returns a summary.

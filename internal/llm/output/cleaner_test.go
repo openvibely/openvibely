@@ -235,31 +235,6 @@ func TestExtractMarker(t *testing.T) {
 	}
 }
 
-func TestDetectToolFailures(t *testing.T) {
-	tests := []struct {
-		name       string
-		output     string
-		wantReason string
-	}{
-		{name: "exit code 1", output: "Running script...\n\n[Thinking]\nThe script exited with code 1.\n", wantReason: "command exited with code 1"},
-		{name: "exited with code 127", output: "Command not found. Exited with code 127", wantReason: "command exited with code 127"},
-		{name: "exit status 2", output: "Error: exit status 2\nSomething went wrong", wantReason: "command exited with code 2"},
-		{name: "Exit code: 1", output: "Exit code: 1", wantReason: "command exited with code 1"},
-		{name: "exit code 0 is not a failure", output: "Script completed. Exit code 0", wantReason: ""},
-		{name: "no exit code mentioned", output: "Everything worked great!", wantReason: ""},
-		{name: "multiple failures uses last", output: "exit code 1\nthen exit code 2", wantReason: "command exited with code 2"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reason := DetectToolFailures(tt.output)
-			if reason != tt.wantReason {
-				t.Errorf("DetectToolFailures()=%q, want %q", reason, tt.wantReason)
-			}
-		})
-	}
-}
-
 func TestCleanChatOutput_PreservesLegacyActionMarkerText(t *testing.T) {
 	tests := []string{
 		"[CREATE_TASK]\n{\"title\":\"Fix bug\"}\n[/CREATE_TASK]",

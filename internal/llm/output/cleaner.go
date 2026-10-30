@@ -115,23 +115,6 @@ var (
 	reCleanEdited           = regexp.MustCompile(`\[TASK_EDITED:[^\]]+\]`)
 )
 
-// nonZeroExitCodeRe matches common patterns for non-zero exit codes in agent output.
-// Examples: "exit code 1", "exited with code 127", "Exit status: 2"
-var nonZeroExitCodeRe = regexp.MustCompile(`(?i)exit(?:ed with)?\s+(?:code|status)[:\s]+([1-9]\d*)`)
-
-// DetectToolFailures scans agent output for signs that tool executions failed
-// (e.g., non-zero exit codes from bash commands). Returns a reason string if
-// failures are detected, empty string otherwise.
-func DetectToolFailures(output string) string {
-	matches := nonZeroExitCodeRe.FindAllStringSubmatch(output, -1)
-	if len(matches) > 0 {
-		// Use the last match (most recent failure)
-		lastMatch := matches[len(matches)-1]
-		return fmt.Sprintf("command exited with code %s", lastMatch[1])
-	}
-	return ""
-}
-
 // IsImageMediaType returns true if the media type is a supported image type
 // for multimodal API calls (Anthropic vision).
 func IsImageMediaType(mediaType string) bool {
