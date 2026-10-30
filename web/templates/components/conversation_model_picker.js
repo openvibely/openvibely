@@ -246,7 +246,7 @@
         endpoint + "?agent_id=" + encodeURIComponent(m.id),
       );
       if (!response.ok)
-        throw Error("Could not load effort. Reopen the picker to retry.");
+        throw Error("Could not load model settings. Try sending again.");
       const data = await response.json();
       const effort = data.reasoning_effort || "";
       const tier = data.service_tier || "";
@@ -751,6 +751,15 @@
       })
       .catch(() => {});
   }
+  function retrySettings(btn) {
+    const s = state(btn);
+    if (!s.error) return;
+    s.ready = s.failedSave
+      ? save(btn).catch(() => {})
+      : s.selectionPending
+        ? loadSelection(btn)
+        : load(btn);
+  }
   window.ovModelPicker = {
     init,
     save,
@@ -767,14 +776,7 @@
       renderSub();
       loadFavorites();
       search.focus({ preventScroll: true });
-      const s = state(btn);
-      if (s.error) {
-        s.ready = s.failedSave
-          ? save(btn).catch(() => {})
-          : s.selectionPending
-            ? loadSelection(btn)
-            : load(btn);
-      }
+      retrySettings(btn);
     },
     changed(btn) {
       init(btn);
@@ -950,6 +952,8 @@
       if (!taskEndpoint(btn)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
+      // Retry a previous settings failure on Send without opening the picker.
+      retrySettings(btn);
       const submitter = e.submitter;
       const form = e.target;
       const message = form.querySelector('[name="message"]');
@@ -1040,8 +1044,8 @@
           }
         })
         .catch((err) => {
-          window.ovModelPicker.open(btn);
-          status.textContent = err.message;
+          if (active === btn) status.textContent = err.message;
+          window.showToast?.("Message not sent: " + err.message, "failed");
           form._chatSubmissionFailed?.(payload);
         });
     },
