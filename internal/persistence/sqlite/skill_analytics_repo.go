@@ -426,7 +426,7 @@ func skillAnalyticsWhereAlias(filter persistence.SkillAnalyticsFilter, alias str
 		where += " AND " + alias + ".created_at < ?"
 		args = append(args, formatSQLiteTime(filter.DateTo.UTC()))
 	}
-	if filter.ProjectID != "" {
+	if filter.ProjectID != "" && filter.ProjectID != models.AllProjectsID {
 		where += " AND " + alias + ".project_id = ?"
 		args = append(args, filter.ProjectID)
 	}

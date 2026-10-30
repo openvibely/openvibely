@@ -44,6 +44,9 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		if path == "/projects/new" || path == "/projects/pick-folder" || path == "/projects" || strings.HasPrefix(path, "/ui/") {
 			return next(c)
 		}
+		if strings.HasPrefix(path, "/api/analytics/") && c.Request().Method == http.MethodGet {
+			return next(c)
+		}
 		if strings.HasPrefix(path, "/breadcrumb-selectors/") && c.Request().Method == http.MethodGet {
 			return next(c)
 		}
@@ -245,17 +248,14 @@ func (h *Handler) AllProjects(c echo.Context) error {
 		}
 		data.Automations, data.HasMore = cardPageItems(cards, page.PageSize)
 	case "analytics":
-		if h.usageAnalyticsSvc == nil {
-			return echo.NewHTTPError(http.StatusServiceUnavailable, "Analytics unavailable")
+		data.AnalyticsFilters = c.QueryParams()
+		data.AnalyticsProject = &models.Project{ID: projectID, Name: "All projects"}
+		for _, project := range projects {
+			if project.ID == projectID {
+				data.AnalyticsProject.Name = project.Name
+			}
 		}
-		filter := parseUsageFilter(c)
-		filter.ProjectID = data.FilterProject // Empty is the existing global aggregate query.
-		filter.EvidencePeriod, filter.EvidenceProvider, filter.EvidenceModel = "", "", ""
-		filter.EvidenceLimit = 0
-		data.Usage, err = h.usageAnalyticsSvc.BuildLocalAnalyticsUsage(ctx, filter)
-		if err != nil {
-			return err
-		}
+		c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(ctx, models.AllProjectsID)))
 	}
 	if isHTMX(c) && c.Request().Header.Get("HX-Target") == "all-projects-results" {
 		if data.Section == "tasks" {

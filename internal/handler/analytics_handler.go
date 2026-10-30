@@ -190,6 +190,31 @@ func skillEvidenceRequested(filter persistence.SkillAnalyticsFilter) bool {
 }
 
 func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []persistence.EnabledSkillInfo {
+	if c.QueryParam("project_id") == models.AllProjectsID {
+		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+		if err != nil {
+			return nil
+		}
+		out := []persistence.EnabledSkillInfo{}
+		seen := map[string]int{}
+		for _, project := range projects {
+			request := c.Request().Clone(c.Request().Context())
+			query := request.URL.Query()
+			query.Set("project_id", project.ID)
+			request.URL.RawQuery = query.Encode()
+			scoped := c.Echo().NewContext(request, c.Response().Writer)
+			for _, skill := range h.enabledSkillsForAnalytics(scoped) {
+				key := skill.Scope + "\x00" + skill.Handle
+				if index, exists := seen[key]; exists {
+					out[index].AlwaysUse = out[index].AlwaysUse || skill.AlwaysUse
+				} else {
+					seen[key] = len(out)
+					out = append(out, skill)
+				}
+			}
+		}
+		return out
+	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	projectRoot := h.currentProjectSkillRoot(c)
 	out := []persistence.EnabledSkillInfo{}

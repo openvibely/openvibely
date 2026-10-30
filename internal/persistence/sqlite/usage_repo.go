@@ -583,7 +583,7 @@ func (r *UsageRepo) GetEvidence(ctx context.Context, filter persistence.UsageFil
 func usageWhere(filter persistence.UsageFilter) (string, []any) {
 	clauses := []string{"1=1"}
 	args := []any{}
-	if filter.ProjectID != "" {
+	if filter.ProjectID != "" && filter.ProjectID != models.AllProjectsID {
 		clauses = append(clauses, "project_id = ?")
 		args = append(args, filter.ProjectID)
 	}

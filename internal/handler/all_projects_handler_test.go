@@ -65,9 +65,15 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 		require.Contains(t, get("/"+page+"?project_id="+models.AllProjectsID).Body.String(), `data-all-projects-view="`+page+`"`)
 	}
 
+	for _, endpoint := range []string{"dashboard", "skills", "success-failure-rates", "avg-execution-time-by-task", "avg-execution-time-by-agent", "execution-trends-by-hour", "task-run-activity", "agent-usage-by-project", "most-frequent-tasks", "failed-task-patterns"} {
+		response := get("/api/analytics/" + endpoint + "?project_id=" + models.AllProjectsID)
+		require.Contains(t, response.Header().Get("Content-Type"), "application/json", endpoint)
+	}
 	analytics := get("/analytics?project_id=" + models.AllProjectsID).Body.String()
-	require.Contains(t, analytics, `data-all-total-tokens>200</strong>`)
-	require.Contains(t, get("/analytics?project_id="+models.AllProjectsID+"&filter_project="+first.ID).Body.String(), `data-all-total-tokens>100</strong>`)
+	require.Contains(t, analytics, `id="analytics-data" data-project-id="__all_projects__"`)
+	require.Contains(t, get("/api/analytics/usage?project_id="+models.AllProjectsID+"&projection=local").Body.String(), `"total_tokens":200`)
+	require.Contains(t, get("/analytics?project_id="+models.AllProjectsID+"&filter_project="+first.ID).Body.String(), `data-project-id="`+first.ID+`" data-workspace-project-id="__all_projects__"`)
+	require.Contains(t, get("/api/analytics/usage?project_id="+first.ID+"&projection=local").Body.String(), `"total_tokens":100`)
 	firstPage := get("/automations?project_id=" + models.AllProjectsID + "&card_page=1&page_size=1").Body.String()
 	require.Contains(t, firstPage, "First workspace automation")
 	require.NotContains(t, firstPage, "Second workspace automation")

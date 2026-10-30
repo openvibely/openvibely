@@ -1245,7 +1245,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 			SUM(CASE WHEN e.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ? AND e.status IN ('completed', 'failed', 'cancelled')
+		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status IN ('completed', 'failed', 'cancelled')
 	`
 	args := []interface{}{dateFormat, projectID}
 
@@ -1293,7 +1293,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 			MAX(e.duration_ms) as max_ms
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0`
+		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1331,7 +1331,7 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		JOIN agent_configs ac ON ac.id = e.agent_config_id
-		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0`
+		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1392,7 +1392,7 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 			COUNT(*) as count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ?
+		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + `
 	`
 	args := []interface{}{projectID}
 
@@ -1446,7 +1446,7 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 	args := []interface{}{}
 
 	if projectID != "" {
-		query += ` AND t.project_id = ?`
+		query += ` AND ` + analyticsProjectPredicate("t.project_id", projectID) + ``
 		args = append(args, projectID)
 	}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
@@ -1486,7 +1486,7 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 			MAX(e.started_at) as last_executed_at
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ?`
+		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ``
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {
@@ -1596,7 +1596,7 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 			COUNT(*) OVER(PARTITION BY t.id) failure_count,
 			ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY e.started_at DESC,e.rowid DESC) rn
 		FROM executions e JOIN tasks t ON t.id=e.task_id
-		WHERE t.project_id=? AND e.status='failed'`
+		WHERE ` + analyticsProjectPredicate("t.project_id", projectID) + ` AND e.status='failed'`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 	if len(bounds) > 2 {

@@ -18,7 +18,8 @@ type AllProjectsData struct {
 	Range         string
 	Tasks         []models.Task
 	Automations   []models.AutomationCard
-	Usage         *models.AnalyticsUsageViewModel
+	AnalyticsProject *models.Project
+ AnalyticsFilters url.Values
 	Offset        int
 	PageSize      int
 	HasMore       bool
@@ -62,13 +63,6 @@ func (d AllProjectsData) URL(offset int) string {
 	}
 	return "/" + d.Section + "?" + q.Encode()
 }
-func allUsageCost(value *float64) string {
-	if value == nil {
-		return "Unavailable"
-	}
-	return fmt.Sprintf("$%.4f", *value)
-}
-
 templ AllProjects(data AllProjectsData) {
 	@layout.Base("All projects", data.Projects, models.AllProjectsID) {
 		@AllProjectsContent(data)
@@ -90,8 +84,16 @@ templ allProjectsHeading(section string) {
 templ AllProjectsContent(data AllProjectsData) {
 	<div id="all-projects-page" data-all-projects-view={ data.Section } class="h-full min-h-0 overflow-y-auto">
 		@allProjectsHeading(data.Section)
-		<form class="flex flex-wrap items-end gap-3 mb-6" method="get" action={ templ.URL("/" + data.Section) } hx-get={ "/" + data.Section } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
+		<form data-analytics-project-filter?={ data.Section == "analytics" } class="flex flex-wrap items-end gap-3 mb-6" method="get" action={ templ.URL("/" + data.Section) } hx-get={ "/" + data.Section } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">
 			<input type="hidden" name="project_id" value={ models.AllProjectsID }/>
+            for key, values := range data.AnalyticsFilters {
+                if key != "project_id" && key != "filter_project" && key != "search" {
+                    for _, value := range values {
+                        <input type="hidden" name={ key } value={ value }/>
+                    }
+                }
+            }
+
 			<label class="form-control">
 				<span class="label-text mb-1">Project</span>
 				<select name="filter_project" class="select select-bordered select-sm" aria-label="Filter by project">
@@ -101,20 +103,13 @@ templ AllProjectsContent(data AllProjectsData) {
 					}
 				</select>
 			</label>
-			if data.Section == "analytics" {
-				<label class="form-control">
-					<span class="label-text mb-1">Date range</span>
-					<select name="range" class="select select-bordered select-sm" aria-label="Date range">
-						for _, option := range []struct{Value, Label string}{{"7d", "Last 7 days"}, {"30d", "Last 30 days"}, {"90d", "Last 90 days"}, {"all", "All time"}} {
-							<option value={ option.Value } selected?={ data.Range == option.Value || (data.Range == "" && option.Value == "30d") }>{ option.Label }</option>
-						}
-					</select>
-				</label>
-			} else {
-				<label class="form-control flex-1"><span class="label-text mb-1">Search</span><input name="search" value={ data.Search } type="search" class="input input-bordered input-sm" placeholder={ "Search " + data.Section }/></label>
-			}
+                if data.Section != "analytics" {
+                    <label class="form-control flex-1"><span class="label-text mb-1">Search</span><input name="search" value={ data.Search } type="search" class="input input-bordered input-sm" placeholder={ "Search " + data.Section }/></label>
+                }
 			<button class="btn btn-sm" type="submit">Apply</button>
+			if data.Section != "analytics" {
 			<a class="btn btn-sm btn-ghost" href={ templ.URL(data.URL(data.Offset)) } hx-get={ data.URL(data.Offset) } hx-target="#main-content" aria-label="Refresh all projects">Refresh</a>
+			}
 			if data.Section == "tasks" {
 				<a class="btn btn-sm btn-primary" href={ templ.URL("/tasks/new?project_id=" + models.AllProjectsID) } hx-get={ "/tasks/new?project_id=" + models.AllProjectsID } hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">New task</a>
 			}
@@ -128,8 +123,8 @@ templ AllProjectsContent(data AllProjectsData) {
 		if data.Section == "automations" {
 			@AllProjectsAutomationResults(data)
 		}
-		if data.Section == "analytics" && data.Usage != nil {
-			@allProjectsAnalytics(data.Usage)
+		if data.Section == "analytics" {
+			@AnalyticsContent(data.AnalyticsProject)
 		}
 	</div>
 }
@@ -182,46 +177,6 @@ templ AllProjectsAutomationResults(data AllProjectsData) {
 			}
 		</nav>
 	</div>
-}
-
-templ allProjectsAnalytics(usage *models.AnalyticsUsageViewModel) {
-	<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6" data-all-projects-usage>
-		<div class="card bg-base-200 p-5"><span class="text-sm opacity-60">Total tokens</span><strong class="text-2xl mt-2" data-all-total-tokens>{ strconv.Itoa(usage.Totals.TotalTokens) }</strong></div>
-		<div class="card bg-base-200 p-5"><span class="text-sm opacity-60">Model calls</span><strong class="text-2xl mt-2">{ strconv.Itoa(usage.Totals.CallCount) }</strong></div>
-		<div class="card bg-base-200 p-5"><span class="text-sm opacity-60">Known usage cost</span><strong class="text-2xl mt-2">{ allUsageCost(usage.Totals.CostUSD) }</strong><span class="text-xs opacity-60">Excludes unpriced usage and subscription fees</span></div>
-	</div>
-	<section class="card border border-base-300 p-4 mb-6">
-		<h3 class="font-semibold mb-3">Usage over time</h3>
-		<div class="overflow-x-auto">
-			<table class="table table-sm">
-				<thead><tr><th>Period</th><th>Tokens</th><th>Calls</th><th>Known cost</th></tr></thead>
-				<tbody>
-					for _, point := range usage.DailyUsage {
-						<tr><td>{ point.Period }</td><td>{ strconv.Itoa(point.TotalTokens) }</td><td>{ strconv.Itoa(point.CallCount) }</td><td>{ allUsageCost(point.CostUSD) }</td></tr>
-					}
-					if len(usage.DailyUsage) == 0 {
-						<tr><td colspan="4">No recorded usage in this period.</td></tr>
-					}
-				</tbody>
-			</table>
-		</div>
-	</section>
-	<section class="card border border-base-300 p-4">
-		<h3 class="font-semibold mb-3">Usage by model</h3>
-		<div class="overflow-x-auto">
-			<table class="table table-sm">
-				<thead><tr><th>Model</th><th>Provider</th><th>Tokens</th><th>Calls</th><th>Known cost</th></tr></thead>
-				<tbody>
-					for _, model := range usage.ModelBreakdown {
-						<tr><td>{ model.Model }</td><td>{ model.Provider }</td><td>{ strconv.Itoa(model.TotalTokens) }</td><td>{ strconv.Itoa(model.CallCount) }</td><td>{ allUsageCost(model.CostUSD) }</td></tr>
-					}
-					if len(usage.ModelBreakdown) == 0 {
-						<tr><td colspan="5">No recorded model usage.</td></tr>
-					}
-				</tbody>
-			</table>
-		</div>
-	</section>
 }
 
 templ AllProjectsChoose(projects []models.Project, path string) {

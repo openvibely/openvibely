@@ -272,7 +272,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div data-analytics-chart-controls>@analyticsChartHeading("Task runs over time", "Task run starts across the selected date range. Includes unfinished runs; excludes chat activity.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
 				</section>
 			<!-- Chart.js and Custom Script -->
-			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
+			<div id="analytics-data" data-project-id={ currentProject.ID } data-workspace-project-id={ layout.WorkspaceProjectID(ctx, currentProject.ID) } class="hidden"></div>
 			<style>
 				[data-analytics-chart-controls] { display:flex; flex-direction:column; align-items:stretch; gap:.75rem; min-width:0; }
 				[data-analytics-chart-controls] > select, [data-analytics-chart-controls] > .form-control { align-self:flex-start; max-width:100%; }
@@ -310,6 +310,7 @@ templ analyticsContent(currentProject *models.Project) {
 					var dataEl = document.getElementById('analytics-data');
 					if (!dataEl) return;
 					var projectID = dataEl.dataset.projectId;
+                    var workspaceProjectID = dataEl.dataset.workspaceProjectId || projectID;
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
                         const themeObserver = new MutationObserver(function() {
@@ -551,7 +552,7 @@ templ analyticsContent(currentProject *models.Project) {
 						}
 						function analyticsURL(view) {
 							const params = new URLSearchParams(window.location.search);
-							params.set('project_id', projectID);
+							params.set('project_id', workspaceProjectID);
 							params.set('view', view);
 							params.set('range', usageRangeParam());
 							params.set('group_by', document.getElementById('groupBy').value);
@@ -570,7 +571,17 @@ templ analyticsContent(currentProject *models.Project) {
 									selectedView = validViews.includes(view) ? view : 'usage';
 									rememberAnalyticsView(selectedView);
 									document.querySelectorAll('[data-analytics-section]').forEach(function(section) { section.classList.toggle('hidden', section.dataset.analyticsSection !== selectedView); });
-									document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
+			                        document.body.addEventListener('htmx:configRequest', function(event) {
+                            if (!event.detail.elt?.matches('[data-analytics-project-filter]')) return;
+                            const params = new URL(analyticsURL(selectedView), location.href).searchParams;
+                            Object.keys(event.detail.parameters).forEach(function(key) {
+                                if (key !== 'filter_project' && key !== 'project_id') delete event.detail.parameters[key];
+                            });
+                            params.forEach(function(value, key) {
+                                if (key !== 'filter_project' && key !== 'project_id') event.detail.parameters[key] = value;
+                            });
+                        }, {signal: eventSignal});
+						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
 									const agentFilter = document.querySelector('[data-agent-filter]');
 									if (agentFilter) agentFilter.classList.toggle('hidden', selectedView !== 'agents');
 									const automationFilter = document.querySelector('[data-automation-filter]');
@@ -586,7 +597,7 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function skillOutcomeEvidenceURL(row, agentID) {
 								const params = clearEvidenceParams(new URLSearchParams(window.location.search));
-								params.set('project_id', projectID);
+								params.set('project_id', workspaceProjectID);
 								params.set('view', 'outcomes');
 								params.set('evidence', 'skill_outcomes');
 								params.set('evidence_skill_handle', row.skill_handle);
@@ -728,7 +739,7 @@ templ analyticsContent(currentProject *models.Project) {
 										return 'Not achieved (denominator only)';
 									};
 									document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
-										const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
+										const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(workspaceProjectID);
 										return '\x3ctr>\x3ctd>\x3ca class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '\x3c/a>\x3c/td>\x3ctd>' + escapeHTML(evidenceTechnicalResult(row)) + '\x3c/td>\x3ctd>' + escapeHTML(evidenceGoalResult(row)) + '\x3c/td>\x3ctd>' + escapeHTML(row.agent_name) + '\x3c/td>\x3ctd>' + escapeHTML(row.model) + '\x3c/td>\x3ctd>' + row.execution_count + '\x3c/td>\x3ctd>' + row.follow_up_count + '\x3c/td>\x3ctd>' + escapeHTML(row.cycle_eligible ? formatDuration(row.cycle_time_ms || 0) : 'Unavailable') + '\x3c/td>\x3ctd>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '\x3c/td>\x3c/tr>';								}).join('') : '\x3ctr>\x3ctd colspan="9" class="text-center opacity-50">No task outcomes in this period\x3c/td>\x3c/tr>';							renderOutcomeFunnel('outcomeFunnel', data.funnel || []);
 								renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
 								renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
@@ -1102,12 +1113,12 @@ templ analyticsContent(currentProject *models.Project) {
 								const selected = selectedAgent;
 								const visible = rows.filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								const table = document.getElementById('agentPerformanceTable'); if (table) table.innerHTML = visible.length ? visible.map(function(row) {
-									const name = row.agent_id ? '\x3ca class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '\x3c/a>' : escapeHTML(row.agent_name);
+									const name = row.agent_id ? '\x3ca class="link" href="/agents?project_id=' + encodeURIComponent(workspaceProjectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '\x3c/a>' : escapeHTML(row.agent_name);
 									return '\x3ctr>\x3ctd>' + name + '\x3c/td>\x3ctd>' + row.tasks_evaluated + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.technical_completion)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.goal_achievement)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.first_pass)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.follow_up)) + '\x3c/td>\x3ctd>' + escapeHTML(row.duration_sample_size ? formatDuration(row.median_duration_ms || 0) + ' · n=' + row.duration_sample_size : 'Unavailable · n=0') + '\x3c/td>\x3ctd>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '\x3c/td>\x3c/tr>';
 								}).join('') : '\x3ctr>\x3ctd colspan="8" class="text-center opacity-50">No Agent evidence in this period\x3c/td>\x3c/tr>';
 								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								const evidenceTable = document.getElementById('agentEvidenceTable'); if (evidenceTable) evidenceTable.innerHTML = evidence.length ? evidence.map(function(row) {
-									const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);
+									const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(workspaceProjectID);
 									return '\x3ctr>\x3ctd>\x3ca class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+escapeHTML(row.technical_result)+'\x3c/td>\x3ctd>'+escapeHTML(row.goal_result||'Not goal-bearing')+'\x3c/td>\x3ctd>'+escapeHTML(row.model)+'\x3c/td>\x3ctd>'+row.execution_count+'\x3c/td>\x3ctd>'+row.follow_up_count+'\x3c/td>\x3c/tr>';
 								}).join('') : '\x3ctr>\x3ctd colspan="6" class="text-center opacity-50">No recent supporting tasks in this period\x3c/td>\x3c/tr>';
 							}
@@ -1134,13 +1145,13 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 							function renderAgentDetail(detail) {
 									function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'\x3ctr>\x3ctd colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'\x3c/td>\x3c/tr>'; }
-								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+row.failure_count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_error||'Unavailable')+'\x3c/td>\x3c/tr>';});
+								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(workspaceProjectID);return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+row.failure_count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_error||'Unavailable')+'\x3c/td>\x3c/tr>';});
 									rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){const url=skillOutcomeEvidenceURL(row,selectedAgent);return '\x3ctr>\x3ctd>\x3ca class="link" data-skill-outcome-evidence href="'+escapeHTML(url)+'">\x3ccode>'+escapeHTML(row.skill_handle)+'\x3c/code>\x3c/a> \x3cspan class="badge badge-ghost badge-xs">'+escapeHTML(row.skill_scope||'unknown')+'\x3c/span>\x3c/td>\x3ctd>'+row.tasks_evaluated+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.technical_completion))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.goal_achievement))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.follow_up))+'\x3c/td>\x3c/tr>';});							}
 								function renderWorkflowPerformance(rows) {
 									const selected = selectedWorkflow;
 									const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
-									const table=document.getElementById('workflowPerformanceTable');if(table)table.innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'\x3c/a>\x3c/td>\x3ctd>'+row.invocation_count+'\x3c/td>\x3ctd>'+row.completed_count+' / '+row.invocation_count+' ('+Number(row.completion_rate||0).toFixed(1)+'%)\x3c/td>\x3ctd>'+row.failed_count+'\x3c/td>\x3ctd>'+row.cancelled_count+'\x3c/td>\x3ctd>'+row.skipped_count+'\x3c/td>\x3ctd>'+row.open_count+'\x3c/td>\x3ctd>'+escapeHTML(row.duration_sample_size ? formatDuration(row.average_duration_ms||0)+' · n='+row.duration_sample_size : 'Unavailable · n=0')+'\x3c/td>\x3ctd>'+row.waiting_count+' / '+row.blocked_count+'\x3c/td>\x3ctd>'+escapeHTML(row.health)+'\x3c/td>\x3c/tr>'; }).join('') : '\x3ctr>\x3ctd colspan="10" class="text-center">No automation activity in this period. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Open Automations\x3c/a>\x3c/td>\x3c/tr>';
-									const empty=document.getElementById('automationEmptyState');if(empty){empty.classList.toggle('hidden',rows.length>0);empty.innerHTML=rows.length?'':'No automation activity in this period. Automation analytics appear after this project runs an automation graph. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Open Automations\x3c/a>';}
+									const table=document.getElementById('workflowPerformanceTable');if(table)table.innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(workspaceProjectID); return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'\x3c/a>\x3c/td>\x3ctd>'+row.invocation_count+'\x3c/td>\x3ctd>'+row.completed_count+' / '+row.invocation_count+' ('+Number(row.completion_rate||0).toFixed(1)+'%)\x3c/td>\x3ctd>'+row.failed_count+'\x3c/td>\x3ctd>'+row.cancelled_count+'\x3c/td>\x3ctd>'+row.skipped_count+'\x3c/td>\x3ctd>'+row.open_count+'\x3c/td>\x3ctd>'+escapeHTML(row.duration_sample_size ? formatDuration(row.average_duration_ms||0)+' · n='+row.duration_sample_size : 'Unavailable · n=0')+'\x3c/td>\x3ctd>'+row.waiting_count+' / '+row.blocked_count+'\x3c/td>\x3ctd>'+escapeHTML(row.health)+'\x3c/td>\x3c/tr>'; }).join('') : '\x3ctr>\x3ctd colspan="10" class="text-center">No automation activity in this period. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(workspaceProjectID)+'">Open Automations\x3c/a>\x3c/td>\x3c/tr>';
+									const empty=document.getElementById('automationEmptyState');if(empty){empty.classList.toggle('hidden',rows.length>0);empty.innerHTML=rows.length?'':'No automation activity in this period. Automation analytics appear after this project runs an automation graph. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(workspaceProjectID)+'">Open Automations\x3c/a>';}
 									const canvas=renderChartState('automationComparison','automationComparisonChart',rows,'No automation activity in this period');if(canvas)charts.automationComparison=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.workflow_name),datasets:[{label:'Completed',data:rows.map(r=>r.completed_count),backgroundColor:'#22c55e'},{label:'Failed',data:rows.map(r=>r.failed_count),backgroundColor:'#ef4444'},{label:'Open',data:rows.map(r=>r.open_count),backgroundColor:'#3b82f6'},{label:'Waiting / blocked',data:rows.map(r=>Number(r.waiting_count||0)+Number(r.blocked_count||0)),backgroundColor:'#f59e0b'}]},options:{scales:{y:{beginAtZero:true}},plugins:{tooltip:{callbacks:{footer:function(items){if(!items.length)return '';const r=rows[items[0].dataIndex];return 'completion '+Number(r.completion_rate||0).toFixed(1)+'% · duration '+formatDuration(r.average_duration_ms||0)+' · n='+r.invocation_count;}}}}}});
 								}
 								function renderWorkflowDetail(detail) {
@@ -1279,9 +1290,9 @@ templ analyticsContent(currentProject *models.Project) {
 										const table = document.getElementById('skillEventEvidenceTable');
 										if (!table) return;
 										table.innerHTML = evidence.length ? evidence.map(function(row) {
-											const task = row.task_id ? '\x3ca class="link" href="/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID) + '">' + escapeHTML(row.task_id) + '\x3c/a>' : 'No task';
+											const task = row.task_id ? '\x3ca class="link" href="/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(workspaceProjectID) + '">' + escapeHTML(row.task_id) + '\x3c/a>' : 'No task';
 										const execution = row.execution_id ? '\x3ccode>' + escapeHTML(row.execution_id) + '\x3c/code>' : 'No run';
-											const agent = row.agent_id ? '\x3ca class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name || row.agent_id) + '\x3c/a>' : escapeHTML(row.agent_name || 'Unassigned');
+											const agent = row.agent_id ? '\x3ca class="link" href="/agents?project_id=' + encodeURIComponent(workspaceProjectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name || row.agent_id) + '\x3c/a>' : escapeHTML(row.agent_name || 'Unassigned');
 											const occurred = row.created_at ? new Date(row.created_at).toLocaleString() : 'Unavailable';
 											return '\x3ctr>\x3ctd>\x3ccode>' + escapeHTML(row.id) + '\x3c/code>\x3c/td>\x3ctd>' + escapeHTML(occurred) + '\x3c/td>\x3ctd>\x3ccode>' + escapeHTML(row.skill_handle) + '\x3c/code>\x3cbr>\x3cspan class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '\x3c/span>\x3c/td>\x3ctd>' + agent + '\x3c/td>\x3ctd>' + escapeHTML(row.event_type) + '\x3c/td>\x3ctd>' + escapeHTML((row.source || 'unknown') + ' / ' + (row.surface || 'unknown')) + '\x3c/td>\x3ctd>' + task + '\x3cbr>' + execution + '\x3c/td>\x3c/tr>';
 										}).join('') : '\x3ctr>\x3ctd colspan="7" class="text-center opacity-50">No matching skill events\x3c/td>\x3c/tr>';
@@ -1589,7 +1600,7 @@ templ analyticsContent(currentProject *models.Project) {
 										const table = document.getElementById('usageEventEvidenceTable');
 										if (!table) return;
 										table.innerHTML = evidence.length ? evidence.map(function(row) {
-											const task = row.task_id ? '\x3ca class="link" href="/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID) + '">' + escapeHTML(row.task_id) + '\x3c/a>' : 'No task';
+											const task = row.task_id ? '\x3ca class="link" href="/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(workspaceProjectID) + '">' + escapeHTML(row.task_id) + '\x3c/a>' : 'No task';
 										const execution = row.execution_id ? '\x3ccode>' + escapeHTML(row.execution_id) + '\x3c/code>' : 'No run';
 											const occurred = row.occurred_at ? new Date(row.occurred_at).toLocaleString() : 'Unavailable';
 											return '\x3ctr>\x3ctd>\x3ccode>' + escapeHTML(row.id) + '\x3c/code>\x3c/td>\x3ctd>' + escapeHTML(occurred) + '\x3c/td>\x3ctd>' + escapeHTML((row.provider || 'unknown') + ' / ' + (row.model || 'unknown')) + '\x3c/td>\x3ctd>' + escapeHTML(row.operation || 'unknown') + '\x3c/td>\x3ctd>' + escapeHTML(row.status || 'unknown') + '\x3c/td>\x3ctd>' + formatNumber(row.total_tokens) + '\x3c/td>\x3ctd>' + escapeHTML(formatCost(row.cost_usd)) + '\x3c/td>\x3ctd>' + task + '\x3cbr>' + execution + '\x3c/td>\x3c/tr>';
@@ -2105,7 +2116,7 @@ templ analyticsContent(currentProject *models.Project) {
 								\x3cdiv class="flex items-center justify-between gap-3 py-2 border-b border-base-300">
 									\x3cdiv class="flex-1 min-w-0 pr-2">
 										\x3cspan class="font-mono text-sm opacity-50">${idx + 1}.\x3c/span>
-										\x3cspan class="ml-2 break-words">\x3ca class="link" href="/tasks/${encodeURIComponent(task.TaskID)}?project_id=${encodeURIComponent(projectID)}">${escapeHTML(task.TaskTitle || 'Unknown')}\x3c/a>\x3c/span>
+										\x3cspan class="ml-2 break-words">\x3ca class="link" href="/tasks/${encodeURIComponent(task.TaskID)}?project_id=${encodeURIComponent(workspaceProjectID)}">${escapeHTML(task.TaskTitle || 'Unknown')}\x3c/a>\x3c/span>
 									\x3c/div>
 									\x3cspan class="badge badge-primary shrink-0 inline-flex items-center justify-center whitespace-nowrap h-auto min-h-6 px-3 py-1 leading-none text-center">${task.ExecutionCount || 0} runs\x3c/span>
 								\x3c/div>
@@ -2137,7 +2148,7 @@ templ analyticsContent(currentProject *models.Project) {
 							const lastFailedAt = pattern.LastFailedAt ? new Date(pattern.LastFailedAt).toLocaleString() : 'N/A';
 							return `
 								\x3ctr>
-									\x3ctd>\x3ca class="link" href="/tasks/${encodeURIComponent(pattern.TaskID)}?project_id=${encodeURIComponent(projectID)}">${escapeHTML(pattern.TaskTitle || 'Unknown')}\x3c/a>\x3c/td>
+									\x3ctd>\x3ca class="link" href="/tasks/${encodeURIComponent(pattern.TaskID)}?project_id=${encodeURIComponent(workspaceProjectID)}">${escapeHTML(pattern.TaskTitle || 'Unknown')}\x3c/a>\x3c/td>
 									\x3ctd>\x3cspan class="badge badge-error">${pattern.FailureCount || 0}\x3c/span>\x3c/td>
 									\x3ctd>\x3cspan class="text-xs" title="${escapeHTML(lastError)}">${escapeHTML(truncatedError)}\x3c/span>\x3c/td>
 									\x3ctd class="text-xs opacity-60">${escapeHTML(lastFailedAt)}\x3c/td>
@@ -2179,6 +2190,16 @@ templ analyticsContent(currentProject *models.Project) {
 								applyView(validViews.includes(requestedView) ? requestedView : (savedAnalyticsView() || 'usage'), false);
 								restoreAggregateSelectionState();
 						}
+                        document.body.addEventListener('htmx:configRequest', function(event) {
+                            if (!event.detail.elt?.matches('[data-analytics-project-filter]')) return;
+                            const params = new URL(analyticsURL(selectedView), location.href).searchParams;
+                            Object.keys(event.detail.parameters).forEach(function(key) {
+                                if (key !== 'filter_project' && key !== 'project_id') delete event.detail.parameters[key];
+                            });
+                            params.forEach(function(value, key) {
+                                if (key !== 'filter_project' && key !== 'project_id') event.detail.parameters[key] = value;
+                            });
+                        }, {signal: eventSignal});
 						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); loadAllData(false); }, { signal: eventSignal }); });
 						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
 						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });

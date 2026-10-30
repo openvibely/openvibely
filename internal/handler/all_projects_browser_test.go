@@ -160,7 +160,23 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 
  assert(new URL(location.href).searchParams.get('search')==='Cross','task breadcrumb lost search');
  document.querySelector('nav[aria-label="All projects views"] a[href^="/analytics"]').click();
- await wait(()=>document.querySelector('[data-all-projects-usage]'));
+ await wait(()=>document.querySelector('#analytics-data'));
+ for(const view of ['models','learning','usage']){
+   document.querySelector('[data-analytics-view="'+view+'"]').click();
+   await wait(()=>!document.querySelector('[data-analytics-section="'+view+'"]').classList.contains('hidden'));
+   assert(new URL(location.href).searchParams.get('project_id')==='__all_projects__','analytics view changed workspace');
+ }
+ document.getElementById('dateRange').value='7';
+ document.getElementById('dateRange').dispatchEvent(new Event('change',{bubbles:true}));
+ const projectFilter=document.querySelector('[data-analytics-project-filter]');
+ projectFilter.querySelector('[name="filter_project"]').value=owner;
+ projectFilter.requestSubmit();
+ await wait(()=>document.getElementById('analytics-data')?.dataset.projectId===owner);
+ assert(document.getElementById('dateRange').value==='7','project filter reset analytics date');
+ document.querySelector('[data-analytics-view="models"]').click();
+ await wait(()=>new URL(location.href).searchParams.get('view')==='models');
+ assert(document.getElementById('project-selector').value==='__all_projects__','filtered analytics switched tabs');
+ assert(new URL(location.href).searchParams.get('filter_project')===owner,'view lost project filter');
  document.querySelector('nav[aria-label="All projects views"] a[href^="/automations"]').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
  await window.openVibelyNavigate('/automations?project_id=__all_projects__&search=Browser&filter_project='+owner+'&card_page=1&page_size=1&offset=100000');
@@ -302,10 +318,10 @@ func TestAllProjectsDesktopRestoresSavedLocationInChrome(t *testing.T) {
 	runner := `<script>
  (async()=>{try{
  const deadline=Date.now()+12000;
- while(!document.querySelector('[data-all-projects-usage]') || document.querySelector('.htmx-request,.htmx-settling')){if(Date.now()>deadline)throw Error('restore timeout: '+location.href);await new Promise(r=>setTimeout(r,30));}
+ while(!document.querySelector('#analytics-data') || document.querySelector('.htmx-request,.htmx-settling')){if(Date.now()>deadline)throw Error('restore timeout: '+location.href);await new Promise(r=>setTimeout(r,30));}
  if(location.pathname+location.search+location.hash!=='/analytics?project_id=__all_projects__&range=7d#usage')throw Error('wrong location '+location.href);
  if(document.getElementById('project-selector').value!=='__all_projects__')throw Error('wrong project');
- if(document.querySelector('select[name="range"]').value!=='7d')throw Error('lost range');
+ if(document.getElementById('dateRange').value!=='7')throw Error('lost range');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)})}})();
  </script>`
