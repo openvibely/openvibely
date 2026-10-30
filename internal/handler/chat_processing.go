@@ -526,6 +526,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			ListTaskAnthropicHistory(context.Context, string, int) ([]models.Execution, error)
 		}); ok && params.Agent.Provider == models.ProviderAnthropic {
 			priorExecs, err = reader.ListTaskAnthropicHistory(ctx, params.TaskID, taskThreadHistoryLimit)
+		} else if reader, ok := h.execRepo.(interface {
+			ListTaskCompletionsHistory(context.Context, string, int) ([]models.Execution, error)
+		}); ok && params.Agent.Provider == models.ProviderOpenAICompatible {
+			priorExecs, err = reader.ListTaskCompletionsHistory(ctx, params.TaskID, taskThreadHistoryLimit)
 		} else {
 			priorExecs, err = h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
 		}

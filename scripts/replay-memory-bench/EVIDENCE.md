@@ -73,3 +73,11 @@ scripts/replay-memory-bench/concurrent/request-recovery/README.md
 That directory contains every turn, phase, reclamation counts, compaction/browser results, rejected candidate comparisons, validation logs, pinned source/binary metadata, and its own detailed evidence archive. Historical rounds retain their original baselines and limitations. Earlier bulk-save microbenchmarks are not representative streaming measurements.
 
 For new measurements, use the retained [concurrent harness](concurrent/README.md) or [sequential/browser harness](app-flow/README.md). Store generated results outside this worktree. The concise latest summary is [RESULTS.md](RESULTS.md).
+
+## Compatible retention fix — baseline e7c495c38
+
+[Report](/files/2a689ceb1f7670099282271d2f7dcabd?project_id=b184292efa07a415fc59967a5fc328d1) · [Raw evidence and profiles](/files/8e438250dbd07f668274bddeb1cf3a3d?project_id=b184292efa07a415fc59967a5fc328d1). Repository report: [COMPATIBLE_RETENTION_RESULTS.md](COMPATIBLE_RETENTION_RESULTS.md).
+
+Previous task branch versus compatible retention fixes, not main. All 12 final timing runs (396 turns), two separate diagnostics, and final smoke runs passed. Includes before/after CPU, allocation and near-peak heap profiles, text summaries, exact production patch, source, phase samples, validation logs and per-file manifest. Superseded partial timing runs are labeled and excluded. Databases and generated fixture repositories are not archived.
+
+Archive: 1,327,352 bytes; SHA256 `0f8f289c20d36669c27f0e41d8546c0277c53a53fe05eba6d1b4ea7b3e1e85d9`.

@@ -1,5 +1,7 @@
 # Concurrent streaming resource checks
 
+Latest focused experiment: [compatible retention fix](../COMPATIBLE_RETENTION_RESULTS.md), previous task branch versus fixed branch.
+
 Provider comparison: [Anthropic and OpenAI-compatible results](../PROVIDER_RESULTS.md). Earlier OpenAI Responses measurements: [results](../RESULTS.md). Historical reports, profiles, raw data, and build metadata are in the [evidence archive](../EVIDENCE.md). Keep raw outputs outside this worktree.
 
 This extends the frozen app-flow workload; sequential/browser measurements remain separate. No UI changes. One real app/service/database process runs either one task or ten tasks concurrently. Every task starts empty and completes its response before its next follow-up. Six turns per task. A round barrier launches each wave together, deliberately stressing simultaneous initialization and completion. This is not ten independent app processes.

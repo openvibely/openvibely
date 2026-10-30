@@ -70,8 +70,8 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		return canonicalResult(output, output, usage, err)
 	case llmcontracts.OperationStreaming, llmcontracts.OperationTask:
 		if requestUsesChatStreaming(req) {
-			output, usage, err := a.callChatStreaming(ctx, req, workDir)
-			return canonicalResult(output, output, usage, err)
+			output, textOnly, usage, err := a.callChatStreaming(ctx, req, workDir)
+			return canonicalResult(output, textOnly, usage, err)
 		}
 		output, textOnly, usage, err := a.callTaskStreaming(ctx, req, workDir)
 		return canonicalResult(output, textOnly, usage, err)
@@ -421,18 +421,18 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	return sw.String(), sw.TextString(), usageFromResponse(resp), stopError(resp.StopReason)
 }
 
-func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, llmcontracts.Usage, error) {
+func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, string, llmcontracts.Usage, error) {
 	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
-		return "", llmusage.FromTotal(0), err
+		return "", "", llmusage.FromTotal(0), err
 	}
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
 	if err != nil {
-		return "", llmusage.FromTotal(0), err
+		return "", "", llmusage.FromTotal(0), err
 	}
 	history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
 	if err != nil {
-		return "", llmusage.FromTotal(0), err
+		return "", "", llmusage.FromTotal(0), err
 	}
 	client.SetCompletionsHistory(history)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -443,7 +443,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	attachments, err := convertAttachmentsContext(ctx, req.Attachments)
 	if err != nil {
-		return "", llmusage.FromTotal(0), err
+		return "", "", llmusage.FromTotal(0), err
 	}
 
 	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
@@ -477,10 +477,10 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
-		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
+		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
 	sw.Flush()
-	return sw.String(), usageFromResponse(resp), stopError(resp.StopReason)
+	return sw.String(), sw.TextString(), usageFromResponse(resp), stopError(resp.StopReason)
 }
 
 func compatibleTemperature(agent models.LLMConfig) float64 {
@@ -804,10 +804,6 @@ func appendAttachmentSummary(prompt string, attachments []models.Attachment) str
 
 func streamText(sw *llmstream.Writer) func(string) {
 	return func(text string) {
-		if isStreamingMarkerChunk(text) {
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventRawOutput, Text: text}, false)
-			return
-		}
 		llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventTextDelta, Text: text}, false)
 	}
 }
@@ -834,9 +830,6 @@ func usageFromResponse(resp *openaiclient.AgenticResponse) llmcontracts.Usage {
 }
 
 func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err error) (llmcontracts.AgentResult, error) {
-	if textOnly == "" {
-		textOnly = output
-	}
 	res := llmcontracts.AgentResult{Output: output, TextOnlyOutput: textOnly, Usage: usage}
 	if err != nil && strings.HasPrefix(err.Error(), "response truncated: max") {
 		res.StopReason = "max_tokens"
@@ -867,10 +860,6 @@ func effectiveWorkDir(workDir string) string {
 		return "."
 	}
 	return workDir
-}
-
-func isStreamingMarkerChunk(text string) bool {
-	return strings.Contains(text, "[Using tool:") || strings.Contains(text, "[Tool ") || strings.Contains(text, "[/Tool]")
 }
 
 func toolSecondaryInfo(name string, input json.RawMessage) string {

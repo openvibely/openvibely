@@ -1655,17 +1655,23 @@ func (r *ExecutionRepo) GetDisplayExecution(ctx context.Context, id string) (*mo
 // with a nonempty native Responses checkpoint. The OpenAI adapter replaces
 // their prompt/output with that checkpoint. Failed and legacy turns keep output.
 func (r *ExecutionRepo) ListTaskResponsesHistory(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
-	return r.listTaskNativeHistory(ctx, taskID, limit, "responses_input")
+	return r.listTaskNativeHistory(ctx, taskID, limit, "envelope", "responses_input")
 }
 
 // ListTaskAnthropicHistory omits display text for completed native Anthropic
 // turns. The adapter uses their messages; failed, empty and foreign replay
 // retain display output for recovery and provider conversion.
 func (r *ExecutionRepo) ListTaskAnthropicHistory(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
-	return r.listTaskNativeHistory(ctx, taskID, limit, "messages")
+	return r.listTaskNativeHistory(ctx, taskID, limit, "envelope", "messages")
 }
 
-func (r *ExecutionRepo) listTaskNativeHistory(ctx context.Context, taskID string, limit int, itemsKey string) ([]models.Execution, error) {
+// ListTaskCompletionsHistory omits display text only for completed turns with
+// nonempty native Chat Completions replay. Preserve failed and fallback history.
+func (r *ExecutionRepo) ListTaskCompletionsHistory(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	return r.listTaskNativeHistory(ctx, taskID, limit, "array", "")
+}
+
+func (r *ExecutionRepo) listTaskNativeHistory(ctx context.Context, taskID string, limit int, format, itemsKey string) ([]models.Execution, error) {
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
@@ -1673,12 +1679,12 @@ func (r *ExecutionRepo) listTaskNativeHistory(ctx context.Context, taskID string
  SELECT 1 FROM conversation_items c WHERE c.execution_id=executions.id
  AND c.generation=0 AND c.is_current=1 AND c.operation='put' AND c.lane='metadata'
  AND c.item_id LIKE 'replay:%:header'
- AND json_extract(c.payload,'$.format')='envelope'
- AND json_extract(c.payload,'$.items_key')=?
+ AND json_extract(c.payload,'$.format')=?
+ AND COALESCE(json_extract(c.payload,'$.items_key'),'')=?
  AND json_extract(c.payload,'$.item_count')>0
  ) THEN '' ELSE ` + executionOutputSelect + ` END`
 	columns := strings.Replace(executionSelectColumnsLight, executionOutputSelect, projection, 1)
-	rows, err := r.db.QueryContext(ctx, `SELECT `+columns+` FROM executions WHERE task_id=? ORDER BY started_at DESC,rowid DESC LIMIT ?`, itemsKey, taskID, limit)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+columns+` FROM executions WHERE task_id=? ORDER BY started_at DESC,rowid DESC LIMIT ?`, format, itemsKey, taskID, limit)
 	if err != nil {
 		return nil, err
 	}

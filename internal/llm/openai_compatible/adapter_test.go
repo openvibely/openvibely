@@ -666,6 +666,91 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 	}
 }
 
+func TestChatStreamingSeparatesToolOutputFromAssistantText(t *testing.T) {
+	requests := 0
+	var secondMessages []any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]any
+		_ = json.Unmarshal(body, &reqBody)
+		if requests == 2 {
+			secondMessages, _ = reqBody["messages"].([]any)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Need memory.\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"memory_view\",\"arguments\":\"{\\\"handle\\\":\"}}]}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"usage.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"Read it. The literal marker is [Tool example done].\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "memory_view", Description: "read memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name != "memory_view" {
+				t.Fatalf("unexpected tool name %q", name)
+			}
+			return "memory contents", true, false, nil
+		},
+	})
+
+	adapter := New(nil, nil)
+	res, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Ctx:       ctx,
+		Operation: llmcontracts.OperationStreaming,
+		Followup:  true,
+		Message:   "Use memory",
+		Agent: models.LLMConfig{
+			Name:       "Compatible",
+			Provider:   models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey,
+			Model:      "provider/model",
+			APIKey:     "sk-compatible",
+			BaseURL:    srv.URL + "/v1/",
+			PresetSlug: "vllm",
+			Transport:  "chat_completions",
+		},
+	}, ".")
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	require.Contains(t, res.Output, "Read it. The literal marker is [Tool example done].")
+	require.Contains(t, res.Output, "memory contents")
+	require.Contains(t, res.Output, "[Using tool:")
+	require.Equal(t, "Read it. The literal marker is [Tool example done].", res.TextOnlyOutput)
+	require.NotContains(t, res.TextOnlyOutput, "Need memory.")
+	foundToolMessage := false
+	foundReasoningMessage := false
+	for _, raw := range secondMessages {
+		msg, _ := raw.(map[string]any)
+		if msg["role"] == "tool" && msg["tool_call_id"] == "call_1" && msg["content"] == "memory contents" {
+			foundToolMessage = true
+		}
+		if msg["role"] == "assistant" && msg["reasoning_content"] == "Need memory." {
+			foundReasoningMessage = true
+		}
+	}
+	if !foundToolMessage {
+		t.Fatalf("tool result message not replayed: %#v", secondMessages)
+	}
+	if !foundReasoningMessage {
+		t.Fatalf("assistant reasoning content not replayed: %#v", secondMessages)
+	}
+}
+
 func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
 	executions := []models.Execution{{
 		PromptSent:       "question",
@@ -1206,59 +1291,68 @@ func TestNonKimiAdapterPersistsReplay(t *testing.T) {
 }
 
 func TestAdapterPersistsToolsAcrossFollowupsAndCancellation(t *testing.T) {
-	for _, model := range []string{"generic-model", "kimi-k3"} {
-		for _, cancelTurn := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/cancel=%t", model, cancelTurn), func(t *testing.T) {
-				ctx := context.Background()
-				stores := teststores.New(t).Stores
-				task := &models.Task{ProjectID: "default", Title: "Replay", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "load skill"}
-				require.NoError(t, stores.Tasks.Create(ctx, task))
-				config, err := stores.LLMConfigs.GetDefault(ctx)
-				require.NoError(t, err)
-				execution := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "load skill"}
-				require.NoError(t, stores.Executions.Create(ctx, execution))
-				calls := 0
-				var last map[string]any
-				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					calls++
-					require.NoError(t, json.NewDecoder(r.Body).Decode(&last))
-					w.Header().Set("Content-Type", "text/event-stream")
-					if calls == 1 {
-						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"original thinking sentinel\",\"tool_calls\":[{\"index\":0,\"id\":\"skill-call\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
-						return
-					}
-					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
-				}))
-				defer srv.Close()
-				turn, cancel := context.WithCancel(ctx)
-				defer cancel()
-				turn = llmcontracts.WithRuntimeTools(turn, &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view", Access: llmcontracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)}}, Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
-					if cancelTurn {
-						cancel()
-					}
-					return "loaded skill instructions", true, false, nil
-				}})
-				agent := models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: model, PresetSlug: "vllm", APIKey: "test", BaseURL: srv.URL + "/v1", Transport: "chat_completions"}
-				_, err = New(stores.Executions, nil).Call(turn, llmcontracts.AgentRequest{Ctx: turn, Operation: llmcontracts.OperationDirect, Message: "load skill", ExecID: execution.ID, Agent: agent}, ".")
-				if cancelTurn {
-					require.Error(t, err)
-				} else {
+	for _, operation := range []llmcontracts.Operation{llmcontracts.OperationDirect, llmcontracts.OperationStreaming} {
+		for _, model := range []string{"generic-model", "kimi-k3"} {
+			for _, cancelTurn := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/cancel=%t", operation, model, cancelTurn), func(t *testing.T) {
+					ctx := context.Background()
+					stores := teststores.New(t).Stores
+					task := &models.Task{ProjectID: "default", Title: "Replay", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "load skill"}
+					require.NoError(t, stores.Tasks.Create(ctx, task))
+					config, err := stores.LLMConfigs.GetDefault(ctx)
 					require.NoError(t, err)
-				}
-				replay, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
-				require.NoError(t, err)
-				require.Len(t, replay[execution.ID], 1)
-				require.Contains(t, replay[execution.ID][0].TranscriptJSON, "loaded skill instructions")
-				// The service supplies persisted replay before the adapter runs.
-				execution.ReplayMessages = replay[execution.ID]
-				_, err = New(stores.Executions, nil).Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "continue", Followup: true, ChatHistory: []models.Execution{*execution}, Agent: agent}, ".")
-				require.NoError(t, err)
-				data, err := json.Marshal(last["messages"])
-				require.NoError(t, err)
-				require.Contains(t, string(data), "loaded skill instructions")
-				require.Contains(t, string(data), "skill-call")
-				require.Contains(t, string(data), "original thinking sentinel")
-			})
+					execution := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "load skill"}
+					require.NoError(t, stores.Executions.Create(ctx, execution))
+					calls := 0
+					var last map[string]any
+					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						calls++
+						require.NoError(t, json.NewDecoder(r.Body).Decode(&last))
+						w.Header().Set("Content-Type", "text/event-stream")
+						if calls == 1 {
+							fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"original thinking sentinel\",\"tool_calls\":[{\"index\":0,\"id\":\"skill-call\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n")
+							return
+						}
+						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					}))
+					defer srv.Close()
+					turn, cancel := context.WithCancel(ctx)
+					defer cancel()
+					turn = llmcontracts.WithRuntimeTools(turn, &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "skill_view", Access: llmcontracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)}}, Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+						if cancelTurn {
+							cancel()
+						}
+						return "loaded skill instructions", true, false, nil
+					}})
+					agent := models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: model, PresetSlug: "vllm", APIKey: "test", BaseURL: srv.URL + "/v1", Transport: "chat_completions"}
+					_, err = New(stores.Executions, nil).Call(turn, llmcontracts.AgentRequest{Ctx: turn, Operation: operation, Followup: true, Message: "load skill", ExecID: execution.ID, Agent: agent}, ".")
+					if cancelTurn {
+						require.Error(t, err)
+					} else {
+						require.NoError(t, err)
+					}
+					replay, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+					require.NoError(t, err)
+					require.Len(t, replay[execution.ID], 1)
+					require.Contains(t, replay[execution.ID][0].TranscriptJSON, "loaded skill instructions")
+					// The service supplies persisted replay before the adapter runs.
+					execution.ReplayMessages = replay[execution.ID]
+					_, err = New(stores.Executions, nil).Call(ctx, llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, Message: "continue", Followup: true, ChatHistory: []models.Execution{*execution}, Agent: agent}, ".")
+					require.NoError(t, err)
+					data, err := json.Marshal(last["messages"])
+					require.NoError(t, err)
+					require.Contains(t, string(data), "loaded skill instructions")
+					require.Contains(t, string(data), "skill-call")
+					require.Contains(t, string(data), "original thinking sentinel")
+				})
+			}
 		}
 	}
+}
+
+func TestCanonicalResultPreservesEmptyAssistantText(t *testing.T) {
+	res, err := canonicalResult("[Using tool: read_file]\n[Tool read_file done]\ncontents\n[/Tool]", "", llmcontracts.Usage{}, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Output)
+	require.Empty(t, res.TextOnlyOutput, "a tool-only transcript is not assistant text")
 }
