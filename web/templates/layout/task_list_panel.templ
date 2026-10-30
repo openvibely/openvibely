@@ -130,6 +130,7 @@ templ TaskListPanel(currentProjectID string) {
         (function() {
             var root = document.documentElement;
             var inSettings = false;
+            var inContextSidebar = false;
             var wasCollapsed = false;
             var workspaceURL = /^\/(themes|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
             var workspaceScroll = 0;
@@ -155,11 +156,12 @@ templ TaskListPanel(currentProjectID string) {
                 var reviewing = !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
-                var active = reviewing || appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
-                if (active && !inSettings) {
+                var settings = appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
+                var active = reviewing || settings;
+                if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');
                     root.classList.remove('task-list-collapsed');
-                } else if (!active && inSettings) {
+                } else if (!active && inContextSidebar) {
                     root.classList.toggle('task-list-collapsed', wasCollapsed);
                     if (location.pathname + location.search + location.hash === workspaceURL) {
                         document.getElementById('main-content').scrollTop = workspaceScroll;
@@ -172,7 +174,8 @@ templ TaskListPanel(currentProjectID string) {
                         });
                     }
                 }
-                inSettings = active;
+                inSettings = settings;
+                inContextSidebar = active;
                 root.classList.toggle('appearance-settings', active);
                 document.getElementById('task-list-panel').setAttribute('aria-label', reviewing ? 'Changed files' : active ? 'Settings' : 'Tasks');
                 if (!active) return;
