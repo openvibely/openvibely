@@ -863,7 +863,7 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 	}
 }
 
-func TestOpenResponsesLiteHTTPStream_OAuthPreservesGPT56AutoImageDetail(t *testing.T) {
+func TestOpenResponsesHTTPStream_LiteOAuthPreservesGPT56AutoImageDetail(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer oauth-token" {
 			t.Fatalf("Authorization = %q", got)
@@ -904,7 +904,7 @@ func TestOpenResponsesLiteHTTPStream_OAuthPreservesGPT56AutoImageDetail(t *testi
 			}},
 		}},
 	}, "", client.sessionID)
-	body, err := client.openResponsesLiteHTTPStream(context.Background(), payload, true)
+	body, err := client.openResponsesHTTPStream(context.Background(), payload, true, true)
 	if err != nil {
 		t.Fatalf("open OAuth HTTP fallback stream: %v", err)
 	}

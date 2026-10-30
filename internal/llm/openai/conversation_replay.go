@@ -103,10 +103,6 @@ func historyMessageItems(messages []openaiclient.Message) []any {
 	return items
 }
 
-func completionsReplayInput(raw string) []any {
-	return completionsReplayMessageInput(models.ExecutionReplayMessage{TranscriptJSON: raw})
-}
-
 func completionsReplayMessageInput(replay models.ExecutionReplayMessage) []any {
 	var messages []openaiclient.CompletionsHistoryMessage
 	if replay.DecodeTranscript(&messages) != nil {

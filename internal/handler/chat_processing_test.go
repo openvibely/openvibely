@@ -4523,7 +4523,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, lateSteering, exec.ID))
 
-	batch, err = h.preparePendingSteeringInputsFromPersistedReplay(ctx, &params, "assistant answerfinal answer")
+	batch, err = h.preparePendingTextSteeringInputsFromPersistedReplay(ctx, &params, "assistant answerfinal answer")
 	require.NoError(t, err)
 	require.Equal(t, 1, batch.count())
 	require.Len(t, params.ChatHistory, 1)

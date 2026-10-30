@@ -38,9 +38,6 @@ func TestChatProcessingSmallHelpers(t *testing.T) {
 	if messageID != 17 || reply.Source != models.TaskOriginSlack || reply.SlackChannelID != "C1" {
 		t.Fatalf("parseCompletionOptions = %d %#v", messageID, reply)
 	}
-	if got := normalizeDiffSnapshot("\n  diff --git a/file b/file  \n"); got != "diff --git a/file b/file" {
-		t.Fatalf("normalizeDiffSnapshot = %q", got)
-	}
 }
 
 func TestHasOtherEditFields(t *testing.T) {

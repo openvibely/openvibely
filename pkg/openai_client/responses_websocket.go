@@ -767,10 +767,6 @@ func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload m
 	return resp.Body, nil
 }
 
-func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth bool) (io.ReadCloser, error) {
-	return c.openResponsesHTTPStream(ctx, websocketPayload, isChatGPTOAuth, true)
-}
-
 func isTerminalResponsesWebsocketEvent(eventType string) bool {
 	switch strings.TrimSpace(eventType) {
 	case "response.completed", "response.failed", "response.incomplete", "response.error", "error":

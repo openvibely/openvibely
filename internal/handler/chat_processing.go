@@ -1160,11 +1160,6 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 	return batch, nil
 }
 
-func (h *Handler) preparePendingSteeringInputsFromPersistedReplay(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
-	batch, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
-	return h.collapsePreparedSteeringReplay(params, batch, err)
-}
-
 func (h *Handler) preparePendingTextSteeringInputsFromPersistedReplay(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
 	batch, err := h.preparePendingTextSteeringInputs(ctx, params, previousAssistantOutput)
 	return h.collapsePreparedSteeringReplay(params, batch, err)
@@ -2603,10 +2598,6 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 			svc.SendTaskCompletionNotification(ctx, *task, output, errMsg)
 		}
 	}
-}
-
-func normalizeDiffSnapshot(diff string) string {
-	return strings.TrimSpace(diff)
 }
 
 // resolveTaskChangesWorktreeRefs identifies the managed worktree and explicit
