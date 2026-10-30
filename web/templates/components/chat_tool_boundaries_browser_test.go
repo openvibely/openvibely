@@ -237,3 +237,20 @@ func TestBrowserFunctional_ToolGeometryStableAcrossLiveAndSavedRendering(t *test
  return {};
  `)
 }
+
+func TestBrowserFunctional_ActivitySpacingStableAcrossLiveAndVirtualRows(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='3000px';
+ const text='Intro.\n\n[Using tool: read_file | a.go]\n[Tool read_file done]\n'+'line\n'.repeat(8)+'[/Tool]\n[Thinking]\nhmm\n[/Thinking]\n[Using tool: process | x]\n[Tool process done]\nstatus\n[/Tool]\n[Using tool: shell | rg x]\n[Tool shell done]\nout\n[/Tool]\nDone.\n';
+ const offsets=()=>{const top=stream.getBoundingClientRect().top;return Array.from(stream.querySelectorAll('.stream-tool, details.stream-thinking, .chat-markdown')).filter(e=>!e.parentElement.closest('.stream-tool, details.stream-thinking, .chat-markdown')).map(e=>Math.round(e.getBoundingClientRect().top-top));};
+ const results=[];
+ for (const status of ['running','completed']) {
+  stream.replaceChildren(); delete stream._chatVirtualData;
+  document.getElementById('pair').dataset.execStatus=status;
+  await renderStreamingContent(stream,text,true);await paint();await paint();
+  results.push(offsets());
+ }
+ assert(results[0].length===6 && JSON.stringify(results[0])===JSON.stringify(results[1]),'row spacing changed between live and virtualized rendering: '+JSON.stringify(results));
+ return {};
+ `)
+}
