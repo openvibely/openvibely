@@ -91,6 +91,30 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(window._sidebarSSE,'All projects missing live connection');
  await verifyLiveRefresh('default','task_board_updated');
  await verifyStableRefresh('[data-all-projects-task]');
+ async function moveTask(title,category){
+   const entry=Array.from(document.querySelectorAll('[data-all-projects-task]')).find(c=>c.textContent.includes(title));
+   const id=entry.dataset.allProjectsTask, owner=entry.dataset.ownerProject;
+   entry.scrollIntoView({block:'center'});
+   const rect=entry.getBoundingClientRect();
+   const x=rect.left+20,y=rect.top+20;
+   entry.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,isPrimary:true,pointerId:29,clientX:x,clientY:y}));
+   entry.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,isPrimary:true,pointerId:29,clientX:x+10,clientY:y+10}));
+   const zone=document.querySelector('[data-all-projects-category="'+category+'"]');
+   zone.scrollIntoView({block:'center'});
+   const target=zone.getBoundingClientRect();
+   const tx=target.left+20,ty=Math.max(5,target.top+15);
+   entry.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,isPrimary:true,pointerId:29,clientX:tx,clientY:ty}));
+   entry.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,button:0,isPrimary:true,pointerId:29,clientX:tx,clientY:ty}));
+   entry.click();
+   await wait(()=>document.querySelector('[data-all-projects-category="'+category+'"] [data-all-projects-task="'+id+'"]'));
+   assert(document.querySelector('[data-all-projects-task="'+id+'"]').dataset.ownerProject===owner,'drag changed owner');
+   assert(location.pathname==='/tasks' && document.getElementById('project-selector').value==='__all_projects__','drag navigated away');
+ }
+ await moveTask('Cross project browser task','completed');
+ await moveTask('Other project task','completed');
+ await moveTask('Cross project browser task','backlog');
+ await moveTask('Other project task','backlog');
+
  await window.openVibelyNavigate('/tasks?project_id=__all_projects__&search=Cross');
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));
 

@@ -734,14 +734,15 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
-	e.Use(h.taskProjectBoundary, h.threadInputProjectBoundary)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			c.Set("handler", h)
 			return next(c)
 		}
 	})
+	// Resolve the virtual workspace to the item owner before enforcing project consistency.
 	e.Use(h.allProjectsScope)
+	e.Use(h.taskProjectBoundary, h.threadInputProjectBoundary)
 	e.GET("/files", h.ListFilesPanel)
 	e.GET("/files/:id", h.GeneratedFileContent)
 	e.POST("/files/:id", h.saveDesktopFile(h.GeneratedFileContent))

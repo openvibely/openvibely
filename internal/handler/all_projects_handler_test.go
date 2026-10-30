@@ -427,3 +427,31 @@ func TestAllProjectsChatDoesNotRequireProjectChooser(t *testing.T) {
 		require.Empty(t, rec.Header().Get("Location"))
 	}
 }
+
+func TestAllProjectsDragMovePreservesOwnerAndValidatesSchedule(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	project := createProject(t, h, "Move owner")
+	for _, owner := range []string{"default", project.ID} {
+		task := models.Task{ProjectID: owner, Title: "Move task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, stores.Tasks.Create(t.Context(), &task))
+		move := func(category string) *httptest.ResponseRecorder {
+			req := httptest.NewRequest(http.MethodPatch, "/tasks/"+task.ID+"/category?project_id="+models.AllProjectsID, strings.NewReader("category="+category))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, req)
+			return rec
+		}
+		require.Equal(t, http.StatusBadRequest, move("scheduled").Code)
+		unchanged, err := h.taskSvc.GetByID(t.Context(), task.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.CategoryBacklog, unchanged.Category)
+		for _, category := range []models.TaskCategory{models.CategoryCompleted, models.CategoryBacklog} {
+			rec := move(string(category))
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			updated, err := h.taskSvc.GetByID(t.Context(), task.ID)
+			require.NoError(t, err)
+			require.Equal(t, owner, updated.ProjectID)
+			require.Equal(t, category, updated.Category)
+		}
+	}
+}
