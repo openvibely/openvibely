@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/require"
 )
@@ -465,11 +466,15 @@ func TestChatPendingInputs_SharedRowsAndProjectIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, inputs, 4)
 	var expected bytes.Buffer
-	require.NoError(t, components.ChatComposerQueuedInputRows(inputs, func(input models.ThreadInput) string { return "/chat/queued/" + input.ID + "/steer" }).Render(ctx, &expected))
+	// Match the auth-off context supplied by the HTTP renderer.
+	renderCtx := templateui.WithMessageAuthors(ctx, false)
+	require.NoError(t, components.ChatComposerQueuedInputRows(inputs, func(input models.ThreadInput) string { return "/chat/queued/" + input.ID + "/steer" }).Render(renderCtx, &expected))
 	for i := 0; i < 2; i++ {
 		rec := tc.HTTP().Get("/chat/pending-inputs?project_id=" + project.ID).Execute()
 		tc.Assert(rec).StatusCode(http.StatusOK)
 		require.Equal(t, expected.String(), rec.Body.String())
+		require.NotContains(t, rec.Body.String(), `>User</span>`)
+		require.NotContains(t, rec.Body.String(), "User · Steering pending")
 		require.NotContains(t, rec.Body.String(), foreign.ID)
 		for _, input := range inputs {
 			require.Equal(t, 1, strings.Count(rec.Body.String(), `id="thread-input-`+input.ID+`"`))
