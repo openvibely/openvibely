@@ -395,28 +395,35 @@ func (h *Handler) ListTasks(c echo.Context) error {
 
 func (h *Handler) NewTask(c echo.Context) error {
 	ctx := c.Request().Context()
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return err
-	}
-	project, err := h.projectSvc.GetByID(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	if project == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	projectID := c.QueryParam("project_id")
+	var project *models.Project
+	var err error
+	if projectID == models.AllProjectsID {
+		project = &models.Project{ID: models.AllProjectsID}
+	} else {
+		projectID, err = h.getCurrentProjectID(c)
+		if err != nil {
+			return err
+		}
+		project, err = h.projectSvc.GetByID(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		if project == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "project not found")
+		}
 	}
 	agents, err := h.llmConfigRepo.ListPickerOptions(ctx)
 	if err != nil {
 		return err
 	}
-	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.NewTaskContent(project, agents, agentDefs))
-	}
 	projects, err := h.projectSvc.ListSelectorOptions(ctx)
 	if err != nil {
 		return err
+	}
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
+	if isHTMX(c) {
+		return render(c, http.StatusOK, pages.NewTaskContent(project, agents, agentDefs, projects...))
 	}
 	return render(c, http.StatusOK, pages.NewTask(projects, project, agents, agentDefs))
 }

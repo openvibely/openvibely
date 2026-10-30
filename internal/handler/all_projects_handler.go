@@ -52,6 +52,15 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		if path == "/tasks/new" || path == "/automations/new" || ((path == "/tasks" || path == "/automations/builder") && c.Request().Method == http.MethodPost) {
 			destination := c.QueryParam("destination_project")
+			if path == "/tasks" && c.Request().Method == http.MethodPost {
+				destination = c.FormValue("destination_project")
+				if destination == "" {
+					destination = c.QueryParam("destination_project")
+				}
+			}
+			if path == "/tasks/new" && destination == "" && c.Request().Method == http.MethodGet {
+				return h.NewTask(c)
+			}
 			if destination == "" {
 				if c.Request().Method == http.MethodGet {
 					return h.AllProjectsChooseProject(c)

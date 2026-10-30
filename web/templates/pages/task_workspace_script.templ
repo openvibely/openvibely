@@ -297,7 +297,7 @@ templ TaskWorkspaceScript() {
 		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root) destroy(); });
 		window.taskWorkspace = {
 			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },
-			closePanel: closePanel, togglePanel: function() { if (panel.hidden) openPanel(); else closePanel(); }, destroy: destroy
+			openPanel: openPanel, closePanel: closePanel, togglePanel: function() { if (panel.hidden) openPanel(); else closePanel(); }, destroy: destroy
 		};
 		resize(read('task-inspector-width'));
 		applyURL();
