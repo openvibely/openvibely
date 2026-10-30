@@ -26,13 +26,13 @@ templ diffViewerPerformanceScript() {
     if (!panel || !scroller) return null;
     var top = scroller.getBoundingClientRect().top;
     var snapshot = {heights:new Map(), anchor:null};
-    panel.querySelectorAll('.diff-file-card').forEach(function(card) {
-     var path = card.querySelector('[data-copy-path]');
+    panel.querySelectorAll('.diff-file-card, .diff-file-slot').forEach(function(card) {
+     var path = card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
      if (!path) return;
      var rect = card.getBoundingClientRect();
-     snapshot.heights.set(path.dataset.copyPath, rect.height);
+     snapshot.heights.set(path, rect.height);
      if (!snapshot.anchor && rect.bottom > top && rect.height > 0) {
-      var anchor = {path:path.dataset.copyPath, cardOffset:rect.top-top};
+      var anchor = {path:path, cardOffset:rect.top-top};
       var rows = card.querySelectorAll('tr.diff-review-line');
       for (var i=0; i<rows.length; i++) {
        var rowRect = rows[i].getBoundingClientRect();
@@ -44,7 +44,7 @@ templ diffViewerPerformanceScript() {
        }
       }
       // Keep the original line while its placeholder is still loading.
-      var saved = card._diffScrollAnchor;
+      var saved = card._diffScrollAnchor || card._diffReadingAnchor;
       if (saved && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) anchor = saved.snapshot.anchor;
       snapshot.anchor = anchor;
      }
@@ -58,14 +58,14 @@ templ diffViewerPerformanceScript() {
     var scroller = viewer && (viewer.closest('#tab-changes') || document.getElementById('main-content'));
     if (!panel || !scroller) return;
     var target = null;
-    panel.querySelectorAll('.diff-file-card').forEach(function(card) {
-     var path = card.querySelector('[data-copy-path]');
+    panel.querySelectorAll('.diff-file-card, .diff-file-slot').forEach(function(card) {
+     var path = card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
      if (!path) return;
-     if (reserve && card.hasAttribute('data-diff-lazy-url') && !card.querySelector('[data-collapsed]')) {
-      var height = snapshot.heights.get(path.dataset.copyPath);
+     if (reserve && card.hasAttribute('data-diff-lazy-url') && !card.hasAttribute('data-collapsed') && !card.querySelector('[data-collapsed]')) {
+      var height = snapshot.heights.get(path);
       if (height) card.style.minHeight = height + 'px';
      }
-     if (snapshot.anchor && path.dataset.copyPath === snapshot.anchor.path) target = card;
+     if (snapshot.anchor && path === snapshot.anchor.path) target = card;
     });
     if (!target) return;
     var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset, match = null;
@@ -80,7 +80,12 @@ templ diffViewerPerformanceScript() {
      if (match) { element = match; offset = anchor.offset; }
     }
     scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset;
-    if (match) delete target._diffScrollAnchor;
+    if (match) {
+     delete target._diffScrollAnchor;
+     // A split row represents two lines. Keep the original side when toggling
+     // back without scrolling, rather than changing an old-line anchor to new.
+     target._diffReadingAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+    }
     else if (reserve && (anchor.oldLine || anchor.newLine) && viewer._diffPerformance &&
              (target.dataset.diffLazyUrl || target.dataset.chunkUrl)) {
      viewer._diffPerformance.restoreAnchor(target, snapshot);
@@ -105,6 +110,9 @@ templ diffViewerPerformanceScript() {
   }
 
   function createController(viewer) {
+   // Explicit line anchoring owns geometry changes, including cached chunks.
+   // Native anchoring would otherwise compensate a second time after a swap.
+   viewer.style.overflowAnchor = 'none';
    var activePanel = null, stopped = false, inFlight = 0, anchorRestore = null;
    var pending = new Map(), visible = new Set(), observed = new Set();
    var headers = new Map(), chunks = new Set(), retained = [];
@@ -120,13 +128,16 @@ templ diffViewerPerformanceScript() {
       (selection && !selection.isCollapsed && selection.containsNode(node, true));
    }
    var chunkObserver = new IntersectionObserver(function(entries) {
+    var snapshot = window._captureDiffScroll(), changed = false;
     entries.forEach(function(entry) {
      var chunk = entry.target;
-     var measured = chunk.getBoundingClientRect().height;
+     var rect = chunk.getBoundingClientRect(), bounds = scroller.getBoundingClientRect();
+     var measured = rect.height;
      if (measured > 0) chunk._height = measured;
-     chunk._near = entry.isIntersecting;
-     if (entry.isIntersecting) {
-      if (chunk._saved) { chunk.appendChild(chunk._saved); chunk._saved = null; chunk.style.minHeight = ''; }
+     // Layout switches can invalidate queued observer entries before delivery.
+     chunk._near = measured > 0 && rect.bottom >= bounds.top-600 && rect.top <= bounds.bottom+600;
+     if (chunk._near) {
+      if (chunk._saved) { chunk.appendChild(chunk._saved); chunk._saved = null; chunk.style.minHeight = ''; changed = true; }
       if (!chunk.firstElementChild) { visible.add(chunk); }
      } else if (chunk.firstElementChild && !protectedContent(chunk)) {
       var height = chunk.getBoundingClientRect().height || chunk._height;
@@ -138,6 +149,7 @@ templ diffViewerPerformanceScript() {
       visible.delete(chunk);
      }
     });
+    if (changed) window._restoreDiffScroll(snapshot, false);
     pump();
    }, {root:viewer.closest('#tab-changes') || document.getElementById('main-content'), rootMargin:'600px 0px'});
    var scroller = viewer.closest('#tab-changes') || document.getElementById('main-content');
@@ -161,6 +173,7 @@ templ diffViewerPerformanceScript() {
    }, {root:scroller, rootMargin:'-1px 0px 0px 0px', threshold:[0,1]});
 
    function expanded(card) {
+    if (card.classList.contains('diff-file-slot')) return !card.hasAttribute('data-collapsed');
     var owner = card.closest('.diff-file-card') || card;
     var header = owner.querySelector('[data-diff-toggle]');
     return header && !header.hasAttribute('data-collapsed');
@@ -234,6 +247,12 @@ templ diffViewerPerformanceScript() {
     var abort = new AbortController();
     pending.set(card, abort); inFlight++;
     if (restore) restore.abort = abort;
+    if (card.classList.contains('diff-file-slot') && !card.querySelector('[data-diff-load-status]')) {
+     var statusNode = document.createElement('div'); statusNode.setAttribute('data-diff-load-status',''); statusNode.setAttribute('role','status');
+     var retryButton = document.createElement('button'); retryButton.type='button'; retryButton.className='btn btn-sm btn-ghost hidden';
+     retryButton.setAttribute('data-diff-retry',''); retryButton.textContent='Retry loading diff'; retryButton.onclick=function(){window.retryLazyDiffFile(retryButton);};
+     card.append(statusNode,retryButton);
+    }
     var status = card.querySelector('[data-diff-load-status]');
     if (status) status.textContent = 'Loading diff…';
     else if (!card.firstChild) card.appendChild(document.createTextNode('Loading diff…'));
@@ -265,6 +284,20 @@ templ diffViewerPerformanceScript() {
       var saved = card._diffScrollAnchor;
       if (saved && scroller && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) scroll = saved.snapshot;
       if (response) {
+       if (card.classList.contains('diff-file-slot')) {
+        var header = replacement.querySelector('.diff-file-header');
+        var destinationBody = document.createElement('div');
+        destinationBody.id = replacement.querySelector('.diff-file-body').id;
+        destinationBody.className = 'diff-file-body overflow-hidden transition-all duration-300 ease-in-out';
+        var adds=card.dataset.diffAdds, dels=card.dataset.diffDels;
+        header.querySelector('.diff-stat-add').textContent='+'+adds;
+        header.querySelector('.diff-stat-del').textContent='-'+dels;
+        header.querySelector('.diff-file-stats').setAttribute('aria-label',adds+' added lines, '+dels+' deleted lines');
+        card.className = replacement.className;
+        card.removeAttribute('role'); card.removeAttribute('tabindex'); card.removeAttribute('aria-expanded');
+        card.onclick=null; card.onkeydown=null;
+        card.replaceChildren(header,destinationBody);
+       }
        var body = replacement.querySelector('.diff-file-body');
        if (card.hasAttribute('data-chunk-index')) {
         card.replaceChildren();
@@ -301,6 +334,7 @@ templ diffViewerPerformanceScript() {
         card.style.minHeight = '';
         visible.delete(card);
        }
+       if (window._restoreDiffFileState) window._restoreDiffFileState();
        if (window.htmx) htmx.process(card);
       } else htmx.swap(card, html, {swapStyle:'outerHTML'});
       if (restore) { anchorRestore = null; delete card._diffScrollAnchor; }
@@ -353,6 +387,7 @@ templ diffViewerPerformanceScript() {
      observed.clear(); visible.clear(); headers.clear(); chunkObserver.disconnect(); chunks.clear(); activePanel = panel;
     }
     if (!panel) return;
+    if (window._prepareDiffPanel) window._prepareDiffPanel(viewer,panel);
     observed.forEach(function(card) {
      if (!card.isConnected || !card.hasAttribute('data-diff-lazy-url')) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
     });
@@ -362,7 +397,7 @@ templ diffViewerPerformanceScript() {
     viewer.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
      if (!chunks.has(chunk)) { chunks.add(chunk); if (chunk._saved) retain(chunk); chunkObserver.observe(chunk); }
     });
-    panel.querySelectorAll('.diff-file-card[data-diff-lazy-url]').forEach(function(card) {
+    panel.querySelectorAll('.diff-file-card[data-diff-lazy-url], .diff-file-slot[data-diff-lazy-url]').forEach(function(card) {
      if (observed.has(card)) return;
      observed.add(card); loadObserver.observe(card);
     });
@@ -380,7 +415,7 @@ templ diffViewerPerformanceScript() {
     });
     pump();
    }
-   return {refresh:refresh, restoreAnchor:restoreAnchor, destroy:function() {
+   return {refresh:refresh, restoreAnchor:restoreAnchor, cancelAnchor:cancelAnchor, destroy:function() {
     stopped = true;
     cancelAnchor();
     ['wheel','touchstart','pointerdown','keydown'].forEach(function(type) { scroller.removeEventListener(type, cancelAnchorForInput); });

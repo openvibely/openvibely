@@ -1752,42 +1752,13 @@ func TestDiffViewerWithReview_LargeFileLoadsProgressively(t *testing.T) {
 	if !strings.Contains(body, "chunk=0") {
 		t.Error("expected chunked lazy request")
 	}
-	if !strings.Contains(body, `data-copy-path="big.txt"`) {
-		t.Error("expected deferred large-file header copy path button")
+	if !strings.Contains(body, `data-diff-path="big.txt"`) || !strings.Contains(body, `data-file-revision=`) {
+		t.Fatal("large file must remain discoverable in the revisioned index")
 	}
-	if !strings.Contains(body, `<span class="flex items-center gap-1 min-w-0 flex-1"><span class="font-mono text-sm font-medium truncate min-w-0" data-tooltip-disabled>big.txt</span><button`) {
-		t.Error("expected deferred large-file copy button next to filename")
+	if strings.Contains(body, `class="diff-file-card `) || strings.Contains(body, `<table class="diff-table`) {
+		t.Fatal("initial response must not render file cards or rows")
 	}
-	if !strings.Contains(body, `onclick="toggleDiffFile(0)"`) {
-		t.Error("expected deferred large-file header to toggle collapse")
-	}
-	if !strings.Contains(body, `data-diff-toggle="0"`) {
-		t.Error("expected deferred large-file header to participate in persisted collapse state")
-	}
-	if !strings.Contains(body, `id="diff-chevron-0"`) || !strings.Contains(body, `id="diff-chevron-split-0"`) {
-		t.Error("expected deferred large-file cards to render inline and split chevrons")
-	}
-	if !strings.Contains(body, `id="diff-body-0"`) || !strings.Contains(body, `id="diff-body-split-0"`) {
-		t.Error("expected deferred large-file placeholders to expose collapsible body targets")
-	}
-	if !strings.Contains(body, `class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"`) {
-		t.Error("expected deferred placeholder body to use normal collapsible body styling")
-	}
-	if strings.Contains(body, `class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out p-6`) {
-		t.Error("deferred placeholder body should not keep padding on the collapsed element")
-	}
-	if !strings.Contains(body, `class="p-6 bg-base-100 text-center"`) {
-		t.Error("expected deferred placeholder content wrapper to keep placeholder spacing")
-	}
-	if strings.Contains(body, `<table class="diff-table`) {
-		t.Error("deferred large-file placeholder should not mount heavy diff table DOM")
-	}
-	if !strings.Contains(body, `/tasks/task123/changes/file?file_index=0&amp;view=inline&amp;review=true`) {
-		t.Error("expected inline load-diff endpoint")
-	}
-	if !strings.Contains(body, `/tasks/task123/changes/file?file_index=0&amp;view=split&amp;review=true`) {
-		t.Error("expected split load-diff endpoint")
-	}
+
 }
 
 func TestLoadDiffFileCard_RendersRequestedView(t *testing.T) {
@@ -2199,8 +2170,11 @@ func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) 
 	if strings.Contains(initial.String(), "<tr") {
 		t.Fatal("initial lazy viewer rendered rows")
 	}
-	if got := strings.Count(initial.String(), "data-diff-lazy-url="); got != 200 {
-		t.Fatalf("lazy layout cards=%d want 200", got)
+	if got := strings.Count(initial.String(), "data-diff-index="); got != 100 {
+		t.Fatalf("file index entries=%d want 100", got)
+	}
+	if strings.Contains(initial.String(), `class="diff-file-card `) {
+		t.Fatal("initial response must not render cards for either layout")
 	}
 	for _, meta := range buildDiffRenderMetas(ParseDiffOutput(diff)) {
 		for _, view := range []string{"inline", "split"} {

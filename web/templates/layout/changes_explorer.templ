@@ -46,8 +46,7 @@ templ ChangesExplorerScript() {
                 else button.removeAttribute('aria-current');
             });
             if (expand) {
-                var chevron = document.getElementById('diff-chevron-' + file.index);
-                if (chevron && !chevron.classList.contains('rotate-90') && window.toggleDiffFile) window.toggleDiffFile(Number(file.index));
+                if (window.diffFileStateBucket && window.diffFileStateBucket()[file.index] === false && window.toggleDiffFile) window.toggleDiffFile(Number(file.index));
             }
             if (window._refreshDiffPerformance) window._refreshDiffPerformance();
         }
@@ -78,6 +77,7 @@ templ ChangesExplorerScript() {
                 button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h6M11 10v6M8 19h6"/></svg>';
                 var label = document.createElement('span'); label.className = 'task-list-title'; label.textContent = parts[parts.length - 1]; button.append(label);
                 button.onclick = function() {
+                    if (viewer._diffPerformance) viewer._diffPerformance.cancelAnchor();
                     selected = file.path; save(); applySelection(true);
                     var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
                     var prefix = panel && panel.id === 'diff-content-split' ? 'diff-file-split-' : 'diff-file-';
@@ -85,7 +85,13 @@ templ ChangesExplorerScript() {
                     var scroller = viewer.closest('#tab-changes');
                     if (card && scroller) {
                         delete card._diffScrollAnchor;
+                        delete card._diffReadingAnchor;
                         scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+                        // A short unloaded slot may be too close to the bottom to
+                        // reach the viewport top until its content arrives.
+                        if (card.dataset.diffLazyUrl) card._diffScrollAnchor = {
+                            snapshot:{heights:new Map(),anchor:{path:file.path,cardOffset:0}},scrollTop:scroller.scrollTop
+                        };
                     }
                 };
                 parent.append(button);

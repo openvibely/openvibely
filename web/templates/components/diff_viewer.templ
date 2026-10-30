@@ -578,39 +578,44 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 		</div>
         <div hidden data-diff-explorer-files>
             for _, m := range metas {
-                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path }></span>
+                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path } data-file-revision={ m.Revision } data-diff-adds={ fmt.Sprint(diffStatCounts(m.File).Adds) } data-diff-dels={ fmt.Sprint(diffStatCounts(m.File).Dels) }></span>
             }
         </div>
-		<!-- Diff Content with Review -->
-		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
-			for _, m := range metas {
-				if m.AutoLoad && taskID == "" {
-					@inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
-				} else {
-					@deferredDiffFileWithReview(m, taskID, "inline", true)
-				}
-			}
-		</div>
-		<div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
-			for _, m := range metas {
-				if m.AutoLoad && taskID == "" {
-					@splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
-				} else {
-					@deferredDiffFileWithReview(m, taskID, "split", true)
-				}
-			}
-		</div>
+        <!-- File cards are fetched only for the visible layout and viewport. -->
+        <div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
+            if taskID == "" {
+                for _, m := range metas {
+                    if m.AutoLoad {
+                        @inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
+                    } else {
+                        @deferredDiffFileWithReview(m, taskID, "inline", true)
+                    }
+                }
+            }
+        </div>
+        <div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
+            if taskID == "" {
+                for _, m := range metas {
+                    if m.AutoLoad {
+                        @splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
+                    } else {
+                        @deferredDiffFileWithReview(m, taskID, "split", true)
+                    }
+                }
+            }
+        </div>
+        @diffFileIndexScript()
 		<!-- Inline review JavaScript -->
 		@diffFileStateScript()
 		<script>
 
-			function toggleDiffFile(idx) {
+			function toggleDiffFile(idx, deferRefresh) {
 				var inlineBody = document.getElementById('diff-body-' + idx);
 				var splitBody = document.getElementById('diff-body-split-' + idx);
 				var chevron = document.getElementById('diff-chevron-' + idx);
 				var chevronSplit = document.getElementById('diff-chevron-split-' + idx);
 
-				var isExpanded = chevron && chevron.classList.contains('rotate-90');
+				var isExpanded = diffFileStateBucket()[idx] !== false;
 				var newState = !isExpanded;
 
 				// When collapsing a card whose sticky header is currently
@@ -670,27 +675,25 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					else el.setAttribute('data-collapsed', '1');
 				});
 
-				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; } });
+				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; delete card._diffReadingAnchor; } });
                 diffFileStateBucket()[idx] = newState;
-                if (window._refreshDiffPerformance) window._refreshDiffPerformance();
+                if (window._setDiffSlotState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(slot) { window._setDiffSlotState(slot,newState); });
+                if (!deferRefresh && window._refreshDiffPerformance) window._refreshDiffPerformance();
 			}
 
 			function toggleAllDiffFiles(expand) {
-				var viewer = document.getElementById('diff-viewer');
-				if (!viewer) return;
-				var count = parseInt(viewer.dataset.fileCount || '0');
-				for (var i = 0; i < count; i++) {
-					var chevron = document.getElementById('diff-chevron-' + i);
-					var isExpanded = chevron && chevron.classList.contains('rotate-90');
-					if (isExpanded !== expand) {
-						toggleDiffFile(i);
-					}
-				}
-			}
+                var viewer = document.getElementById('diff-viewer');
+                if (!viewer) return;
+                var count = parseInt(viewer.dataset.fileCount || '0');
+                for (var i=0; i<count; i++) {
+                    if ((diffFileStateBucket()[i] !== false) !== expand) toggleDiffFile(i,true);
+                }
+                if (window._refreshDiffPerformance) window._refreshDiffPerformance();
+            }
 
-			function expandAndScrollDiffFile(idx) {
+            function expandAndScrollDiffFile(idx) {
 				var chevron = document.getElementById('diff-chevron-' + idx);
-				var isExpanded = chevron && chevron.classList.contains('rotate-90');
+				var isExpanded = diffFileStateBucket()[idx] !== false;
 				if (!isExpanded) {
 					toggleDiffFile(idx);
 				}
@@ -713,6 +716,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				for (var i = 0; i < count; i++) {
 					if (state.hasOwnProperty(i)) {
 						var savedExpanded = state[i];
+                        if (window._setDiffSlotState) [document.getElementById('diff-file-' + i), document.getElementById('diff-file-split-' + i)].forEach(function(slot) { window._setDiffSlotState(slot,savedExpanded); });
 						var bodies = [
 							document.getElementById('diff-body-' + i),
 							document.getElementById('diff-body-split-' + i)
@@ -1879,7 +1883,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision
 				});
 
 				// Persist state
-				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; } });
+				if (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; delete card._diffReadingAnchor; } });
                 diffFileStateBucket()[idx] = newState;
                 if (window._refreshDiffPerformance) window._refreshDiffPerformance();
 			}

@@ -69,6 +69,13 @@ func TestProgressiveDiffIncludesEveryFileWithoutBodies(t *testing.T) {
 	if !strings.Contains(out.String(), `data-diff-path="f349"`) || strings.Contains(out.String(), "<tr") {
 		t.Fatal("manifest must contain all files without eagerly rendering rows")
 	}
+	if strings.Contains(out.String(), `class="diff-file-card `) {
+		t.Fatal("initial response still contains file cards")
+	}
+	if out.Len() > 256*1024 {
+		t.Fatalf("350-file index response is too large: %d bytes", out.Len())
+	}
+	t.Logf("350-file initial HTML: %d bytes, no file cards", out.Len())
 	if _, ok := DiffRenderMetaByIndex(diff.String(), 349); !ok {
 		t.Fatal("file after former cap is inaccessible")
 	}

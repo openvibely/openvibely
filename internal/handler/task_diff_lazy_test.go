@@ -24,7 +24,7 @@ func loadInlineTaskDiffCards(t *testing.T, h *Handler, e *echo.Echo, taskID, mar
 	var visit func(*html.Node)
 	visit = func(node *html.Node) {
 		for _, attr := range node.Attr {
-			if attr.Key == "data-diff-lazy-url" && strings.Contains(attr.Val, "view=inline") {
+			if attr.Key == "data-diff-index" || (attr.Key == "data-diff-lazy-url" && strings.Contains(attr.Val, "view=inline")) {
 				cards = append(cards, node)
 			}
 		}
@@ -34,14 +34,23 @@ func loadInlineTaskDiffCards(t *testing.T, h *Handler, e *echo.Echo, taskID, mar
 	}
 	visit(doc)
 	for _, card := range cards {
-		var endpoint, path string
+		var endpoint, path, index, revision string
 		for _, attr := range card.Attr {
 			if attr.Key == "data-diff-lazy-url" {
 				endpoint = attr.Val
 			}
-			if attr.Key == "data-diff-file-path" {
+			if attr.Key == "data-diff-file-path" || attr.Key == "data-diff-path" {
 				path = attr.Val
 			}
+			if attr.Key == "data-diff-index" {
+				index = attr.Val
+			}
+			if attr.Key == "data-file-revision" {
+				revision = attr.Val
+			}
+		}
+		if endpoint == "" {
+			endpoint = "/tasks/" + taskID + "/changes/file?file_index=" + index + "&view=inline&review=true&chunk=0&revision=" + url.QueryEscape(revision)
 		}
 		request := httptest.NewRequest(http.MethodGet, endpoint+"&file_path="+url.QueryEscape(path), nil)
 		response := httptest.NewRecorder()
