@@ -87,3 +87,99 @@ func TestUsageResetCreditsAndSelectedRedemption(t *testing.T) {
 		t.Error("invalid request reached provider")
 	}
 }
+
+func TestUsageResetAccountCredentialFallback(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	first := models.LLMConfig{Name: "A failed", Provider: models.ProviderOpenAI, Model: "one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "bad", OAuthAccountID: "same-account", OAuthExpiresAt: time.Now().Add(4 * time.Hour).UnixMilli()}
+	second := models.LLMConfig{Name: "B alias", Provider: models.ProviderOpenAI, Model: "two", AuthMethod: models.AuthMethodOAuth}
+	healthy := first
+	healthy.Name = "C healthy"
+	healthy.Model = "three"
+	healthy.OAuthAccessToken = "good"
+	other := first
+	other.Name = "D different account"
+	other.OAuthAccountID = "other-account"
+	other.OAuthAccessToken = "other"
+	for _, cfg := range []*models.LLMConfig{&first, &second, &healthy, &other} {
+		if err := env.LLMConfigs.Create(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := env.Fixtures.LinkModelOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+		t.Fatal(err)
+	}
+	badStatus := http.StatusForbidden
+	var tokens []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := r.Header.Get("Authorization")
+		tokens = append(tokens, token)
+		if r.Header.Get("ChatGPT-Account-ID") != "same-account" {
+			t.Error("crossed account boundary")
+		}
+		if r.Method == http.MethodPost {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if body["credit_id"] != "selected" || body["redeem_request_id"] != "same-attempt" {
+				t.Errorf("changed redemption: %v", body)
+			}
+		}
+		if token == "Bearer bad" {
+			w.WriteHeader(badStatus)
+			return
+		}
+		if token != "Bearer good" {
+			t.Errorf("unexpected credential %s", token)
+		}
+		w.Write([]byte(`{"available_count":1,"status":"reset"}`))
+	}))
+	defer server.Close()
+	old := openaiclient.OpenAIChatGPTAPIBaseURL
+	openaiclient.OpenAIChatGPTAPIBaseURL = server.URL + "/backend-api/codex/"
+	defer func() { openaiclient.OpenAIChatGPTAPIBaseURL = old }()
+	svc := NewUsageAnalyticsService(env.Usage, env.LLMConfigs)
+	configs, err := env.LLMConfigs.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key string
+	for _, group := range accountUsageGroups(configs, "openai") {
+		if group[0].OAuthAccountID == "same-account" {
+			key = usageAccountGroupKey(group)
+		}
+	}
+	if key == "" {
+		t.Fatal("missing account group")
+	}
+	if _, err := svc.UsageResetCredits(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 2 || tokens[0] != "Bearer bad" || tokens[1] != "Bearer good" {
+		t.Fatalf("read credential sequence: %v", tokens)
+	}
+	tokens = nil
+	if _, err := svc.ConsumeUsageReset(ctx, key, "selected", "same-attempt"); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 2 || tokens[0] != "Bearer bad" || tokens[1] != "Bearer good" {
+		t.Fatalf("redemption credential sequence: %v", tokens)
+	}
+	tokens = nil
+	badStatus = http.StatusUnauthorized
+	if _, err := svc.ConsumeUsageReset(ctx, key, "selected", "same-attempt"); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens) != 2 || tokens[1] != "Bearer good" {
+		t.Fatalf("failed OAuth recovery prevented credential fallback: %v", tokens)
+	}
+	tokens = nil
+	badStatus = http.StatusServiceUnavailable
+	if _, err := svc.ConsumeUsageReset(ctx, key, "selected", "same-attempt"); err == nil {
+		t.Fatal("expected provider failure")
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("ambiguous POST was repeated using other credentials: %v", tokens)
+	}
+}

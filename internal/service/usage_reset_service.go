@@ -31,20 +31,15 @@ func (s *UsageAnalyticsService) usageResetRequest(ctx context.Context, accountKe
 	if err != nil {
 		return nil, err
 	}
-	var selected *models.LLMConfig
+	var selected []models.LLMConfig
 	for _, group := range accountUsageGroups(configs, "openai") {
 		if usageAccountGroupKey(group) == accountKey {
-			cfg := group[0]
-			selected = &cfg
+			selected = group
 			break
 		}
 	}
 	if selected == nil {
 		return nil, fmt.Errorf("OpenAI account configuration changed; reload accounts")
-	}
-	cfg, err := s.ensureFreshAccountUsageOAuth(ctx, *selected, s.openAIAccountUsageRefreshFunc())
-	if err != nil {
-		return nil, err
 	}
 	endpoint, err := openAIUsageEndpoint()
 	if err != nil {
@@ -71,5 +66,38 @@ func (s *UsageAnalyticsService) usageResetRequest(ctx context.Context, accountKe
 		}
 		return req, nil
 	}
-	return s.doAccountUsageRequestWithOAuthRecovery(ctx, cfg, endpoint, build, s.openAIAccountUsageRefreshFunc())
+	credentials := newAccountUsageCredentials(selected, "openai")
+	var lastErr error
+	for {
+		candidate, ok := credentials.next()
+		if !ok {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		cfg, err := s.ensureFreshAccountUsageOAuth(ctx, candidate, s.openAIAccountUsageRefreshFunc())
+		if err != nil {
+			credentials.failed(candidate)
+			lastErr = err
+			continue
+		}
+		result, err := s.doAccountUsageRequestWithOAuthRecovery(ctx, cfg, endpoint, build, s.openAIAccountUsageRefreshFunc())
+		if err == nil {
+			credentials.succeeded(candidate)
+			return result, nil
+		}
+		// A failed read can use another credential. A redemption may already
+		// have happened: only retry it with another credential after an explicit
+		// authentication rejection, preserving the credit and redemption IDs.
+		if creditID != "" && !isAccountUsageHTTPStatus(err, http.StatusUnauthorized) && !isAccountUsageHTTPStatus(err, http.StatusForbidden) {
+			return nil, err
+		}
+		credentials.failed(candidate)
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no usable OpenAI credentials for this account")
+	}
+	return nil, lastErr
 }
