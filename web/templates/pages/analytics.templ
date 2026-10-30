@@ -303,15 +303,18 @@ templ analyticsContent(currentProject *models.Project) {
 				}
 					window._analyticsCharts = {};
 					window._analyticsAbortController = new AbortController();
+					if (window._analyticsDataAbortControllers) Array.from(window._analyticsDataAbortControllers).forEach(function(controller) { controller.abort(); });
+					window._analyticsDataAbortControllers = new Set();
 					if (window._analyticsDataAbortController) window._analyticsDataAbortController.abort();
 
 					function initAnalytics() {
 					if (analyticsGeneration !== window._analyticsGeneration) return;
 					var dataEl = document.getElementById('analytics-data');
 					if (!dataEl) return;
-					var projectID = dataEl.dataset.projectId;
-						var charts = window._analyticsCharts;
-						var eventSignal = window._analyticsAbortController.signal;
+						var projectID = dataEl.dataset.projectId;
+						var urlProjectID = new URLSearchParams(window.location.search).get('project_id');
+						if (!window._analyticsSelectedProjectID || urlProjectID === projectID) window._analyticsSelectedProjectID = projectID;
+							var charts = window._analyticsCharts;						var eventSignal = window._analyticsAbortController.signal;
                         const themeObserver = new MutationObserver(function() {
                             if (!dataEl.isConnected) { themeObserver.disconnect(); return; }
                             Object.values(charts).forEach(function(chart) { chart.update('none'); });
@@ -409,10 +412,26 @@ templ analyticsContent(currentProject *models.Project) {
 										usageEvidenceRequest++;
 										if (dataAbortController) dataAbortController.abort();
 									}
+									function cancelAnalyticsDataForProject(nextProjectID) {
+										if (!nextProjectID) return;
+										window._analyticsSelectedProjectID = nextProjectID;
+										abortAnalyticsData();
+										const controllers = window._analyticsDataAbortControllers;
+										if (controllers) Array.from(controllers).forEach(function(controller) { if (!controller.signal.aborted) controller.abort(); });
+										const controller = window._analyticsDataAbortController;
+										if (controller && !controller.signal.aborted) controller.abort();
+								}
+									window.openVibelyCancelAnalyticsDataForProject = cancelAnalyticsDataForProject;
+									eventSignal.addEventListener('abort', function() {
+										if (window.openVibelyCancelAnalyticsDataForProject === cancelAnalyticsDataForProject) delete window.openVibelyCancelAnalyticsDataForProject;
+									}, {once:true});
 									function beginDataGeneration() {
 										abortAnalyticsData();
 										dataAbortController = new AbortController();
-									window._analyticsDataAbortController = dataAbortController;
+										if (!window._analyticsDataAbortControllers) window._analyticsDataAbortControllers = new Set();
+										window._analyticsDataAbortControllers.add(dataAbortController);
+										dataAbortController.signal.addEventListener('abort', function() { window._analyticsDataAbortControllers && window._analyticsDataAbortControllers.delete(dataAbortController); }, {once:true});
+										window._analyticsDataAbortController = dataAbortController;
 									latestDashboard = null;
 									latestRunActivity = null;
 									runActivityFailed = false;
@@ -421,16 +440,16 @@ templ analyticsContent(currentProject *models.Project) {
 									const loadMore = document.getElementById('loadMoreEvidence');
 									if (loadMore) { loadMore.disabled = true; loadMore.classList.add('hidden'); loadMore.removeAttribute('aria-busy'); }
 								}							// Fetch JSON for the current filter generation only. Never preserve stale data.
-							async function fetchJSON(url) {
-								const requestGeneration = dataGeneration;
-								const controller = dataAbortController;
-								const response = await fetch(url, controller ? { signal: controller.signal } : undefined);
-								if (!response.ok) throw new Error('Analytics request failed (' + response.status + ')');
-								const data = await response.json();
-								if (requestGeneration !== dataGeneration || (controller && controller.signal.aborted)) throw new DOMException('Stale Analytics response', 'AbortError');
+								async function fetchJSON(url) {
+									if (window._analyticsSelectedProjectID && window._analyticsSelectedProjectID !== projectID) throw new DOMException('Analytics project changed', 'AbortError');
+									const requestGeneration = dataGeneration;
+									const controller = dataAbortController;
+									const response = await fetch(url, controller ? { signal: controller.signal } : undefined);
+									if (!response.ok) throw new Error('Analytics request failed (' + response.status + ')');
+									const data = await response.json();
+									if (requestGeneration !== dataGeneration || (controller && controller.signal.aborted) || (window._analyticsSelectedProjectID && window._analyticsSelectedProjectID !== projectID)) throw new DOMException('Stale Analytics response', 'AbortError');
 									return data;
-								}
-								function leaveAnalytics() {
+								}								function leaveAnalytics() {
 									abortAnalyticsData();
 									if (analyticsGeneration === window._analyticsGeneration) window._analyticsGeneration++;
 									if (window._analyticsAbortController && !window._analyticsAbortController.signal.aborted) window._analyticsAbortController.abort();
@@ -438,11 +457,14 @@ templ analyticsContent(currentProject *models.Project) {
 								document.body.addEventListener('htmx:beforeRequest', function(event) {
 									const detail = event.detail || {};
 									const target = detail.target || (detail.requestConfig && detail.requestConfig.target);
-									const path = detail.pathInfo && detail.pathInfo.requestPath;
-									// Cancel data work on a navigation request, but keep the visible page
-                                    // usable if the request fails or is cancelled. Actual removal (or
-                                    // pagehide) disposes charts and page listeners via leaveAnalytics.
-                                    if (target && target.id === 'main-content' && path && new URL(path, window.location.href).pathname !== '/analytics') abortAnalyticsData();
+									const path = detail.pathInfo && (detail.pathInfo.finalRequestPath || detail.pathInfo.requestPath) || detail.requestConfig && detail.requestConfig.path;
+									// A project change can stay on /analytics. Cancel its requests as
+									// soon as navigation starts, before the old page is swapped out.
+									if (target && target.id === 'main-content' && path) {
+										const destination = new URL(path, window.location.href);
+										const destinationProjectID = destination.searchParams.get('project_id');
+										if (destination.pathname !== '/analytics' || (destinationProjectID && destinationProjectID !== projectID)) abortAnalyticsData();
+									}
 								}, { signal: eventSignal });
 								window.addEventListener('pagehide', leaveAnalytics, { once: true, signal: eventSignal });
 						function destroyChart(key) {
@@ -451,8 +473,8 @@ templ analyticsContent(currentProject *models.Project) {
 							delete charts[key];
 						}
 							function showAnalyticsError(error) {
-								finishPanelLoading(true);
 								if (error && error.name === 'AbortError') return;
+								finishPanelLoading(true);
 								Object.keys(charts).forEach(destroyChart);								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
 								box.classList.remove('hidden');
