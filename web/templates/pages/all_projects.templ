@@ -207,17 +207,3 @@ if destination == "/tasks/new" || destination == "/automations/new" {
 		}
 	</div>
 }
-
-
-templ AllProjectsChatUnavailable(projects []models.Project) {
-	@layout.Base("Chat", projects, models.AllProjectsID) {
-		@AllProjectsChatUnavailableContent()
-	}
-}
-
-templ AllProjectsChatUnavailableContent() {
-	<div id="all-projects-chat" class="h-full">
-		@layout.PageTitle("Chat")
-		<p class="text-sm opacity-60">All projects chat isn’t available yet.</p>
-	</div>
-}

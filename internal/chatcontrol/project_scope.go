@@ -6,7 +6,7 @@ import (
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
-const projectSelectionHelp = "Optional destination/filter project ID from list_projects. Defaults to the current project. Available in interactive web/API chat only; task follow-ups remain restricted to their owning project."
+const projectSelectionHelp = "Optional destination/filter project ID from list_projects. Defaults to the current project in a project conversation. In All projects chat an explicit real project ID is required; call once per project for a subset or all. Available in interactive web/API chat only; task follow-ups remain restricted to their owning project."
 
 // SupportsProjectSelection identifies actions whose implicit project can be
 // selected by an interactive web/API conversation. Task workers and channel
@@ -16,6 +16,7 @@ func SupportsProjectSelection(name string) bool {
 	case "create_task", "create_swarm_task", "edit_task", "execute_tasks", "cancel_task",
 		"list_tasks", "view_swarm", "view_task_thread", "send_to_task", "merge_task",
 		"set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal",
+		"github_is_actor_authorized", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 		"list_alerts", "get_alert", "create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert",
 		"update_project_settings", "create_agent", "update_agent",
 		"schedule_task", "delete_schedule", "modify_schedule", "list_schedules",

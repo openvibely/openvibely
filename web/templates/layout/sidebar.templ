@@ -359,7 +359,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						}
 
-						if (newProjectId === '__all_projects__' && !['/tasks', '/analytics', '/automations'].includes(currentPath)) newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
+						if (newProjectId === '__all_projects__' && !['/chat', '/tasks', '/analytics', '/automations'].includes(currentPath)) newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
 						rememberProjectLocation();
 						if (desktopProjectNavigation || matchMedia('(min-width: 1024px)').matches) newUrl = projectLocation(newProjectId);
 

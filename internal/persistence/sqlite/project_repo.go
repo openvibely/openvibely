@@ -15,7 +15,7 @@ type ProjectRepo struct {
 }
 
 const projectWorkerCapacityProjectsQuery = `SELECT id, name, max_workers
-	FROM projects ORDER BY is_default DESC, name ASC`
+	FROM projects WHERE id != '__all_projects__' ORDER BY is_default DESC, name ASC`
 
 func NewProjectRepo(db *sql.DB) *ProjectRepo {
 	return &ProjectRepo{db: db}
@@ -24,7 +24,7 @@ func NewProjectRepo(db *sql.DB) *ProjectRepo {
 func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, skill_memory_permissions, created_at, updated_at
-			 FROM projects ORDER BY is_default DESC, name ASC`)
+			 FROM projects WHERE id != '__all_projects__' ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)
 	}
@@ -42,7 +42,7 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 }
 
 const projectAPIProjectsQuery = `SELECT id, name, repo_path, created_at
-	FROM projects ORDER BY is_default DESC, name ASC`
+	FROM projects WHERE id != '__all_projects__' ORDER BY is_default DESC, name ASC`
 
 // ListAPIProjects returns the compact project projection required by
 // GET /api/projects. Keep this separate from List because management, detail,
@@ -86,8 +86,8 @@ func (r *ProjectRepo) ListWorkerCapacityProjects(ctx context.Context) ([]models.
 	return projects, rows.Err()
 }
 
-const projectRepoRootsQuery = `SELECT id, repo_path FROM projects`
-const projectRepoValidationProjectsQuery = `SELECT id, name, repo_path, repo_url FROM projects`
+const projectRepoRootsQuery = `SELECT id, repo_path FROM projects WHERE id != '__all_projects__'`
+const projectRepoValidationProjectsQuery = `SELECT id, name, repo_path, repo_url FROM projects WHERE id != '__all_projects__'`
 
 // ListRepoValidationProjects returns the compact unordered project projection
 // needed by startup repository-path validation. Keep this separate from List:
@@ -153,7 +153,7 @@ func (r *ProjectRepo) ListRepoRoots(ctx context.Context) ([]persistence.ProjectR
 // idx_projects_selector_order covering index lets SQLite satisfy this order
 // without a temp B-tree sort or table lookup.
 const projectSelectorOptionsQuery = `SELECT id, name, is_default
-			 FROM projects ORDER BY is_default DESC, name ASC, id ASC`
+			 FROM projects WHERE id != '__all_projects__' ORDER BY is_default DESC, name ASC, id ASC`
 
 func (r *ProjectRepo) ListSelectorOptions(ctx context.Context) ([]models.Project, error) {
 	rows, err := r.db.QueryContext(ctx, projectSelectorOptionsQuery)

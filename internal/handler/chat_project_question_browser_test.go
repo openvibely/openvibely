@@ -12,12 +12,17 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 
 	"github.com/openvibely/openvibely/web/static"
 )
 
-func TestProjectQuestionPickerInChrome(t *testing.T) {
+func TestProjectQuestionPickerInChrome(t *testing.T) { testProjectQuestionPickerInChrome(t, false) }
+func TestAllProjectsChatQuestionPickerInChrome(t *testing.T) {
+	testProjectQuestionPickerInChrome(t, true)
+}
+func testProjectQuestionPickerInChrome(t *testing.T, all bool) {
 	for _, width := range []int{1024, 390} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			if testing.Short() {
@@ -30,7 +35,11 @@ func TestProjectQuestionPickerInChrome(t *testing.T) {
 			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().WithName("API").Build()
 			second := tc.CreateProject().WithName("Website").Build()
-			pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-picker", []chatInputRequestQuestion{
+			scope := project.ID
+			if all {
+				scope = models.AllProjectsID
+			}
+			pending, err := tc.handler.chatInputRequests.create(scope, "exec-picker", []chatInputRequestQuestion{
 				{ID: "model", Question: "Which model?", Options: []chatInputRequestOption{{Label: "Default", Description: "Use default"}, {Label: "Fast", Description: "Use fast"}}},
 				{ID: "scope", Kind: "projects", Question: "Which projects?", Options: []chatInputRequestOption{{Label: "All projects", Description: "All"}, {Label: "Specific projects", Description: "Choose"}}, Projects: []events.ChatInputProject{{ID: project.ID, Name: project.Name}, {ID: second.ID, Name: second.Name}}},
 			})
@@ -99,7 +108,7 @@ func TestProjectQuestionPickerInChrome(t *testing.T) {
 				"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 				"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
 				"--user-data-dir="+filepath.Join(t.TempDir(), "chat-input-request-profile"),
-				fmt.Sprintf("--window-size=%d,844", width), server.URL+"/chat?project_id="+project.ID,
+				fmt.Sprintf("--window-size=%d,844", width), server.URL+"/chat?project_id="+scope,
 			)
 			require.NoError(t, startHandlerBrowserProcess(cmd))
 			stopped := false

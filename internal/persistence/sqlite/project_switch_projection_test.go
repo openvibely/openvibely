@@ -17,7 +17,7 @@ func TestProjectSwitchSelectorSQLShapeAndPlan(t *testing.T) {
 	statements := counter.Statements()
 	require.Len(t, statements, 1)
 	normalized := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	require.Equal(t, "select id, name, is_default from projects order by is_default desc, name asc, id asc", normalized)
+	require.Equal(t, "select id, name, is_default from projects where id != '__all_projects__' order by is_default desc, name asc, id asc", normalized)
 	rows, err := db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+statements[0])
 	require.NoError(t, err)
 	defer rows.Close()

@@ -33,7 +33,7 @@ func TestProjectRepo_ListAPIProjectsUsesCompactProjection(t *testing.T) {
 		t.Fatalf("ListAPIProjects statements = %d, want 1: %#v", len(statements), statements)
 	}
 	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	if query != "select id, name, repo_path, created_at from projects order by is_default desc, name asc" {
+	if query != "select id, name, repo_path, created_at from projects where id != '__all_projects__' order by is_default desc, name asc" {
 		t.Fatalf("ListAPIProjects query = %q", query)
 	}
 	for _, omitted := range []string{"description", "repo_url", "default_agent_config_id", "max_workers", "updated_at"} {

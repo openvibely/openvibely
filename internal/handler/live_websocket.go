@@ -273,7 +273,7 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 	if cmd.ProjectID == "" || h.projectRepo == nil {
 		return false
 	}
-	if cmd.ProjectID == models.AllProjectsID {
+	if cmd.ProjectID == models.AllProjectsID && cmd.Op == "live" {
 		// Authentication is instance-wide. The virtual scope receives project
 		// notifications, but execution streams still require their real owner.
 		if cmd.Op != "live" {
@@ -338,7 +338,7 @@ func (h *Handler) streamLive(ctx context.Context, cmd liveCommand, send func(liv
 		}
 		defer h.broadcaster.Unsubscribe(tasks)
 	}
-	if h.chatBroadcaster != nil && cmd.ProjectID != models.AllProjectsID {
+	if h.chatBroadcaster != nil {
 		chats, err = h.chatBroadcaster.SubscribeProject(cmd.ProjectID)
 		if err != nil {
 			send(liveFrame{Event: "retry", Data: "live subscription unavailable"})

@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
@@ -303,6 +304,9 @@ func (h *Handler) startStreamingResponse(params streamingResponseParams) error {
 }
 
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
+	if params.ProjectID == models.AllProjectsID && !params.IsTaskFollowup {
+		params.SystemContext = combineContexts(params.SystemContext, llmprompt.AllProjectsChatContext)
+	}
 	if params.updateWorkDone != nil {
 		defer params.updateWorkDone()
 	}

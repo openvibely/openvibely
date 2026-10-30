@@ -1,6 +1,7 @@
 package models
 
-// AllProjectsID is a UI read scope, never a persisted project or a write target.
+// AllProjectsID identifies the aggregate UI and its reserved chat-history owner.
+// It is never a destination for project work.
 const AllProjectsID = "__all_projects__"
 
 func AllProjectsOption() Project {

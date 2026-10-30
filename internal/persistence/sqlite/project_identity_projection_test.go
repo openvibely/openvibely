@@ -33,5 +33,5 @@ func TestProjectSelectorExactProjection(t *testing.T) {
 	require.NoError(t, err)
 	statements := counter.Statements()
 	require.Len(t, statements, 1)
-	require.Equal(t, "select id, name, is_default from projects order by is_default desc, name asc, id asc", strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")))
+	require.Equal(t, "select id, name, is_default from projects where id != '__all_projects__' order by is_default desc, name asc, id asc", strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")))
 }

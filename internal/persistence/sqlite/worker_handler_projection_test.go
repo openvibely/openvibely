@@ -24,8 +24,8 @@ func TestWorkerHandlerExactProjection(t *testing.T) {
 }
 func assertWorkerCapacityProjectProjection(t *testing.T, counter *testutil.SQLStatementCounter) {
 	t.Helper()
-	const compact = "select id, name, max_workers from projects order by is_default desc, name asc"
-	const selector = "select id, name, is_default from projects order by is_default desc, name asc, id asc"
+	const compact = "select id, name, max_workers from projects where id != '__all_projects__' order by is_default desc, name asc"
+	const selector = "select id, name, is_default from projects where id != '__all_projects__' order by is_default desc, name asc, id asc"
 
 	compactCount := 0
 	for _, statement := range counter.Statements() {

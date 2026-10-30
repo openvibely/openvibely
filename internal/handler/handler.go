@@ -674,6 +674,9 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	ctx := c.Request().Context()
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID == models.AllProjectsID {
+		if c.Request().URL.Path == "/chat" || strings.HasPrefix(c.Request().URL.Path, "/chat/") {
+			return projectID, nil
+		}
 		return "", echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this operation.")
 	}
 	if projectID != "" {
@@ -690,7 +693,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 		selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
 		if err != nil {
 			applog.Debugf("[handler] failed to load selected project preference: %v", err)
-		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" {
+		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" && selectedProjectID != models.AllProjectsID {
 			p, err := h.projectSvc.GetByID(ctx, selectedProjectID)
 			if err != nil {
 				return "", err

@@ -102,7 +102,8 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("Location"))
 	project, err := h.projectSvc.GetByID(t.Context(), models.AllProjectsID)
 	require.NoError(t, err)
-	require.Nil(t, project)
+	require.NotNil(t, project)
+	require.Empty(t, project.RepoPath)
 }
 
 func TestAllProjectsPreferenceSurvivesLaunch(t *testing.T) {
@@ -118,7 +119,7 @@ func TestAllProjectsPreferenceSurvivesLaunch(t *testing.T) {
 	rec = httptest.NewRecorder()
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/chat", nil))
 	require.Equal(t, 200, rec.Code)
-	require.Contains(t, rec.Body.String(), `id="all-projects-chat"`)
+	require.Contains(t, rec.Body.String(), `id="chat-form"`)
 	require.NotContains(t, rec.Body.String(), `id="all-projects-choose"`)
 }
 
@@ -160,7 +161,7 @@ func TestAllProjectsDesktopLaunchKeepsRestorationBootstrap(t *testing.T) {
 	require.Empty(t, rec.Header().Get("Location"), "the original launch URL must reach the shell's saved-location/outbox restoration")
 	require.Contains(t, rec.Body.String(), `data-openvibely-runtime="desktop"`)
 	require.Contains(t, rec.Body.String(), `/analytics?project_id=__all_projects__&amp;range=7d#usage`)
-	require.Contains(t, rec.Body.String(), `data-all-projects-view="tasks"`)
+	require.Contains(t, rec.Body.String(), `id="chat-form"`)
 }
 
 func TestAllProjectsStaleFilterRefreshesWholeView(t *testing.T) {
@@ -437,7 +438,7 @@ func TestAllProjectsChatDoesNotRequireProjectChooser(t *testing.T) {
 		rec := httptest.NewRecorder()
 		app.ServeHTTP(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), `id="all-projects-chat"`)
+		require.Contains(t, rec.Body.String(), `id="chat-form"`)
 		require.NotContains(t, rec.Body.String(), `id="all-projects-choose"`)
 		require.Empty(t, rec.Header().Get("Location"))
 	}

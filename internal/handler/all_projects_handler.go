@@ -14,7 +14,7 @@ import (
 )
 
 // allProjectsScope handles the virtual UI scope before project-specific handlers
-// can resolve a default project. The scope has no database row or write authority.
+// can resolve a default project. Only Chat may write to its reserved history owner.
 func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		// Resolve the saved virtual selection before real-project fallback.
@@ -29,7 +29,10 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 					if h.desktopMode && c.Request().URL.RawQuery == "" {
 						// Keep the launch URL intact so the shell can restore
 						// saved locations and replay any newer preference outbox.
-						return h.AllProjects(c)
+						query := c.QueryParams()
+						query.Set("project_id", models.AllProjectsID)
+						c.Request().URL.RawQuery = query.Encode()
+						return h.Chat(c)
 					}
 				}
 				query := c.QueryParams()
@@ -38,6 +41,9 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			}
 		}
 		if c.QueryParam("project_id") != models.AllProjectsID {
+			return next(c)
+		}
+		if path == "/chat" || strings.HasPrefix(path, "/chat/") {
 			return next(c)
 		}
 		// These controls create or configure the shell itself, not a scoped item.
@@ -117,15 +123,6 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "Choose a project before making changes.")
 		}
 		switch path {
-		case "/chat":
-			projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-			if err != nil {
-				return err
-			}
-			if isHTMX(c) {
-				return render(c, http.StatusOK, pages.AllProjectsChatUnavailableContent())
-			}
-			return render(c, http.StatusOK, pages.AllProjectsChatUnavailable(projects))
 		case "/tasks", "/automations", "/analytics":
 			return h.AllProjects(c)
 		case "/tasks/sidebar":

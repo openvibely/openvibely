@@ -30,6 +30,9 @@ func (h *Handler) projectSelectedChatHandlers(params streamingResponseParams, co
 			if err != nil {
 				return "", err
 			}
+			if projectID == models.AllProjectsID || (params.ProjectID == models.AllProjectsID && projectID == "") {
+				return "", fmt.Errorf("%s: select a real project_id from list_projects; for multiple projects call this tool once per selected project", name)
+			}
 			if projectID == "" || projectID == params.ProjectID {
 				return handler(ctx, forwarded)
 			}
@@ -49,6 +52,11 @@ func (h *Handler) projectSelectedChatHandlers(params streamingResponseParams, co
 			scoped := params
 			scoped.ProjectID = project.ID
 			return h.chatActionHandlers(scoped, collector, mode, surface)[name](ctx, forwarded)
+		}
+	}
+	if params.ProjectID == models.AllProjectsID {
+		handlers["switch_project"] = func(context.Context, json.RawMessage) (string, error) {
+			return "", fmt.Errorf("All projects chat stays in this workspace; use project_id on individual tools instead")
 		}
 	}
 	return handlers

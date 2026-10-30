@@ -133,6 +133,9 @@ func (s *ProjectService) Create(ctx context.Context, p *models.Project) error {
 }
 
 func (s *ProjectService) Update(ctx context.Context, p *models.Project) error {
+	if p.ID == models.AllProjectsID {
+		return fmt.Errorf("All projects is a chat workspace, not an editable project")
+	}
 	if err := s.validateProjectWorkerLimit(ctx, p, true); err != nil {
 		return err
 	}
@@ -169,6 +172,9 @@ func (s *ProjectService) validateProjectWorkerLimit(ctx context.Context, p *mode
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
+	if id == models.AllProjectsID {
+		return fmt.Errorf("All projects is a chat workspace, not an editable project")
+	}
 	project, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err

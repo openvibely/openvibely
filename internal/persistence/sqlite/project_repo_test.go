@@ -109,7 +109,7 @@ func TestProjectRepo_ListRepoRootsUsesCompactUnorderedProjection(t *testing.T) {
 		t.Fatalf("statements = %d, want 1: %v", len(statements), statements)
 	}
 	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	if query != "select id, repo_path from projects" {
+	if query != "select id, repo_path from projects where id != '__all_projects__'" {
 		t.Fatalf("unexpected compact query: %s", statements[0])
 	}
 
@@ -181,7 +181,7 @@ func TestProjectRepo_ListRepoValidationProjectsUsesCompactUnorderedProjection(t 
 		t.Fatalf("statements = %d, want 1: %v", len(statements), statements)
 	}
 	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	if query != "select id, name, repo_path, repo_url from projects" {
+	if query != "select id, name, repo_path, repo_url from projects where id != '__all_projects__'" {
 		t.Fatalf("unexpected validation query: %s", statements[0])
 	}
 	if strings.Contains(query, "order by") {

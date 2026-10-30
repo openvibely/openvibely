@@ -534,5 +534,7 @@ func TestLiveWebSocketAllProjectsNotifications(t *testing.T) {
 	client.next(t, "all", "file_modified")
 	require.False(t, tc.handler.liveSubscriptionAllowed(t.Context(), liveCommand{Op: "execution", ProjectID: models.AllProjectsID, ExecID: exec.ID}))
 	require.False(t, tc.handler.liveSubscriptionAllowed(t.Context(), liveCommand{Op: "live", ProjectID: models.AllProjectsID, TaskID: "missing"}))
-	require.Equal(t, 0, tc.handler.chatBroadcaster.SubscriberCount(), "aggregate notifications must not subscribe to chat contents")
+	require.Equal(t, 1, tc.handler.chatBroadcaster.SubscriberCount())
+	tc.handler.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: models.AllProjectsID, Message: "workspace message"})
+	client.next(t, "all", "chat_new_message")
 }
