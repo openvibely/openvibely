@@ -1904,7 +1904,13 @@ templ analyticsContent(currentProject *models.Project) {
 												card.className='card bg-base-100 shadow-sm border border-base-300 h-full'+(accounts.length%2===1&&index===accounts.length-1?' lg:col-span-2':'');
 												card.style.minHeight='12rem';card.setAttribute('aria-busy','true');
 												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
-												target.appendChild(card);return card;
+												card.id='usage-account-'+account.key;
+                                                target.appendChild(card);
+                                                if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
+                                                    card.classList.add('ring-2', 'ring-primary');
+                                                    card.scrollIntoView({block: 'center'});
+                                                }
+                                                return card;
 											});
 											await Promise.allSettled(accounts.map(async function(account,index){
 												const card=cards[index];

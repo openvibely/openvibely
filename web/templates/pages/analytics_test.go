@@ -1706,3 +1706,26 @@ func TestBrowserFunctional_AnalyticsAnthropicResets(t *testing.T) {
  });</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_AnalyticsAccountAlerts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage&account_key=account');
+ window.Chart=function(){this.destroy=function(){};};
+ const response=data=>({ok:true,json:async()=>data});
+ window.fetch=async function(url,opts){const u=new URL(url,location.href),p=u.searchParams;
+ if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'openai'}]});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'openai',limits:[]}]});
+ if(u.pathname.endsWith('/resets'))return response({available_count:0,credits:[]});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});};
+ window.addEventListener('load',async()=>{const result=document.getElementById('reconnect-result');try{
+ const wait=()=>new Promise(r=>setTimeout(r,20));
+ for(let i=0;i<150&&!document.getElementById('usage-account-account');i++)await wait();
+ if(!document.getElementById('usage-account-account').classList.contains('ring-primary'))throw Error('target account not highlighted');
+ result.dataset.testResult='pass';}catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}});
+ </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
