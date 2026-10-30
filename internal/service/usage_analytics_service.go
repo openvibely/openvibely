@@ -122,7 +122,29 @@ type UsageAccountDescriptor struct {
 }
 
 func accountUsageDisplayIdentity(cfg models.LLMConfig) string {
-	return preferredAccountIdentity(cfg.OAuthProviderDisplayName, cfg.OAuthConnectionName, cfg.Name)
+	if identity := strings.TrimSpace(cfg.OAuthProviderDisplayName); identity != "" {
+		return preferredAccountIdentity(identity)
+	}
+	switch models.LLMProvider(strings.ToLower(strings.TrimSpace(string(cfg.Provider)))) {
+	case models.ProviderOpenAI:
+		return "OpenAI account"
+	case models.ProviderAnthropic:
+		return "Anthropic account"
+	default:
+		return "Connected account"
+	}
+}
+
+func accountUsageGroupDisplayIdentity(group []models.LLMConfig, labelsByConnectionID map[string]string) string {
+	identities := make([]string, 0, len(group))
+	for _, cfg := range group {
+		identity := strings.TrimSpace(labelsByConnectionID[cfg.OAuthConnectionID])
+		if identity == "" {
+			identity = accountUsageDisplayIdentity(cfg)
+		}
+		identities = append(identities, identity)
+	}
+	return preferredAccountIdentity(identities...)
 }
 
 func preferredAccountIdentity(candidates ...string) string {
@@ -167,12 +189,20 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	if err != nil {
 		return nil, err
 	}
+	connections, err := s.llmConfigRepo.ListOAuthConnections(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	labelsByConnectionID := make(map[string]string, len(connections))
+	for _, connection := range connections {
+		labelsByConnectionID[connection.ID] = connection.Name
+	}
 	for _, provider := range []string{"openai", "anthropic"} {
 		for _, group := range accountUsageGroups(configs, provider) {
 			result = append(result, UsageAccountDescriptor{
 				Key:      usageAccountGroupKey(group),
 				Provider: provider,
-				Identity: accountUsageDisplayIdentity(group[0]),
+				Identity: accountUsageGroupDisplayIdentity(group, labelsByConnectionID),
 			})
 		}
 	}

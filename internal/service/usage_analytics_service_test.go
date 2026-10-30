@@ -30,16 +30,28 @@ func TestUsageAccountInventoryShowsProviderIdentityAndSafeFallback(t *testing.T)
 	env := teststores.New(t)
 	ctx := context.Background()
 	openAI := &models.LLMConfig{
-		Name: "OpenAI model alias", Provider: models.ProviderOpenAI, Model: "test",
+		Name: "A OpenAI model alias", Provider: models.ProviderOpenAI, Model: "test",
 		AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "openai-access-secret",
 		OAuthRefreshToken: "openai-refresh-secret", OAuthAccountID: "openai-account-id",
 	}
 	if err := env.LLMConfigs.Create(ctx, openAI); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := env.LLMConfigs.UpdateLinkedOAuthConnectionProfileIfRevision(ctx, openAI.ID, openAI.OAuthConnectionID, openAI.OAuthConfigRevision, openAI.Provider, openAI.OAuthAccountID, "owner@example.com", "verified-principal")
+	updated, err := env.LLMConfigs.UpdateLinkedOAuthConnectionProfileIfRevision(ctx, openAI.ID, openAI.OAuthConnectionID, openAI.OAuthConfigRevision, openAI.Provider, openAI.OAuthAccountID, "OpenAI owner", "verified-principal")
 	if err != nil || !updated {
-		t.Fatalf("store verified OpenAI profile: updated=%v err=%v", updated, err)
+		t.Fatalf("store OpenAI display name: updated=%v err=%v", updated, err)
+	}
+	openAIEmail := &models.LLMConfig{
+		Name: "Z OpenAI model alias", Provider: models.ProviderOpenAI, Model: "test",
+		AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "openai-email-access-secret",
+		OAuthRefreshToken: "openai-email-refresh-secret", OAuthAccountID: "openai-account-id",
+	}
+	if err := env.LLMConfigs.Create(ctx, openAIEmail); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = env.LLMConfigs.UpdateLinkedOAuthConnectionProfileIfRevision(ctx, openAIEmail.ID, openAIEmail.OAuthConnectionID, openAIEmail.OAuthConfigRevision, openAIEmail.Provider, openAIEmail.OAuthAccountID, "owner@example.com", "verified-email-principal")
+	if err != nil || !updated {
+		t.Fatalf("store OpenAI email identity: updated=%v err=%v", updated, err)
 	}
 	anthropic := &models.LLMConfig{
 		Name: "Anthropic model alias", Provider: models.ProviderAnthropic, Model: "test",
@@ -71,7 +83,7 @@ func TestUsageAccountInventoryShowsProviderIdentityAndSafeFallback(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"openai-access-secret", "openai-refresh-secret", "anthropic-access-secret", "anthropic-refresh-secret", "openai-account-id", "anthropic-account-id", openAI.ID, anthropic.ID} {
+	for _, secret := range []string{"openai-access-secret", "openai-refresh-secret", "openai-email-access-secret", "openai-email-refresh-secret", "anthropic-access-secret", "anthropic-refresh-secret", "openai-account-id", "anthropic-account-id", openAI.ID, openAIEmail.ID, anthropic.ID} {
 		if strings.Contains(string(encoded), secret) {
 			t.Fatalf("account inventory exposed private OAuth data %q: %s", secret, encoded)
 		}
