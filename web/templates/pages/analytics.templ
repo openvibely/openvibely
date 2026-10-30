@@ -1714,7 +1714,7 @@ templ analyticsContent(currentProject *models.Project) {
 											});
 											}
 										}
-									function renderAccountUsageCards(accounts, target, fallbackIdentity) {
+									function renderAccountUsageCards(accounts, target) {
 										const accountContainers = [target || document.getElementById('accountUsageCards')].filter(Boolean);
 										if (!accountContainers.length) return;
 										if (accounts.length === 0) {
@@ -1738,7 +1738,7 @@ templ analyticsContent(currentProject *models.Project) {
 											const error = account.error ? `\x3cdiv class="alert alert-warning py-2 text-xs mt-2">${escapeHTML(account.error)}\x3c/div>` : '';
 											const providerName = (account.provider || '').toLowerCase();
 											const providerTitle = providerName === 'openai' ? 'OpenAI' : (providerName === 'anthropic' ? 'Anthropic' : 'OAuth account');
-											const identity = account.account_identity || fallbackIdentity || '';
+											const identity = account.error ? '' : (account.account_identity || '');
 											const identityHtml = identity ? '\x3cdiv class="text-xs opacity-70">Account: ' + escapeHTML(identity) + '\x3c/div>' : '';
 											const subscription = account.plan_type || '';
 
@@ -1884,7 +1884,7 @@ templ analyticsContent(currentProject *models.Project) {
                                                             if(['reset','already_redeemed','alreadyRedeemed','already_used','no_credit','noCredit','not_limited','nothing_to_reset','nothingToReset','cooldown','ineligible'].includes(outcome))attempts.delete(credit.id);
                                                             const text=outcome==='reset'||outcome==='already_redeemed'||outcome==='alreadyRedeemed'?'Usage reset.':outcome==='no_credit'||outcome==='noCredit'?'That reset is no longer available.':outcome==='nothing_to_reset'||outcome==='nothingToReset'||outcome==='not_limited'?'Your usage does not need a reset right now.':outcome==='already_used'?'That reset was already used.':outcome==='cooldown'?'Reset is on cooldown.':outcome==='ineligible'?'This reset is not currently available.':'Reset was not confirmed. '+String(result.reason||outcome||'Please refresh and try again.').replaceAll('_',' ');
                                                             const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','true');
-                                                            try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary,account.identity);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
+                                                            try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
                                                             await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
                                                         }catch(e){message.textContent=e.message;button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}
                                                     },{signal:eventSignal});
@@ -1906,7 +1906,7 @@ templ analyticsContent(currentProject *models.Project) {
 												const card=document.createElement('div');
 												card.className='card bg-base-100 shadow-sm border border-base-300 h-full'+(accounts.length%2===1&&index===accounts.length-1?' lg:col-span-2':'');
 												card.style.minHeight='12rem';card.setAttribute('aria-busy','true');
-												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>'+(account.identity?'\x3cdiv class="text-xs opacity-70">Account: '+escapeHTML(account.identity)+'\x3c/div>':'')+'\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
+												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
 												card.id='usage-account-'+account.key;
                                                 target.appendChild(card);
                                                 if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
@@ -1922,7 +1922,7 @@ templ analyticsContent(currentProject *models.Project) {
 													if(refreshUsage)query.set('refresh','true');
 													const data=await fetchJSON('/api/analytics/usage?'+query.toString());
 													const temporary=document.createElement('div');
-													renderAccountUsageCards(data.account_limits||[],temporary,account.identity);
+													renderAccountUsageCards(data.account_limits||[],temporary);
 													const bodies=temporary.querySelectorAll('.card-body');
 													if(bodies.length){card.replaceChildren(...bodies);await loadResetCredits(card,account);}
 													else card.querySelector('p').textContent='No live limit snapshot yet';

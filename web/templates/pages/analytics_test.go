@@ -103,6 +103,9 @@ func TestBrowserFunctional_AnalyticsUsageCardsIdentifyOAuthAccounts(t *testing.T
 	if start < 0 || end <= start {
 		t.Fatal("account usage card renderer not found")
 	}
+	if strings.Contains(content, "escapeHTML(account.identity)") {
+		t.Fatal("loading cards should not show an account identity before usage is available")
+	}
 	fixture := `<!doctype html><html><body><main id="result"></main><div id="cards"></div><script>
 function escapeHTML(value){return String(value).replace(/[&<>\"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch];});}
 function formatResetCountdown(){return '';}
@@ -111,12 +114,14 @@ try {
  const target=document.getElementById('cards');
  renderAccountUsageCards([
   {provider:'openai',account_identity:'owner@example.com',limits:[]},
-  {provider:'anthropic',limits:[]}
- ],target,'claude-fallback@example.com');
+  {provider:'anthropic',limits:[]},
+  {provider:'anthropic',account_identity:'sibling@example.com',error:'usage unavailable',limits:[]}
+ ],target);
  const cards=Array.from(target.querySelectorAll('.card-body'));
- if(cards.length!==2)throw new Error('expected both provider account cards');
- if(!cards[0].textContent.includes('Account: owner@example.com'))throw new Error('OpenAI account email not shown');
- if(!cards[1].textContent.includes('Account: claude-fallback@example.com'))throw new Error('Anthropic identity fallback not shown');
+ if(cards.length!==3)throw new Error('expected all provider account cards');
+ if(!cards[0].textContent.includes('Account: owner@example.com'))throw new Error('successful usage account email not shown');
+ if(cards[1].textContent.includes('Account:'))throw new Error('missing account identity should not show a generic label');
+ if(cards[2].textContent.includes('Account:'))throw new Error('failed usage should not show a sibling account identity');
  const unsafe=document.createElement('div');
  renderAccountUsageCards([{provider:'openai',account_identity:'<img src=x onerror=alert(1)>',limits:[]}],unsafe);
  if(unsafe.querySelector('img')||!unsafe.textContent.includes('<img src=x onerror=alert(1)>'))throw new Error('account identity must be escaped as text');
