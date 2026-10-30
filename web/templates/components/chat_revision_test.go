@@ -46,12 +46,14 @@ func TestChatRevisionCompatibility(t *testing.T) {
 func TestChatRevisionFieldChanges(t *testing.T) {
 	base := models.Execution{ID: "exec", Status: models.ExecRunning, PromptSent: "prompt", Output: "output", ErrorMessage: "error"}
 	for name, change := range map[string]func(*models.Execution){
-		"id":       func(e *models.Execution) { e.ID += "!" },
-		"status":   func(e *models.Execution) { e.Status = models.ExecCompleted },
-		"prompt":   func(e *models.Execution) { e.PromptSent += "!" },
-		"output":   func(e *models.Execution) { e.Output += "!" },
-		"error":    func(e *models.Execution) { e.ErrorMessage += "!" },
-		"followup": func(e *models.Execution) { e.IsFollowup = true },
+		"id":          func(e *models.Execution) { e.ID += "!" },
+		"status":      func(e *models.Execution) { e.Status = models.ExecCompleted },
+		"prompt":      func(e *models.Execution) { e.PromptSent += "!" },
+		"output":      func(e *models.Execution) { e.Output += "!" },
+		"error":       func(e *models.Execution) { e.ErrorMessage += "!" },
+		"followup":    func(e *models.Execution) { e.IsFollowup = true },
+		"author id":   func(e *models.Execution) { e.AuthorUserID = "user-1" },
+		"author name": func(e *models.Execution) { e.AuthorName = "testuser1" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := base
@@ -72,6 +74,8 @@ func TestChatRevisionFieldChanges(t *testing.T) {
 		"expected turn": func(i *models.ThreadInput) { i.ExpectedTurnID += "!" },
 		"content":       func(i *models.ThreadInput) { i.Content += "!" },
 		"attachment":    func(i *models.ThreadInput) { i.AttachmentSessionID += "!" },
+		"author id":     func(i *models.ThreadInput) { i.AuthorUserID = "user-1" },
+		"author name":   func(i *models.ThreadInput) { i.AuthorName = "testuser1" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := input

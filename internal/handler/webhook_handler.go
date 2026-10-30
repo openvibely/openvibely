@@ -422,7 +422,11 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 	}
 
 	id := c.Param("id")
-	w, err := h.webhookRepo.GetByID(c.Request().Context(), id)
+	projectID, projectErr := h.getCurrentProjectID(c)
+	if projectErr != nil {
+		return projectErr
+	}
+	w, err := h.webhookRepo.GetByIDForProject(c.Request().Context(), id, projectID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load webhook")
 	}
@@ -498,6 +502,17 @@ func (h *Handler) HandleWebhookRotateSecret(c echo.Context) error {
 	}
 
 	id := c.Param("id")
+	projectID, projectErr := h.getCurrentProjectID(c)
+	if projectErr != nil {
+		return projectErr
+	}
+	endpoint, lookupErr := h.webhookRepo.GetByIDForProject(c.Request().Context(), id, projectID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if endpoint == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+	}
 	newSecret, err := h.webhookRepo.RotateSecret(c.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, persistence.ErrWebhookNotFound) {
@@ -518,7 +533,11 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 	}
 
 	id := c.Param("id")
-	endpoint, err := h.webhookRepo.GetByID(c.Request().Context(), id)
+	projectID, projectErr := h.getCurrentProjectID(c)
+	if projectErr != nil {
+		return projectErr
+	}
+	endpoint, err := h.webhookRepo.GetByIDForProject(c.Request().Context(), id, projectID)
 	if err != nil || endpoint == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 	}

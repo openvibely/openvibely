@@ -132,6 +132,7 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 	exec := admission.Execution
 	task = admission.Task
 	if err := h.startStreamingResponse(streamingResponseParams{
+		PrincipalID:      h.authPrincipalID(c),
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,

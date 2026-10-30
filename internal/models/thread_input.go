@@ -25,6 +25,8 @@ const (
 )
 
 type ThreadInput struct {
+	AuthorUserID           string            `json:"author_user_id,omitempty"`
+	AuthorName             string            `json:"author_name,omitempty"`
 	ReasoningEffort        string            `json:"reasoning_effort,omitempty"`
 	ServiceTier            string            `json:"service_tier,omitempty"`
 	ID                     string            `json:"id"`

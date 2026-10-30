@@ -936,7 +936,7 @@ func TestHandler_RunTaskRejectsForeignProjectScope(t *testing.T) {
 
 	rec := tc.HTMX().Post("/tasks/" + task.ID + "/run?project_id=" + foreign.ID + "&from=schedule").Execute()
 
-	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 }
 
 func TestHandler_CreateTask_Active_NoModelsConfiguredHTMX(t *testing.T) {

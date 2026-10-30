@@ -122,8 +122,8 @@ func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
 		task := tc.CreateTask(projectA.ID).Build()
 
 		rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + projectB.ID).WithForm(validScheduleForm(time.Now().Add(time.Hour))).Execute()
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
 		}
 		schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
 		if err != nil {
