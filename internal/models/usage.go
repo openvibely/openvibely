@@ -149,6 +149,7 @@ type AccountLimitView struct {
 
 type AccountUsageView struct {
 	Provider             string             `json:"provider"`
+	AccountIdentity      string             `json:"account_identity,omitempty"`
 	AccountID            string             `json:"-"`
 	AgentConfigID        string             `json:"-"`
 	PlanType             string             `json:"plan_type,omitempty"`

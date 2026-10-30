@@ -171,13 +171,7 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 	}()
 	go func() { defer wg.Done(); resets, resetErr = m.usage.UsageResetCredits(ctx, key) }()
 	wg.Wait()
-	label := "OpenAI"
-	if cfg.Provider == models.ProviderAnthropic {
-		label = "Anthropic"
-	}
-	if cfg.Name != "" {
-		label += " (" + cfg.Name + ")"
-	}
+	label := accountMonitorLabel(group, limits)
 	var rows []models.AccountLimitView
 	if limitErr == nil && limits != nil {
 		for _, a := range limits.AccountLimits {
@@ -218,6 +212,39 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 	return resetErr
 }
 
+// Use the same successful account view as Analytics, never a model alias.
+// Reset alerts can still be emitted when limits are unavailable; in that case
+// only use a stored identity if the group has a single credential owner.
+func accountMonitorLabel(group []models.LLMConfig, limits *models.AnalyticsUsageAccountLimitsViewModel) string {
+	provider := "OpenAI"
+	if group[0].Provider == models.ProviderAnthropic {
+		provider = "Anthropic"
+	}
+	identity := accountUsageGroupDisplayIdentity(group, nil)
+	plan := ""
+	if limits != nil {
+		for _, account := range limits.AccountLimits {
+			if account.Error != "" {
+				continue
+			}
+			identity = strings.TrimSpace(account.AccountIdentity)
+			plan = strings.TrimSpace(account.PlanType)
+			break
+		}
+	}
+	var details []string
+	if identity != "" && identity != accountUsageProviderFallbackIdentity(group[0].Provider) && identity != "Connected account" {
+		details = append(details, identity)
+	}
+	if plan != "" {
+		details = append(details, plan)
+	}
+	if len(details) > 0 {
+		return provider + " (" + strings.Join(details, " · ") + ")"
+	}
+	return provider
+}
+
 func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountLimitView, resets map[string]any, now time.Time, label string) []accountMonitorEvent {
 	var events []accountMonitorEvent
 	for _, limit := range limits {
@@ -235,23 +262,37 @@ func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountL
 			window = *limit.ResetsAt
 		}
 		cycle := prev.Cycle
-		if window == "" && pct < 80 && prev.Percent >= 80 {
+		if window == "" && pct <= 80 && prev.Percent > 80 {
 			cycle++
 		}
 
 		threshold := 0
-		if pct >= 95 {
+		if pct >= 100 {
+			threshold = 100
+		} else if pct > 95 {
 			threshold = 95
-		} else if pct >= 80 {
+		} else if pct > 80 {
 			threshold = 80
 		}
 		if prev.Window == window && prev.Cycle == cycle && prev.Threshold > threshold {
 			threshold = prev.Threshold
 		}
 		state.Limits[key] = monitoredLimit{Window: window, Cycle: cycle, Percent: pct, Threshold: threshold}
-		if threshold > 0 && pct >= 80 {
+		if threshold > 0 && pct > 80 {
 			eventKey := fmt.Sprintf("limit:%s:%s:%d:%d", key, window, cycle, threshold)
-			events = append(events, accountMonitorEvent{eventKey, label + " usage nearing its limit", fmt.Sprintf("%s is %.0f%% used (crossed %d%%).", limit.Label, pct, threshold), models.SeverityWarning})
+			// Keep the reported percentage, including fractions: 99.9% is not 100%.
+			percentage := strconv.FormatFloat(pct, 'f', -1, 64) + "%"
+			limitName := strings.TrimSpace(limit.Label)
+			if limitName == "" {
+				limitName = "Account"
+			}
+			title := fmt.Sprintf("%s — %s: %s used (nearing limit)", label, limitName, percentage)
+			severity := models.SeverityWarning
+			if pct >= 100 {
+				title = fmt.Sprintf("%s — %s: limit reached (%s used)", label, limitName, percentage)
+				severity = models.SeverityError
+			}
+			events = append(events, accountMonitorEvent{eventKey, title, fmt.Sprintf("%s is %s used.", limitName, percentage), severity})
 		}
 	}
 	credits, ok := resets["credits"].([]any)

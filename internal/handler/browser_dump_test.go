@@ -25,15 +25,20 @@ func runHandlerBrowserProcess(cmd *exec.Cmd) ([]byte, error) {
 	if err := startHandlerBrowserProcess(cmd); err != nil {
 		return nil, err
 	}
-	defer killHandlerBrowserProcess(cmd)
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	done := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		close(done)
+	}()
+	defer stopHandlerBrowserProcessWithWait(cmd, done)
 	select {
 	case <-dump.complete:
 		killHandlerBrowserProcess(cmd)
 		<-done
 		return dump.Bytes(), nil
-	case err := <-done:
+	case <-done:
+		err := waitErr
 		select {
 		case <-dump.complete:
 			return dump.Bytes(), nil
