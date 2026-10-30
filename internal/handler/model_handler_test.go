@@ -4199,6 +4199,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-6-luna", "gpt-6-luna"},
 		{"gpt-5.6-sol", "gpt-5.6-sol"},
 		{"gpt-5.6-terra", "gpt-5.6-terra"},
+		{"gpt-6.1-terra", "gpt-6.1-terra"},
 		{"gpt-5.6-luna", "gpt-5.6-luna"},
 		{"gpt-5.5", "gpt-5.5"},
 		{"gpt-5.5-pro", "gpt-5.5-pro"},

@@ -117,7 +117,7 @@ delimiterScanBytes = 0; decodingStarted = false; decodedBytes = 0; maxDecodedChu
 sheet = parseBuffer(giantBuffer,'csv');
 assert.equal(sheet.totalColumns,3); assert.equal(sheet.rows[0][0],'left'); assert.equal(sheet.rows[0][1],'right');
 assert.equal(sheet.rows[0][2].length,2*1024*1024);
-assert.equal(delimiterScanBytes,0,'delimiter inference must not scan the source bytes before decoding');
+assert.ok(delimiterScanBytes<=2,'only the BOM may be inspected before streaming decode');
 assert.equal(decodedBytes,giantBuffer.byteLength,'the full CSV should be decoded once');
 assert.ok(maxDecodedChunk<=65536,'decoded chunks must remain bounded');
 const semicolonBuffer = new TextEncoder().encode('x'.repeat(70*1024)+';tail').buffer;
@@ -125,7 +125,7 @@ delimiterScanBytes = 0; decodingStarted = false; decodedBytes = 0; maxDecodedChu
 sheet = parseBuffer(semicolonBuffer,'csv');
 assert.equal(sheet.totalRows,1); assert.equal(sheet.totalColumns,2);
 assert.equal(sheet.rows[0][0].length,70*1024); assert.equal(sheet.rows[0][1],'tail');
-assert.equal(delimiterScanBytes,0,'long first records must use the same single streaming pass for delimiter inference');
+assert.ok(delimiterScanBytes<=2,'long first records must inspect only the BOM before streaming decode');
 assert.equal(decodedBytes,semicolonBuffer.byteLength,'delimiter inference must not trigger a second decode pass');
 assert.ok(maxDecodedChunk<=65536,'long first records must still decode in bounded chunks');
 const quotedSemicolonBuffer = new TextEncoder().encode('"'+'x'.repeat(70*1024)+',|inside";tail').buffer;
@@ -270,6 +270,33 @@ for(const compression of [false,true]){
  const sheet=await result;
  assert.equal(sheet.totalRows,5001);assert.equal(sheet.totalColumns,20);assert.equal(sheet.truncated,true);
  assert.deepEqual(JSON.parse(JSON.stringify(sheet.rows)),rows.slice(0,5000).map(row=>row.map(String)),'every value must survive XML chunk boundaries (compression='+compression+')');
+}
+})().catch(error=>{console.error(error);process.exitCode=1});
+`)
+}
+
+func TestSpreadsheetWorkerPreservesXLSXBooleans(t *testing.T) {
+	runSpreadsheetWorkerNodeTest(t, `
+(async()=>{
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),XLSX=require('../../assets/file-vendor/xlsx.full.min.js');
+const wb=XLSX.utils.book_new();
+for(const name of ['NumericBooleans','TextBooleans'])XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([[true,false,1,0]]),name);
+const zip=XLSX.CFB.read(new Uint8Array(XLSX.write(wb,{type:'array',bookType:'xlsx'})),{type:'array'});
+const entry=XLSX.CFB.find(zip,'sheet2.xml');
+entry.content=new TextEncoder().encode(Buffer.from(entry.content).toString().replace(/(t="b"[^>]*><v>)([01])(<\/v>)/g,(_,prefix,value,suffix)=>prefix+(value==='1'?'true':'false')+suffix));
+const buffer=new Uint8Array(XLSX.CFB.write(zip,{type:'array',fileType:'zip'})).buffer;
+const baseline=XLSX.read(buffer,{type:'array'});
+let resolve,reject;
+const context={XLSX,TextDecoder,ReadableStream,DecompressionStream,importScripts(){},close(){},postMessage(message){if(message.error)reject(Error(message.error));else if(message.type==='ready'||message.type==='sheet')resolve(message.sheet)}};
+vm.createContext(context);vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'),context);
+for(let index=0;index<2;index++){
+ const result=new Promise((yes,no)=>{resolve=yes;reject=no});
+ context.onmessage({data:index===0?{buffer,format:'xlsx'}:{type:'load',index,requestId:1}});
+ const sheet=await result;
+ const expected=XLSX.utils.sheet_to_json(baseline.Sheets[baseline.SheetNames[index]],{header:1,raw:false});
+ assert.deepEqual(expected,[['TRUE','FALSE','1','0']]);
+ assert.deepEqual(JSON.parse(JSON.stringify(sheet.rows)),expected,'Boolean display must match the original parser on initial and on-demand sheets');
+ assert.equal(sheet.totalRows,1);assert.equal(sheet.totalColumns,4);assert.equal(sheet.truncated,false);
 }
 })().catch(error=>{console.error(error);process.exitCode=1});
 `)
@@ -676,6 +703,7 @@ const early=messages.find(message=>message.type==='ready');
 assert.equal(completed,false,'bounded ODS preview must publish before the selected table XML is fully consumed');
 assert.equal(early.sheet.rows.length,10001,JSON.stringify(early));assert.equal(early.sheet.rows[9999][0],'row9999');
 assert.equal(early.sheet.dimensionsPending,true,'early observed dimensions must not be presented as final');
+assert.equal(early.updatesPending,true,'dimension scanning must remain protected by an update timeout');
 assert.equal(early.sheet.truncated,null,'truncation is unknown until the dimension scan finishes');
 assert.ok(maximumDecodedBytes<=4096,'a whole-table output chunk must be decoded only in fixed-size byte windows');
 assert.ok(maximumPendingBytes<=8192,'retained decoded input must not contain the whole-table chunk remainder');
@@ -686,6 +714,7 @@ await new Promise((resolve,reject)=>{const deadline=Date.now()+5000;(function po
 assert.equal(final.sheet.totalRows,11000);assert.equal(final.sheet.totalColumns,1);assert.equal(final.sheet.rows[10000][0],'row10000');assert.equal(final.sheet.truncated,true);assert.equal(completed,true);
 assert.ok(tagsProcessedAtReady>0&&tagsProcessed>tagsProcessedAtReady,'ODS must publish at the preview row cap before traversing the rest of a single decompressor chunk');
 assert.equal(final.sheet.dimensionsPending,false,'final dimensions must replace provisional metadata');
+assert.equal(final.updatesPending,false,'completed dimension scanning must clear the update timeout');
 assert.ok(maximumDecodedBytes<=4096&&maximumPendingBytes<=8192,'the decoded input bound must hold through the entire table');
 })().catch(error=>{console.error(error);process.exitCode=1});
 `)
@@ -766,5 +795,115 @@ for(const declaredDimensions of [true,false]){
  } finally {clearTimeout(timer)}
 }
 })().catch(error=>{console.error(error);process.exitCode=1});
+`)
+}
+
+func TestSpreadsheetWorkerPreservesODSTextAcrossChunks(t *testing.T) {
+	runSpreadsheetWorkerNodeTest(t, `
+(async()=>{
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),XLSX=require('../../assets/file-vendor/xlsx.full.min.js');
+const rows=Array.from({length:100},(_,r)=>Array.from({length:20},(_,c)=>'value-'+r+'-'+c));
+const workbook=XLSX.utils.book_new();XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet(rows),'Data');
+for(const compression of [false,true]){
+ const buffer=XLSX.write(workbook,{type:'array',bookType:'ods',compression});
+ let resolve,reject;const result=new Promise((yes,no)=>{resolve=yes;reject=no});
+ const timer=setTimeout(()=>reject(Error('ODS preview timed out')),5000);
+ const context={XLSX,TextDecoder,ReadableStream,DecompressionStream,setTimeout,importScripts(){},close(){},postMessage(message){if(message.type==='error')reject(Error(message.error));if(message.type==='ready')resolve(message.sheet)}};
+ vm.createContext(context);vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'),context);
+ try{
+  context.onmessage({data:{buffer,format:'ods'}});
+  const sheet=await result;
+  assert.equal(sheet.totalRows,100);assert.equal(sheet.totalColumns,20);assert.equal(sheet.truncated,false);
+  assert.deepEqual(JSON.parse(JSON.stringify(sheet.rows)),rows,'all ODS text must survive chunk boundaries (compression='+compression+')');
+ }finally{clearTimeout(timer)}
+}
+})().catch(error=>{console.error(error);process.exitCode=1});
+`)
+}
+
+func TestSpreadsheetWorkerPreservesDelimitedTitlesAndLiteralQuotes(t *testing.T) {
+	runSpreadsheetWorkerNodeTest(t, `
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),XLSX=require('../../assets/file-vendor/xlsx.full.min.js');
+const context={XLSX,TextDecoder,importScripts(){},close(){},postMessage(){}};
+vm.createContext(context);vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'),context);
+const parse=(text,format='csv')=>JSON.parse(JSON.stringify(context.readDelimited(new TextEncoder().encode(text).buffer,format)));
+for(const separator of [';',',','\t'])for(const newline of ['\n','\r\n']){
+ const text=['Report','Name'+separator+'Value','A'+separator+'6" bolt','B'+separator+'"line 1\nline ""2"""'].join(newline);
+ const book=XLSX.read(new TextEncoder().encode(text),{type:'array'});
+ const expected=XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{header:1,raw:false,blankrows:true,defval:''});
+ const sheet=parse(text);
+ assert.deepEqual(sheet.rows,expected);assert.equal(sheet.totalRows,4);assert.equal(sheet.totalColumns,2);assert.equal(sheet.truncated,false);
+}
+// Unknown-delimiter mode must survive title rows beyond the bounded sample.
+const title='x'.repeat(70000)+'" title';
+const long=parse(title+'\r\nName;Value\r\nA;6" bolt\r\nB;normal');
+assert.deepEqual(long.rows,[[title,''],['Name','Value'],['A','6" bolt'],['B','normal']]);
+// Literal quotes spanning decoded chunks must not change parser state.
+const prefix='x'.repeat(65535);
+for(const format of ['csv','tsv']){
+ const separator=format==='tsv'?'\t':',';
+ const sheet=parse(prefix+'" bolt'+separator+'tail\nnext'+separator+'row',format);
+ assert.deepEqual(sheet.rows,[[prefix+'" bolt','tail'],['next','row']]);
+}
+// Field state must also be tracked for cells outside the retained preview.
+const wide='a,'.repeat(100)+'6" bolt\nnext,end';
+const sheet=parse(wide);assert.equal(sheet.totalRows,2);assert.equal(sheet.totalColumns,101);assert.equal(sheet.rows[1][0],'next');
+`)
+}
+
+func TestSpreadsheetWorkerPreservesDelimitedEncodingsAndDirectives(t *testing.T) {
+	runSpreadsheetWorkerNodeTest(t, `
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+let decodedBytes=0,maxChunk=0;
+class TrackingDecoder extends TextDecoder {
+ decode(bytes,options){if(bytes){decodedBytes+=bytes.byteLength;maxChunk=Math.max(maxChunk,bytes.byteLength)}return super.decode(bytes,options)}
+}
+const context={TextDecoder:TrackingDecoder,importScripts(){},close(){},postMessage(message){context.output=message}};
+vm.createContext(context);vm.runInContext(fs.readFileSync('../../assets/files/file-spreadsheet-worker.js','utf8'),context);
+function encode(text,encoding){
+ if(encoding==='utf8')return Uint8Array.from(Buffer.from(text,'utf8')).buffer;
+ const bytes=Buffer.concat([Buffer.from([255,254]),Buffer.from(text,'utf16le')]);
+ if(encoding==='utf16be')bytes.swap16();
+ return Uint8Array.from(bytes).buffer;
+}
+function parse(text,encoding,format){
+ const buffer=encode(text,encoding);decodedBytes=0;maxChunk=0;
+ context.onmessage({data:{buffer,format}});
+ assert.equal(context.output.type,'ready');
+ assert.equal(decodedBytes,buffer.byteLength,'decode once, including BOM and directive');
+ assert.ok(maxChunk<=65536,'decoding stays bounded');
+ return context.output.sheet;
+}
+const expected=[['Name','Value'],['Café 😀','42']];
+for(const encoding of ['utf8','utf16le','utf16be']){
+ for(const format of ['csv','tsv']){
+  const separator=format==='tsv'?'\t':',';
+  const sheet=parse('Name'+separator+'Value\r\nCafé 😀'+separator+'42',encoding,format);
+  assert.deepEqual(JSON.parse(JSON.stringify(sheet.rows)),expected);
+  assert.equal(sheet.totalRows,2);assert.equal(sheet.totalColumns,2);assert.equal(sheet.truncated,false);
+ }
+ for(const ending of ['\r\n','\n','\r']){
+  for(const separator of [';','|','\t']){
+   // The explicit directive overrides the extension's default delimiter.
+   const sheet=parse('sep='+separator+ending+'Name'+separator+'Value'+ending+'Café 😀'+separator+'42',encoding,'tsv');
+   assert.deepEqual(JSON.parse(JSON.stringify(sheet.rows)),expected);
+   assert.equal(sheet.totalRows,2);assert.equal(sheet.totalColumns,2);
+  }
+ }
+ const opening='sep=;\r\nName;Value\r\n"';
+ // Split a multibyte character (or UTF-16 surrogate pair) across decode chunks.
+ const prefix='x'.repeat((encoding==='utf8'?65535:32766)-opening.length),longText=prefix+'😀;quoted';
+ const quoted=parse(opening+longText+'";"line 1\r\nline ""2"""',encoding,'csv');
+ assert.equal(quoted.rows[1][0],longText);assert.equal(quoted.rows[1][1],'line 1\r\nline "2"');
+ const bounded=parse('sep=;\n'+Array.from({length:10002},(_,i)=>i+';Café').join('\n'),encoding,'csv');
+ assert.equal(bounded.rows.length,10001);assert.equal(bounded.totalRows,10002);assert.equal(bounded.truncated,true);
+ assert.equal(bounded.rows[10000][0],'10000');assert.equal(bounded.rows[10000][1],'Café');
+}
+const literal=parse('"sep=;"\nvalue','utf8','csv');
+assert.equal(literal.rows[0][0],'sep=;');assert.equal(literal.totalRows,2);
+assert.equal(parse('sep=;','utf8','csv').rows[0][0],'sep=','an unterminated directive remains ordinary CSV');
+assert.deepEqual(JSON.parse(JSON.stringify(parse('Heading\nsep=;','utf8','csv').rows)),[['Heading',''],['sep=','']],'a later separator-like line remains a data row, parsed with the inferred delimiter');
+const bom=parse('\uFEFFsep=;\nName;Value\nCafé 😀;42','utf8','csv');
+assert.deepEqual(JSON.parse(JSON.stringify(bom.rows)),expected);
 `)
 }

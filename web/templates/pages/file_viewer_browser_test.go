@@ -310,6 +310,22 @@ window.renderChatMarkdownAsync=function(text){
 		b.waitFor("visible spreadsheet truncation notice", `String(Array.from(document.querySelectorAll('[data-sheet-status]')).some(node=>!node.hidden && node.textContent.includes('Preview limited:') && node.textContent.includes('100 of 101 columns') && node.textContent.includes('Download the original')))`, "true")
 		b.waitFor("bounded spreadsheet columns", `String(document.querySelectorAll('[data-sheet-grid] [role=columnheader]').length)`, "100")
 		b.click("[data-file-close]")
+
+		b.evaluate(`window.savedRetryWorker=window.Worker;window.retryWorkers=[];window.Worker=class{constructor(){this.run=retryWorkers.length+1;retryWorkers.push(this)}postMessage(message){const sheet={name:message.type==='load'?'Second':'First',rows:[['Heading'],[message.type==='load'?'Second value':'Run '+this.run]],totalRows:2,totalColumns:1,truncated:false};setTimeout(()=>this.onmessage({data:message.type==='load'?{type:'sheet',requestId:message.requestId,sheet}:{type:'ready',names:['First','Second'],sheet}}),0)}terminate(){this.terminated=true}};'ok'`)
+		b.click("#sheet")
+		b.waitFor("retry fixture first preview", `String(document.querySelector('[data-sheet-grid]')?.textContent.includes('Run 1'))`, "true")
+		b.waitFor("tabs moved into dialog header", `String(!!document.querySelector('#image-gallery header [data-sheet-tabs]') && !document.querySelector('[data-file-viewer="table"] [data-sheet-tabs]'))`, "true")
+		for run := 2; run <= 3; run++ {
+			b.evaluate(`retryWorkers.at(-1).onerror();'ok'`)
+			b.waitFor("worker error offers retry", `String(!!document.querySelector('[data-sheet-retry]') && retryWorkers.at(-1).terminated)`, "true")
+			b.click("[data-sheet-retry]")
+			b.waitFor("dialog preview recovers", fmt.Sprintf(`String(document.querySelector('[data-sheet-grid]')?.textContent.includes('Run %d') && !document.querySelector('[data-sheet-retry]'))`, run), "true")
+			b.waitFor("retry retains one tab bar", `String(document.querySelectorAll('#image-gallery [data-sheet-tabs]').length===1 && document.querySelectorAll('#image-gallery header [data-sheet-tabs] button').length===2)`, "true")
+			b.click("#image-gallery header [data-sheet-tabs] button:nth-child(2)")
+			b.waitFor("tab selection works after retry", `String(document.querySelector('[data-sheet-grid]')?.textContent.includes('Second value'))`, "true")
+		}
+		b.click("[data-file-close]")
+		b.evaluate(`window.Worker=window.savedRetryWorker;'ok'`)
 		b.evaluate(`window.savedSheetWorker=window.Worker;window.fakeSheetWorker=null;window.Worker=class{constructor(){window.fakeSheetWorker=this}postMessage(message){const makeSheet=index=>({name:index===0?'First':'Second',rows:[[index===0?'Name':'Title'],[index===0?'Retry value':'Second value']],totalRows:2,totalColumns:1,truncated:false});if(message.type==='load'){setTimeout(()=>this.onmessage({data:{type:'sheet',requestId:message.requestId,sheet:makeSheet(message.index)}}),0);return}setTimeout(()=>this.onmessage({data:{type:'ready',names:['First','Second'],sheet:{name:'First',rows:[['Name'],['']],totalRows:2,totalColumns:1,truncated:false,valuesPending:true},updatesPending:true}}),0)}fail(){this.onmessage({data:{type:'update-error',index:0,updatesPending:false,error:'Could not resolve shared text'}})}terminate(){}};var holder=document.createElement('div');holder.dataset.fileName='async.xlsx';holder.innerHTML='<div id="fake-sheet-preview" data-spreadsheet-url="/fixture/async.xlsx"><div data-sheet-status></div><nav data-sheet-tabs></nav><div data-sheet-grid></div></div>';document.body.append(holder);'ok'`)
 		b.waitFor("pending shared strings are identified", `String(document.querySelector('#fake-sheet-preview [data-sheet-status]')?.textContent.includes('Cell text is still resolving'))`, "true")
 		b.click("#fake-sheet-preview [data-sheet-grid] [data-row='1'][data-col='0']")

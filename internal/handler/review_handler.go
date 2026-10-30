@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,14 +11,19 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 // ListReviewComments returns all review comments for a task as an HTML fragment.
 func (h *Handler) ListReviewComments(c echo.Context) error {
 	taskID := c.Param("taskId")
+	task, lookupErr := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c))
+	if lookupErr != nil {
+		return lookupErr
+	}
 	if h.reviewCommentRepo == nil {
-		return render(c, http.StatusOK, components.ReviewCommentList(nil, taskID))
+		return render(c, http.StatusOK, components.ReviewCommentList(nil, taskID, task.ProjectID))
 	}
 
 	comments, err := h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -26,12 +32,16 @@ func (h *Handler) ListReviewComments(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load review comments")
 	}
 
-	return render(c, http.StatusOK, components.ReviewCommentList(comments, taskID))
+	return render(c, http.StatusOK, components.ReviewCommentList(comments, taskID, task.ProjectID))
 }
 
 // AddReviewComment adds a new inline review comment.
 func (h *Handler) AddReviewComment(c echo.Context) error {
 	taskID := c.Param("taskId")
+	task, lookupErr := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c))
+	if lookupErr != nil {
+		return lookupErr
+	}
 	if h.reviewCommentRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "review comments not configured")
 	}
@@ -70,7 +80,7 @@ func (h *Handler) AddReviewComment(c echo.Context) error {
 
 	// Return the updated comment list
 	comments, _ := h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	return render(c, http.StatusOK, components.ReviewCommentList(comments, taskID))
+	return render(c, http.StatusOK, components.ReviewCommentList(comments, taskID, task.ProjectID))
 }
 
 // UpdateReviewComment updates the text of an existing review comment.
@@ -85,7 +95,14 @@ func (h *Handler) UpdateReviewComment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "comment_text is required")
 	}
 
-	if err := h.reviewCommentRepo.UpdateText(c.Request().Context(), id, commentText); err != nil {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.reviewCommentRepo.UpdateTextForProject(c.Request().Context(), projectID, id, commentText); err != nil {
+		if errors.Is(err, persistence.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "review comment not found")
+		}
 		applog.Infof("[handler] UpdateReviewComment error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update review comment")
 	}
@@ -100,7 +117,14 @@ func (h *Handler) DeleteReviewComment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "review comments not configured")
 	}
 
-	if err := h.reviewCommentRepo.Delete(c.Request().Context(), id); err != nil {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.reviewCommentRepo.DeleteForProject(c.Request().Context(), projectID, id); err != nil {
+		if errors.Is(err, persistence.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "review comment not found")
+		}
 		applog.Infof("[handler] DeleteReviewComment error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete review comment")
 	}

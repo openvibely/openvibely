@@ -90,14 +90,14 @@ func Build(workbookPath string) error {
 		return err
 	}
 	defer archive.Close()
-	var shared *zip.File
 	entries := make(map[string]*zip.File, len(archive.File))
 	for _, file := range archive.File {
 		name := strings.ToLower(path.Clean(filepath.ToSlash(file.Name)))
 		entries[name] = file
-		if name == "xl/sharedstrings.xml" {
-			shared = file
-		}
+	}
+	shared, err := sharedStringsPart(entries)
+	if err != nil {
+		return err
 	}
 	sheets := workbookOrderedSheets(entries)
 	if shared == nil || len(sheets) == 0 {
@@ -146,6 +146,51 @@ func Build(workbookPath string) error {
 		return closeErr
 	}
 	return writeIndex(workbookPath, values)
+}
+
+// Resolve the declared part just as the browser's workbook catalog does. Its
+// filename is not required to be sharedStrings.xml (or even live under xl/).
+func sharedStringsPart(entries map[string]*zip.File) (*zip.File, error) {
+	contentTypes := entries["[content_types].xml"]
+	if contentTypes == nil {
+		// Retain support for older/minimal archives without a content-type catalog.
+		return entries["xl/sharedstrings.xml"], nil
+	}
+	reader, err := contentTypes.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	decoder := xml.NewDecoder(io.LimitReader(reader, 4<<20))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("reading workbook content types: %w", err)
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "Override" {
+			continue
+		}
+		partName, contentType := "", ""
+		for _, attr := range start.Attr {
+			switch attr.Name.Local {
+			case "PartName":
+				partName = attr.Value
+			case "ContentType":
+				contentType = attr.Value
+			}
+		}
+		if contentType == "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml" {
+			name := strings.ToLower(strings.TrimPrefix(path.Clean(partName), "/"))
+			if file := entries[name]; file != nil {
+				return file, nil
+			}
+			return nil, fmt.Errorf("shared-string part %q is missing", partName)
+		}
+	}
 }
 
 func writeIndex(workbookPath string, values map[string]string) error {
@@ -285,16 +330,48 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 	decoder := xml.NewDecoder(r)
 	cellCount := 0
 	row, nextRow, nextColumn := 1, 1, 0
+	rowLimit, allocatedCells := maxRows, -1
+	finish := func() (map[int]struct{}, int, error) {
+		if allocatedCells >= 0 {
+			return refs, allocatedCells, nil
+		}
+		return refs, cellCount, nil
+	}
 	for cellCount < limit {
 		token, err := decoder.Token()
 		if err == io.EOF {
-			return refs, cellCount, nil
+			return finish()
 		}
 		if err != nil {
 			return nil, cellCount, err
 		}
+		if end, ok := token.(xml.EndElement); ok && end.Name.Local == "row" && row >= rowLimit {
+			return finish()
+		}
 		start, ok := token.(xml.StartElement)
 		if !ok {
+			continue
+		}
+		if start.Name.Local == "dimension" {
+			for _, attr := range start.Attr {
+				if attr.Name.Local != "ref" {
+					continue
+				}
+				ref := attr.Value
+				if colon := strings.LastIndex(ref, ":"); colon >= 0 {
+					ref = ref[colon+1:]
+				}
+				totalRows, lastColumn, valid := cellCoordinate(ref)
+				if valid && totalRows > 0 && lastColumn >= 0 {
+					columns := min(lastColumn+1, maxColumns)
+					rowLimit = min(maxRows, totalRows, limit/columns)
+					// The worker budgets the entire preview rectangle, including blank cells.
+					allocatedCells = rowLimit * columns
+					if rowLimit == 0 {
+						return finish()
+					}
+				}
+			}
 			continue
 		}
 		if start.Name.Local == "row" {
@@ -305,6 +382,9 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 						row = explicit
 					}
 				}
+			}
+			if row > rowLimit {
+				return finish()
 			}
 			nextRow, nextColumn = row+1, 0
 			continue
@@ -328,7 +408,10 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 			row, col, valid = cellCoordinate(coord)
 		}
 		nextColumn = col + 1
-		if !valid || row < 1 || row > maxRows || col < 0 || col >= maxColumns {
+		if valid && row > rowLimit {
+			return finish()
+		}
+		if !valid || row < 1 || col < 0 || col >= maxColumns {
 			continue
 		}
 		cellCount++
@@ -347,7 +430,7 @@ func previewStringRefs(r io.Reader, limit int) (map[int]struct{}, int, error) {
 		}
 		refs[index] = struct{}{}
 	}
-	return refs, cellCount, nil
+	return finish()
 }
 
 func cellCoordinate(ref string) (row, col int, ok bool) {

@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+ "context"
 	"net/url"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
@@ -47,6 +48,10 @@ func ChatExecutionRevision(exec models.Execution) string {
 	write(exec.ID)
 	write(string(exec.Status))
 	write(exec.PromptSent)
+ if exec.AuthorUserID != "" || exec.AuthorName != "" {
+ write(exec.AuthorUserID)
+ write(exec.AuthorName)
+ }
 	write(exec.Output)
 	write(exec.ErrorMessage)
 	write(fmt.Sprintf("%t", exec.IsFollowup))
@@ -71,6 +76,10 @@ func ChatTranscriptRevision(executions []models.Execution, pendingInputs []model
 		write(string(input.InputStatus))
 		write(input.ExpectedTurnID)
 		write(input.Content)
+ if input.AuthorUserID != "" || input.AuthorName != "" {
+ write(input.AuthorUserID)
+ write(input.AuthorName)
+ }
 		write(input.AttachmentSessionID)
 	}
 	return fmt.Sprintf("%x-%016x", len(executions)+len(pendingInputs), hash)
@@ -199,10 +208,10 @@ templ ChatLoadingDots(size string) {
 }
 
 // ChatBubble renders a static chat message bubble (completed or failed text).
-templ ChatBubble(role, content string) {
+templ ChatBubble(role, content string, author ...string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
-			{ role }
+			{ chatAuthorLabel(ctx, role, author) }
 		</div>
 		<div class="chat-bubble-inner">
 			if role == "User" {
@@ -274,10 +283,10 @@ templ ChatBubbleRunning(role, partialOutput string) {
 }
 
 // ChatBubbleWithAttachments renders a message with inline attachment display.
-templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string) {
+templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string, author ...string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2 flex items-center gap-2">
-			{ role }
+			{ chatAuthorLabel(ctx, role, author) }
 			if len(attachments) > 0 {
 				<span class="badge badge-sm badge-neutral">
 					<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1241,8 +1250,8 @@ templ ChatStreamingResumeInitScript() {
 	</script>
 }
 
-templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments bool) {
-	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "")
+templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments bool, author ...string) {
+	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "", author...)
 }
 
 templ pendingAttachmentBadge(label, title string) {
@@ -1254,8 +1263,11 @@ templ pendingAttachmentBadge(label, title string) {
 	</div>
 }
 
-templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
+templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string, author ...string) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" data-tooltip-disabled>
+		if templateui.MessageAuthorsEnabled(ctx) {
+ <span class="text-xs font-semibold">{ chatAuthorLabel(ctx, "User", author) }</span>
+ }
 		<div class="min-w-0 flex-1 truncate" data-pending-input-content>{ message }</div>
 		if hasAttachments {
 			@pendingAttachmentBadge("Attachments queued", "Attachments queued with this follow-up")
@@ -1274,24 +1286,28 @@ templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttac
 	</div>
 }
 
-templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string, hasAttachments bool) {
-	@ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint, hasAttachments, "")
+templ ChatQueuedInputRowOOB(inputID, message, steerEndpoint string, hasAttachments bool, author ...string) {
+	@ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint, hasAttachments, "", author...)
 }
 
-templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
+templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string, author ...string) {
 	<div id="pending-thread-inputs" data-task-id={ taskID } hx-swap-oob={ pendingInputsOOBTarget(taskID) }>
-		@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, taskID)
+		@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, taskID, author...)
 	</div>
 }
 
-templ ChatSteeringInputRow(inputID, message string, hasAttachments bool) {
-	@ChatSteeringInputRowForTask(inputID, message, hasAttachments, "")
+templ ChatSteeringInputRow(inputID, message string, hasAttachments bool, author ...string) {
+	@ChatSteeringInputRowForTask(inputID, message, hasAttachments, "", author...)
 }
 
-templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string) {
+templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string, author ...string) {
 	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" data-tooltip-disabled>
 		<div class="min-w-0 flex-1">
-			<div class="text-xs font-semibold opacity-70">Steering pending</div>
+			<div class="text-xs font-semibold opacity-70">
+ if templateui.MessageAuthorsEnabled(ctx) {
+ { chatAuthorLabel(ctx, "User", author) } ·
+ }
+ Steering pending</div>
 			<div class="truncate" data-pending-input-content>{ message }</div>
 			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
@@ -1317,7 +1333,7 @@ templ ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpo
 	<div id="pending-thread-inputs" class="space-y-1.5" data-task-id={ taskID }>
 		for _, input := range inputs {
 			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
-				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID)
+				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID, input.AuthorName)
 			} else if input.InputMode == models.ThreadInputModeSteering {
 				@chatPendingSteeringInputRowForTask(input, taskID)
 			}
@@ -1360,9 +1376,9 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 	<!-- User message: show for followups and first non-followup only -->
 	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
+			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID, exec.AuthorName)
 		} else {
-			@ChatBubble("User", chatUserContent(exec, task, executions, index))
+			@ChatBubble("User", chatUserContent(exec, task, executions, index), exec.AuthorName)
 		}
 	}
 	<!-- Assistant response -->
@@ -1407,9 +1423,9 @@ templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTar
 		}
 	>
 		if len(attachments) > 0 {
-			@ChatBubbleWithAttachments("User", message, attachments, projectID)
+			@ChatBubbleWithAttachments("User", message, attachments, projectID, executionAuthorName(execution))
 		} else {
-			@ChatBubble("User", message)
+			@ChatBubble("User", message, executionAuthorName(execution))
 		}
 		@ChatBubbleStreaming("Assistant", execID, messagesContainerID, pausePollingTargetID, isThread)
 	</div>
@@ -1531,9 +1547,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			data-steer-endpoint={ config.SteerEndpoint }
 			data-composer-auto-focus="true"
+			if config.ProjectID != "" {
+				data-model-select-endpoint={ "/conversation/model-settings?project_id=" + config.ProjectID }
+				if config.TaskID != "" {
+					data-conversation-task-id={ config.TaskID }
+				}
+			}
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
-				data-model-select-endpoint={ "/tasks/" + config.TaskID + "/thread/model" }
 			}
 			else
 			if config.ProjectID != "" {
@@ -1552,6 +1573,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			</div>
 			if config.ShowModelSelector {
 				<input type="hidden" name="reasoning_effort" value=""/>
+ <input type="hidden" name="service_tier" value=""/>
 				<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value={ selectedAgentOrAuto(config.SelectedAgentID) }/>
 			}
 			if config.ShowModeSelector {
@@ -1609,7 +1631,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								<li data-value="auto">Auto</li>
 								<li data-value="default" data-picker-effective-id={ pickerDefaultAgent(config.Agents, config.DefaultAgentID).ID } data-picker-detail={ pickerDefaultDetail(config.Agents, config.DefaultAgentID) }>Default</li>
 								for _, agent := range config.Agents {
-									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) }>{ agent.Name } ({ agent.Model })</li>
+									<li data-value={ agent.ID } data-picker-name={ agent.Name } data-picker-model={ agent.Model } data-picker-provider={ pickerProvider(agent) } data-picker-efforts={ pickerEfforts(agent) } data-picker-default={ pickerDefaultEffort(agent) } data-picker-fast={ fmt.Sprint(models.ModelSupportsFastMode(agent.Provider, agent.Model)) } data-picker-tier={ agent.EffectiveServiceTier() }>{ agent.Name } ({ agent.Model })</li>
 								}
 							</ul>
 						</div>
@@ -2135,6 +2157,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								attachmentSessionID: sessionInput ? sessionInput.value : '',
 								modelID: fields.has('agent_id') ? fields.get('agent_id') : undefined,
 								reasoningEffort: fields.has('reasoning_effort') ? fields.get('reasoning_effort') : undefined,
+ serviceTier: fields.has('service_tier') ? fields.get('service_tier') : undefined,
 								submitIntent: form.getAttribute('data-submit-intent') || 'normal'
 							}, payload || {});
 							snapshot.parameters = Object.assign(parameters, snapshot.parameters || {});
@@ -2158,6 +2181,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							});
 							if (payload.modelID !== undefined) parameters.agent_id = payload.modelID;
 							if (payload.reasoningEffort !== undefined) parameters.reasoning_effort = payload.reasoningEffort;
+ if (payload.serviceTier !== undefined) parameters.service_tier = payload.serviceTier;
 							if (payload.expectedTurnID !== undefined) parameters.expected_turn_id = payload.expectedTurnID;
 							if (payload.managedModelSelection) parameters.model_selection_managed = '1';
 						});
@@ -2685,45 +2709,17 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						e.stopImmediatePropagation();
 						submitComposer(normalPostEndpoint, 'normal');
 					}, true);
-			// Model selector -> hidden input sync + localStorage persistence
+			// The shared picker loads and saves model preferences through the API.
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
 			var projectId = projectIdInput ? projectIdInput.value : '';
-			var modelStorageKey = projectId ? 'chat-model-' + projectId : '';
 			var modeStorageKey = projectId ? 'chat-mode-' + projectId : '';
 
 			if (agentSelect && agentInput) {
-				var agentOptList = agentSelect.parentElement ? agentSelect.parentElement.querySelector('.chat-custom-select-options') : null;
 				// Initialize the custom select UI (set label from current value, bind click handler)
 				if (window._initChatCustomSelect) window._initChatCustomSelect(agentSelect);
-				// Restore persisted selection
-				if (modelStorageKey) {
-					var saved = localStorage.getItem(modelStorageKey);
-					if (saved) {
-						// Verify the saved option still exists in the list
-						var optExists = false;
-						if (agentOptList) {
-							agentOptList.querySelectorAll('li[data-value]').forEach(function(li) {
-								if (li.dataset.value === saved) optExists = true;
-							});
-						}
-						if (optExists) {
-							if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(agentSelect, saved);
-							agentInput.value = saved;
-						} else {
-							localStorage.removeItem(modelStorageKey);
-						}
-					}
-				}
 				if (window.ovModelPicker) window.ovModelPicker.init(agentSelect);
 				agentSelect.addEventListener('chat-select-change', function(e) {
 					agentInput.value = e.detail.value;
-					if (modelStorageKey) {
-						localStorage.setItem(modelStorageKey, e.detail.value);
-					}
-					// Task threads have no localStorage persistence (keyed by
-					// ProjectID, which task threads omit); persist the
-					// selection server-side immediately so navigating away
-					// and back does not silently revert to the task default.
 					if (window.ovModelPicker) window.ovModelPicker.changed(agentSelect);
 				});
 			}
@@ -3710,6 +3706,10 @@ templ ChatAutoScrollScript() {
 						var el = self.element;
 						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
 						if (self._userInteracting) {
+							// Moving toward newer output never leaves bottom-following: a smooth
+							// follow scroll can reach the end after the gesture window expires.
+							var followingDown = !self.userScrolledUp && self._interactionUp !== true &&
+								el.scrollTop > self._interactionScrollTop;
 							// Smooth keyboard/wheel scrolling can outlast the original input
 							// event. Extend its lifetime while it is still moving downward,
 							// but not for height corrections or a stationary boundary event.
@@ -3727,7 +3727,7 @@ templ ChatAutoScrollScript() {
 							// Follow again only when the reader reaches the actual end. The wider
 							// near-bottom threshold is for UI affordances, not scroll ownership:
 							// re-pinning inside it makes layout updates finish the gesture for them.
-							self.userScrolledUp = !atBottom;
+							self.userScrolledUp = !atBottom && !followingDown;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
 						}
@@ -6587,7 +6587,7 @@ func chatPendingSteeringInputRowForTask(input models.ThreadInput, taskID string)
 	if input.ProviderSteeringState == "accepted_ambiguous" {
 		return ChatAmbiguousSteeringInputRowForTask(input.ID, input.Content, taskID)
 	}
-	return ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", taskID)
+	return ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", taskID, input.AuthorName)
 }
 
 templ ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string) {
@@ -6630,4 +6630,14 @@ func pickerDefaultDetail(agents []models.LLMConfig, defaultID string) string {
 		detail += " · " + agent.Model
 	}
 	return detail
+}
+
+func chatAuthorLabel(ctx context.Context, role string, author []string) string {
+ if !templateui.MessageAuthorsEnabled(ctx) { return role }
+ if role == "User" && len(author) > 0 && strings.TrimSpace(author[0]) != "" { return author[0] }
+ return role
+}
+func executionAuthorName(executions []models.Execution) string {
+ if len(executions) > 0 { return executions[0].AuthorName }
+ return ""
 }

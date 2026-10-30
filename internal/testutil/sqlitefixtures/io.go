@@ -221,7 +221,7 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 			if strings.Contains(q, "from agent_configs order by is_default desc, name asc") || strings.Contains(q, "from agent_configs a ") && strings.Contains(q, "order by a.is_default desc, a.name asc") {
 				stats.ModelCatalogReads++
 			}
-			if strings.HasPrefix(q, "select id, name, model, provider, preset_slug, reasoning_effort, is_default") {
+			if strings.HasPrefix(q, "select id, name, model, provider, preset_slug, reasoning_effort, service_tier, is_default") {
 				stats.ModelPickerReads++
 			}
 			if (strings.Contains(q, " from agent_configs order by is_default desc, name asc") || strings.Contains(q, "from agent_configs a ") && strings.Contains(q, "order by a.is_default desc, a.name asc")) && strings.Contains(q, "api_key") {

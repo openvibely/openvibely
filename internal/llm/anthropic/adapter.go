@@ -511,6 +511,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		ContextWindow:             agent.ContextWindow,
 		MaxTokens:                 maxTokens,
 		Effort:                    agent.ReasoningEffort,
+		ServiceTier:               agent.EffectiveServiceTier(),
 		System:                    systemPrompt,
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
@@ -591,6 +592,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		ContextWindow:             agent.ContextWindow,
 		MaxTokens:                 maxTokens,
 		Effort:                    agent.ReasoningEffort,
+		ServiceTier:               agent.EffectiveServiceTier(),
 		EnableThinking:            true,
 		DisableTools:              disableTools,
 		SkipDefaultTools:          skipDefaultTools,
@@ -698,6 +700,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		ContextWindow:             agent.ContextWindow,
 		MaxTokens:                 maxTokens,
 		Effort:                    agent.ReasoningEffort,
+		ServiceTier:               agent.EffectiveServiceTier(),
 		EnableThinking:            true,
 		SkipDefaultTools:          skipDefaultTools,
 		System:                    llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir),
@@ -945,12 +948,12 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 	case "bash", "Bash", "shell":
 		if cmd, ok := m["command"].(string); ok {
-			cmd = truncateToolSecondary(cmd, 320)
+			cmd = llmstream.TruncateToolSecondary(cmd, 320)
 			return "$ " + cmd
 		}
 	case "grep_search", "Grep":
 		if p, ok := m["pattern"].(string); ok {
-			return truncateToolSecondary(p, 140)
+			return llmstream.TruncateToolSecondary(p, 140)
 		}
 	case "list_files", "Glob":
 		if p, ok := m["path"].(string); ok {
@@ -961,22 +964,14 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 	case "web_search", "web_search_20250305", "web_search_20260209", "WebSearch":
 		if q, ok := m["query"].(string); ok {
-			return truncateToolSecondary(q, 140)
+			return llmstream.TruncateToolSecondary(q, 140)
 		}
 	case "web_fetch", "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309", "WebFetch":
 		if u, ok := m["url"].(string); ok {
-			return truncateToolSecondary(u, 140)
+			return llmstream.TruncateToolSecondary(u, 140)
 		}
 	}
 	return ""
-}
-
-func truncateToolSecondary(value string, max int) string {
-	value = strings.TrimSpace(strings.ReplaceAll(value, "\n", " "))
-	if max <= 0 || len(value) <= max {
-		return value
-	}
-	return value[:max] + "…"
 }
 
 func splitPath(p string) []string {

@@ -29,7 +29,7 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 		{"auto_merge", "false", p.ID, 200},
 		{"auto_merge", "true", p.ID, 200},
 		{"auto_merge", "invalid", p.ID, 400},
-		{"auto_merge", "false", other.ID, 400},
+		{"auto_merge", "false", other.ID, 404},
 		{"priority", "4", p.ID, 200}, {"tag", "bug", p.ID, 200},
 		{"priority", "99", p.ID, 400}, {"status", "running", p.ID, 400},
 		{"agent_id", "missing", p.ID, 400}, {"prompt", "", p.ID, 400},
@@ -38,7 +38,7 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 		{"agent_definition_id", "missing", p.ID, 400},
 		{"priority", "1", "", 400},
 		{"category", "scheduled", p.ID, 400},
-		{"priority", "1", other.ID, 400},
+		{"priority", "1", other.ID, 404},
 	} {
 		body := url.Values{"field": {test.field}, "value": {test.value}}
 		req := httptest.NewRequest(http.MethodPatch, "/tasks/"+task.ID+"/details/property?project_id="+test.project, strings.NewReader(body.Encode()))

@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+ "net/url"
 	"github.com/openvibely/openvibely/internal/models"
 	"time"
 )
@@ -371,16 +372,17 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		@ChatInputForm(ChatInputFormConfig{
 			FormID:                 "task-thread-form",
 			InputID:                "task-message-input",
-			PostEndpoint:           fmt.Sprintf("/tasks/%s/thread", task.ID),
+			PostEndpoint:           fmt.Sprintf("/tasks/%s/thread?project_id=%s", task.ID, url.QueryEscape(task.ProjectID)),
 			TargetID:               "task-thread-messages",
 			Agents:                 agents,
 			ShowModelSelector:      true,
 			ShowChangesSummary:     true,
 			TaskID:                 task.ID,
+			ProjectID:              task.ProjectID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),
 			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
-			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
+			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer?project_id=%s", task.ID, url.QueryEscape(task.ProjectID)),
 			SelectedAgentID:        derefString(task.AgentID),
 			DefaultAgentID:         defaultAgentID,
 			PendingInputs:          pendingInputs,
@@ -1341,11 +1343,11 @@ templ TaskThreadFollowupResponse(message string, execID string, attachments []mo
 	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID, execution...)
 }
 
-templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) {
+templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string, author ...string) {
 	if len(attachments) > 0 {
-		@ChatBubbleWithAttachments("User", message, attachments, projectID)
+		@ChatBubbleWithAttachments("User", message, attachments, projectID, author...)
 	} else {
-		@ChatBubble("User", message)
+		@ChatBubble("User", message, author...)
 	}
 	@ChatBubble("Assistant", "Queued. This message will be sent to the model after the active response finishes.")
 }

@@ -157,6 +157,7 @@ templ TaskWorkspaceScript() {
 				else if (wasDiff && push !== false) _focusTaskThreadComposer(back);
 			}
 			if (push !== false) historyView(diff ? 'changes' : (panel.hidden ? 'chat' : selected));
+            if (window.syncAppearanceSettings) window.syncAppearanceSettings();
 		}
 		function applyURL() {
 			var tab = displayedURL().searchParams.get('tab') || root.dataset.initialTab || 'chat';

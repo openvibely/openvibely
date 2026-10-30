@@ -2055,6 +2055,15 @@ diff --git a/web/templates/components/really-long-directory-name/another-long-di
 			if err != nil {
 				t.Fatalf("render failed: %v", err)
 			}
+			if name == "DiffViewerWithReview" {
+				if !strings.Contains(body, `data-diff-explorer-files`) || !strings.Contains(body, `data-diff-path="src/short.go"`) {
+					t.Fatal("review must expose file paths to the explorer")
+				}
+				if strings.Contains(body, `class="badge badge-sm badge-outline cursor-pointer`) {
+					t.Fatal("review must not duplicate the explorer with file badges")
+				}
+				return
+			}
 			if !strings.Contains(body, `<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">`) {
 				t.Fatal("changed files card must constrain horizontal overflow")
 			}

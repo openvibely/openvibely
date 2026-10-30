@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"io"
 	"math"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 )
 
 type UsageAnalyticsService struct {
+	accountReads            singleflight.Group
 	usageRepo               persistence.UsageStore
 	llmConfigRepo           persistence.LLMConfigStore
 	oauthRecovery           *llmoauth.Manager
@@ -144,7 +146,22 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	return result, nil
 }
 
+// A forced refresh must not join a read that is allowed to return a cached snapshot.
+func accountLimitsReadKey(accountKey string, refresh bool) string {
+	return "limits:" + accountKey + ":refresh=" + strconv.FormatBool(refresh)
+}
+
 func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
+	if filter.AccountGroupKey == "" {
+		return s.buildAnalyticsAccountLimits(ctx, filter)
+	}
+	value, err := s.sharedAccountRead(ctx, accountLimitsReadKey(filter.AccountGroupKey, filter.Refresh), func(work context.Context) (any, error) { return s.buildAnalyticsAccountLimits(work, filter) })
+	if err != nil {
+		return nil, err
+	}
+	return value.(*models.AnalyticsUsageAccountLimitsViewModel), nil
+}
+func (s *UsageAnalyticsService) buildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
 	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -786,8 +803,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context,
 	}
 	var snapshots []models.AccountUsageSnapshot
 	errorsByKey := map[string]string{}
-	seenAccounts := map[string]bool{}
-	failedCredentialOwners := map[string]bool{}
+	credentials := newAccountUsageCredentials(configs, provider)
 	type pendingAccountFailure struct {
 		snapshot       models.AccountUsageSnapshot
 		message        string
@@ -798,24 +814,13 @@ func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context,
 	}
 	pendingFailures := map[string]pendingAccountFailure{}
 	var pendingFailureOwnerKeys []string
-	for _, cfg := range configs {
-		if cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
-			continue
-		}
-		if cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderOpenAI {
-			continue
-		}
-		if provider != "" && string(cfg.Provider) != provider {
-			continue
+	for {
+		cfg, ok := credentials.next()
+		if !ok {
+			break
 		}
 		credentialOwnerKey := accountUsageCredentialOwnerKeyForConfig(cfg)
-		if failedCredentialOwners[credentialOwnerKey] {
-			continue
-		}
 		key := accountUsageKeyForConfig(cfg)
-		if seenAccounts[key] {
-			continue
-		}
 		latest, shouldRefresh := latestAccountSnapshotForConfig(ctx, s.usageRepo, cfg, force)
 		if !shouldRefresh {
 			if latest != nil && isAccountRefreshFailure(latest.RateLimitReachedType) {
@@ -823,13 +828,13 @@ func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context,
 				// Let a healthy sibling for the same account remain eligible.
 				continue
 			}
-			seenAccounts[key] = true
+			credentials.succeeded(cfg)
 			delete(pendingFailures, credentialOwnerKey)
 			continue
 		}
 		snapshot, err := s.accountFetcher(ctx, cfg)
 		if err != nil {
-			failedCredentialOwners[credentialOwnerKey] = true
+			credentials.failed(cfg)
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
 			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
@@ -870,7 +875,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context,
 			applog.Infof("[usage] skipped stale account usage snapshot provider=%s", cfg.Provider)
 			continue
 		}
-		seenAccounts[key] = true
+		credentials.succeeded(cfg)
 		delete(pendingFailures, credentialOwnerKey)
 		snapshots = append(snapshots, *snapshot)
 	}
@@ -890,7 +895,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context,
 			applog.Infof("[usage] skipped stale account usage refresh failure provider=%s", failure.snapshot.Provider)
 			continue
 		}
-		if !seenAccounts[failure.accountKey] {
+		if !credentials.servedAccounts[failure.accountKey] {
 			errorsByKey[failure.accountKey] = failure.message
 		}
 		snapshots = append(snapshots, failure.snapshot)
@@ -1992,7 +1997,9 @@ func (s *UsageAnalyticsService) doAccountUsageRequestWithOAuthRecovery(ctx conte
 	}
 	fresh, recovered, recoverErr := s.recoverAccountUsageUnauthorized(ctx, cfg, tokenUsed, refresh)
 	if recoverErr != nil {
-		return nil, recoverErr
+		// Preserve the rejected request's status so callers can safely choose
+		// another credential even when refreshing this one also fails.
+		return nil, errors.Join(err, recoverErr)
 	}
 	if !recovered || strings.TrimSpace(fresh.OAuthAccessToken) == "" || fresh.OAuthAccessToken == tokenUsed {
 		return nil, err

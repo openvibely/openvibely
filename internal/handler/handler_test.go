@@ -2605,6 +2605,10 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	assertContains(t, rec, "#worker-settings-content .worker-limit-input:focus")
 	assertContains(t, rec, "#worker-settings-content .worker-limit-input:focus-visible")
 	assertNotContains(t, rec, "input-warning")
+	settingsRec := htmxGet(e, "/settings/workers?project_id="+p1.ID)
+	assertCode(t, settingsRec, http.StatusOK)
+	assertContains(t, settingsRec, `id="limit-input-global"`)
+	assertContains(t, settingsRec, "Worker Capacity &amp; Utilization")
 }
 
 func TestHandler_WorkerSettingsReportsCapacitySourceFailures(t *testing.T) {
@@ -6033,15 +6037,15 @@ func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 	insightsIdx := strings.Index(body, `>Insights</span>`)
 	systemIdx := strings.Index(body, `>System</span>`)
 	alertsIdx := strings.Index(body, `data-nav-base="/alerts"`)
-	modelsIdx := strings.Index(body, `data-nav-base="/models"`)
-	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || modelsIdx < 0 {
-		t.Fatal("sidebar missing Insights/System/Alerts/Models markers")
+	settingsIdx := strings.Index(body, `data-nav-base="/themes"`)
+	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || settingsIdx < 0 {
+		t.Fatal("sidebar missing Insights/System/Alerts/Settings markers")
 	}
 	if !(insightsIdx < systemIdx) {
 		t.Fatal("Insights section must appear before System section")
 	}
-	if !(systemIdx < alertsIdx && alertsIdx < modelsIdx) {
-		t.Fatal("Alerts nav item must be grouped under System, before Models")
+	if !(systemIdx < alertsIdx && alertsIdx < settingsIdx) {
+		t.Fatal("Alerts nav item must be grouped under System, before Settings")
 	}
 	if strings.Contains(body[:systemIdx], `data-nav-base="/alerts"`) {
 		t.Fatal("Alerts nav item must not appear before the System section")

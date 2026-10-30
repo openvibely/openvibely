@@ -166,10 +166,9 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 		local = append(local, stripExternalAssetTags(line))
 	}
 	initialHTML := renderWithState(initial, pages.CardListState{Filters: map[string]string{"provider": "openai"}})
-	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>
-	.hidden{display:none!important}.flex{display:flex!important}.fixed{position:fixed!important}.card{position:relative}.card-body{padding:2rem}.left-5{left:1.25rem}.top-8{top:2rem}
-	@media (min-width:768px){.md\:inline-flex{display:inline-flex!important}.md\:hidden{display:none!important}.md\:pl-8{padding-left:2rem!important}}
-	</style></head>`, 1)
+	// Use production styles so icons and selection gutters have their real geometry.
+	page := strings.Replace(strings.Join(local, "\n"), "</head>",
+		`<link rel="stylesheet" href="`+static.URL("app.css")+`"><link rel="stylesheet" href="`+static.URL("app-utilities.css")+`"></head>`, 1)
 	page = strings.Replace(page, "</main>", initialHTML+"</main>", 1)
 	runner := `<script>
 (function() {
@@ -210,7 +209,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    var alignedCard=card('a'), alignedTitle=alignedCard.querySelector('h3'), alignedGutter=alignedCard.querySelector('[data-card-selection-gutter]');
 	    var lineHeight=parseFloat(getComputedStyle(alignedTitle).lineHeight); if (!Number.isFinite(lineHeight)) lineHeight=alignedTitle.getBoundingClientRect().height;
 	    var expectedTop=alignedTitle.getBoundingClientRect().top-alignedCard.getBoundingClientRect().top+Math.max(0,(lineHeight-20)/2);
-	    if (!alignedGutter.style.top || Math.abs(parseFloat(alignedGutter.style.top)-expectedTop)>1) fail('card checkbox is not aligned with the title');
+	    if (!alignedGutter.style.top || Math.abs(parseFloat(alignedGutter.style.top)-expectedTop)>1) fail('card checkbox is not aligned with the title: top='+alignedGutter.style.top+' expected='+expectedTop);
 	    for (var cssWait=0;cssWait<80 && getComputedStyle(desktopSelect.closest('[data-card-select-loaded-control]')).display!=='none';cssWait++) await wait(25);
 	    if (getComputedStyle(desktopSelect.closest('[data-card-select-loaded-control]')).display!=='none' || getComputedStyle(mobileSelect).display==='none') fail('production responsive styles did not expose mobile selection mode');    var clicks=0; ['a','b','c'].forEach(function(id) { card(id).onclick=function(){clicks++;}; });
 	    checkbox('a').click();

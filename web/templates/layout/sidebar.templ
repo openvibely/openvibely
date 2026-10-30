@@ -49,12 +49,36 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     // Coalesce unsaved values; only acknowledge successful HTTP responses.
                     const pendingPreferences = {};
                     const preferenceVersions = {};
-                    const preferenceOutboxPrefix = 'openvibely.project-preference-outbox.';
+                    const preferenceUserID = document.documentElement.getAttribute('data-preference-user-id');
+                    if (!preferenceUserID) return;
+                    const legacyOutboxPrefix = 'openvibely.project-preference-outbox.';
+                    const preferenceOutboxPrefix = 'openvibely.' + encodeURIComponent(preferenceUserID) + '.project-preference-outbox.';
+                    const activePreferenceUserKey = 'openvibely.active-preference-user';
+                    let preferenceAccountStopped = false;
+                    let activePreferenceController = null;
+                    try { localStorage.setItem(activePreferenceUserKey, preferenceUserID); } catch (_) {}
+                    function preferenceAccountActive() {
+                        if (preferenceAccountStopped) return false;
+                        try {
+                            const active = localStorage.getItem(activePreferenceUserKey);
+                            if (active && active !== preferenceUserID) { stopPreferenceRetries(); return false; }
+                        } catch (_) {}
+                        return true;
+                    }
+                    function stopPreferenceRetries() {
+                        preferenceAccountStopped = true;
+                        clearTimeout(preferenceRetry);
+                        if (activePreferenceController) activePreferenceController.abort();
+                    }
+                    window.addEventListener('storage', function(event) {
+                        if (event.key === activePreferenceUserKey && event.newValue !== preferenceUserID) stopPreferenceRetries();
+                    });
                     const projectPreferenceFields = ['project_id', 'project_locations', 'pinned_project_ids'];
                     // This is an outbox, not a second preference store. Keep only unacknowledged
                     // writes across reloads/restarts (the desktop asset origin is stable).
                     projectPreferenceFields.forEach(function(key) {
                         try {
+                            localStorage.removeItem(legacyOutboxPrefix + key);
                             const entry = JSON.parse(localStorage.getItem(preferenceOutboxPrefix + key));
                             if (entry && typeof entry.version === 'string' && Object.prototype.hasOwnProperty.call(entry, 'value')) {
                                 pendingPreferences[key] = entry.value;
@@ -70,6 +94,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     let preferenceRetry = null;
                     let preferenceRetryDelay = 1000;
                     function saveProjectPreferences(values) {
+                        if (!preferenceAccountActive()) return;
                         Object.keys(values).forEach(function(key) {
                             if (!projectPreferenceFields.includes(key)) return;
                             pendingPreferences[key] = values[key];
@@ -82,18 +107,24 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         flushProjectPreferences();
                     }
                     async function flushProjectPreferences() {
-                        if (savingPreferences || !Object.keys(pendingPreferences).length) return;
+                        if (!preferenceAccountActive() || savingPreferences || !Object.keys(pendingPreferences).length) return;
                         clearTimeout(preferenceRetry);
                         savingPreferences = true;
                         const snapshot = {...pendingPreferences};
                         const versions = {...preferenceVersions};
                         let failed = false;
                         const controller = new AbortController();
+                        activePreferenceController = controller;
                         // Bound both the request and response-body read so a stalled save
                         // cannot hold the queue forever. Pending values remain in the outbox.
                         const deadline = setTimeout(function() { controller.abort(); }, 10000);
                         try {
-                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true, signal: controller.signal});
+                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Preference-User-ID': preferenceUserID}, body: JSON.stringify(snapshot), keepalive: true, signal: controller.signal});
+                            if (response.redirected || response.status === 401 || response.status === 403 || response.status === 409) {
+                                stopPreferenceRetries();
+                                return;
+                            }
+                            if (!preferenceAccountActive()) return;
                             let acknowledged = Object.keys(snapshot);
                             if (!response.ok) {
                                 // Retry transient failures only. Validation can reject one field
@@ -126,9 +157,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             });
                             preferenceRetryDelay = 1000;
                         } catch (_) { failed = true; }
-                        finally { clearTimeout(deadline); }
-                        savingPreferences = false;
-                        if (Object.keys(pendingPreferences).length) {
+                        finally { clearTimeout(deadline); activePreferenceController = null; savingPreferences = false; }
+                        if (preferenceAccountActive() && Object.keys(pendingPreferences).length) {
                             preferenceRetry = setTimeout(flushProjectPreferences, failed ? preferenceRetryDelay : 0);
                             if (failed) preferenceRetryDelay = Math.min(preferenceRetryDelay * 2, 30000);
                         }
@@ -281,7 +311,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						} else if (currentPath.includes('/alerts')) {
 							newUrl = '/alerts?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/workers')) {
-							newUrl = '/workers?project_id=' + encodeURIComponent(newProjectId);
+							newUrl = (currentPath === '/settings/workers' ? '/settings/workers' : '/workers') + '?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/insights')) {
 							newUrl = '/insights?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/channels')) {
@@ -424,7 +454,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								if (eventType === 'alert_created' && projectSelector) {
 									const currentProjectID = projectSelector.value;
 									if (data.project_id === currentProjectID) {
-										console.log('[SSE-Alerts] Alert created, refreshing badge');
+										if (data.alert_source === 'account_usage' && typeof window.showToast === 'function') {
+											window.showToast(data.alert_title, 'info', '', {toastKey:'account-usage:'+data.alert_id, clickURL: data.alert_url && data.alert_url.startsWith('/analytics?') ? data.alert_url : '/alerts'});
+										}
 										htmx.trigger('body', 'alertUpdate');
 									}
 								}
@@ -567,7 +599,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						function syncSidebarActiveNavigation() {
 							var currentPath = window.location.pathname;
 							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
-								var active = link.getAttribute('data-nav-base') === currentPath;
+								var base = link.getAttribute('data-nav-base');
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
@@ -889,90 +922,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						</span>
 					</a>
 				</li>
-				<li>
-					<a
-						data-nav-base="/models"
-						href={ templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/models?project_id=%s", currentProjectID) }
-						hx-target="#main-content"
-						hx-push-url="true"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-						</svg>
-						<span class="sidebar-text">Models</span>
-					</a>
-				</li>
-				<li>
-					<a
-						data-nav-base="/agents"
-						href={ templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/agents?project_id=%s", currentProjectID) }
-						hx-target="#main-content"
-						hx-push-url="true"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
-						</svg>
-						<span class="sidebar-text">Agents</span>
-					</a>
-				</li>
-					<li>
-						<a
-							data-nav-base="/skills"
-							href={ templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)) }
-							hx-get={ fmt.Sprintf("/skills?project_id=%s", currentProjectID) }
-							hx-target="#main-content"
-							hx-push-url="true"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
-							</svg>
-							<span class="sidebar-text">Skills</span>
-						</a>
-					</li>
-					<li>
-						<a
-							data-nav-base="/workers"						href={ templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/workers?project_id=%s", currentProjectID) }
-						hx-target="#main-content"
-						hx-push-url="true"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-						</svg>
-						<span class="sidebar-text">Workers</span>
-					</a>
-				</li>
-				<li>
-					<a
-						data-nav-base="/channels"
-						href={ templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/channels?project_id=%s", currentProjectID) }
-						hx-target="#main-content"
-						hx-push-url="true"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
-						</svg>
-						<span class="sidebar-text">Channels</span>
-					</a>
-				</li>
-				<li>
-					<a
-						data-nav-base="/personality"
-						href={ templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/personality?project_id=%s", currentProjectID) }
-						hx-target="#main-content"
-						hx-push-url="true"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0"></path>
-						</svg>
-						<span class="sidebar-text">Personality</span>
-					</a>
-				</li>
+
+
+
 				<li>
 					<a
 						data-nav-base="/themes"
@@ -981,12 +933,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						hx-target="#main-content"
 						hx-push-url="true"
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<rect x="3" y="3" width="14" height="6" rx="2"></rect>
-							<path d="M17 6h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-7v3"></path>
-							<rect x="10" y="16" width="4" height="6" rx="1"></rect>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"></path>
+							<path d="m9.5 3-.6 2.2-1.5.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.5-.9-.6-2.2Z"></path>
 						</svg>
-						<span class="sidebar-text">Appearance</span>
+						<span class="sidebar-text">Settings</span>
 					</a>
 				</li>
 			</ul>

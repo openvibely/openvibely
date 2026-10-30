@@ -1835,6 +1835,62 @@ templ analyticsContent(currentProject *models.Project) {
 											document.getElementById('usageBreakdownTable').innerHTML='\x3ctr>\x3ctd colspan="7" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 										}
 									}
+
+                                    async function loadResetCredits(card, account) {
+                                        if(!['openai','anthropic'].includes(account.provider)) return;
+                                        const section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';
+                                        card.querySelector('.card-body').appendChild(section);
+                                        section.textContent='Loading usage resets…';
+                                        const attempts=new Map();
+                                        async function refreshResets(){
+                                            try {
+                                                const data=await fetchJSON('/api/analytics/usage/resets?account_key='+encodeURIComponent(account.key));
+                                                if(!section.isConnected)return;
+                                                section.replaceChildren();
+                                                const heading=document.createElement('div');heading.className='font-semibold';
+                                                heading.textContent='Usage resets available: '+Number(data.available_count ?? data.availableCount ?? 0);section.appendChild(heading);
+                                                if(data.unavailable_reason){const reason=document.createElement('p');reason.className='text-xs opacity-60 mt-2';reason.textContent=String(data.unavailable_reason).replaceAll('_',' ');section.appendChild(reason);}
+                                                const credits=data.credits;
+                                                if(!Array.isArray(credits)){
+                                                    const note=document.createElement('p');note.className='text-xs opacity-60 mt-2';note.textContent='Reset details unavailable.';section.appendChild(note);return;
+                                                }
+                                                credits.forEach(credit=>{
+                                                    if(credit.status!=='available')return;
+                                                    const row=document.createElement('div');row.className='flex items-center justify-between gap-3 mt-3';
+                                                    const details=document.createElement('div');
+                                                    const title=document.createElement('div');title.className='text-sm';title.textContent=credit.title||'Usage reset';details.appendChild(title);
+                                                    if(credit.description){const description=document.createElement('div');description.className='text-xs opacity-70';description.textContent=credit.description;details.appendChild(description);}
+                                                    if(credit.remaining_uses!==undefined){const info=document.createElement('div');info.className='text-xs opacity-70';const labels={five_hour:'5-hour limit',seven_day:'Weekly limit',seven_day_opus:'Opus weekly limit',seven_day_sonnet:'Sonnet weekly limit'};const limits=Array.isArray(credit.clears)?credit.clears.map(x=>labels[x]||String(x).replaceAll('_',' ')).join(', '):'';info.textContent=credit.remaining_uses+' use(s) remaining'+(limits?' · Resets '+limits:'')+(credit.gives_back_weekly?' · Returns usage to weekly allowance':'');details.appendChild(info);}
+                                                    if(credit.usable===false){const reason=document.createElement('div');reason.className='text-xs opacity-60';reason.textContent=String(credit.unavailable_reason||'Currently unavailable').replaceAll('_',' ');details.appendChild(reason);}
+                                                    const expiry=document.createElement('div');expiry.className='text-xs opacity-60';
+                                                    const rawExpiry=credit.expires_at ?? credit.expiresAt;
+                                                    const date=rawExpiry==null?null:new Date(typeof rawExpiry==='number'?rawExpiry*1000:rawExpiry);
+                                                    const validDate=date&&!Number.isNaN(date.getTime());
+                                                    expiry.textContent=rawExpiry==null?'Does not expire':validDate?'Expires '+date.toLocaleString():'Expiration unavailable';details.appendChild(expiry);
+                                                    const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline';button.textContent='Use reset';
+                                                    button.disabled=!credit.id||credit.usable===false||(validDate&&date.getTime()<=Date.now());
+                                                    button.addEventListener('click',async()=>{
+                                                        const buttons=Array.from(section.querySelectorAll('button'));const disabledBefore=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
+                                                        button.textContent='Resetting…';
+                                                        const message=document.createElement('p');message.className='text-xs mt-2';message.setAttribute('role','status');section.appendChild(message);
+                                                        try{
+                                                            if(!attempts.has(credit.id)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(credit.id,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
+                                                            const response=await fetch('/api/analytics/usage/resets/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_key:account.key,credit_id:credit.id,idempotency_key:attempts.get(credit.id)})});
+                                                            const result=await response.json();if(!response.ok)throw Error(result.message||'Unable to use reset');
+                                                            const outcome=result.outcome||result.status||result.result;
+                                                            if(['reset','already_redeemed','alreadyRedeemed','already_used','no_credit','noCredit','not_limited','nothing_to_reset','nothingToReset','cooldown','ineligible'].includes(outcome))attempts.delete(credit.id);
+                                                            const text=outcome==='reset'||outcome==='already_redeemed'||outcome==='alreadyRedeemed'?'Usage reset.':outcome==='no_credit'||outcome==='noCredit'?'That reset is no longer available.':outcome==='nothing_to_reset'||outcome==='nothingToReset'||outcome==='not_limited'?'Your usage does not need a reset right now.':outcome==='already_used'?'That reset was already used.':outcome==='cooldown'?'Reset is on cooldown.':outcome==='ineligible'?'This reset is not currently available.':'Reset was not confirmed. '+String(result.reason||outcome||'Please refresh and try again.').replaceAll('_',' ');
+                                                            const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','true');
+                                                            try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
+                                                            await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
+                                                        }catch(e){message.textContent=e.message;button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}
+                                                    },{signal:eventSignal});
+                                                    row.append(details,button);section.appendChild(row);
+                                                });
+                                            }catch(e){if(e.name!=='AbortError')section.textContent='Usage resets unavailable.';}
+                                        }
+                                        await refreshResets();
+                                    }
 									async function loadUsageAccounts(refreshUsage) {
 										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
 										try {
@@ -1848,7 +1904,13 @@ templ analyticsContent(currentProject *models.Project) {
 												card.className='card bg-base-100 shadow-sm border border-base-300 h-full'+(accounts.length%2===1&&index===accounts.length-1?' lg:col-span-2':'');
 												card.style.minHeight='12rem';card.setAttribute('aria-busy','true');
 												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
-												target.appendChild(card);return card;
+												card.id='usage-account-'+account.key;
+                                                target.appendChild(card);
+                                                if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
+                                                    card.classList.add('ring-2', 'ring-primary');
+                                                    card.scrollIntoView({block: 'center'});
+                                                }
+                                                return card;
 											});
 											await Promise.allSettled(accounts.map(async function(account,index){
 												const card=cards[index];
@@ -1859,7 +1921,7 @@ templ analyticsContent(currentProject *models.Project) {
 													const temporary=document.createElement('div');
 													renderAccountUsageCards(data.account_limits||[],temporary);
 													const bodies=temporary.querySelectorAll('.card-body');
-													if(bodies.length)card.replaceChildren(...bodies);
+													if(bodies.length){card.replaceChildren(...bodies);await loadResetCredits(card,account);}
 													else card.querySelector('p').textContent='No live limit snapshot yet';
 												} catch(e) {
 													if(e.name==='AbortError'||generation!==dataGeneration)return;

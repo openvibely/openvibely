@@ -83,11 +83,12 @@ func TestCodexReasoningEffort_NewModelDefaults(t *testing.T) {
 		want  string
 	}{
 		{model: "gpt-6-astra", want: "medium"},
-		{model: "gpt-6.1-sol", want: "medium"},
+		{model: "gpt-6.1-sol", want: "low"},
 		{model: "gpt-6-sol", want: "medium"},
 		{model: "gpt-6-luna", want: "medium"},
 		{model: "gpt-5.6-sol", want: "medium"},
 		{model: "gpt-5.6-terra", want: "medium"},
+		{model: "gpt-6.1-terra", want: "low"},
 		{model: "gpt-5.6-luna", want: "medium"},
 		{model: "gpt-5.5", want: "medium"},
 		{model: "gpt-5.5-pro", want: "medium"},

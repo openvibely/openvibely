@@ -133,3 +133,25 @@ func TestOllamaBudgetsAreNotDetectedCapacity(t *testing.T) {
 		t.Fatalf("fallback budget: %+v", got)
 	}
 }
+
+func TestGPT61CatalogContextBudget(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-terra", "gpt-6.1-sol"} {
+		t.Run(model, func(t *testing.T) {
+			for _, cap := range []int{0, 200000, 872000} {
+				agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: model, ProviderContextWindow: 272000, ContextWindow: cap}
+				SyncProviderFromCatalog(&agent)
+				got := Resolve(agent)
+				want := 500000
+				if cap > 0 && cap < want {
+					want = cap
+				}
+				if got.ProviderInputWindow != 500000 || got.EffectiveInputWindow != want {
+					t.Fatalf("cap %d: provider/effective = %d/%d, want 500000/%d", cap, got.ProviderInputWindow, got.EffectiveInputWindow, want)
+				}
+				if got.TriggerLimit != want*90/100 || got.EffectiveHardLimit != want*95/100 {
+					t.Fatalf("cap %d: unexpected compaction budgets: %+v", cap, got)
+				}
+			}
+		})
+	}
+}

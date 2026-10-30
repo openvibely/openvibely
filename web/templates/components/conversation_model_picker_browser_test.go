@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,7 +33,11 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	}
 	var favoriteMu sync.Mutex
 	favorites := map[string]bool{}
+	pickerSettings := browserConversationSettings("m0")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if pickerSettings(w, r) {
+			return
+		}
 		if r.URL.Path == "/ui/model-favorites" {
 			favoriteMu.Lock()
 			defer favoriteMu.Unlock()
@@ -181,6 +186,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(sub.hidden && panel.querySelectorAll('.ov-mp-pick').length===1,'search all providers');
  panel.querySelector('.ov-mp-pick').click();
  assert(!panel.hidden && trigger.dataset.currentValue==='m23','select keeps picker open');
+ await trigger._ovModelState.ready;
  const slider=panel.querySelector('input[type=range]');
  document.documentElement.dataset.theme='light';
  assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#d5d8df','light track is light gray');
@@ -206,7 +212,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  list.style.maxHeight='';await wait();
  const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
  assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','global default uses provider and model subtext');
- defaultRow.click();
+ defaultRow.click();await trigger._ovModelState.ready;
  assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
  assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
@@ -283,7 +289,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 		{ID: "mix", Name: "Ensemble", Provider: models.ProviderMixture},
 	}
 	var content bytes.Buffer
-	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/tasks/t/thread", TaskID: "t", Agents: agents, DefaultAgentID: "b", SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/tasks/t/thread", TaskID: "t", ProjectID: "task-project", Agents: agents, DefaultAgentID: "b", SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,8 +298,10 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false;
  window.fetch=async function(url,options){
  if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
+ // Another project is selected globally; task requests must identify their own project.
+ if(new URL(url,location.href).searchParams.get('project_id')!=='task-project')throw Error('task settings request used the globally selected project');
  if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
- if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id'),id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
+ if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id')||'a',id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
  </script>`+content.String()+`<div id="browser-result"></div><script>
  (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)},wait=ms=>new Promise(r=>setTimeout(r,ms));try{
@@ -446,10 +454,10 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 	chrome := testChromePath(t)
 	var content bytes.Buffer
 	agents := []models.LLMConfig{
-		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
-		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5"},
+		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
+		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
 	}
-	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", ProjectID: "task-project", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -462,7 +470,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			_, _ = w.Write(htmx204)
-		case "/tasks/t/thread/model", "/ui/model-favorites":
+		case "/conversation/model-settings", "/ui/model-favorites":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)
 		case "/stop":
@@ -497,7 +505,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,20));
  const until=async(fn)=>{for(let i=0;i<200;i++){if(fn())return;await wait();}throw Error('timed out');};
  try {
- const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]');
+ const form=document.getElementById('task-form'),message=form.querySelector('[name=message]'),attachment=form.querySelector('[name=attachment_session_id]'),model=form.querySelector('[name=agent_id]'),effort=form.querySelector('[name=reasoning_effort]'),tier=form.querySelector('[name=service_tier]');
  const picker=form.querySelector('.chat-model-select');await picker._ovModelState.ready;
  const completed=[];let stopped=false;
  assert(form.querySelector('[aria-label="Stop response"]').getAttribute('hx-sync')==='this:drop','rendered Stop has an independent request scope');
@@ -507,18 +515,18 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(records?.length===1,'first request is held in flight');
  // Simulate a rejected steering request falling back to a normal send.
  form._chatNextSubmissionPayload={message:'queued follow-up',attachmentSessionID:'queued-attachment',fallbackFromSteer:true};
- message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';
+ message.value='queued follow-up';attachment.value='queued-attachment';effort.value='high';tier.value='default';
  let handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
  form.requestSubmit();await until(()=>handedOff);
  // A later send must not replace the waiting steering fallback.
- message.value='third message';attachment.value='third-attachment';model.value='b';effort.value='medium';
+ message.value='third message';attachment.value='third-attachment';model.value='b';effort.value='medium';tier.value='priority';
  handedOff=false;form.addEventListener('submit',()=>{handedOff=true;},{once:true});
  form.requestSubmit();await until(()=>handedOff);
  // Rebuilt Stop controls must still run while sends are waiting.
  message.value='';message.dispatchEvent(new Event('input',{bubbles:true}));
  form.querySelector('[aria-label="Stop response"]').click();await until(()=>stopped);
  assert(completed.length===0,'Stop completes independently of the held send');
- message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';
+ message.value='unsent newer draft';attachment.value='newer-attachment';model.value='b';effort.value='low';tier.value='default';
  message.dispatchEvent(new Event('input',{bubbles:true}));
  await fetch('/release');await until(()=>completed.length>=2);
  records=await (await fetch('/records')).json();
@@ -528,6 +536,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
  assert(records.length===3,'all three sends reach the server exactly once');
  const sent=records[1];
  assert(sent.message==='queued follow-up','queued request must not send the newer draft: '+sent.message);
+ assert(sent.service_tier==='default'&&records[2].service_tier==='priority'&&tier.value==='default','queued sends retain their own tier and preserve draft tier');
  assert(sent.attachment_session_id==='queued-attachment','queued request retains attachments');
  assert(sent.agent_id==='a'&&sent.reasoning_effort==='high'&&sent.model_selection_managed==='1','queued request retains model ownership and effort');
  assert(completed[1].message==='queued follow-up'&&completed[1].attachment==='queued-attachment'&&completed[1].fallback===true,'queued request retains completion metadata');
@@ -545,4 +554,175 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		srv.Close()
 	}()
 	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "queued model picker snapshot", 1000, 800, 25*time.Second)
+}
+
+func TestBrowserFunctional_ModelPickerFastMode(t *testing.T) {
+	chrome := testChromePath(t)
+	for _, scope := range []string{"chat", "task"} {
+		t.Run(scope, func(t *testing.T) {
+			agents := []models.LLMConfig{
+				{ID: "fast", Name: "Fast model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol", ServiceTier: "priority"},
+				{ID: "other", Name: "Other model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-terra"},
+				{ID: "local", Name: "Local model", Provider: models.ProviderOllama, Model: "qwen"},
+				{ID: "opus", Name: "Opus model", Provider: models.ProviderAnthropic, Model: "claude-opus-5-5"},
+				{ID: "sonnet", Name: "Sonnet model", Provider: models.ProviderAnthropic, Model: "claude-sonnet-5-5"},
+			}
+			config := ChatInputFormConfig{FormID: "fast-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/send", ProjectID: "fast-project", Agents: agents, SelectedAgentID: "fast", DefaultAgentID: "fast", ShowModelSelector: true}
+			if scope == "task" {
+				config.TaskID = "fast-task"
+			}
+			var content bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &content); err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><script>
+localStorage.clear();window.htmx={process:function(){}};const stored={},posts=[];
+window.fetch=async(url,opts)=>{if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
+if(opts?.method==='POST'){const id=opts.body.get('agent_id');stored[id]=opts.body.get('service_tier');posts.push(Object.fromEntries(opts.body));return {ok:true};}
+const id=new URL(url,location.href).searchParams.get('agent_id')||'fast';return {ok:true,json:async()=>({service_tier:stored[id]||'',reasoning_effort:''})};};
+</script>`+content.String()+`<div id="browser-result"></div><script>
+(async()=>{const assert=(v,m)=>{if(!v)throw Error(m)};try{
+const trigger=document.getElementById('fast-form-agent-select');window.ovModelPicker.open(trigger);await trigger._ovModelState.ready;
+const panel=document.getElementById('conversation-model-picker'),hidden=document.querySelector('[name=service_tier]');
+const waitSave=async()=>{await trigger._ovModelState.pending;};const toggle=()=>panel.querySelector('.ov-mp-fast-toggle');
+assert(!panel.querySelector('.ov-mp-speed').hidden,'supported model exposes Fast mode');
+assert(toggle().getAttribute('aria-checked')==='true'&&hidden.value==='','inherit Fast model default');
+toggle().click();await waitSave();assert(hidden.value==='default'&&toggle().getAttribute('aria-checked')==='false','explicit off selects standard');
+const choose=async(name)=>{panel.querySelector('.ov-mp-search input').value=name;panel.querySelector('.ov-mp-search input').dispatchEvent(new Event('input'));panel.querySelector('.ov-mp-pick').click();await trigger._ovModelState.ready;};
+await choose('Local model');assert(panel.querySelector('.ov-mp-speed').hidden&&hidden.value==='','unsupported model omits toggle and tier');
+await choose('Other model');assert(toggle().getAttribute('aria-checked')==='false'&&hidden.value==='','other model has independent default');
+toggle().click();await waitSave();assert(hidden.value==='priority','Fast selection');
+await choose('Fast model');assert(hidden.value==='default','restore per-model override');
+panel.querySelector('.ov-mp-speed .ov-mp-reset').click();await waitSave();assert(hidden.value===''&&toggle().getAttribute('aria-checked')==='true','Use default restores configured Fast');
+if(trigger.closest('form').dataset.modelSelectEndpoint){assert(posts.some(p=>p.agent_id==='fast'&&p.service_tier==='default'),'task override persisted');assert(stored.fast==='','task reset persisted');}
+assert(localStorage.getItem('chat-service-tier-fast-project')===null,'preferences are not stored in localStorage');
+await choose('Opus model');assert(!panel.querySelector('.ov-mp-speed').hidden,'Anthropic supported model exposes Fast');
+toggle().click();await waitSave();assert(hidden.value==='priority','Anthropic Fast override');
+await choose('Sonnet model');assert(panel.querySelector('.ov-mp-speed').hidden&&hidden.value==='','unsupported Anthropic model omits Fast');
+await choose('Opus model');assert(hidden.value==='priority','Anthropic override restored');
+panel.querySelector('.ov-mp-speed .ov-mp-reset').click();await waitSave();assert(hidden.value===''&&toggle().getAttribute('aria-checked')==='false','Anthropic reset');
+const form=trigger.closest('form');const captured=form._captureChatSubmission();assert(captured.serviceTier==='','submission snapshot includes default override');
+document.body.dataset.testResult='pass';
+}catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);}})();
+</script></body></html>`)
+			}))
+			defer srv.Close()
+			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "fast mode "+scope, 1000, 800, 15*time.Second)
+		})
+	}
+}
+
+// Models a shared persistent API for the browser fixtures.
+func browserConversationSettings(selected string) func(http.ResponseWriter, *http.Request) bool {
+	var mu sync.Mutex
+	overrides := map[string]map[string]string{}
+	saved := false
+	return func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/conversation/model-settings" {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == http.MethodPost {
+			if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+				var payload struct {
+					AgentID    string                       `json:"agent_id"`
+					ImportOnly bool                         `json:"import_only"`
+					Overrides  map[string]map[string]string `json:"overrides"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&payload)
+				if !saved {
+					selected = payload.AgentID
+					for key, value := range payload.Overrides {
+						overrides[strings.SplitN(key, ":", 2)[0]] = value
+					}
+					saved = true
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return true
+			}
+			saved = true
+			_ = r.ParseForm()
+			selected = r.FormValue("agent_id")
+			overrides[selected] = map[string]string{"reasoning_effort": r.FormValue("reasoning_effort"), "service_tier": r.FormValue("service_tier")}
+			w.WriteHeader(http.StatusNoContent)
+			return true
+		}
+		id := r.URL.Query().Get("agent_id")
+		if id == "" {
+			id = selected
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": id, "reasoning_effort": overrides[id]["reasoning_effort"], "service_tier": overrides[id]["service_tier"]})
+		return true
+	}
+}
+
+func TestBrowserFunctional_ConversationSettingsSurviveStorageClear(t *testing.T) {
+	chrome := testChromePath(t)
+	for _, scope := range []string{"chat", "task"} {
+		t.Run(scope, func(t *testing.T) {
+			config := ChatInputFormConfig{FormID: "persist-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", ProjectID: "owner", SelectedAgentID: "a", ShowModelSelector: true, Agents: []models.LLMConfig{
+				{ID: "a", Name: "Assigned", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
+				{ID: "b", Name: "Legacy chat", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
+			}}
+			if scope == "task" {
+				config.TaskID = "task"
+			}
+			var content bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &content); err != nil {
+				t.Fatal(err)
+			}
+			settings := browserConversationSettings("a")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/conversation/model-settings" {
+					if r.URL.Query().Get("project_id") != "owner" || (scope == "task" && r.URL.Query().Get("task_id") != "task") {
+						http.Error(w, "wrong project", 404)
+						return
+					}
+					settings(w, r)
+					return
+				}
+				if r.URL.Path == "/ui/model-favorites" {
+					fmt.Fprint(w, `{}`)
+					return
+				}
+				fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><script>
+window.htmx={process(){}};
+if(!sessionStorage.getItem('reloaded')){
+ localStorage.setItem('chat-model-owner','b');
+ localStorage.setItem('chat-effort-owner',JSON.stringify({'b:gpt-6.1-sol':'medium'}));
+ localStorage.setItem('chat-service-tier-owner',JSON.stringify({'b:gpt-6.1-sol':'priority'}));
+}
+</script>`+content.String()+`<div id="browser-result"></div><script>
+(async()=>{try{
+const assert=(v,m)=>{if(!v)throw Error(m)},trigger=document.getElementById('persist-form-agent-select'),form=trigger.closest('form');
+const submitted=new Promise(resolve=>form.addEventListener('submit',event=>{event.preventDefault();resolve(new FormData(form));},{once:true}));
+form.querySelector('[name=message]').value='send before settings finish';
+form.requestSubmit();
+const sent=await submitted;
+await trigger._ovModelState.ready;
+const task=!!form.dataset.conversationTaskId;
+assert(!trigger._ovModelState.error,trigger._ovModelState.error);
+assert(trigger.dataset.currentValue===(task?'a':'b'),'selection comes from task assignment or migrated Chat settings');
+assert(sent.get('agent_id')===(task?'a':'b'),'Send waits for the restored model selection');
+if(!sessionStorage.getItem('reloaded')){
+ if(!task){assert(form.querySelector('[name=reasoning_effort]').value==='medium','legacy effort imported');assert(form.querySelector('[name=service_tier]').value==='priority','legacy Fast imported');}
+ window.ovModelPicker.open(trigger);
+ const panel=document.getElementById('conversation-model-picker'),slider=panel.querySelector('input[type=range]');
+ slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));await trigger._ovModelState.pending;
+ assert(!trigger._ovModelState.error,'save succeeded');
+ localStorage.clear();sessionStorage.setItem('reloaded','1');location.reload();return;
+}
+assert(form.querySelector('[name=reasoning_effort]').value==='high','saved effort survives clearing storage and reloading');
+assert(localStorage.getItem('chat-model-owner')===null,'does not recreate local preferences');
+document.body.dataset.testResult='pass';
+}catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);}})();
+</script></body></html>`)
+			}))
+			defer srv.Close()
+			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "shared preference persistence "+scope, 1000, 800, 20*time.Second)
+		})
+	}
 }

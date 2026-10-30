@@ -68,6 +68,7 @@ type AgenticOptions struct {
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
 	ReasoningEffort  string
+	ServiceTier      string
 	ReasoningSummary string // reasoning summary mode (e.g. auto, concise, detailed, none)
 	// AutoCompaction enables client-side Codex-style history compaction for
 	// OpenAI Responses API turns.
@@ -122,6 +123,12 @@ type AgenticOptions struct {
 	WebSearchEnabled    bool
 	standaloneWebSearch func(ctx context.Context, input json.RawMessage) (WebSearchResult, bool, error)
 	OnWebSearchResult   func(WebSearchResult)
+
+	// PublishGeneratedImage enables the generate_image tool. The
+	// callback must durably publish the temporary PNG and return artifact JSON.
+	// Image generation also requires the request's publish_file permission.
+	PublishGeneratedImage     func(context.Context, string) (string, error)
+	standaloneImageGeneration func(context.Context, json.RawMessage) (string, bool, error)
 
 	// Callbacks for real-time output
 	OnText       func(text string)                              // called for each text delta
@@ -270,6 +277,7 @@ type toolCallInfo struct {
 // until the model finishes (no more tool calls) or MaxTurns is reached.
 // Uses the OpenAI Responses API with function calling.
 func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOptions) (*AgenticResponse, error) {
+	ctx = attachment.WithToolImages(ctx)
 	if opts == nil {
 		opts = &AgenticOptions{}
 	}
@@ -293,6 +301,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		useStandaloneWebSearch = false
 	}
 	var standaloneSearchInput []any
+	var imageGenerationInput []any
 	var webSearchResults []WebSearchResult
 	if useStandaloneWebSearch {
 		optsCopy := *opts
@@ -304,6 +313,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	if err := c.ensureValidToken(); err != nil {
 		return nil, err
+	}
+
+	if opts.PublishGeneratedImage != nil {
+		optsCopy := *opts
+		optsCopy.standaloneImageGeneration = func(imageCtx context.Context, args json.RawMessage) (string, bool, error) {
+			return c.runImageGenerationTool(imageCtx, &optsCopy, imageGenerationInput, args)
+		}
+		opts = &optsCopy
 	}
 
 	tools := agenticToolDefinitions(opts, useStandaloneWebSearch)
@@ -620,6 +637,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if useStandaloneWebSearch {
 			standaloneSearchInput = append([]any(nil), inputItems...)
 		}
+		if opts.PublishGeneratedImage != nil {
+			imageGenerationInput = append([]any(nil), inputItems...)
+		}
 
 		// If no tool calls, we're done
 		if len(turnResult.toolCalls) == 0 {
@@ -734,12 +754,21 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			inputItems = append(inputItems, toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
 			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
-				item := agenticInputItem{"type": "message", "role": "user", "content": []any{
-					map[string]any{"type": "input_text", "text": "Image returned by view_image: " + image.Name},
-					map[string]any{"type": "input_image", "detail": "auto", "image_url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)},
-				}}
-				inputItems = append(inputItems, item)
-				localItemsAfterResponse = append(localItemsAfterResponse, item)
+				imageBlock := map[string]any{"type": "input_image", "detail": "auto", "image_url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)}
+				if exec.call.Name == imageGenerationToolName {
+					toolResultItem["output"] = []any{
+						map[string]any{"type": "input_text", "text": modelOutput}, imageBlock,
+					}
+				} else {
+					item := agenticInputItem{"type": "message", "role": "user", "content": []any{
+						map[string]any{"type": "input_text", "text": "Image returned by view_image: " + image.Name}, imageBlock,
+					}}
+					inputItems = append(inputItems, item)
+					localItemsAfterResponse = append(localItemsAfterResponse, item)
+				}
+			}
+			if opts.PublishGeneratedImage != nil {
+				imageGenerationInput = append([]any(nil), inputItems...)
 			}
 			if exec.record.ID != "" {
 				if opts.OnAsyncToolResult != nil {
@@ -1039,7 +1068,7 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 	isError := false
 	var err error
 	var webSearchResult *WebSearchResult
-	if opts.ToolFilter != nil && !opts.ToolFilter(name) {
+	if !openAIToolAllowed(opts, name) {
 		isError = true
 		output = fmt.Sprintf("tool %s is not allowed by this agent", name)
 	} else if name == standaloneWebSearchToolName && opts.standaloneWebSearch != nil {
@@ -1048,6 +1077,12 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 		if err == nil && !isError {
 			webSearchResult = &searchResult
 		}
+		if err != nil {
+			isError = true
+			output = err.Error()
+		}
+	} else if name == imageGenerationToolName && opts.standaloneImageGeneration != nil {
+		output, isError, err = opts.standaloneImageGeneration(ctx, input)
 		if err != nil {
 			isError = true
 			output = err.Error()
@@ -2551,6 +2586,9 @@ func agenticToolDefinitions(opts *AgenticOptions, includeStandaloneWebSearch boo
 	if includeStandaloneWebSearch {
 		tools = append(tools, standaloneWebSearchTool())
 	}
+	if opts.PublishGeneratedImage != nil && !opts.DisableTools && !opts.SkipDefaultTools {
+		tools = append(tools, imageGenerationTool())
+	}
 	return prepareStrictTools(tools)
 }
 
@@ -2612,13 +2650,15 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
-	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
+	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), func(name string) bool { return openAIToolAllowed(opts, name) })
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,
 		"input":            inputItems,
 		"stream":           true,
 	}
+
+	applyServiceTier(payload, opts.Model, opts.ServiceTier)
 	applyDefaultResponsesTextVerbosity(payload, opts.Model)
 
 	if !isChatGPTOAuth {

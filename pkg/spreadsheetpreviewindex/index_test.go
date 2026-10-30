@@ -163,3 +163,99 @@ func TestBuildIndexesCellsWithoutCoordinates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"0": "First", "1": "Second"}, values)
 }
+
+func writeIndexTestWorkbook(t *testing.T, parts map[string]string) string {
+	t.Helper()
+	filename := filepath.Join(t.TempDir(), "workbook.xlsx")
+	file, err := os.Create(filename)
+	require.NoError(t, err)
+	archive := zip.NewWriter(file)
+	for name, content := range parts {
+		entry, err := archive.Create(name)
+		require.NoError(t, err)
+		_, err = fmt.Fprint(entry, content)
+		require.NoError(t, err)
+	}
+	require.NoError(t, archive.Close())
+	require.NoError(t, file.Close())
+	return filename
+}
+
+func TestBuildResolvesDeclaredSharedStringPart(t *testing.T) {
+	for _, part := range []string{"xl/strings.xml", "text/shared.xml"} {
+		t.Run(part, func(t *testing.T) {
+			filename := writeIndexTestWorkbook(t, map[string]string{
+				"[Content_Types].xml":      fmt.Sprintf(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/%s" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`, part),
+				"xl/worksheets/sheet1.xml": `<worksheet><dimension ref="A1"/><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>`,
+				part:                       `<sst><si><t>Correct text</t></si></sst>`,
+				"xl/sharedStrings.xml":     `<sst><si><t>Unused legacy part</t></si></sst>`,
+			})
+			require.NoError(t, Build(filename))
+			values, err := Read(SidecarPath(filename), []int{0})
+			require.NoError(t, err)
+			require.Equal(t, map[string]string{"0": "Correct text"}, values)
+		})
+	}
+}
+
+func TestBuildRejectsMissingDeclaredSharedStringPart(t *testing.T) {
+	filename := writeIndexTestWorkbook(t, map[string]string{
+		"[Content_Types].xml": `<Types><Override PartName="/xl/missing.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`,
+	})
+	require.ErrorContains(t, Build(filename), "shared-string part")
+	require.NoFileExists(t, SidecarPath(filename))
+}
+
+func TestPreviewStringRefsStopsAtPreviewRows(t *testing.T) {
+	for _, tt := range []struct {
+		name, dimension        string
+		limit, rows, allocated int
+	}{
+		{"narrow", "A1:A25000", maxSheetRefs, maxRows, maxRows},
+		{"missing dimensions", "", maxSheetRefs, maxRows, maxRows},
+		{"sparse wide", "A1:CV25000", maxSheetRefs, 1000, maxSheetRefs},
+		{"remaining workbook budget", "A1:CV25000", 15000, 150, 15000},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var xml strings.Builder
+			xml.WriteString(`<worksheet>`)
+			if tt.dimension != "" {
+				fmt.Fprintf(&xml, `<dimension ref="%s"/>`, tt.dimension)
+			}
+			xml.WriteString(`<sheetData>`)
+			for row := 1; row <= 25000; row++ {
+				fmt.Fprintf(&xml, `<row r="%d"><c r="A%d" t="s"><v>%d</v></c></row>`, row, row, row)
+			}
+			xml.WriteString(`</sheetData></worksheet>`)
+			reader := strings.NewReader(xml.String())
+			refs, allocated, err := previewStringRefs(reader, tt.limit)
+			require.NoError(t, err)
+			require.Len(t, refs, tt.rows)
+			require.Contains(t, refs, tt.rows)
+			require.NotContains(t, refs, tt.rows+1)
+			require.Equal(t, tt.allocated, allocated)
+			require.Less(t, xml.Len()-reader.Len(), xml.Len()/2, "must not read the worksheet tail")
+		})
+	}
+}
+
+func TestPreviewStringRefsStopsBeforeDistantRowPayload(t *testing.T) {
+	content := `<worksheet><sheetData><row><c t="s"><v>0</v></c></row><row r="1048576"><c t="inlineStr"><is><t>` + strings.Repeat("ignored", 200000) + `</t></is></c></row></sheetData></worksheet>`
+	reader := strings.NewReader(content)
+	refs, _, err := previewStringRefs(reader, maxSheetRefs)
+	require.NoError(t, err)
+	require.Equal(t, map[int]struct{}{0: {}}, refs)
+	require.LessOrEqual(t, len(content)-reader.Len(), 8192, "stop at the out-of-preview row opening tag")
+}
+
+func TestBuildBudgetsBlankCellsInDeclaredPreviewRange(t *testing.T) {
+	parts := map[string]string{"xl/sharedStrings.xml": `<sst><si><t>First</t></si><si><t>Second</t></si><si><t>Over budget</t></si></sst>`}
+	for index := 0; index < 3; index++ {
+		parts[fmt.Sprintf("xl/worksheets/sheet%d.xml", index+1)] = fmt.Sprintf(`<worksheet><dimension ref="A1:CV25000"/><sheetData><row r="1"><c r="A1" t="s"><v>%d</v></c></row></sheetData></worksheet>`, index)
+	}
+	filename := writeIndexTestWorkbook(t, parts)
+	require.NoError(t, Build(filename))
+	values, err := Read(SidecarPath(filename), []int{0, 1, 2})
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"0": "First", "1": "Second"}, values)
+}

@@ -11,12 +11,14 @@ import (
 func TestCodexPromptMatchesSnapshot(t *testing.T) {
 	// Hashes of the actual cached templates, excluding surrounding whitespace.
 	for model, want := range map[string]string{
-		"gpt-6-astra":       "8e5e8f9a863bb360482e4d9fc000f1e4f1a85b1fdab7301dba58b36d1185b707",
+		"gpt-6-astra":       "44f0750eeca334d50226166d28657e7013e00480a038fb03d0106023161c4dea",
 		"gpt-6-sol":         "6e61d417b2c660f88f59b8be32933df8ed5e21240058ded907e8e3ecfbf2ea5a",
 		"gpt-6-luna":        "49c4958e931333ee6a703ecb258a44ffb46f07f40e0a167a663de04dfdfa6ef1",
 		"gpt-reserve":       "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.6-sol":       "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.6-terra":     "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
+		"gpt-6.1-sol":       "c2bbf87f723d3d917512961ab76bea218779383231587005b8d7ea61e6d5e50c",
+		"gpt-6.1-terra":     "44f0750eeca334d50226166d28657e7013e00480a038fb03d0106023161c4dea",
 		"gpt-5.6-luna":      "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 		"gpt-5.5":           "3d7984a1671ad1c65f6bd7732f03b69eb96b616cd7fa7390eb5e5ca04d06cf49",
 		"codex-auto-review": "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
@@ -66,9 +68,9 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 }
 
 func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
-	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
 		prompt := CodexSystemPrompt(model)
-		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async", "multi_tool_use.parallel"} {
+		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async", "multi_tool_use.parallel", "ALL_TOOLS"} {
 			if strings.Contains(prompt, unavailable) {
 				t.Errorf("%s references unavailable %s", model, unavailable)
 			}

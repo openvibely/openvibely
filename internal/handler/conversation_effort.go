@@ -14,13 +14,27 @@ func (h *Handler) applyConversationEffort(c echo.Context, taskID string, agent *
 	if present && effort != "" && !models.ValidConversationEffort(*agent, effort) {
 		return echo.NewHTTPError(http.StatusBadRequest, "unsupported reasoning effort for selected model")
 	}
+	tier, tierPresent := formValueIfPresent(c, "service_tier")
+	if tierPresent && !models.ValidServiceTier(*agent, tier) {
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported service tier for selected model")
+	}
 	if taskID != "" && h.taskRepo != nil {
+		var effortOverride, tierOverride *string
 		if present {
-			if err := h.taskRepo.SetModelEffort(c.Request().Context(), taskID, *agent, effort); err != nil {
+			effortOverride = &effort
+		}
+		if tierPresent {
+			tierOverride = &tier
+		}
+		if present || tierPresent {
+			if err := h.taskRepo.SetModelOverrides(c.Request().Context(), taskID, *agent, effortOverride, tierOverride); err != nil {
 				return err
 			}
 		}
 		return h.taskRepo.ApplyModelEffort(c.Request().Context(), taskID, agent)
+	}
+	if tier != "" {
+		agent.ServiceTier = tier
 	}
 	if effort != "" {
 		agent.ReasoningEffort = effort
@@ -30,29 +44,15 @@ func (h *Handler) applyConversationEffort(c echo.Context, taskID string, agent *
 
 // Read the selected configuration's task override when opening the shared picker.
 func (h *Handler) TaskThreadModelEffort(c echo.Context) error {
-	task, err := h.taskSvc.GetByID(c.Request().Context(), c.Param("taskId"))
+	settings, err := h.taskRepo.TaskModelSettings(c.Request().Context(), c.Param("taskId"), c.QueryParam("agent_id"))
 	if err != nil {
 		return err
 	}
-	if task == nil {
+	if settings == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	agentID := c.QueryParam("agent_id")
-	var agent *models.LLMConfig
-	if agentID == "default" {
-		agent, err = h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
-	} else {
-		agent, err = h.llmConfigRepo.GetByID(c.Request().Context(), agentID)
-	}
-	if err != nil {
-		return err
-	}
-	if agent == nil {
+	if settings.Config.ID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid model")
 	}
-	effort, err := h.taskRepo.ModelEffort(c.Request().Context(), task.ID, *agent)
-	if err != nil {
-		return err
-	}
-	return c.JSON(http.StatusOK, map[string]string{"reasoning_effort": effort})
+	return c.JSON(http.StatusOK, map[string]string{"reasoning_effort": settings.Effort, "service_tier": settings.ServiceTier})
 }

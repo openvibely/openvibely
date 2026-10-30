@@ -74,6 +74,7 @@ const (
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
+	ServiceTier              string // shared app preference; priority enables Anthropic fast speed
 	Model                    string
 	MaxTokens                int
 	ContextWindow            int    // complete-request admission window; defaults conservatively when zero
@@ -376,6 +377,7 @@ func contentBlocksJSON(content any) ([]json.RawMessage, error) {
 
 // agenticRequest is the API request body for agentic sends.
 type agenticRequest struct {
+	Speed             string                   `json:"speed,omitempty"`
 	Model             string                   `json:"model"`
 	MaxTokens         int                      `json:"max_tokens"`
 	Messages          []agenticMessage         `json:"messages"`
@@ -1353,6 +1355,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	}
 
 	req := agenticRequest{
+		Speed:     fastModeSpeed(opts.Model, opts.ServiceTier),
 		Model:     opts.Model,
 		MaxTokens: opts.MaxTokens,
 		Messages:  messages,
@@ -1449,6 +1452,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	isOAuth := c.auth.APIKey == "" && c.auth.Token != ""
 	if isOAuth {
 		betaHeaders = append(betaHeaders, "claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05")
+	}
+	if req.Speed != "" {
+		betaHeaders = append(betaHeaders, FastModeBetaHeader)
 	}
 	if nativeCompactionEnabled {
 		betaHeaders = append(betaHeaders, CompactionBetaHeader)

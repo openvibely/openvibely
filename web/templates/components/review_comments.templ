@@ -2,11 +2,12 @@ package components
 
 import (
 	"fmt"
+ "net/url"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 // ReviewCommentList renders a list of review comments (used for HTMX responses).
-templ ReviewCommentList(comments []models.ReviewComment, taskID string) {
+templ ReviewCommentList(comments []models.ReviewComment, taskID string, projectID string) {
 	<div id="review-comments-list" data-task-id={ taskID } data-comment-count={ fmt.Sprintf("%d", len(comments)) }>
 		if len(comments) > 0 {
 			for _, comment := range comments {
@@ -26,7 +27,7 @@ templ ReviewCommentList(comments []models.ReviewComment, taskID string) {
 					</div>
 					<button
 						class="btn btn-ghost btn-xs opacity-50 hover:opacity-100 flex-shrink-0"
-						hx-delete={ fmt.Sprintf("/reviews/%s", comment.ID) }
+						hx-delete={ fmt.Sprintf("/reviews/%s?project_id=%s", comment.ID, url.QueryEscape(projectID)) }
 						hx-target="closest .review-comment-item"
 						hx-swap="outerHTML"
 						data-tooltip-disabled aria-label="Remove comment"

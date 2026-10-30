@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"unicode/utf8"
 )
 
 // SearchOptions preserves each caller's directory policy and output limits.
@@ -251,8 +253,16 @@ func containsNULInFileSamples(file io.ReaderAt, size int64, buffer []byte) (bool
 }
 
 func truncateLine(line string, maxLen int) string {
+	if !utf8.ValidString(line) {
+		line = strings.ToValidUTF8(line, "\uFFFD")
+	}
 	if len(line) <= maxLen {
 		return line
 	}
-	return line[:maxLen] + "..."
+
+	end := maxLen
+	for end > 0 && !utf8.RuneStart(line[end]) {
+		end--
+	}
+	return line[:end] + "..."
 }

@@ -40,6 +40,7 @@ type AgentStore interface {
 
 // AlertStore persists project alerts and actionable notifications.
 type AlertStore interface {
+	GetByIdempotencyKey(ctx context.Context, projectID, key string) (*models.Alert, error)
 	AlertOwnedByAutomation(ctx context.Context, projectID string, alertID string, bindings []models.AutomationBinding) (bool, error)
 	ClaimApproved(ctx context.Context, projectID string, id string, claimant string, lease time.Duration) (*models.Alert, error)
 	CountPending(ctx context.Context, projectID string) (int, error)
@@ -536,6 +537,8 @@ type ProjectStore interface {
 
 // ReviewCommentStore persists task review comments.
 type ReviewCommentStore interface {
+	UpdateTextForProject(ctx context.Context, projectID, id, commentText string) error
+	DeleteForProject(ctx context.Context, projectID, id string) error
 	Create(ctx context.Context, c *models.ReviewComment) error
 	Delete(ctx context.Context, id string) error
 	DeleteByTask(ctx context.Context, taskID string) error
@@ -646,6 +649,8 @@ type TaskPullRequestStore interface {
 
 // TaskStore persists tasks and their lifecycle state.
 type TaskStore interface {
+	TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error)
+	SetModelOverrides(ctx context.Context, taskID string, agent models.LLMConfig, effort, tier *string) error
 	ActivateAllBacklog(ctx context.Context, projectID string) (int, error)
 	ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error)
 	ActiveMergeConflictOwner(ctx context.Context, projectID string) (string, error)
@@ -717,6 +722,8 @@ type TaskStore interface {
 	SearchByTitle(ctx context.Context, projectID string, titleQuery string) ([]models.Task, error)
 	SetActiveMergeConflictOwner(ctx context.Context, projectID string, taskID string) error
 	SetModelEffort(ctx context.Context, taskID string, agent models.LLMConfig, effort string) error
+	SetModelServiceTier(ctx context.Context, taskID string, agent models.LLMConfig, tier string) error
+	ModelServiceTier(ctx context.Context, taskID string, agent models.LLMConfig) (string, error)
 	SetPendingIfNotRunningOrQueued(ctx context.Context, id string) (bool, error)
 	SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx context.Context, id string, scheduleID string) (bool, error)
 	TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error)

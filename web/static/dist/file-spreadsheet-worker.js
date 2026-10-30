@@ -317,7 +317,8 @@ async function consumeODSTable(active, text, onRowProgress) {
     if (active.cell && active.cell.capture && open > offset) active.cell.parts.push(active.tokenCarry.slice(offset, open));
     const end = xmlTagEnd(active.tokenCarry, open);
     if (end < 0) {
-      if (offset > 0) active.tokenCarry = active.tokenCarry.slice(offset);
+      // Text preceding this incomplete tag was already captured above.
+      active.tokenCarry = active.tokenCarry.slice(open);
       return;
     }
     const tag = active.tokenCarry.slice(open, end + 1);
@@ -808,7 +809,7 @@ function xlsxCellFromXML(cell, content) {
   } else {
     if (!valueMatch) return null;
     const raw = xmlUnescape(valueMatch[1]).trim();
-    if (type === 'b') value = raw === '1' ? 1 : 0;
+    if (type === 'b') value = raw === '1' || raw === 'true';
     else if (type === 'e') { cellType = 's'; value = raw; }
     else if (type === 'd') {
       cellType = 'n';
@@ -1158,7 +1159,11 @@ function makeSheetPreview(index, workbook) {
 function scanDelimited(buffer, requestedFormat) {
   let delimiter = requestedFormat === 'tsv' ? '\t' : null;
   const bytes = new Uint8Array(buffer);
-  const decoder = new TextDecoder('utf-8');
+  // Excel's Unicode text exports use UTF-16. Inspect only the BOM and keep
+  // decoding in bounded chunks; TextDecoder removes the matching BOM.
+  const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le'
+    : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8';
+  const decoder = new TextDecoder(encoding);
   const previewRows = [];
   let totalRows = 0;
   let totalColumns = 0;
@@ -1170,11 +1175,12 @@ function scanDelimited(buffer, requestedFormat) {
   let pendingQuote = false;
   let skipLineFeed = false;
   let recordStarted = false;
+  let fieldStarted = false;
 
   const rowLimit = () => Math.min(MAX_ROWS, Math.floor(Math.min(MAX_SHEET_CELLS, MAX_WORKBOOK_CELLS) / Math.min(MAX_COLUMNS, Math.max(totalColumns, 1))));
   const append = value => {
     if (rowIndex < rowLimit() && columnIndex < MAX_COLUMNS) field += value;
-    if (value) recordStarted = true;
+    if (value) { recordStarted = true; fieldStarted = true; }
   };
   const updateDimensions = () => {
     totalColumns = Math.max(totalColumns, columnIndex + 1);
@@ -1186,6 +1192,7 @@ function scanDelimited(buffer, requestedFormat) {
     updateDimensions();
     if (rowIndex < rowLimit() && columnIndex < MAX_COLUMNS) row[columnIndex] = field;
     field = '';
+    fieldStarted = false;
     columnIndex++;
     recordStarted = true;
   };
@@ -1229,8 +1236,9 @@ function scanDelimited(buffer, requestedFormat) {
         } else {
           append(char);
         }
-      } else if (char === '"') {
+      } else if (char === '"' && !fieldStarted) {
         quoted = true;
+        fieldStarted = true;
         recordStarted = true;
       } else if (char === delimiter) {
         finishField();
@@ -1253,6 +1261,7 @@ function scanDelimited(buffer, requestedFormat) {
   let unknownMode = false;
   let detectingQuoted = false;
   let detectingPendingQuote = false;
+  let detectingFieldStarted = false;
   let unknownQuoted = false;
   let unknownPendingQuote = false;
   const chooseDelimiter = () => Object.keys(delimiterCounts).reduce(
@@ -1274,13 +1283,21 @@ function scanDelimited(buffer, requestedFormat) {
           else if (i === text.length - 1) detectingPendingQuote = true;
           else detectingQuoted = false;
         }
-      } else if (char === '"') {
+      } else if (char === '"' && !detectingFieldStarted) {
         detectingQuoted = true;
+        detectingFieldStarted = true;
       } else if (char === '\n' || char === '\r') {
-        delimiter = chooseDelimiter();
-        return;
+        detectingFieldStarted = false;
+        // Title-only and blank rows provide no separator evidence.
+        if (Object.values(delimiterCounts).some(count => count > 0)) {
+          delimiter = chooseDelimiter();
+          return;
+        }
       } else if (Object.prototype.hasOwnProperty.call(delimiterCounts, char)) {
         delimiterCounts[char]++;
+        detectingFieldStarted = false;
+      } else {
+        detectingFieldStarted = true;
       }
     }
   };
@@ -1298,6 +1315,10 @@ function scanDelimited(buffer, requestedFormat) {
     }
     for (; i < text.length; i++) {
       const char = text[i];
+      if (skipLineFeed) {
+        skipLineFeed = false;
+        if (char === '\n') continue;
+      }
       if (unknownQuoted) {
         if (char === '"') {
           if (text[i + 1] === '"') {
@@ -1311,8 +1332,9 @@ function scanDelimited(buffer, requestedFormat) {
         } else {
           append(char);
         }
-      } else if (char === '"') {
+      } else if (char === '"' && !fieldStarted) {
         unknownQuoted = true;
+        fieldStarted = true;
         recordStarted = true;
       } else if (Object.prototype.hasOwnProperty.call(delimiterCounts, char)) {
         delimiter = char;
@@ -1321,12 +1343,8 @@ function scanDelimited(buffer, requestedFormat) {
         consume(text.slice(i + 1), final);
         return;
       } else if (char === '\n' || char === '\r') {
-        delimiter = chooseDelimiter();
-        unknownMode = false;
         finishRow();
         if (char === '\r') skipLineFeed = true;
-        consume(text.slice(i + 1), final);
-        return;
       } else {
         append(char);
       }
@@ -1340,7 +1358,17 @@ function scanDelimited(buffer, requestedFormat) {
     for (const pending of pendingChunks) consumeChunk(pending);
     pendingChunks.length = 0;
   };
+  let firstChunk = true;
   const processChunk = (chunk, byteLength) => {
+    if (firstChunk) {
+      firstChunk = false;
+      // A leading Excel separator directive is metadata, not a worksheet row.
+      const directive = /^sep=(.)(?:\r\n|\r|\n)/.exec(chunk);
+      if (directive) {
+        delimiter = directive[1];
+        chunk = chunk.slice(directive[0].length);
+      }
+    }
     if (delimiter !== null) {
       consume(chunk);
       return;
@@ -1426,6 +1454,9 @@ async function loadODSZipSheet(index, requestId) {
       type,
       names: sheetNames.slice(),
       catalogPending: type === 'ready' && requestId == null,
+      // Later tabs have no catalog timer: keep their update timer active until
+      // the remaining dimension scan finishes, then explicitly clear it.
+      updatesPending: !!metrics.dimensionsPending,
       index,
       sheet: {...makeSheetPreview(index, workbook), dimensionsPending:!!metrics.dimensionsPending}
     };

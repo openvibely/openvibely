@@ -307,6 +307,15 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.updateWorkDone != nil {
 		defer params.updateWorkDone()
 	}
+	baseCtx := context.Background()
+	if h.organizationSvc != nil && strings.HasPrefix(params.PrincipalID, "user:") {
+		user, err := h.organizationSvc.Store.UserByID(baseCtx, strings.TrimPrefix(params.PrincipalID, "user:"))
+		if err != nil || user == nil || user.Disabled || user.Role == "" {
+			h.completeWithFailure(baseCtx, params.ExecID, params.TaskID, "initiating user no longer has organization access", 0, params.ChannelReply)
+			return
+		}
+		baseCtx = models.WithPrincipal(baseCtx, user.Principal)
+	}
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
 	// relevant project memory reaches Chat without triggering after_complete memory
@@ -318,11 +327,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
-	waitCtx := context.Background()
+	waitCtx := baseCtx
 	var waitCancel context.CancelFunc
 	var waitCancelRegistration uint64
 	if params.IsTaskFollowup && h.workerSvc != nil {
-		waitCtx, waitCancel = context.WithCancel(context.Background())
+		waitCtx, waitCancel = context.WithCancel(baseCtx)
 		waitCancelRegistration = h.registerTaskCancellation(params.TaskID, waitCancel)
 	}
 	cleanupWaitCancellation := func() {
@@ -346,14 +355,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if ctx != nil {
 			return ctx
 		}
-		return context.Background()
+		return baseCtx
 	}
 	startRuntimeCancellation := func() {
 		if ctx != nil {
 			return
 		}
 		var resetInactivity func()
-		ctx, cancel, resetInactivity = withInactivityTimeout(context.Background(), timeout)
+		ctx, cancel, resetInactivity = withInactivityTimeout(baseCtx, timeout)
 		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
 		runtimeCancelRegistration = h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true
@@ -1671,8 +1680,9 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		task.CreatedVia = models.TaskOriginX
 	}
 	exec := &models.Execution{AgentConfigID: agent.ID,
-		Status:     models.ExecRunning,
-		PromptSent: input.Content,
+		Status:       models.ExecRunning,
+		PromptSent:   input.Content,
+		AuthorUserID: input.AuthorUserID, AuthorName: input.AuthorName,
 	}
 	var slackContext *models.SlackTaskContext
 	if input.Source == models.TaskOriginSlack {
@@ -1793,6 +1803,9 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 
 func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.ThreadInput) (selected *models.LLMConfig, unavailable bool, resultErr error) {
 	defer func() {
+		if selected != nil && resultErr == nil && selected.ID == input.AgentConfigID && input.ServiceTier != "" && models.ValidServiceTier(*selected, input.ServiceTier) {
+			selected.ServiceTier = input.ServiceTier
+		}
 		if selected != nil && resultErr == nil && selected.ID == input.AgentConfigID && models.ValidConversationEffort(*selected, input.ReasoningEffort) {
 			selected.ReasoningEffort = input.ReasoningEffort
 		}
@@ -2139,7 +2152,8 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			AgentConfigID: agent.ID,
 			Status:        models.ExecQueued,
 			PromptSent:    input.Content,
-			IsFollowup:    true,
+			AuthorUserID:  input.AuthorUserID, AuthorName: input.AuthorName,
+			IsFollowup: true,
 		}
 		err = h.threadInputRepo.ClaimQueuedForTaskExecutionWithModel(ctx, input.ID, exec, task.AgentID, agent)
 		if errors.Is(err, persistence.ErrTaskModelChanged) {

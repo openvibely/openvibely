@@ -564,6 +564,11 @@ func alertDetailInspectLabel(alert models.Alert) string {
 // It is the only alerts surface that renders the full body and structured
 // metadata, and it is fetched per-alert when a user opens the inspect panel.
 templ AlertDetail(alert models.Alert) {
+ if alert.Source == "account_usage" {
+ if link, ok := alert.Metadata["usage_url"].(string); ok && strings.HasPrefix(link, "/analytics?") {
+ <a class="btn btn-sm btn-outline mb-3" href={ templ.SafeURL(link) }>View account usage</a>
+ }
+ }
 	@alertDetailBody(alert)
 }
 

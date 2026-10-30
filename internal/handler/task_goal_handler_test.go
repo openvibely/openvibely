@@ -104,7 +104,7 @@ func TestTaskGoalRoutesRejectForeignTaskFromExplicitAndSelectedProjects(t *testi
 					path += "?project_id=" + projectB.ID
 				}
 				rec := requestWithAccept(tc, route.method, path, "application/json", route.body)
-				if rec.Code != http.StatusBadRequest {
+				if rec.Code != http.StatusNotFound {
 					t.Fatalf("foreign %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
 				}
 				body := rec.Body.String()

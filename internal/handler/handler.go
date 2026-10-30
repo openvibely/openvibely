@@ -26,6 +26,7 @@ import (
 )
 
 type Handler struct {
+	organizationSvc            *service.OrganizationService
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService
 	swarmSvc                   *service.SwarmService
@@ -666,11 +667,11 @@ func (h *Handler) mutationProjectID(c echo.Context) string {
 }
 
 // getCurrentProjectID resolves the current project ID from the query param.
-// If project_id is provided and valid, it uses GetByID to verify it exists.
-// Otherwise it falls back to the first compact selector option.
+// Explicit non-default IDs must exist. Omitted/default selection uses the
+// selected-project preference, then the first compact selector option.
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	ctx := c.Request().Context()
-	projectID := c.QueryParam("project_id")
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID != "" && projectID != "default" {
 		p, err := h.projectSvc.GetByID(ctx, projectID)
 		if err != nil {
@@ -679,6 +680,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 		if p != nil {
 			return projectID, nil
 		}
+		return "", echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 	if h.settingsRepo != nil {
 		selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
@@ -728,6 +730,7 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.Use(h.taskProjectBoundary, h.threadInputProjectBoundary)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			c.Set("handler", h)
@@ -763,6 +766,13 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/login", h.AuthLogin)
 	e.POST("/logout", h.AuthLogout)
 	e.GET("/auth/me", h.AuthMe)
+	e.GET("/organization", h.OrganizationPage)
+	e.POST("/organization", h.RenameOrganization)
+	e.POST("/organization/invitations", h.CreateOrgInvitation)
+	e.POST("/organization/invitations/:id/revoke", h.RevokeOrgInvitation)
+	e.POST("/organization/members/:id", h.ChangeOrgMember)
+	e.GET("/invite", h.OrgInvitePage)
+	e.POST("/invite", h.AcceptOrgInvitation)
 	e.GET("/auth/sso/start", h.HostedSSOStart)
 	e.GET("/auth/sso/callback", h.HostedSSOCallback)
 	e.GET("/logged-out", h.LoggedOut)
@@ -773,6 +783,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Analytics API endpoints
 	e.GET("/api/analytics/usage", h.GetAnalyticsUsage)
+	e.GET("/api/analytics/usage/resets", h.GetUsageResetCredits)
+	e.POST("/api/analytics/usage/resets/consume", h.ConsumeUsageReset)
 	e.GET("/api/analytics/skills", h.GetSkillAnalytics)
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	e.GET("/api/analytics/success-failure-rates", h.GetSuccessFailureRates)
@@ -847,6 +859,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
 	e.POST("/tasks/:taskId/thread/model", h.TaskThreadSelectModel)
 	e.GET("/tasks/:taskId/thread/model", h.TaskThreadModelEffort)
+	e.GET("/conversation/model-settings", h.ConversationModelSettings)
+	e.POST("/conversation/model-settings", h.ConversationModelSettings)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
 	e.GET("/tasks/:taskId/thread/pending-inputs", h.TaskThreadPendingInputs)
 	e.POST("/thread-inputs/:inputId/edit", h.EditThreadInput)
@@ -961,6 +975,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Worker settings
 	e.GET("/workers", h.WorkerSettings)
+	e.GET("/settings/workers", h.WorkerSettings)
 	e.POST("/workers", h.UpdateWorkerSettings)
 	e.POST("/workers/projects/:projectId/limit", h.UpdateProjectWorkerLimit)
 	// Worker stats polling endpoints

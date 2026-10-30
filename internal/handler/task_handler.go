@@ -3335,6 +3335,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 				return err
 			}
 			selection := service.SwarmFollowupModelSelection{ModelID: model.ID}
+			if tier, present := formValueIfPresent(c, "service_tier"); present {
+				selection.ServiceTier = &tier
+			}
 			if effort, present := formValueIfPresent(c, "reasoning_effort"); present {
 				selection.ReasoningEffort = &effort
 			}
@@ -3352,8 +3355,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 			applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
+		principal, _ := models.PrincipalFromContext(c.Request().Context())
 		return render(c, http.StatusOK, templ.Join(
-			components.TaskThreadQueuedFollowupResponse(message, nil, task.ProjectID),
+			components.TaskThreadQueuedFollowupResponse(message, nil, task.ProjectID, principal.Username),
 			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""),
 		))
 	}
@@ -3440,7 +3444,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 	if admission.Queued != nil {
 		queued := admission.Queued
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID, queued.AuthorName))
 	}
 	exec := admission.Execution
 	task = admission.Task
@@ -3469,6 +3473,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
 	if err := h.startStreamingResponse(streamingResponseParams{
+		PrincipalID:       h.authPrincipalID(c),
 		ExecID:            exec.ID,
 		TaskID:            taskID,
 		Message:           message,
@@ -3563,7 +3568,7 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, input.AttachmentSessionID != "", taskID))
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, input.AttachmentSessionID != "", taskID, input.AuthorName))
 }
 
 // GetTaskThread returns the task thread view (for polling updates)
