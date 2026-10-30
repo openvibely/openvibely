@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/pkg/filecontent"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -35,6 +36,19 @@ var (
 	taskAttachmentCopy     = io.Copy
 	taskAttachmentRemove   = os.Remove
 )
+
+func prepareSpreadsheetStringIndex(path string) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".xlsx", ".xlsm", ".xltx", ".xltm":
+		if err := spreadsheetpreviewindex.Build(path); err != nil {
+			applog.Infof("[attachment] spreadsheet preview index unavailable for %s: %v", filepath.Base(path), err)
+		}
+	}
+}
+
+func removeSpreadsheetStringIndex(path string) {
+	_ = os.Remove(spreadsheetpreviewindex.SidecarPath(path))
+}
 
 type taskAttachmentLister interface {
 	ListByTask(context.Context, string) ([]models.Attachment, error)
@@ -461,6 +475,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 		}
 		src.Close()
 		dest.Close()
+		prepareSpreadsheetStringIndex(destPath)
 
 		mediaType := file.Header.Get("Content-Type")
 		if known, ok := allowedFileExtensions[strings.ToLower(filepath.Ext(filename))]; ok {
@@ -481,6 +496,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
 			applog.Infof("[handler] %s error creating attachment for %s: %v", logScope, filename, err)
 			taskAttachmentRemove(destPath)
+			removeSpreadsheetStringIndex(destPath)
 			continue
 		}
 
@@ -508,6 +524,9 @@ func (h *Handler) removeTaskAttachmentFileIfUnreferenced(ctx context.Context, ta
 	}
 	if err := taskAttachmentRemove(filePath); err != nil {
 		applog.Infof("[handler] %s error deleting file=%s: %v (continuing)", logScope, filePath, err)
+	}
+	if err := os.Remove(spreadsheetpreviewindex.SidecarPath(filePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		applog.Infof("[handler] %s error deleting spreadsheet preview index for file=%s: %v (continuing)", logScope, filePath, err)
 	}
 }
 
@@ -602,15 +621,18 @@ func (h *Handler) saveDeferredTaskUploads(ctx context.Context, taskID, sessionID
 			rollback()
 			return err
 		}
+		prepareSpreadsheetStringIndex(path)
 		info, err := os.Stat(path)
 		if err != nil {
 			os.Remove(path)
+			removeSpreadsheetStringIndex(path)
 			rollback()
 			return err
 		}
 		attachment := &models.Attachment{TaskID: taskID, FileName: file.Name(), FilePath: path, FileSize: info.Size(), MediaType: mediaTypeFromExtension(file.Name())}
 		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
 			os.Remove(path)
+			removeSpreadsheetStringIndex(path)
 			rollback()
 			return err
 		}

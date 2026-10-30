@@ -6,9 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +66,25 @@ func TestDesktopDownloadAuthorizationAndOriginal(t *testing.T) {
 			require.Equal(t, tc.status == 200 || tc.failed, called)
 		})
 	}
+}
+
+func TestDesktopSaveRouteAllowsSpreadsheetIndexRequest(t *testing.T) {
+	dir := t.TempDir()
+	workbook := filepath.Join(dir, "preview.xlsx")
+	require.NoError(t, os.WriteFile(workbook, []byte("xlsx"), 0600))
+	require.NoError(t, os.WriteFile(spreadsheetpreviewindex.SidecarPath(workbook), []byte(`{"7":"resolved"}`), 0600))
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/files/id?spreadsheet-strings=1", strings.NewReader("[7]"))
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	h := &Handler{}
+	err := h.saveDesktopFile(func(c echo.Context) error {
+		return serveFileContent(c, workbook, filepath.Base(workbook))
+	})(c)
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"7":"resolved"}`, rec.Body.String())
 }
 
 func TestDesktopSaveNativeOrigins(t *testing.T) {

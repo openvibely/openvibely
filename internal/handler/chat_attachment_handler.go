@@ -144,6 +144,11 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 			os.Remove(destPath)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
 		}
+		if err := dest.Close(); err != nil {
+			os.Remove(destPath)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save file")
+		}
+		prepareSpreadsheetStringIndex(destPath)
 
 		// Detect media type
 		mediaType := file.Header.Get("Content-Type")
@@ -231,6 +236,7 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 	if err := os.Remove(attachment.FilePath); err != nil {
 		applog.Infof("[handler] DeleteChatAttachment error deleting file: %v (continuing)", err)
 	}
+	removeSpreadsheetStringIndex(attachment.FilePath)
 
 	applog.Infof("[handler] DeleteChatAttachment success id=%s", attachmentID)
 

@@ -411,10 +411,10 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			}
 			dst.Close()
 			src.Close()
+			prepareSpreadsheetStringIndex(destPath)
 
 			// Determine media type from extension
 			mediaType := mediaTypeFromExtension(filename)
-
 			// Create database record
 			chatAtt := &models.ChatAttachment{
 				ExecutionID: exec.ID,
@@ -428,6 +428,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 				if cleanupErr := os.Remove(destPath); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
 					applog.Infof("[handler] APIChatMessage error removing unpublished attachment %s: %v", destPath, cleanupErr)
 				}
+				removeSpreadsheetStringIndex(destPath)
 				_ = os.Remove(execDir) // Remove only when no published attachment still owns the directory.
 				continue
 			}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUploadAttachment_TaskNotFound(t *testing.T) {
@@ -144,6 +147,60 @@ func TestUploadAttachment_Success(t *testing.T) {
 	if !bytes.Equal(stored, content) {
 		t.Fatalf("uploaded content=%q want=%q", stored, content)
 	}
+}
+
+func TestUploadAttachmentPrecomputesPreviewSharedStringIndex(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	uploadsRoot := withTaskAttachmentUploadsDir(t)
+
+	var workbook bytes.Buffer
+	archive := zip.NewWriter(&workbook)
+	worksheet, err := archive.Create("xl/worksheets/sheet1.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprint(worksheet, `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>1</v></c></row></sheetData></worksheet>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedStrings, err := archive.Create("xl/sharedStrings.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprint(sharedStrings, `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>unreferenced</t></si><si><t>high index visible</t></si></sst>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("files", "indexed.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(workbook.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/attachments?project_id="+url.QueryEscape(project.ID), body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	recorder := httptest.NewRecorder()
+	tc.echo.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	indexPath := spreadsheetpreviewindex.SidecarPath(filepath.Join(uploadsRoot, task.ID, "indexed.xlsx"))
+	values, err := spreadsheetpreviewindex.Read(indexPath, []int{1})
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"1": "high index visible"}, values)
 }
 
 func TestUploadAttachment_RejectsCrossProjectBeforePersistence(t *testing.T) {

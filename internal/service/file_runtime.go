@@ -14,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/filecontent"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
@@ -90,6 +91,7 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 			os.RemoveAll(dir)
 			return "", true, true, err
 		}
+		_ = spreadsheetpreviewindex.Build(stored)
 		f := models.GeneratedFile{ProjectID: req.ProjectID, ExecutionID: req.ExecID, FileName: filepath.Base(path), FilePath: stored, MediaType: filecontent.FileMediaType(path, data), FileSize: int64(len(data))}
 		if err = s.attachmentRepo.CreateGeneratedFile(ctx, &f); err != nil {
 			os.RemoveAll(dir)

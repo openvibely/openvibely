@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -19,9 +21,26 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/pkg/spreadsheetpreviewindex"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func tinySharedStringXLSX(t *testing.T) []byte {
+	t.Helper()
+	var workbook bytes.Buffer
+	archive := zip.NewWriter(&workbook)
+	worksheet, err := archive.Create("xl/worksheets/sheet1.xml")
+	require.NoError(t, err)
+	_, err = fmt.Fprint(worksheet, `<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>1</v></c></row></sheetData></worksheet>`)
+	require.NoError(t, err)
+	shared, err := archive.Create("xl/sharedStrings.xml")
+	require.NoError(t, err)
+	_, err = fmt.Fprint(shared, `<sst><si><t>unused</t></si><si><t>indexed upload value</t></si></sst>`)
+	require.NoError(t, err)
+	require.NoError(t, archive.Close())
+	return workbook.Bytes()
+}
 
 func useTempUploadsDir(t *testing.T) {
 	t.Helper()
@@ -332,6 +351,13 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 			content:     []byte("PK\x03\x04"), // ZIP header
 			expectError: false,
 		},
+		{
+			name:        "Spreadsheet with shared strings",
+			filename:    "indexed.xlsx",
+			contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			content:     tinySharedStringXLSX(t),
+			expectError: false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -372,9 +398,15 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 				assert.NotEmpty(t, response["session_id"])
 				attachments := response["attachments"].([]interface{})
 				assert.Len(t, attachments, 1)
-
 				attachment := attachments[0].(map[string]interface{})
 				assert.Equal(t, tc.filename, attachment["filename"])
+				if tc.filename == "indexed.xlsx" {
+					sessionID := response["session_id"].(string)
+					indexPath := spreadsheetpreviewindex.SidecarPath(filepath.Join(uploadsDir, "chat", "pending", sessionID, tc.filename))
+					values, readErr := spreadsheetpreviewindex.Read(indexPath, []int{1})
+					require.NoError(t, readErr)
+					require.Equal(t, map[string]string{"1": "indexed upload value"}, values)
+				}
 			}
 		})
 	}
