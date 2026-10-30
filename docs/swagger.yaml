@@ -48,6 +48,15 @@ definitions:
         example: 150
         type: integer
     type: object
+  handler.ConsumeUsageResetRequest:
+    properties:
+      account_key:
+        type: string
+      credit_id:
+        type: string
+      idempotency_key:
+        type: string
+    type: object
   handler.ErrorResponse:
     properties:
       error:
@@ -2304,6 +2313,67 @@ paths:
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
       summary: Get LLM usage analytics
+      tags:
+      - analytics
+  /api/analytics/usage/resets:
+    get:
+      parameters:
+      - description: Connected OAuth account key
+        in: query
+        name: account_key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider reset credits
+          schema:
+            additionalProperties: true
+            type: object
+        "502":
+          description: Account or provider request failed
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Usage service unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get usage reset credits
+      tags:
+      - analytics
+  /api/analytics/usage/resets/consume:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Account, credit, and idempotency key
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.ConsumeUsageResetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider reset result
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid reset request
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "502":
+          description: Account or provider request failed
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "503":
+          description: Usage service unavailable
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Consume a usage reset credit
       tags:
       - analytics
   /api/capacity/global:
