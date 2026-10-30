@@ -5211,7 +5211,7 @@ func TestHandler_Analytics_ModelUsagePageWiring(t *testing.T) {
 	if count := strings.Count(body, "function renderAccountUsageCards(accounts, target)"); count != 1 {
 		t.Fatalf("expected one account limits renderer in analytics script, got %d", count)
 	}
-	assertContains(t, rec, "let accountLimits = account.limits || []")
+	assertContains(t, rec, "let accountLimits = failed ? [] : (account.limits || [])")
 	assertContains(t, rec, "if (remainingMilliseconds <= 0) return 'Reset due'")
 	assertNotContains(t, rec, "Math.max(0, Math.ceil((resetAt.getTime() - Date.now()) / 60000))")
 }

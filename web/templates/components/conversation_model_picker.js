@@ -659,7 +659,6 @@
     toggle.type = "button";
     toggle.setAttribute("role", "switch");
     toggle.setAttribute("aria-labelledby", title.id);
-    toggle.setAttribute("aria-describedby", "ov-mp-fast-help");
     toggle.setAttribute(
       "aria-checked",
       String((override || m.defaultTier) === "priority"),
@@ -673,13 +672,7 @@
     };
     actions.append(reset, toggle);
     row.append(title, actions);
-    const help = el(
-      "div",
-      "ov-mp-speed-help",
-      "Faster responses · Higher cost or plan usage",
-    );
-    help.id = "ov-mp-fast-help";
-    speedBox.append(row, help);
+    speedBox.append(row);
   }
   function render() {
     if (!active) return;

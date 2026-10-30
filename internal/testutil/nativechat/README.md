@@ -69,3 +69,59 @@ phase, hit-test target, coordinates, and window activation/visibility). These
 lines are included in the native process output when a scenario fails. This
 separates a missing DOM event from malformed native input or inactive routing;
 a successful HTTP response alone still does not prove browser delivery.
+
+## Visible host and streaming memory measurements (macOS)
+
+The larger always-on-top host previously kept as `/tmp/ov-memory-audit/native-visible`
+can now be built directly from this repository. No replacement `main.go`, overlay,
+or files from a previous `/tmp` session are required:
+
+```sh
+go build -tags=openvibely_native_ui -o /tmp/ov-native-visible ./internal/testutil/nativechat
+OPENVIBELY_NATIVE_VISIBLE=1 /tmp/ov-native-visible http://127.0.0.1:PORT/FIXTURE
+```
+
+The URL must be a running isolated test fixture accepting `/native-test-bridge`.
+This is not a standalone OV server. `OPENVIBELY_NATIVE_VISIBLE=1` selects a
+1728×1085 window, always-on-top, with macOS all-Spaces/full-screen-auxiliary
+behavior. Without it, the existing native wheel tests retain their normal window.
+
+To build the host and run the complete streaming memory diagnostic automatically:
+
+```sh
+OPENVIBELY_RUN_STREAM_MEMORY=1 \
+OPENVIBELY_STREAM_RESULTS="$PWD/artifacts/stream-memory" \
+go test ./internal/handler -run '^TestStreamMemoryDiagnostic$' -count=1 -v -timeout 6m
+```
+
+Requires a graphical macOS session, Xcode command-line tools, `vmmap`, `footprint`,
+and `caffeinate`. The diagnostic prevents idle display sleep while the host runs.
+Keep the test window visible; do not minimize it or launch unrelated WebKit apps
+while it identifies the new WebContent process. Ambiguous process identification,
+failed memory sampling, hidden windows, JavaScript errors, or a final-content
+mismatch fail the diagnostic. It uses handler test helpers and an isolated SQLite
+database, never the user's database or live model credentials.
+
+Each run creates a fresh `ov-stream-memory-*` directory inside the result directory
+(or the OS temporary directory if unset), and prints its path. It records:
+
+- A 16,800-character seed followed by 1,000 21-character chunks requested every
+  20 ms through the real resumed-stream renderer. Heavy rendering can delay timers.
+- JSON measurements at baseline, approximately each 250 chunks, after settling,
+  and after 30 seconds idle: render calls, elapsed time, DOM size, viewport, and
+  correctness checks.
+- WebContent `vmmap -summary` and `footprint` output at each stage, plus `host.log`.
+
+For before/after comparisons, run this same diagnostic on each implementation,
+using separate result directories and the same window size and streaming interval.
+Repeat runs and alternate order. To isolate a renderer change, do not also change
+its throttle. The diagnostic measures the currently checked-out implementation;
+it does not assume the experimental DOM-morph helper exists.
+
+This is a measurement tool, not a fixed performance-budget assertion. Sampling can
+perturb timing. `owned unmapped (graphics)` resident and dirty/charged bytes are
+different from process physical footprint. Graphics maxima are sampled, not
+continuous peaks. Neither these values nor render counts measure allocation churn
+or garbage collection. This single synthetic resumed stream does not establish
+behavior for concurrent streams, fresh-stream setup, every rich-content type, or
+the full running app. Backend `pprof` profiling is separate.

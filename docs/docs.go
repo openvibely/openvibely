@@ -2124,6 +2124,9 @@ const docTemplate = `{
                 "account_detail": {
                     "type": "string"
                 },
+                "account_identity": {
+                    "type": "string"
+                },
                 "billing_label": {
                     "type": "string"
                 },

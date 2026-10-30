@@ -227,6 +227,36 @@ window.addEventListener('DOMContentLoaded', function() {
       poll();
     });
   }
+  function exerciseScopedDragTheme(card, rootSelector) {
+    var initialStyle = card.getAttribute('style');
+    card.style.setProperty('--drag-test-original', 'preserved');
+    var originalStyle = card.getAttribute('style');
+    var parent = card.parentElement, nextSibling = card.nextSibling;
+    var theme = document.createElement('style');
+    var themeSelector = rootSelector + rootSelector + rootSelector;
+    theme.textContent = themeSelector + ' [data-drag-theme-test] { background-color: rgb(31, 42, 53) !important; background-image: linear-gradient(rgb(31, 42, 53), rgb(54, 65, 76)) !important; color: rgb(201, 202, 203) !important; border-color: rgb(81, 82, 83) rgb(91, 92, 93) rgb(101, 102, 103) rgb(111, 112, 113) !important; box-shadow: rgb(10, 20, 30) 0px 2px 4px !important; transition: none !important; }';
+    document.head.appendChild(theme);
+    card.setAttribute('data-drag-theme-test', '');
+    var properties = ['background-color', 'background-image', 'color', 'box-shadow', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'];
+    var before = properties.map(function(property) { return getComputedStyle(card).getPropertyValue(property); });
+    var rect = card.getBoundingClientRect();
+    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:901, pointerType:'mouse', button:0, buttons:1, clientX:rect.left + 8, clientY:rect.top + 8}));
+    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:901, pointerType:'mouse', buttons:1, clientX:rect.left + 28, clientY:rect.top + 28}));
+    if (card.parentElement !== document.body) fail(rootSelector + ': themed drag must leave its container');
+    properties.forEach(function(property, index) {
+      if (getComputedStyle(card).getPropertyValue(property) !== before[index]) fail(rootSelector + ': drag changed scoped theme ' + property);
+    });
+    card.dispatchEvent(new PointerEvent('pointercancel', {bubbles:true, pointerId:901, pointerType:'mouse'}));
+    if (card.parentElement !== parent || card.nextSibling !== nextSibling) fail(rootSelector + ': cancel must restore source position');
+    if (card.getAttribute('style') !== originalStyle) fail(rootSelector + ': cancel must restore exact original inline style: ' + JSON.stringify(originalStyle) + ' -> ' + JSON.stringify(card.getAttribute('style')));
+    if (document.querySelector('[data-pointer-drag-placeholder]')) fail(rootSelector + ': cancel left a placeholder');
+    theme.textContent = themeSelector + ' [data-drag-theme-test] { background-color: rgb(121, 122, 123) !important; transition: none !important; }';
+    if (getComputedStyle(card).backgroundColor !== 'rgb(121, 122, 123)') fail(rootSelector + ': restored card must respond to theme changes');
+    card.removeAttribute('data-drag-theme-test');
+    if (initialStyle === null) card.removeAttribute('style');
+    else card.setAttribute('style', initialStyle);
+    theme.remove();
+  }
   async function exerciseOuterAutoScrollDrop(selector, containerSelector, axis, targetSelector, label, pointerId) {
     // A prior drop's reconciliation refresh replaces #kanban-board, and htmx's settle phase then
     // resets its style attribute; resolve nodes and resize the scroller only after both finish.
@@ -302,7 +332,7 @@ window.addEventListener('DOMContentLoaded', function() {
     card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
     if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark the card as dragging');
     if (getComputedStyle(card).position !== 'fixed' || getComputedStyle(card).transform === 'none') fail(label + ': real card should visibly move during auto-scroll');
-    var selectedTaskCards = containerSelector === '#kanban-board' ? Array.from(container.querySelectorAll('.task-selected')) : [];
+    var selectedTaskCards = containerSelector === '#kanban-board' ? Array.from(document.querySelectorAll('.task-selected')) : [];
     if (selectedTaskCards.length > 1) {
       selectedTaskCards.forEach(function(selectedCard) {
         if (!selectedCard.classList.contains('dragging')) fail(label + ': every selected task should enter dragging state');
@@ -353,6 +383,10 @@ window.addEventListener('DOMContentLoaded', function() {
     var first = document.querySelector('#task-task-drag-cursor');
     var second = document.querySelector('#task-task-active-status-drag');
     var target = document.querySelector(targetSelector);
+    // Force the containing/clipping layer that can occur in the desktop WebView.
+    var sourceLane = first.parentElement;
+    sourceLane.style.transform = 'translateZ(0)';
+    sourceLane.style.overflow = 'hidden';
     first.scrollIntoView({block:'center', inline:'center'});
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var firstRect = first.getBoundingClientRect();
@@ -393,7 +427,17 @@ window.addEventListener('DOMContentLoaded', function() {
       if (getComputedStyle(heading).userSelect !== 'none') fail('column titles must not be selectable during task drag');
     });
     [first, second].forEach(function(card, index) {
+      if (card.parentElement !== document.body) fail('dragged cards must escape source clipping and stacking contexts');
       var rect = card.getBoundingClientRect();
+      var hitX = Math.max(0, rect.left) + (Math.min(innerWidth, rect.right) - Math.max(0, rect.left)) / 2;
+      var hitY = Math.max(0, rect.top) + (Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top)) / 2;
+      if (hitX > 0 && hitX < innerWidth && hitY > 0 && hitY < innerHeight) {
+        // Temporarily enable hit testing to verify actual paint order, not just z-index.
+        card.style.pointerEvents = 'auto';
+        var hit = document.elementFromPoint(hitX, hitY);
+        card.style.pointerEvents = 'none';
+        if (!hit || !card.contains(hit)) fail('dragged card must paint above surrounding components without clipping');
+      }
       if (card.querySelectorAll('.badge').length !== cardLayouts[index].length) fail('grouped drag must not insert badges into task cards');
       cardLayouts[index].forEach(function(layout) {
         if (Math.abs(layout.badge.getBoundingClientRect().top - rect.top - layout.top) > 1) fail('grouped drag must preserve task badge positions inside each card');
@@ -411,6 +455,8 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
+    var themedCard = document.querySelector('#kanban-board .card[data-task-id], #schedule-content [data-schedule-card]');
+    if (themedCard) exerciseScopedDragTheme(themedCard, location.pathname === '/tasks' ? '#kanban-board' : '#schedule-content');
     if (location.pathname === '/tasks') {
       if (document.getElementById('selection-counter')) fail('tasks page must not render a selection counter');
       var groupedDrag = new URLSearchParams(location.search).get('grouped_drag');

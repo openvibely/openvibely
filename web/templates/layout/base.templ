@@ -2933,8 +2933,10 @@ html[data-ov-theme-layer="custom"] .ov-menu { --ov-menu-active: var(--ov-hover-b
 [data-ov-theme-layer="custom"] .ov-tooltip { border-color: var(--ov-subtle-border); }
 [data-ov-theme-layer="custom"] .ov-tooltip kbd { border-color: var(--ov-subtle-border); background: var(--ov-hover-bg); }
 [data-ov-theme-layer="custom"] .ov-mp-star { color: var(--ov-text-muted); }
-[data-ov-theme-layer="custom"] .ov-mp-star[aria-pressed="true"] { color: var(--ov-focus); }
+[data-ov-theme-layer="custom"] .ov-mp-star[aria-pressed="true"] { color: var(--ov-button-bg); }
 html[data-ov-theme-layer="custom"] .ov-mp-effort input[type="range"] { --ov-mp-accent: var(--ov-button-bg); --ov-mp-track: var(--ov-border); accent-color: var(--ov-button-bg); }
+html[data-ov-theme-layer="custom"] .ov-mp-fast-toggle[aria-checked="true"] { background: var(--ov-button-bg); }
+html[data-ov-theme-layer="custom"] .ov-mp-fast-toggle:focus-visible { outline-color: var(--ov-button-bg); }
 html[data-ov-theme-layer="custom"] #desktop-project-titlebar { background-color: var(--ov-kanban-column-bg) !important; color: var(--ov-text); --project-tab-selected: var(--ov-content-bg); --project-tab-contour: var(--ov-subtle-border); }
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"] { color: var(--ov-text-muted) !important; }
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: var(--ov-text) !important; }
@@ -4492,6 +4494,20 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					placeholder.style.marginBottom = getComputedStyle(card).marginBottom;
 					card.parentNode.insertBefore(placeholder, card);
 					const originalStyle = card.getAttribute('style');
+					// Theme surface rules may be scoped to the board or calendar. Freeze
+					// their resolved appearance before leaving those ancestors; cleanup
+					// restores the exact inline style so theme changes still apply later.
+					const appearance = getComputedStyle(card);
+					const appearanceProperties = [
+						'background-color', 'background-image', 'color', 'box-shadow',
+						'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'
+					];
+					const appearanceValues = appearanceProperties.map(function(property) {
+						return appearance.getPropertyValue(property);
+					});
+					appearanceProperties.forEach(function(property, index) {
+						card.style.setProperty(property, appearanceValues[index], 'important');
+					});
 					card.style.position = 'fixed';
 					card.style.left = rect.left + 'px';
 					card.style.top = rect.top + 'px';
@@ -4500,6 +4516,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					card.style.margin = '0';
 					card.style.zIndex = '1000';
 					card.style.pointerEvents = 'none';
+					// Escape scrolling/containing ancestors (including WebKit compositing
+					// layers). A higher z-index alone cannot escape their clipping.
+					document.body.appendChild(card);
 					return { card: card, placeholder: placeholder, originalStyle: originalStyle };
 				}
 
@@ -4508,8 +4527,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 
 				function endPointerCardMotion(motion) {
-					if (!motion) return;
-					if (motion.placeholder) motion.placeholder.remove();
+					if (!motion || motion.ended) return;
+					motion.ended = true;
+					if (motion.placeholder && motion.placeholder.parentNode) {
+						motion.placeholder.replaceWith(motion.card);
+					} else {
+						motion.card.remove();
+					}
 					if (motion.originalStyle === null) motion.card.removeAttribute('style');
 					else motion.card.setAttribute('style', motion.originalStyle);
 				}
@@ -4617,6 +4641,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					if (!state || event.pointerId !== state.pointerId) return;
 					const dropZone = taskPointerDropZoneAt(event.clientX, event.clientY) || state.dropZone;
 					if (state.started) {
+						// Drop handlers inspect source lanes and snapshot the board. Restore
+						// every card before they calculate order or apply optimistic moves.
+						state.motions.forEach(endPointerCardMotion);
 						suppressedTaskClickID = state.card.getAttribute('data-task-id');
 						if (dropZone) {
 							const dropEvent = {
