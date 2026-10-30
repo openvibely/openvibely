@@ -53,11 +53,19 @@ type ChatInputRequestEvent struct {
 }
 
 type ChatInputRequestAnswer struct {
-	QuestionID string `json:"question_id"`
-	Label      string `json:"label"`
+	ProjectIDs []string `json:"project_ids,omitempty"`
+	QuestionID string   `json:"question_id"`
+	Label      string   `json:"label"`
+}
+
+type ChatInputProject struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type ChatInputRequestQuestion struct {
+	Kind     string                   `json:"kind,omitempty"`
+	Projects []ChatInputProject       `json:"projects,omitempty"`
 	ID       string                   `json:"id"`
 	Question string                   `json:"question"`
 	Options  []ChatInputRequestOption `json:"options"`

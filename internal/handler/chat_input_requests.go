@@ -27,9 +27,11 @@ type chatInputRequestOption struct {
 }
 
 type chatInputRequestQuestion struct {
-	ID       string                   `json:"id"`
-	Question string                   `json:"question"`
-	Options  []chatInputRequestOption `json:"options"`
+	Kind     string                    `json:"kind,omitempty"`
+	Projects []events.ChatInputProject `json:"projects,omitempty"`
+	ID       string                    `json:"id"`
+	Question string                    `json:"question"`
+	Options  []chatInputRequestOption  `json:"options"`
 }
 
 type requestUserInputToolInput struct {
@@ -37,9 +39,10 @@ type requestUserInputToolInput struct {
 }
 
 type chatInputRequestAnswer struct {
-	QuestionID   string `json:"question_id"`
-	Label        string `json:"label,omitempty"`
-	CustomAnswer string `json:"custom_answer,omitempty"`
+	ProjectIDs   []string `json:"project_ids,omitempty"`
+	QuestionID   string   `json:"question_id"`
+	Label        string   `json:"label,omitempty"`
+	CustomAnswer string   `json:"custom_answer,omitempty"`
 }
 
 type chatInputRequestAnswerPayload struct {
@@ -207,6 +210,20 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 	var req requestUserInputToolInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
+	}
+	for i := range req.Questions {
+		q := &req.Questions[i]
+		q.Projects = nil // Catalog is server-owned, never supplied by the model.
+		if q.Kind == "projects" {
+			projects, err := h.projectRepo.ListSelectorOptions(ctx)
+			if err != nil {
+				return "", err
+			}
+			for _, project := range projects {
+				q.Projects = append(q.Projects, events.ChatInputProject{ID: project.ID, Name: project.Name})
+			}
+			q.Options = []chatInputRequestOption{{Label: "All projects", Description: "Use all projects listed now."}, {Label: "Specific projects", Description: "Choose one or more projects."}}
+		}
 	}
 	if err := validateChatInputQuestions(req.Questions); err != nil {
 		return "", err
@@ -522,7 +539,7 @@ func chatInputRequestForEvent(req *chatInputRequest) *events.ChatInputRequestEve
 	}
 	answers := make([]events.ChatInputRequestAnswer, 0, len(req.Answers))
 	for _, answer := range req.Answers {
-		answers = append(answers, events.ChatInputRequestAnswer{QuestionID: answer.QuestionID, Label: answer.Label})
+		answers = append(answers, events.ChatInputRequestAnswer{QuestionID: answer.QuestionID, Label: answer.Label, ProjectIDs: append([]string(nil), answer.ProjectIDs...)})
 	}
 	var installation json.RawMessage
 	if req.Installation != nil {
@@ -552,6 +569,9 @@ func validateChatInputQuestions(questions []chatInputRequestQuestion) error {
 	seen := map[string]bool{}
 	for i, q := range questions {
 		qid := strings.TrimSpace(q.ID)
+		if q.Kind != "" && q.Kind != "projects" {
+			return fmt.Errorf("unknown question kind %q", q.Kind)
+		}
 		if qid == "" {
 			return fmt.Errorf("question %d id is required", i+1)
 		}
@@ -595,6 +615,10 @@ func validateChatInputAnswers(questions []chatInputRequestQuestion, answers []ch
 		}
 		allowed[strings.TrimSpace(q.ID)] = labels
 	}
+	questionByID := map[string]chatInputRequestQuestion{}
+	for _, q := range questions {
+		questionByID[strings.TrimSpace(q.ID)] = q
+	}
 	seen := map[string]bool{}
 	for _, ans := range answers {
 		qid := strings.TrimSpace(ans.QuestionID)
@@ -608,6 +632,31 @@ func validateChatInputAnswers(questions []chatInputRequestQuestion, answers []ch
 		}
 		if len(customAnswer) > 2000 {
 			return fmt.Errorf("custom answer for question %q is too long", qid)
+		}
+		q := questionByID[qid]
+		if q.Kind == "projects" {
+			if customAnswer != "" {
+				return fmt.Errorf("select projects using the project picker")
+			}
+			catalog := map[string]bool{}
+			for _, p := range q.Projects {
+				catalog[p.ID] = true
+			}
+			picked := map[string]bool{}
+			for _, id := range ans.ProjectIDs {
+				if !catalog[id] || picked[id] {
+					return fmt.Errorf("invalid or duplicate project %q", id)
+				}
+				picked[id] = true
+			}
+			if label == "Specific projects" && len(picked) == 0 {
+				return fmt.Errorf("select at least one project")
+			}
+			if label == "All projects" && len(picked) != len(catalog) {
+				return fmt.Errorf("all projects must include the displayed catalog")
+			}
+		} else if len(ans.ProjectIDs) != 0 {
+			return fmt.Errorf("project IDs require a projects question")
 		}
 		labels := allowed[qid]
 		if labels == nil {
@@ -627,7 +676,7 @@ func validateChatInputAnswers(questions []chatInputRequestQuestion, answers []ch
 func cloneChatInputQuestions(in []chatInputRequestQuestion) []chatInputRequestQuestion {
 	out := make([]chatInputRequestQuestion, len(in))
 	for i, q := range in {
-		out[i] = chatInputRequestQuestion{ID: strings.TrimSpace(q.ID), Question: strings.TrimSpace(q.Question)}
+		out[i] = chatInputRequestQuestion{ID: strings.TrimSpace(q.ID), Question: strings.TrimSpace(q.Question), Kind: q.Kind, Projects: append([]events.ChatInputProject(nil), q.Projects...)}
 		out[i].Options = make([]chatInputRequestOption, len(q.Options))
 		for j, opt := range q.Options {
 			out[i].Options[j] = chatInputRequestOption{Label: strings.TrimSpace(opt.Label), Description: strings.TrimSpace(opt.Description)}
@@ -643,7 +692,7 @@ func cloneChatInputAnswers(in []chatInputRequestAnswer) []chatInputRequestAnswer
 		if customAnswer := strings.TrimSpace(ans.CustomAnswer); customAnswer != "" {
 			label = customAnswer
 		}
-		out[i] = chatInputRequestAnswer{QuestionID: strings.TrimSpace(ans.QuestionID), Label: label}
+		out[i] = chatInputRequestAnswer{QuestionID: strings.TrimSpace(ans.QuestionID), Label: label, ProjectIDs: append([]string(nil), ans.ProjectIDs...)}
 	}
 	return out
 }
@@ -651,7 +700,7 @@ func cloneChatInputAnswers(in []chatInputRequestAnswer) []chatInputRequestAnswer
 func chatInputQuestionsForEvent(in []chatInputRequestQuestion) []events.ChatInputRequestQuestion {
 	out := make([]events.ChatInputRequestQuestion, len(in))
 	for i, q := range in {
-		out[i] = events.ChatInputRequestQuestion{ID: q.ID, Question: q.Question}
+		out[i] = events.ChatInputRequestQuestion{ID: q.ID, Question: q.Question, Kind: q.Kind, Projects: append([]events.ChatInputProject(nil), q.Projects...)}
 		out[i].Options = make([]events.ChatInputRequestOption, len(q.Options))
 		for j, opt := range q.Options {
 			out[i].Options[j] = events.ChatInputRequestOption{Label: opt.Label, Description: opt.Description}

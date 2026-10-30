@@ -66,7 +66,7 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 	>
 		<div class="card-body gap-4 p-4">
 			for i, q := range req.Questions {
-				<fieldset class={ chatInputQuestionClass(i) } data-chat-input-question-id={ q.ID } data-chat-input-question-index={ fmt.Sprintf("%d", i) }>
+				<fieldset class={ chatInputQuestionClass(i) } data-chat-input-question-kind={ q.Kind } data-chat-input-question-id={ q.ID } data-chat-input-question-index={ fmt.Sprintf("%d", i) }>
 					<legend class="text-xl font-semibold leading-snug">{ chatInputQuestionLegend(q, i) }</legend>
                     if len(req.Installation)>0 {
                         <section data-skill-dependency-details="true"></section>
@@ -82,7 +82,7 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
                                             { opt.Label }
                                         }
                                     </span>
-									if j == 0 && len(req.Installation)==0 {
+									if j == 0 && len(req.Installation)==0 && q.Kind != "projects" {
 										<span class="chat-input-recommended-badge">Recommended</span>
 									}
 								</span>
@@ -92,8 +92,20 @@ templ ChatInputRequestCard(req *events.ChatInputRequestEvent) {
 							</span>
 						</div>
 					}
-if len(req.Installation)==0 {
-					<div class={ chatInputOptionClass } style="--btn-focus-scale: 1" role="button" tabindex="0" data-chat-input-option="true" data-chat-input-custom-option="true" data-question-id={ q.ID } aria-pressed="false">Something else</div>
+if q.Kind == "projects" {
+ <div data-project-picker class="hidden rounded-lg border border-base-300 p-2 space-y-2">
+  <div data-project-chips class="flex flex-wrap gap-1"></div>
+  <input type="search" data-project-search class="input input-bordered input-sm w-full" placeholder="Search projects…" aria-label="Search projects"/>
+  <div data-project-results class="hidden max-h-48 overflow-auto" role="group" aria-label="Select projects">
+   for _, project := range q.Projects {
+    <button type="button" class="btn btn-ghost btn-sm w-full justify-start" data-project-choice={ project.ID } data-project-name={ project.Name } aria-pressed="false"><span data-project-check aria-hidden="true">□</span>{ project.Name }</button>
+   }
+   <p data-project-empty class="hidden text-sm p-2 opacity-70">No matching projects</p>
+  </div>
+ </div>
+}
+if len(req.Installation)==0 && q.Kind != "projects" {
+                    <div class={ chatInputOptionClass } style="--btn-focus-scale: 1" role="button" tabindex="0" data-chat-input-option="true" data-chat-input-custom-option="true" data-question-id={ q.ID } aria-pressed="false">Something else</div>
 					<div class="hidden space-y-2 rounded-lg border border-base-300/70 p-3" data-chat-input-custom-wrap="true">
 						<textarea class="textarea textarea-bordered min-h-20 w-full" maxlength="2000" placeholder="Type your answer" data-chat-input-custom-answer="true" aria-label="Custom answer"></textarea>
 					</div>
