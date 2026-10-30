@@ -19,6 +19,53 @@ import (
 func monitorTestState() accountMonitorState {
 	return accountMonitorState{Grants: map[string]monitoredGrant{}, Limits: map[string]monitoredLimit{}, Sent: map[string]bool{}}
 }
+func TestAccountMonitorLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider models.LLMProvider
+		stored   string
+		accounts []models.AccountUsageView
+		multiple bool
+		want     string
+	}{
+		{name: "OpenAI email and plan", provider: models.ProviderOpenAI, accounts: []models.AccountUsageView{{AccountIdentity: "owner@example.com", PlanType: "ChatGPT Pro"}}, want: "OpenAI (owner@example.com · ChatGPT Pro)"},
+		{name: "Anthropic email and plan", provider: models.ProviderAnthropic, accounts: []models.AccountUsageView{{AccountIdentity: "owner@example.com", PlanType: "Claude Max"}}, want: "Anthropic (owner@example.com · Claude Max)"},
+		{name: "name without email", provider: models.ProviderAnthropic, accounts: []models.AccountUsageView{{AccountIdentity: "Account owner", PlanType: "Pro Lite"}}, want: "Anthropic (Account owner · Pro Lite)"},
+		{name: "plan only", provider: models.ProviderOpenAI, accounts: []models.AccountUsageView{{AccountIdentity: "OpenAI account", PlanType: "ChatGPT Pro"}}, want: "OpenAI (ChatGPT Pro)"},
+		{name: "single stored identity on failed usage", provider: models.ProviderAnthropic, stored: "owner@example.com", accounts: []models.AccountUsageView{{Error: "refresh failed", AccountIdentity: "stale@example.com", PlanType: "Stale plan"}}, want: "Anthropic (owner@example.com)"},
+		{name: "no metadata", provider: models.ProviderOpenAI, want: "OpenAI"},
+		{name: "ambiguous sign-ins without usage", provider: models.ProviderAnthropic, stored: "first@example.com", multiple: true, want: "Anthropic"},
+		{name: "snapshot sign-in wins", provider: models.ProviderAnthropic, stored: "first@example.com", multiple: true, accounts: []models.AccountUsageView{{Error: "failed", AccountIdentity: "first@example.com"}, {AccountIdentity: "fetcher@example.com", PlanType: "Claude Max"}}, want: "Anthropic (fetcher@example.com · Claude Max)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := []models.LLMConfig{{Name: "Model alias", Provider: tc.provider, OAuthConnectionID: "first", OAuthProviderDisplayName: tc.stored}}
+			if tc.multiple {
+				group = append(group, models.LLMConfig{Name: "Other model alias", Provider: tc.provider, OAuthConnectionID: "second"})
+			}
+			label := accountMonitorLabel(group, &models.AnalyticsUsageAccountLimitsViewModel{AccountLimits: tc.accounts})
+			if label != tc.want {
+				t.Fatalf("label = %q, want %q", label, tc.want)
+			}
+			state := monitorTestState()
+			state.ResetsInitialized = true
+			now := time.Now().UTC()
+			pct := 96.0
+			limits := []models.AccountLimitView{{LimitKey: "weekly", Label: "Weekly", UsedPercent: &pct}}
+			resets := map[string]any{"credits": []any{map[string]any{"id": "grant", "status": "available", "remaining_uses": 1, "expires_at": now.Add(time.Hour).Format(time.RFC3339)}}}
+			events := evaluateAccountMonitor(&state, limits, resets, now, label)
+			wantSuffixes := []string{" usage nearing its limit", " received a usage reset", " reset expires soon"}
+			if len(events) != len(wantSuffixes) {
+				t.Fatalf("events = %+v", events)
+			}
+			for i, event := range events {
+				if event.Title != tc.want+wantSuffixes[i] {
+					t.Fatalf("title = %q, want %q", event.Title, tc.want+wantSuffixes[i])
+				}
+			}
+		})
+	}
+}
+
 func TestAccountMonitorThresholdWindows(t *testing.T) {
 	state := monitorTestState()
 	now := time.Now()
@@ -100,6 +147,12 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	if err := env.LLMConfigs.Create(ctx, &cfg); err != nil {
 		t.Fatal(err)
 	}
+	alias := cfg
+	alias.ID = ""
+	alias.Name = "Another model on the same account"
+	if err := env.LLMConfigs.Create(ctx, &alias); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			t.Error("monitor must not redeem")
@@ -114,7 +167,7 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	pct := 96.0
 	reset := time.Now().Add(time.Hour).Format(time.RFC3339)
 	usage.SetAccountUsageFetcher(func(ctx context.Context, c models.LLMConfig) (*models.AccountUsageSnapshot, error) {
-		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, PrimaryLabel: "Session", PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
+		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, AccountDisplayName: "owner@example.com", PlanType: "ChatGPT Pro", PrimaryLabel: "Session", PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
 	})
 	broadcaster := events.NewBroadcaster()
 	sub, err := broadcaster.Subscribe()
@@ -133,6 +186,14 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	case event := <-sub:
 		if event.AlertSource != "account_usage" || event.ProjectID != projects[0].ID || !strings.HasPrefix(event.AlertURL, "/analytics?") {
 			t.Fatal(event)
+		}
+		wantTitle := "OpenAI (owner@example.com · ChatGPT Pro) usage nearing its limit"
+		if event.AlertTitle != wantTitle {
+			t.Fatalf("toast title = %q, want %q", event.AlertTitle, wantTitle)
+		}
+		stored, err := env.Stores.Alerts.GetByIDForProject(ctx, event.ProjectID, event.AlertID)
+		if err != nil || stored.Title != wantTitle {
+			t.Fatalf("stored alert = %+v, err = %v", stored, err)
 		}
 	default:
 		t.Fatal("missing toast event")
