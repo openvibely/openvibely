@@ -4599,6 +4599,24 @@ templ ChatAutoScrollScript() {
 			// Persistent stores survive streaming rerenders and HTMX morph replacement.
 			if (!(window._thinkingOpenStates instanceof Map)) window._thinkingOpenStates = new Map();
 			if (!window._toolOutputRowStates) window._toolOutputRowStates = {};
+            if (!window.syncToolDisclosures && typeof document !== 'undefined' && document.addEventListener) {
+                window.syncToolDisclosures = function() {
+                    var compact = document.documentElement.getAttribute('data-output-detail') === 'compact';
+                    document.querySelectorAll('[data-tool-disclosure-key]').forEach(function(wrap) {
+                        var state = window._toolOutputRowStates[wrap.dataset.toolDisclosureKey];
+                        var expanded = !compact || !!(state && state.expanded);
+                        var button = wrap.querySelector('button.stream-tool-summary');
+                        button.setAttribute('aria-expanded', String(expanded));
+                        button.disabled = !compact;
+                        wrap.querySelector('.stream-tool-body').hidden = !expanded;
+                        if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(wrap);
+                    });
+                };
+                document.addEventListener('openvibely:display-change', function(event) {
+                    if (event.detail.name === 'output') window.syncToolDisclosures();
+                });
+            }
+
 			if (!window._toolOutputStateOwners) window._toolOutputStateOwners = new Map();
 			window.releaseToolOutputState = function(executionID) {
 				if (executionID == null) {
@@ -5936,7 +5954,9 @@ templ ChatAutoScrollScript() {
 					wrap.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 					wrap.setAttribute('data-tool-name', seg.normalizedName || seg.name || '');
 					// Header: status icon or spinner, display name, secondary
-					var header = document.createElement('div');
+					var header = document.createElement('button');
+                    header.type = 'button';
+                    header.style.cssText = 'width:100%;text-align:left;';
 					header.className = 'stream-tool-summary';
 					if (seg.completed) {
 						var iconTemplate = document.createElement('template');
@@ -5966,7 +5986,29 @@ templ ChatAutoScrollScript() {
 
 					// Body grid with IN/OUT rows
 					var toolBody = buildToolBody(seg);
-					if (toolBody) wrap.appendChild(toolBody);
+					if (toolBody) {
+                        wrap.appendChild(toolBody);
+                        var disclosureKey = (toolContainerKey || 'chat') + ':' + seg.toolRenderID + ':disclosure';
+                        wrap.setAttribute('data-tool-disclosure-key', disclosureKey);
+                        var compact = document.documentElement.getAttribute('data-output-detail') === 'compact';
+                        var disclosureState = window._toolOutputRowStates[disclosureKey];
+                        var expanded = !compact || !!(disclosureState && disclosureState.expanded);
+                        header.setAttribute('aria-expanded', String(expanded));
+                        header.disabled = !compact;
+                        toolBody.hidden = !expanded;
+                        var caret = document.createElement('span');
+                        caret.className = 'tool-disclosure-caret'; caret.setAttribute('aria-hidden', 'true');
+                        caret.innerHTML = '<svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"/></svg>';
+                        caret.style.cssText = 'margin-left:auto;';
+                        header.appendChild(caret);
+                        header.onclick = function() {
+                            var open = header.getAttribute('aria-expanded') !== 'true';
+                            header.setAttribute('aria-expanded', String(open));
+                            toolBody.hidden = !open;
+                            window._toolOutputRowStates[disclosureKey] = {expanded:open};
+                            if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(container);
+                        };
+                    }
 
 					renderFragment.appendChild(wrap);
 				}

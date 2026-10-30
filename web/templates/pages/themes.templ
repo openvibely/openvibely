@@ -48,6 +48,7 @@ templ ThemesContent(catalog []themes.Theme) {
             .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }
             [data-preview-surfaces="default"] .dp-surface-card { border-color: var(--ov-surface-default-border, transparent); }
             [data-preview-surfaces="layered"] .dp-surface-card { border-color: var(--dp-frame); }
+			.display-preview[data-kind="output"] { height: 184px; }
 			.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }
 			.display-preview i:last-child { width: 55%; margin-bottom: 0; }
 			.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }
@@ -89,6 +90,7 @@ templ ThemesContent(catalog []themes.Theme) {
 		</section>
 		<section data-display-prefs data-settings-section="chat" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl">
+				@displayToggle("output", "Tool output", "full", "Full", "compact", "Compact")
 				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
 				@displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On")
 				@displayToggle("step", "Bubble and composer color step", "off", "Off", "on", "On")
@@ -299,6 +301,9 @@ func previewSyntaxStyle(theme themes.Theme, key string) string {
 templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabel string) {
 	<fieldset>
 		<legend class="text-sm font-medium mb-2">{ label }</legend>
+		if pref == "output" {
+            <p class="text-xs opacity-60 mb-2">Compact keeps tool inputs and results folded until you expand them. Assistant messages stay visible.</p>
+        }
 		if pref == "step" {
 			<p class="text-xs opacity-60 mb-2">Lift chat bubbles and the composer one shade above cards.</p>
 		}
@@ -307,7 +312,25 @@ templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabe
 				<button type="button" class="display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" data-display-pref={ pref } data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">
 					<span class="flex justify-between items-center gap-2 mb-3"><span class="text-sm font-medium">{ opt[1] }</span><span class="badge badge-primary badge-sm hidden" data-display-active>Active</span></span>
 					<div class="display-preview" data-kind={ pref } data-variant={ opt[0] } aria-hidden="true">
-						if pref == "surfaces" || pref == "layout" || pref == "tabs" {
+						if pref == "output" {
+                            <div class="p-3 text-xs flex flex-col gap-2">
+                                <span class="opacity-70">I’ll check the files.</span>
+                                <div class="border border-base-300 rounded p-2">
+                                    <span>
+                                        if opt[0] == "compact" {
+                                            <span>›</span>
+                                        } else {
+                                            <span>⌄</span>
+                                        }
+                                        Read file
+                                    </span>
+                                    if opt[0] == "full" {
+                                        <div class="opacity-50 mt-2 font-mono">IN · app.go<br/>OUT · File contents…</div>
+                                    }
+                                </div>
+                                <span class="opacity-70">Here’s what I found.</span>
+                            </div>
+                        } else if pref == "surfaces" || pref == "layout" || pref == "tabs" {
 							<div class="dp-tabs"><span></span><span></span></div>
 							<div class="dp-workspace"><div class="dp-list"><i></i><i></i><i></i></div><div class="dp-page"><div class="dp-surface-card"><i></i><i></i></div></div></div>
 						} else {
