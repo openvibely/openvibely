@@ -519,7 +519,7 @@ func ExecuteViewUsageAnalyticsTool(ctx context.Context, usageAnalyticsSvc *Usage
 		return "", fmt.Errorf("recent_bucket_limit must be between 0 and 24")
 	}
 	filter, filterSummary := usageAnalyticsActionFilterFromInput(projectID, req)
-	view, err := usageAnalyticsSvc.BuildLocalAnalyticsUsage(ctx, filter)
+	view, err := usageAnalyticsSvc.BuildLiveAnalyticsUsage(ctx, filter)
 	if err != nil {
 		return "", err
 	}
@@ -568,11 +568,16 @@ func compactUsageAnalyticsActionResponse(projectID string, filter usageAnalytics
 		TopProviders:       topUsageAnalyticsProviderRows(view.ModelBreakdown, resolvedTopLimit),
 		RecentBuckets:      lastUsageAnalyticsRateRows(view.UsageRate, bucketLimit),
 		AccountLimits:      compactUsageAnalyticsAccountRows(view.AccountLimits),
-		LocalOnly:          true,
+		LocalOnly:          false,
 		ProviderRefreshed:  false,
 		CostAvailability:   costStatus,
-		AccountLimitSource: "stored_snapshots_only",
+		AccountLimitSource: "live_provider",
 		Errors:             view.Errors,
+	}
+	for _, account := range view.AccountLimits {
+		if account.Error == "" && !account.UpdatedAt.IsZero() {
+			response.ProviderRefreshed = true
+		}
 	}
 	if view.LastUpdatedAt != nil {
 		updated := view.LastUpdatedAt.UTC().Format(time.RFC3339)

@@ -167,7 +167,7 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		limits, limitErr = m.usage.BuildAnalyticsAccountLimits(ctx, persistence.UsageFilter{AccountGroupKey: key, Refresh: true})
+		limits, limitErr = m.usage.BuildLiveAnalyticsAccountLimits(ctx, persistence.UsageFilter{AccountGroupKey: key, Refresh: true})
 	}()
 	go func() { defer wg.Done(); resets, resetErr = m.usage.UsageResetCredits(ctx, key) }()
 	wg.Wait()
