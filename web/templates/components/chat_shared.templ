@@ -4612,15 +4612,16 @@ templ ChatAutoScrollScript() {
                         button.setAttribute('aria-expanded', String(expanded));
                         button.hidden = !compact;
                         group.querySelector('.stream-activity-body').hidden = !expanded;
-                        var tools = Array.from(group.querySelectorAll('.stream-tool[data-tool-render-id]'));
-                        var running = tools.find(function(tool) { return tool.getAttribute('data-tool-status') === 'running'; });
-                        var failures = tools.filter(function(tool) { return tool.getAttribute('data-tool-status') === 'error'; }).length;
+                        var tools = group._activityTools || Array.from(group.querySelectorAll('.stream-tool[data-tool-render-id]'));
+                        var running = tools.find(function(tool) { return tool.status === 'running' || (tool.getAttribute && tool.getAttribute('data-tool-status') === 'running'); });
+                        var failures = tools.filter(function(tool) { return tool.status === 'error' || (tool.getAttribute && tool.getAttribute('data-tool-status') === 'error'); }).length;
                         var label = tools.length ? tools.length + (tools.length === 1 ? ' tool call' : ' tool calls') : 'Thinking';
                         if (failures) label += ' · ' + failures + ' failed';
                         var pair = group.closest('[data-exec-status]');
                         var terminal = pair ? /^(completed|failed|cancelled)$/.test(pair.getAttribute('data-exec-status')) : group.getAttribute('data-activity-terminal') === 'true';
-                        if (running && !terminal) label = 'Running ' + running.querySelector('.tool-name-text').textContent + '… · ' + label;
+                        if (running && !terminal) label = 'Running ' + (running.name || running.querySelector('.tool-name-text').textContent) + '… · ' + label;
                         group.querySelector('.stream-activity-label').textContent = label;
+                        if (group._ensureActivityContent && group.isConnected) group._ensureActivityContent(expanded);
                         if (!root && window.refreshVirtualChatRows) window.refreshVirtualChatRows(group);
                     });
                 };
@@ -5079,7 +5080,7 @@ templ ChatAutoScrollScript() {
 				// Promoting an enhanced SVG to lazy rows discards its live figure and
 				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
 				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
-					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable) &&
+					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable || document.documentElement.getAttribute('data-output-detail') === 'compact') &&
 					!container.querySelector('.chat-svg-preview');
 				var projectionKey = _thinkingStateKey(container);
 				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
@@ -5462,7 +5463,7 @@ templ ChatAutoScrollScript() {
 					preparationPhases = [];
 					textBuffer = cachedProjection.normalized;
 				} else if (options?.preparedSegments) {
-					preparationPhases = [prepareLargeMarkdownSegments];
+					preparationPhases = options.activityShell ? [] : [prepareLargeMarkdownSegments];
 				}
 				function renderPreparedSegments() {
 					if (virtualOwner && window.installChatVirtualRows) {
@@ -5475,7 +5476,7 @@ templ ChatAutoScrollScript() {
 							node._chatStreamStateKey = model.kind === 'thinking' ? toolStateKey + ':thinking:' + (data.offset + (model.segments[0].index || 0)) : projectionKey + ':row:' + index;
 							node._chatToolStateKey = toolStateKey;
                             node._chatActivityOffset = data.offset;
-							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments});
+							return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments, activityShell:document.documentElement.getAttribute('data-output-detail') === 'compact' && (model.kind === 'using' || model.kind === 'thinking')});
 						});
 					}
 			if (!options?.virtualRow && window.discardChatVirtualRows) window.discardChatVirtualRows(container);
@@ -5493,6 +5494,64 @@ templ ChatAutoScrollScript() {
 				if (!prefixes) window._toolOutputStateOwners.set(toolExecutionID, prefixes = new Set());
 				prefixes.add(toolContainerKey);
 			}
+            if (options?.activityShell) {
+                var activity = document.createElement('div'); activity.className = 'stream-activity';
+                var first = segments[0];
+                var firstKey = first.type === 'using' ? first.toolRenderID : 'thinking-' + ((first.index || 0) + (container._chatActivityOffset || 0));
+                var activityKey = (toolContainerKey || 'chat') + ':activity:' + firstKey;
+                activity.setAttribute('data-tool-disclosure-key', activityKey);
+                activity._activityTools = segments.filter(function(seg) { return seg.type === 'using'; }).map(function(seg) {
+                    return {name:toolDisplayName(seg.name), status:seg.completed ? (seg.resultStatus === 'error' ? 'error' : 'done') : 'running'};
+                });
+                var toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'stream-activity-summary';
+                toggle.innerHTML = '<span class="tool-disclosure-caret" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg></span><span class="stream-activity-label"></span>';
+                var content = document.createElement('div'); content.className = 'stream-activity-body';
+                activity.append(toggle, content);
+                activity._ensureActivityContent = function(expanded) {
+                    if (!expanded) {
+                        if (!activity._contentMounted) return;
+                        activity._contentGeneration = (activity._contentGeneration || 0) + 1;
+                        if (content.hasAttribute('data-chat-virtual-owner')) window.discardChatVirtualRows(content);
+                        content.replaceChildren();
+                        activity._contentMounted = false;
+                        return;
+                    }
+                    if (activity._contentMounted) return;
+                    activity._contentMounted = true;
+                    // The group shell stays mounted; its expanded work keeps the usual
+                    // per-tool virtual window instead of constructing the entire group.
+                    var models = [], thinking = [];
+                    function flush() { if (thinking.length) models.push({kind:'thinking',segments:thinking}); thinking = []; }
+                    segments.forEach(function(seg) {
+                        if (seg.type === 'thinking') thinking.push(seg);
+                        else { flush(); models.push({kind:seg.type,segments:[seg]}); }
+                    });
+                    flush();
+                    var generation = activity._contentGeneration = (activity._contentGeneration || 0) + 1;
+                    Promise.resolve().then(function() {
+                        if (activity._contentGeneration !== generation) return;
+                        if (!activity.isConnected) { activity._contentMounted = false; return; }
+                        return window.installChatVirtualRows(content, {models:models, ungrouped:true}, function(node, model, index, synchronous) {
+                            node._chatToolStateKey = toolContainerKey;
+                            node._chatStreamStateKey = activityKey + ':detail:' + index;
+                            node._chatActivityOffset = container._chatActivityOffset;
+                            return window.renderStreamingContent(node, '', !synchronous, {virtualRow:true, preparedSegments:model.segments, activityContent:true});
+                        });
+                    }).catch(console.error);
+                };
+                toggle.onclick = function() {
+                    var expanded = toggle.getAttribute('aria-expanded') !== 'true';
+                    window._toolOutputRowStates[activityKey] = {expanded:expanded};
+                    window.syncToolDisclosures(activity);
+                    if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(container);
+                };
+                var focused = container.contains(document.activeElement) && document.activeElement.matches('.stream-activity-summary');
+                container.replaceChildren(activity);
+                window.syncToolDisclosures(container);
+                if (focused) toggle.focus({preventScroll:true});
+                return true;
+            }
+
 			// Tail-local indexes support incremental rerenders. Also keep the complete
 			// bubble snapshot for server-markup hydration after a morph.
 			function persistThinkingStates() {
@@ -6021,6 +6080,7 @@ templ ChatAutoScrollScript() {
 				}
 			}
             function foldActivity() {
+                if (options?.activityContent) return;
                 // Group adjacent work, never assistant prose or interactive content.
                 var group = null, body = null, groupIndex = 0;
                 Array.from(renderFragment.children).forEach(function(node) {
@@ -6063,8 +6123,14 @@ templ ChatAutoScrollScript() {
 				if (window.prepareChatMath) window.prepareChatMath(renderFragment, container);
 				if (window.prepareChatSVG) window.prepareChatSVG(renderFragment, container);
                 window.OVFileViewer?.prepareStream(renderFragment, container);
+                var focusedToggle = document.activeElement;
+                var focusedFoldKey = focusedToggle && container.contains(focusedToggle) && focusedToggle.matches('.stream-activity-summary') ? focusedToggle.parentElement.getAttribute('data-tool-disclosure-key') : null;
 				if (options?.virtualRow && window.preserveChatVirtualScroll) window.preserveChatVirtualScroll(container, function() { container.replaceChildren(renderFragment); container.style.minHeight = ''; });
 				else container.replaceChildren(renderFragment);
+                if (focusedFoldKey) {
+                    var restoredFold = Array.from(container.querySelectorAll('[data-tool-disclosure-key]')).find(function(fold) { return fold.getAttribute('data-tool-disclosure-key') === focusedFoldKey; });
+                    if (restoredFold) restoredFold.querySelector('.stream-activity-summary').focus({preventScroll:true});
+                }
 				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(container);
 
 			// Restore open state of thinking sections from before re-render
