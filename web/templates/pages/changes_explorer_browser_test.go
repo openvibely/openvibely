@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -23,6 +24,7 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 			diff += fmt.Sprintf("-old %d\n+%s line %d\n", line, path, line)
 		}
 	}
+	var cleared atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -37,7 +39,11 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		case "/tasks/explorer-task/thread":
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
-			if err := TaskChangesContent(diff, task.ID, nil).Render(r.Context(), w); err != nil {
+			currentDiff := diff
+			if cleared.Load() {
+				currentDiff = ""
+			}
+			if err := TaskChangesContent(currentDiff, task.ID, nil).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/file":
@@ -75,5 +81,13 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.evaluate(`window.taskWorkspace.openChanges();'reopen'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("mobile explorer", `String(!!document.querySelector('#changes-explorer-mobile .changes-explorer') && document.getElementById('changes-explorer-mobile').getBoundingClientRect().height>0)`, "true")
+		b.evaluate(`search.value='';search.dispatchEvent(new Event('input'));'clear filter'`)
+		b.waitFor("files before refresh", `String(document.querySelectorAll('[data-explorer-path]').length===2)`, "true")
+		cleared.Store(true)
+		b.evaluate(`_updateDiffViewer('');'refresh empty'`)
+		b.waitFor("live refresh clears explorer", `String(!document.querySelector('#tab-changes #diff-viewer') && document.querySelectorAll('[data-explorer-path]').length===0 && document.querySelector('.explorer-empty').textContent==='No changed files.')`, "true")
+		cleared.Store(false)
+		b.evaluate(`_updateDiffViewer('');'refresh files'`)
+		b.waitFor("live refresh repopulates explorer", `String(document.querySelectorAll('[data-explorer-path]').length===2 && !document.getElementById('diff-file-0').hidden && document.getElementById('diff-file-1').hidden)`, "true")
 	})
 }
