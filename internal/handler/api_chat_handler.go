@@ -533,6 +533,9 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
 			}
 			if input != nil {
+				if projectID := h.mutationProjectID(c); projectID != "" && input.ProjectID != projectID {
+					return c.JSON(http.StatusNotFound, map[string]string{"error": "message not found"})
+				}
 				if input.InputStatus == models.ThreadInputApplied && input.RunExecutionID != "" {
 					exec, err = h.execRepo.GetAPIChatStatusByID(c.Request().Context(), input.RunExecutionID)
 					if err != nil {
@@ -557,6 +560,19 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 }
 
 func (h *Handler) apiChatExecutionStatus(c echo.Context, exec *models.Execution) error {
+	if projectID := h.mutationProjectID(c); projectID != "" {
+		taskID, err := h.execRepo.GetExecutionTaskID(c.Request().Context(), exec.ID)
+		if err != nil {
+			return err
+		}
+		task, err := h.taskRepo.GetThreadRenderMetadata(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil || task.ProjectID != projectID {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "message not found"})
+		}
+	}
 	resp := ChatMessageStatusResponse{
 		MessageID: exec.ID,
 	}

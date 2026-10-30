@@ -515,6 +515,19 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	// Stores
 	stores := backend.Stores()
+	organizationSvc := service.NewOrganizationService(stores.Organizations, authCfg.SessionSecret)
+	if err := organizationSvc.ConfigureTrustedProxies(cfg.AuthTrustedProxies); err != nil {
+		closeDatabase()
+		return nil, err
+	}
+	bootstrapUsername, bootstrapPassword := "", ""
+	if cfg.AuthMode == auth.AuthModeLocal {
+		bootstrapUsername, bootstrapPassword = authCfg.Username, authCfg.Password
+	}
+	if err := organizationSvc.Bootstrap(ctx, bootstrapUsername, bootstrapPassword, authCfg.Enabled || cfg.AuthMode == auth.AuthModeHostedSSO); err != nil {
+		closeDatabase()
+		return nil, fmt.Errorf("initialize organization: %w", err)
+	}
 	projectRepo := stores.Projects
 	taskRepo := stores.Tasks
 	taskGoalRepo := stores.TaskGoals
@@ -1237,6 +1250,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	if cfg.AuthMode == auth.AuthModeHostedSSO {
 		h.SetHostedSSO(hostedSSOClient, hostedPendingStore, cfg.HostedSSOKey, cfg.HostedSSOInstanceID, cfg.AppBaseURL)
 	}
+	h.SetOrganizationService(organizationSvc)
 	e.Use(h.AuthMiddleware())
 	llmSvc.SetAgentRepo(agentRepo)
 	llmSvc.SetFileChangeBroadcaster(fileChangeBroadcaster)

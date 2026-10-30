@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 )
 
 // ReviewCommentRepo handles database operations for code review comments.
@@ -96,6 +97,32 @@ func (r *ReviewCommentRepo) DeleteByTask(ctx context.Context, taskID string) err
 		`DELETE FROM review_comments WHERE task_id = ?`, taskID)
 	if err != nil {
 		return fmt.Errorf("delete review comments by task: %w", err)
+	}
+	return nil
+}
+
+// UpdateTextForProject updates only comments owned by the request project.
+func (r *ReviewCommentRepo) UpdateTextForProject(ctx context.Context, projectID, id, text string) error {
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE review_comments SET comment_text = ? WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, text, id, projectID)
+	return reviewCommentMutationResult(result, err)
+}
+
+// DeleteForProject deletes only comments owned by the request project.
+func (r *ReviewCommentRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM review_comments WHERE id = ? AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)`, id, projectID)
+	return reviewCommentMutationResult(result, err)
+}
+
+func reviewCommentMutationResult(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return persistence.ErrNotFound
 	}
 	return nil
 }

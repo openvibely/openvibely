@@ -72,6 +72,7 @@ type Config struct {
 	AuthUsername               string
 	AuthPassword               string
 	AuthSessionSecret          string
+	AuthTrustedProxies         string
 	AuthSessionTTL             time.Duration
 	HostedSSOEnabled           bool
 	HostedSSORequested         bool
@@ -169,6 +170,7 @@ func LoadWithMode(mode RuntimeMode) *Config {
 		AuthUsername:               getEnv("AUTH_USERNAME", ""),
 		AuthPassword:               getEnv("AUTH_PASSWORD", ""),
 		AuthSessionSecret:          getEnv("AUTH_SESSION_SECRET", ""),
+		AuthTrustedProxies:         getEnv("AUTH_TRUSTED_PROXIES", ""),
 		AuthSessionTTL:             ResolveAuthSessionTTL(getEnv("AUTH_SESSION_TTL", "")),
 		HostedSSOEnabled:           authMode == auth.AuthModeHostedSSO,
 		HostedSSORequested:         hostedSet && hostedOK && hostedEnabled,

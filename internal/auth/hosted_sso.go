@@ -44,6 +44,7 @@ var (
 
 type SessionClaims struct {
 	Version    int    `json:"v"`
+	SessionID  string `json:"sid,omitempty"`
 	Subject    string `json:"sub"`
 	Email      string `json:"email"`
 	Display    string `json:"display"`
@@ -153,6 +154,18 @@ func (c *HostedSSOClient) TokenURL() (string, error) {
 	return result, nil
 }
 
+// IssueHostedSession gives every login its own identity, even when the owner
+// and second-resolution timestamps match. SignHostedSession remains a pure
+// signer so legacy cookies without a session ID can still be verified.
+func IssueHostedSession(claims SessionClaims, key []byte) (string, error) {
+	var nonce [32]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", err
+	}
+	claims.SessionID = base64.RawURLEncoding.EncodeToString(nonce[:])
+	return SignHostedSession(claims, key)
+}
+
 func SignHostedSession(claims SessionClaims, key []byte) (string, error) {
 	if len(key) != 32 {
 		return "", errors.New("hosted session key must be 32 bytes")
@@ -195,7 +208,7 @@ func VerifyHostedSession(token string, key []byte, instanceID string, now time.T
 	if subtle.ConstantTimeCompare(signature, expected) != 1 {
 		return nil, ErrInvalidToken
 	}
-	allowed := map[string]struct{}{"v": {}, "sub": {}, "email": {}, "display": {}, "instance_id": {}, "auth_source": {}, "iat": {}, "exp": {}}
+	allowed := map[string]struct{}{"v": {}, "sid": {}, "sub": {}, "email": {}, "display": {}, "instance_id": {}, "auth_source": {}, "iat": {}, "exp": {}}
 	if _, err := decodeStrictJSONObject(payload, allowed); err != nil {
 		return nil, ErrInvalidToken
 	}
@@ -222,6 +235,10 @@ func VerifyHostedSession(token string, key []byte, instanceID string, now time.T
 }
 
 func validateSessionClaims(claims SessionClaims, instanceID string, now time.Time, checkTime bool) error {
+	if claims.SessionID != "" && !isCanonical32ByteValue(claims.SessionID) {
+		return ErrInvalidToken
+	}
+
 	if claims.Version != 1 || claims.AuthSource != HostedAuthSource {
 		return ErrInvalidToken
 	}

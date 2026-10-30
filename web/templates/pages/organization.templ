@@ -1,0 +1,68 @@
+package pages
+
+import (
+    "github.com/openvibely/openvibely/internal/models"
+    "github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Organization(projects []models.Project, currentProjectID string, content templ.Component) {
+    @layout.Base("Organization", projects, currentProjectID) {
+        @OrganizationContent(content)
+    }
+}
+
+templ OrganizationContent(content templ.Component) {
+    @layout.PageTitle("Organization")
+    @content
+    <style>
+        #organization-invite-link .code-copy-btn { opacity: 1; pointer-events: auto; }
+        #organization-invite-link pre { padding-right: 3rem; }
+    </style>
+    <script>
+        (function() {
+            // Listen once across HTMX visits. Keep the form (and any freshly
+            // generated invite link) intact when the server rejects an action.
+            if (!window._organizationErrorsBound) {
+                window._organizationErrorsBound = true;
+                function organizationForm(event) {
+                    var elt = event.detail && event.detail.elt;
+                    return elt && elt.closest ? elt.closest('#organization-container form') : null;
+                }
+                function showError(event, networkFailure) {
+                    if (!organizationForm(event)) return;
+                    var alert = document.getElementById('organization-error');
+                    if (!alert) return;
+                    var message = networkFailure ? 'Could not reach the server. Check your connection and try again.' : 'Could not save this change. Please try again.';
+                    var xhr = event.detail.xhr;
+                    if (!networkFailure && xhr && xhr.status < 500) {
+                        try {
+                            var body = JSON.parse(xhr.responseText);
+                            if (typeof body.message === 'string') message = body.message;
+                        } catch (_) {}
+                    }
+                    alert.textContent = message;
+                    alert.classList.remove('hidden');
+                    alert.focus();
+                }
+                document.addEventListener('htmx:responseError', function(event) { showError(event, false); });
+                document.addEventListener('htmx:sendError', function(event) { showError(event, true); });
+                document.addEventListener('htmx:timeout', function(event) { showError(event, true); });
+                document.addEventListener('htmx:beforeRequest', function(event) {
+                    if (!organizationForm(event)) return;
+                    var alert = document.getElementById('organization-error');
+                    if (alert) { alert.textContent = ''; alert.classList.add('hidden'); }
+                });
+            }
+
+            function initInviteCopy() {
+                var link = document.getElementById('organization-invite-link');
+                if (!link || !window.addCodeCopyButtons) return;
+                window.addCodeCopyButtons(link);
+                var button = link.querySelector('.code-copy-btn');
+                if (button) button.setAttribute('aria-label', 'Copy invite link');
+            }
+            if (window.addCodeCopyButtons) initInviteCopy();
+            else document.addEventListener('DOMContentLoaded', initInviteCopy, {once: true});
+        })();
+    </script>
+}

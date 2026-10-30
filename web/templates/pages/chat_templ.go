@@ -181,12 +181,12 @@ func ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[str
 				return templ_7745c5c3_Err
 			}
 			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-				templ_7745c5c3_Err = components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID, exec.AuthorName).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = components.ChatBubble("User", exec.PromptSent).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.ChatBubble("User", exec.PromptSent, exec.AuthorName).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -422,12 +422,12 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 					return templ_7745c5c3_Err
 				}
 				if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-					templ_7745c5c3_Err = components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID, exec.AuthorName).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = components.ChatBubble("User", exec.PromptSent).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = components.ChatBubble("User", exec.PromptSent, exec.AuthorName).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

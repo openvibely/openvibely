@@ -49,12 +49,36 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     // Coalesce unsaved values; only acknowledge successful HTTP responses.
                     const pendingPreferences = {};
                     const preferenceVersions = {};
-                    const preferenceOutboxPrefix = 'openvibely.project-preference-outbox.';
+                    const preferenceUserID = document.documentElement.getAttribute('data-preference-user-id');
+                    if (!preferenceUserID) return;
+                    const legacyOutboxPrefix = 'openvibely.project-preference-outbox.';
+                    const preferenceOutboxPrefix = 'openvibely.' + encodeURIComponent(preferenceUserID) + '.project-preference-outbox.';
+                    const activePreferenceUserKey = 'openvibely.active-preference-user';
+                    let preferenceAccountStopped = false;
+                    let activePreferenceController = null;
+                    try { localStorage.setItem(activePreferenceUserKey, preferenceUserID); } catch (_) {}
+                    function preferenceAccountActive() {
+                        if (preferenceAccountStopped) return false;
+                        try {
+                            const active = localStorage.getItem(activePreferenceUserKey);
+                            if (active && active !== preferenceUserID) { stopPreferenceRetries(); return false; }
+                        } catch (_) {}
+                        return true;
+                    }
+                    function stopPreferenceRetries() {
+                        preferenceAccountStopped = true;
+                        clearTimeout(preferenceRetry);
+                        if (activePreferenceController) activePreferenceController.abort();
+                    }
+                    window.addEventListener('storage', function(event) {
+                        if (event.key === activePreferenceUserKey && event.newValue !== preferenceUserID) stopPreferenceRetries();
+                    });
                     const projectPreferenceFields = ['project_id', 'project_locations', 'pinned_project_ids'];
                     // This is an outbox, not a second preference store. Keep only unacknowledged
                     // writes across reloads/restarts (the desktop asset origin is stable).
                     projectPreferenceFields.forEach(function(key) {
                         try {
+                            localStorage.removeItem(legacyOutboxPrefix + key);
                             const entry = JSON.parse(localStorage.getItem(preferenceOutboxPrefix + key));
                             if (entry && typeof entry.version === 'string' && Object.prototype.hasOwnProperty.call(entry, 'value')) {
                                 pendingPreferences[key] = entry.value;
@@ -70,6 +94,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                     let preferenceRetry = null;
                     let preferenceRetryDelay = 1000;
                     function saveProjectPreferences(values) {
+                        if (!preferenceAccountActive()) return;
                         Object.keys(values).forEach(function(key) {
                             if (!projectPreferenceFields.includes(key)) return;
                             pendingPreferences[key] = values[key];
@@ -82,18 +107,24 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         flushProjectPreferences();
                     }
                     async function flushProjectPreferences() {
-                        if (savingPreferences || !Object.keys(pendingPreferences).length) return;
+                        if (!preferenceAccountActive() || savingPreferences || !Object.keys(pendingPreferences).length) return;
                         clearTimeout(preferenceRetry);
                         savingPreferences = true;
                         const snapshot = {...pendingPreferences};
                         const versions = {...preferenceVersions};
                         let failed = false;
                         const controller = new AbortController();
+                        activePreferenceController = controller;
                         // Bound both the request and response-body read so a stalled save
                         // cannot hold the queue forever. Pending values remain in the outbox.
                         const deadline = setTimeout(function() { controller.abort(); }, 10000);
                         try {
-                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true, signal: controller.signal});
+                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Preference-User-ID': preferenceUserID}, body: JSON.stringify(snapshot), keepalive: true, signal: controller.signal});
+                            if (response.redirected || response.status === 401 || response.status === 403 || response.status === 409) {
+                                stopPreferenceRetries();
+                                return;
+                            }
+                            if (!preferenceAccountActive()) return;
                             let acknowledged = Object.keys(snapshot);
                             if (!response.ok) {
                                 // Retry transient failures only. Validation can reject one field
@@ -126,9 +157,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             });
                             preferenceRetryDelay = 1000;
                         } catch (_) { failed = true; }
-                        finally { clearTimeout(deadline); }
-                        savingPreferences = false;
-                        if (Object.keys(pendingPreferences).length) {
+                        finally { clearTimeout(deadline); activePreferenceController = null; savingPreferences = false; }
+                        if (preferenceAccountActive() && Object.keys(pendingPreferences).length) {
                             preferenceRetry = setTimeout(flushProjectPreferences, failed ? preferenceRetryDelay : 0);
                             if (failed) preferenceRetryDelay = Math.min(preferenceRetryDelay * 2, 30000);
                         }
@@ -568,7 +598,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var currentPath = window.location.pathname;
 							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
 								var base = link.getAttribute('data-nav-base');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(models|agents|skills|channels|personality|workers|settings\/workers)(\/|$)/.test(currentPath));
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});

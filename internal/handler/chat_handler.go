@@ -283,7 +283,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 				HasAttachments: queued.AttachmentSessionID != "",
 			})
 		}
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, "/chat/queued/"+queued.ID+"/steer", queued.AttachmentSessionID != ""))
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, "/chat/queued/"+queued.ID+"/steer", queued.AttachmentSessionID != "", queued.AuthorName))
 	}
 	// Create a task record for the chat message (required for execution tracking)
 	selectedAgentID := agent.ID
@@ -544,7 +544,7 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message, input.AttachmentSessionID != ""))
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message, input.AttachmentSessionID != "", input.AuthorName))
 }
 
 // ChatPendingInputs returns the current pending-inputs composer fragment for the project.
