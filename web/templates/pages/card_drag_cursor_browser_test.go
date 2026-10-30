@@ -302,7 +302,7 @@ window.addEventListener('DOMContentLoaded', function() {
     card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
     if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark the card as dragging');
     if (getComputedStyle(card).position !== 'fixed' || getComputedStyle(card).transform === 'none') fail(label + ': real card should visibly move during auto-scroll');
-    var selectedTaskCards = containerSelector === '#kanban-board' ? Array.from(container.querySelectorAll('.task-selected')) : [];
+    var selectedTaskCards = containerSelector === '#kanban-board' ? Array.from(document.querySelectorAll('.task-selected')) : [];
     if (selectedTaskCards.length > 1) {
       selectedTaskCards.forEach(function(selectedCard) {
         if (!selectedCard.classList.contains('dragging')) fail(label + ': every selected task should enter dragging state');
@@ -353,6 +353,10 @@ window.addEventListener('DOMContentLoaded', function() {
     var first = document.querySelector('#task-task-drag-cursor');
     var second = document.querySelector('#task-task-active-status-drag');
     var target = document.querySelector(targetSelector);
+    // Force the containing/clipping layer that can occur in the desktop WebView.
+    var sourceLane = first.parentElement;
+    sourceLane.style.transform = 'translateZ(0)';
+    sourceLane.style.overflow = 'hidden';
     first.scrollIntoView({block:'center', inline:'center'});
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var firstRect = first.getBoundingClientRect();
@@ -393,7 +397,17 @@ window.addEventListener('DOMContentLoaded', function() {
       if (getComputedStyle(heading).userSelect !== 'none') fail('column titles must not be selectable during task drag');
     });
     [first, second].forEach(function(card, index) {
+      if (card.parentElement !== document.body) fail('dragged cards must escape source clipping and stacking contexts');
       var rect = card.getBoundingClientRect();
+      var hitX = Math.max(0, rect.left) + (Math.min(innerWidth, rect.right) - Math.max(0, rect.left)) / 2;
+      var hitY = Math.max(0, rect.top) + (Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top)) / 2;
+      if (hitX > 0 && hitX < innerWidth && hitY > 0 && hitY < innerHeight) {
+        // Temporarily enable hit testing to verify actual paint order, not just z-index.
+        card.style.pointerEvents = 'auto';
+        var hit = document.elementFromPoint(hitX, hitY);
+        card.style.pointerEvents = 'none';
+        if (!hit || !card.contains(hit)) fail('dragged card must paint above surrounding components without clipping');
+      }
       if (card.querySelectorAll('.badge').length !== cardLayouts[index].length) fail('grouped drag must not insert badges into task cards');
       cardLayouts[index].forEach(function(layout) {
         if (Math.abs(layout.badge.getBoundingClientRect().top - rect.top - layout.top) > 1) fail('grouped drag must preserve task badge positions inside each card');
