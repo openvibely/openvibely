@@ -93,6 +93,7 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 
 templ TaskListPanel(currentProjectID string) {
 	<aside id="task-list-panel" aria-label="Tasks">
+        <div id="changes-explorer-host"></div>
 		<nav id="appearance-settings-nav" aria-label="Settings">
 			@SettingsLinks(currentProjectID)
 		</nav>
@@ -109,6 +110,8 @@ templ TaskListPanel(currentProjectID string) {
 		></div>
 	</aside>
 	<nav class="settings-mobile-nav" aria-label="Settings">@SettingsLinks(currentProjectID)</nav>
+	<div id="changes-explorer-mobile"></div>
+    @ChangesExplorerScript()
 	<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
 	<style>
         #appearance-settings-nav { display: none; }
@@ -148,7 +151,11 @@ templ TaskListPanel(currentProjectID string) {
             window.syncAppearanceSettings = function() {
                 var appearance = !!document.getElementById('themes-container');
                 var workers = !!document.getElementById('worker-settings-content');
-                var active = appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
+                var changes = document.getElementById('tab-changes');
+                var reviewing = !!changes && !changes.classList.contains('hidden');
+                root.classList.toggle('changes-explorer-active', reviewing);
+                if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
+                var active = reviewing || appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
                 if (active && !inSettings) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');
                     root.classList.remove('task-list-collapsed');
@@ -167,7 +174,7 @@ templ TaskListPanel(currentProjectID string) {
                 }
                 inSettings = active;
                 root.classList.toggle('appearance-settings', active);
-                document.getElementById('task-list-panel').setAttribute('aria-label', active ? 'Settings' : 'Tasks');
+                document.getElementById('task-list-panel').setAttribute('aria-label', reviewing ? 'Changed files' : active ? 'Settings' : 'Tasks');
                 if (!active) return;
                 var projectID = new URLSearchParams(location.search).get('project_id') || (document.getElementById('project-selector') || {}).value || '';
                 document.querySelectorAll('[data-settings-link]').forEach(function(link) {
