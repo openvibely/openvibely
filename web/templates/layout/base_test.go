@@ -865,6 +865,7 @@ const assert = require('node:assert/strict');
 const style = new Function('status', ` + style + ` + ';return {alertClass, statusLabel};');
 const dispatch = new Function('data', 'window', ` + dispatch + `);
 for (const [severity, expectedClass, expectedLabel] of [
+ ['error', 'alert-error', 'Error'],
  ['warning', 'alert-warning', 'Warning'],
  ['info', 'alert-info', 'info'],
  [undefined, 'alert-info', 'info']

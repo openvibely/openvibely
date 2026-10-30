@@ -98,6 +98,13 @@ func TestAccountMonitorReportsActualUsage(t *testing.T) {
 				t.Fatalf("want exactly one event, got %+v", events)
 			}
 			event := events[0]
+			wantSeverity := models.SeverityWarning
+			if tc.reached {
+				wantSeverity = models.SeverityError
+			}
+			if event.Severity != wantSeverity {
+				t.Fatalf("severity = %s, want %s", event.Severity, wantSeverity)
+			}
 			if !strings.HasSuffix(event.Key, tc.threshold) || !strings.Contains(event.Title, tc.percentage) || event.Message != "Weekly is "+tc.percentage+" used." {
 				t.Fatalf("wrong threshold or reported usage: %+v", event)
 			}
@@ -172,7 +179,7 @@ func TestAccountMonitorResetBaselineExpiryAndGrants(t *testing.T) {
 	}
 }
 func TestAccountMonitorAlertIdempotency(t *testing.T) {
-	for _, severity := range []models.AlertSeverity{models.SeverityWarning, models.SeverityInfo} {
+	for _, severity := range []models.AlertSeverity{models.SeverityError, models.SeverityWarning, models.SeverityInfo} {
 		t.Run(string(severity), func(t *testing.T) {
 			env := teststores.New(t)
 			ctx := context.Background()

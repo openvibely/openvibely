@@ -287,10 +287,12 @@ func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountL
 				limitName = "Account"
 			}
 			title := fmt.Sprintf("%s — %s: %s used (nearing limit)", label, limitName, percentage)
+			severity := models.SeverityWarning
 			if pct >= 100 {
 				title = fmt.Sprintf("%s — %s: limit reached (%s used)", label, limitName, percentage)
+				severity = models.SeverityError
 			}
-			events = append(events, accountMonitorEvent{eventKey, title, fmt.Sprintf("%s is %s used.", limitName, percentage), models.SeverityWarning})
+			events = append(events, accountMonitorEvent{eventKey, title, fmt.Sprintf("%s is %s used.", limitName, percentage), severity})
 		}
 	}
 	credits, ok := resets["credits"].([]any)
