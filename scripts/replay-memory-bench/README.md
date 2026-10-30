@@ -4,7 +4,6 @@ This directory keeps the current harness source and a concise [latest-results re
 
 - [Concurrent streaming](concurrent/README.md): one or ten tasks in one backend/database process; text-only and tool-use separately; CPU, allocation/reclamation rates, heap/RSS, output gaps, and storage throughout each turn.
 - [Sequential app flow and browser loading](app-flow/README.md): empty task followed by five completed follow-ups, native compaction/continuation, cold opens, and verified cache-hit reopens.
-- `check_shared_store.py`: standalone SQLite invariant checks used by the storage feasibility document.
 
 Build model peers and injected test harnesses in temporary checkouts. Keep generated results, profiles, model binaries, and databases outside this worktree. Pin baseline and candidate revisions, run identical workloads separately from compilation/tests, and report each operation and mode separately. The two model peers are different: concurrent tests require the concurrent peer.
 
