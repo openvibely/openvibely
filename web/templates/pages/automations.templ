@@ -1188,6 +1188,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 				<section class={ "min-w-0 min-h-0", templ.KV("mb-5", !automationBuilderUsesEditShell(page)), templ.KV("mb-0", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page)) } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 
+
 				<span class="sr-only" data-automation-connect-status aria-live="polite"></span>
 						if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
 						<form id="automation-builder-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, layout.WorkspaceProjectID(ctx, currentProjectID))) }>
@@ -2173,8 +2174,8 @@ yamlViewport.scrollTop = 0;
                         else removeEdge(button.value);
                     });
 						var automationName = builder.querySelector('[data-automation-name]');
-						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
-					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
+						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && event.target.id !== 'automation-destination-project' && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
+					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && event.target.id !== 'automation-destination-project' && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
 					builder.addEventListener('submit', function() {
 						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
 							var submittedYAML = automationYAMLValue();
@@ -2184,7 +2185,26 @@ yamlViewport.scrollTop = 0;
 						}
 						syncCandidate();
 					});
-						var viewRoot = builder.querySelector('[data-automation-view-root]');
+						var destinationProject = builder.querySelector('#automation-destination-project');
+                if (destinationProject) {
+                    builder.addEventListener('htmx:configRequest', function(event) {
+                        if (event.detail.parameters.save_changes === 'true' && !destinationProject.value) {
+                            event.preventDefault();
+                            destinationProject.setCustomValidity('Choose a project.');
+                            destinationProject.reportValidity();
+                            return;
+                        }
+                        event.detail.parameters.destination_project = destinationProject.value;
+                    });
+                    destinationProject.addEventListener('change', function() {
+                        destinationProject.setCustomValidity('');
+                        var form = document.getElementById('automation-design-form');
+                        var initial = form.querySelector('[data-automation-initial-view]');
+                        initial.value = yamlPanel && !yamlPanel.hidden ? 'yaml' : detailsPanel && !detailsPanel.hidden ? 'details' : '';
+                        form.requestSubmit();
+                    });
+                }
+                						var viewRoot = builder.querySelector('[data-automation-view-root]');
 						var graphButton = builder.querySelector('[data-automation-view-graph]');
 						var yamlButton = builder.querySelector('[data-automation-view-yaml]');
 
@@ -2215,6 +2235,8 @@ yamlViewport.scrollTop = 0;
                                 nodePanel.open(builder.dataset.selectedNode, false);
                                 if (builder.dataset.focusNode === 'true') requestAnimationFrame(function() { if (builder.isConnected) { nodePanel.open(builder.dataset.selectedNode, true); } });
                             }
+							var initialView = builder.querySelector('[data-automation-initial-view]');
+							if (initialView && ['details', 'yaml'].includes(initialView.value)) selectAutomationBuilderView(initialView.value);
                             // Compare the editable data, not focus or input events: graph edits
                             // and programmatic field updates must also protect shortcut navigation.
                             function automationEditSnapshot() {
@@ -2242,7 +2264,7 @@ const (
 func automationWorkspacePostURL(ctx context.Context, page models.AutomationBuilderPage, ownerID string) string {
  scope := layout.WorkspaceProjectID(ctx, ownerID)
  destination := automationBuilderPostURL(page, scope)
- if scope == models.AllProjectsID && page.AutomationID == "" { destination += "&destination_project=" + url.QueryEscape(ownerID) }
+ if scope == models.AllProjectsID && page.AutomationID == "" && ownerID != models.AllProjectsID { destination += "&destination_project=" + url.QueryEscape(ownerID) }
  return destination
 }
 

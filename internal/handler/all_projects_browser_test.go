@@ -207,11 +207,31 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(document.getElementById('project-selector').value==='__all_projects__','duplicate breadcrumb switched tabs');
  assert(new URL(location.href).searchParams.get('search')==='Browser' && new URL(location.href).searchParams.get('filter_project')===owner,'automation breadcrumb lost filters');
  document.querySelector('#all-projects-page a[href^="/automations/new"]').click();
- await wait(()=>document.getElementById('all-projects-choose'));
- Array.from(document.querySelectorAll('#all-projects-choose a')).find(a=>a.textContent==='Second browser project').click();
- await wait(()=>document.getElementById('automation-builder'));
+ await wait(()=>document.getElementById('automation-destination-project'));
+ assert(!document.getElementById('all-projects-choose'),'new automation showed chooser');
+ var draftName=document.querySelector('[data-automation-name]');
+ draftName.value='Preserved inline draft';
+ draftName.dispatchEvent(new Event('input',{bubbles:true}));
+ document.querySelector('[data-automation-view-details]').click();
+ var projectPicker=document.getElementById('automation-destination-project');
+ projectPicker.value=owner;
+ projectPicker.dispatchEvent(new Event('change',{bubbles:true}));
+ await wait(()=>document.getElementById('automation-destination-project')!==projectPicker && document.getElementById('automation-builder'));
+ assert(document.querySelector('[data-automation-name]').value==='Preserved inline draft','project selection lost name');
+ assert(!document.querySelector('[data-automation-details-panel]').hidden,'project selection lost Details view');
  assert(document.getElementById('project-selector').value==='__all_projects__','new automation switched tabs');
  assert(new URL(document.querySelector('#automation-builder form[hx-post]').getAttribute('hx-post'),location.href).searchParams.get('destination_project')===owner,'automation draft lost owner');
+ document.querySelector('[data-automation-view-yaml]').click();
+ var yamlDraft=document.querySelector('[data-automation-yaml-editor]');
+ yamlDraft.value=yamlDraft.value.replace('description: ""','description: Keep this draft');
+ yamlDraft.dispatchEvent(new Event('input',{bubbles:true}));
+ var changingProject=document.getElementById('automation-destination-project');
+ changingProject.value='default';
+ changingProject.dispatchEvent(new Event('change',{bubbles:true}));
+ await wait(()=>document.getElementById('automation-destination-project')!==changingProject);
+ assert(!document.querySelector('[data-automation-yaml-panel]').hidden,'project selection lost YAML view');
+ assert(document.querySelector('[data-automation-yaml-editor]').value.includes('Keep this draft'),'project selection lost YAML edits');
+
  document.querySelector('[data-automation-breadcrumb] a').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
 

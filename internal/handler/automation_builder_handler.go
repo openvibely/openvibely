@@ -23,7 +23,7 @@ type automationYAMLParseResult struct {
 // ParseAutomationYAML verifies YAML syntax for the browser editor without
 // normalizing, previewing, or persisting an Automation.
 func (h *Handler) ParseAutomationYAML(c echo.Context) error {
-	if _, err := h.getCurrentProjectID(c); err != nil {
+	if _, err := h.automationBuilderProjectID(c); err != nil {
 		return err
 	}
 	rawYAML, submitted := automationDraftFormValue(c, "automation_yaml")
@@ -36,12 +36,20 @@ func (h *Handler) ParseAutomationYAML(c echo.Context) error {
 	return c.JSON(http.StatusOK, automationYAMLParseResult{Valid: true})
 }
 
+// automationBuilderProjectID permits an unassigned draft only on builder routes.
+func (h *Handler) automationBuilderProjectID(c echo.Context) (string, error) {
+	if c.QueryParam("project_id") == models.AllProjectsID && (c.Request().URL.Path == "/automations/new" || c.Request().URL.Path == "/automations/builder" || c.Request().URL.Path == "/automations/yaml/parse") {
+		return models.AllProjectsID, nil
+	}
+	return h.getCurrentProjectID(c)
+}
+
 // NewAutomation opens a blank draft without writing or saving a candidate.
 func (h *Handler) NewAutomation(c echo.Context) error {
 	if h.automationDraftSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
 	}
-	projectID, err := h.getCurrentProjectID(c)
+	projectID, err := h.automationBuilderProjectID(c)
 	if err != nil {
 		return err
 	}
@@ -61,7 +69,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
 	}
 	ctx := c.Request().Context()
-	projectID, err := h.getCurrentProjectID(c)
+	projectID, err := h.automationBuilderProjectID(c)
 	if err != nil {
 		return err
 	}
@@ -100,7 +108,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 				return fallbackErr
 			}
 			return h.renderAutomationBuilder(c, models.AutomationBuilderPage{
-				Result: models.AutomationDraftResult{Candidate: fallback}, Source: source, YAML: rawYAML, YAMLProvided: true,
+				Result: models.AutomationDraftResult{Candidate: fallback}, Source: source, YAML: rawYAML, YAMLProvided: true, InitialView: automationBuilderInitialView(c),
 				Error: "YAML did not parse: " + err.Error(),
 			})
 		}
@@ -274,6 +282,9 @@ func (h *Handler) applySubmittedAutomationBuilderCandidate(c echo.Context, candi
 }
 
 func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
+	if projectID == models.AllProjectsID {
+		return h.automationDraftSvc.PreviewValidatedCandidate(candidate, definition), nil
+	}
 	if h.automationCompiler == nil {
 		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "automation preview unavailable")
 	}
@@ -293,6 +304,13 @@ func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCan
 		return service.DecodeAutomationDraftYAML([]byte(raw))
 	}
 	return service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+}
+
+func automationBuilderInitialView(c echo.Context) string {
+	if view := strings.TrimSpace(c.FormValue("initial_view")); view == "details" || view == "yaml" {
+		return view
+	}
+	return ""
 }
 
 func automationBuilderSelectedNode(c echo.Context) string {
@@ -824,7 +842,7 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 	if h.automationLifecycleSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")
 	}
-	projectID, _ := h.getCurrentProjectID(c)
+	projectID, _ := h.automationBuilderProjectID(c)
 	var err error
 	switch action {
 	case "pause":
@@ -851,7 +869,7 @@ func (h *Handler) renderAutomationBuilder(c echo.Context, page models.Automation
 	// Successful saves redirect. A POST that renders the editor is still an
 	// unsaved preview (or a failed save), even after replacing the whole editor.
 	page.UnsavedChanges = page.UnsavedChanges || c.Request().Method == http.MethodPost
-	projectID, _ := h.getCurrentProjectID(c)
+	projectID, _ := h.automationBuilderProjectID(c)
 	if !page.YAMLProvided && page.YAML == "" {
 		encodedYAML, err := service.EncodeAutomationDraftYAML(page.Result.Candidate)
 		if err != nil {
@@ -865,12 +883,15 @@ func (h *Handler) renderAutomationBuilder(c echo.Context, page models.Automation
 			page.EdgePalette = palette.Edges
 		}
 	}
-	if h.automationCapabilitySvc != nil {
+	if h.automationCapabilitySvc != nil && projectID != models.AllProjectsID {
 		capabilities, err := h.automationCapabilitySvc.Build(c.Request().Context(), projectID)
 		if err != nil {
 			return err
 		}
 		page.Capabilities = capabilities
+	}
+	if layout.WorkspaceProjectID(c.Request().Context(), projectID) == models.AllProjectsID && page.AutomationID == "" {
+		page.Projects, _ = h.projectSvc.ListSelectorOptions(c.Request().Context())
 	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationBuilderContent(page, projectID))

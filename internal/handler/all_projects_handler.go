@@ -58,14 +58,17 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		if path == "/tasks/new" || path == "/automations/new" || ((path == "/tasks" || path == "/automations/builder") && c.Request().Method == http.MethodPost) {
 			destination := c.QueryParam("destination_project")
-			if path == "/tasks" && c.Request().Method == http.MethodPost {
+			if (path == "/tasks" || path == "/automations/builder") && c.Request().Method == http.MethodPost {
 				destination = c.FormValue("destination_project")
-				if destination == "" {
+				if _, supplied := c.Request().PostForm["destination_project"]; !supplied {
 					destination = c.QueryParam("destination_project")
 				}
 			}
 			if path == "/tasks/new" && destination == "" && c.Request().Method == http.MethodGet {
 				return h.NewTask(c)
+			}
+			if destination == "" && (path == "/automations/new" || (path == "/automations/builder" && !automationBuilderSaveRequested(c))) {
+				return next(c)
 			}
 			if destination == "" {
 				if c.Request().Method == http.MethodGet {
@@ -77,13 +80,16 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			if err != nil {
 				return err
 			}
-			if project == nil {
+			if project == nil || project.ID == models.AllProjectsID {
 				return echo.NewHTTPError(http.StatusBadRequest, "Unknown destination project.")
 			}
 			c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
 			q := c.QueryParams()
 			q.Set("project_id", project.ID)
 			c.Request().URL.RawQuery = q.Encode()
+			return next(c)
+		}
+		if path == "/automations/yaml/parse" {
 			return next(c)
 		}
 		if strings.HasPrefix(path, "/automations/") && c.Param("automationId") != "" {

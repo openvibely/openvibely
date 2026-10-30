@@ -124,6 +124,7 @@ type AutomationChatConfirmationReceipt struct {
 }
 
 type AutomationBuilderPage struct {
+	Projects                []Project                    `json:"-"`
 	Result                  AutomationDraftResult        `json:"result"`
 	AutomationID            string                       `json:"automation_id,omitempty"`
 	Source                  string                       `json:"source,omitempty"`

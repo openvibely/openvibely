@@ -306,7 +306,8 @@ func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
 	require.NoError(t, err)
 	chooser := tc.HTTP().Get("/automations/new?project_id=" + models.AllProjectsID).Execute()
 	require.Equal(t, http.StatusOK, chooser.Code)
-	require.Contains(t, chooser.Body.String(), "/automations/new?project_id="+models.AllProjectsID+"&amp;destination_project="+project.ID)
+	require.Contains(t, chooser.Body.String(), `id="automation-destination-project"`)
+	require.NotContains(t, chooser.Body.String(), `id="all-projects-choose"`)
 	for _, path := range []string{
 		"/automations/new?project_id=" + models.AllProjectsID + "&destination_project=" + project.ID,
 		"/automations/" + saved.Definition.Automation.ID + "/duplicate?project_id=" + models.AllProjectsID,
@@ -331,6 +332,23 @@ func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
 	definitions, err := tc.stores.Automations.ListPortfolioCards(t.Context(), project.ID)
 	require.NoError(t, err)
 	require.Len(t, definitions, 1, "opening drafts must not save them")
+	encoded, err := service.EncodeAutomationDraftYAML(seed)
+	require.NoError(t, err)
+	for _, destination := range []string{"", models.AllProjectsID, "missing-project"} {
+		rejected := tc.HTMX().Post("/automations/builder?project_id=" + models.AllProjectsID + "&destination_project=" + project.ID).WithForm(url.Values{
+			"destination_project": {destination}, "save_changes": {"true"}, "builder_source": {"blank"}, "automation_yaml": {encoded},
+		}).Execute()
+		require.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+	}
+	other := tc.CreateProject().WithName("Inline destination").Build()
+	created := tc.HTMX().Post("/automations/builder?project_id=" + models.AllProjectsID + "&destination_project=" + project.ID).WithForm(url.Values{
+		"destination_project": {other.ID}, "save_changes": {"true"}, "builder_source": {"blank"}, "automation_yaml": {encoded},
+	}).Execute()
+	require.Less(t, created.Code, 400, created.Body.String())
+	owned, err := tc.stores.Automations.ListPortfolioCards(t.Context(), other.ID)
+	require.NoError(t, err)
+	require.Len(t, owned, 1, "form destination must override stale URL destination")
+
 	seed.Name = "Source A survivor"
 	_, err = compiler.Save(t.Context(), service.AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: seed})
 	require.NoError(t, err)
