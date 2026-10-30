@@ -138,6 +138,8 @@
             const generation = row.generation = (row.generation || 0) + 1;
             const finish = () => {
                 if (row.generation !== generation) return;
+                // The preference may have changed while an async row rendered.
+                window.syncToolDisclosures?.(row.node);
                 row.ready = true;
                 row.loading = null;
                 if (row.node.isConnected) row.node.style.minHeight = '';
@@ -160,6 +162,9 @@
                 console.error('Transcript row rendering failed', error);
             }
         } else if (row.placeholder.isConnected && row.node) {
+            // Retained rows are detached from document-wide preference updates.
+            // Synchronize before insertion so measurements use the current mode.
+            window.syncToolDisclosures?.(row.node);
             row.placeholder.replaceWith(row.node);
             restored.push(row);
         }
