@@ -106,6 +106,10 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 		t.Fatalf("record usage event: %v", err)
 	}
 
+	freshPercent := 37.0
+	tc.handler.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		return &models.AccountUsageSnapshot{PrimaryLabel: "Session", PrimaryUsedPercent: &freshPercent}, nil
+	})
 	full := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all").Execute()
 	tc.Assert(full).StatusCode(http.StatusOK)
 	var fullPayload map[string]json.RawMessage
@@ -118,10 +122,6 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 		}
 	}
 
-	freshPercent := 37.0
-	tc.handler.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
-		return &models.AccountUsageSnapshot{PrimaryLabel: "Session", PrimaryUsedPercent: &freshPercent}, nil
-	})
 	compact := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=account_limits").Execute()
 	local := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=local").Execute()
 	tc.Assert(local).StatusCode(http.StatusOK)
@@ -176,22 +176,22 @@ func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
 	fiveHourPercent := 4.0
 	weeklyMinutes := 10080
 	fiveHourMinutes := 300
-	if err := tc.stores.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
-		Provider:               "openai",
-		AccountID:              cfg.OAuthAccountID,
-		AgentConfigID:          cfg.ID,
-		PlanType:               "ChatGPT Pro",
-		PrimaryLabel:           "5-hour session",
-		PrimaryUsedPercent:     &weeklyPercent,
-		PrimaryWindowMinutes:   &weeklyMinutes,
-		SecondaryLabel:         "weekly limit",
-		SecondaryUsedPercent:   &fiveHourPercent,
-		SecondaryWindowMinutes: &fiveHourMinutes,
-		RawJSON:                `{"account_id":"raw-provider-account","authorization":"Bearer raw-secret"}`,
-		FetchedAt:              time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("create account snapshot: %v", err)
-	}
+	tc.handler.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		return &models.AccountUsageSnapshot{
+			Provider:               "openai",
+			AccountID:              cfg.OAuthAccountID,
+			AgentConfigID:          cfg.ID,
+			PlanType:               "ChatGPT Pro",
+			PrimaryLabel:           "5-hour session",
+			PrimaryUsedPercent:     &weeklyPercent,
+			PrimaryWindowMinutes:   &weeklyMinutes,
+			SecondaryLabel:         "weekly limit",
+			SecondaryUsedPercent:   &fiveHourPercent,
+			SecondaryWindowMinutes: &fiveHourMinutes,
+			RawJSON:                `{"account_id":"raw-provider-account","authorization":"Bearer raw-secret"}`,
+			FetchedAt:              time.Now().UTC(),
+		}, nil
+	})
 
 	rec := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
@@ -1106,4 +1106,43 @@ func sortedSkillAnalyticsHandles(metrics map[string][]models.UnderusedSkillMetri
 	}
 	sort.Strings(handles)
 	return handles
+}
+
+func TestGetAnalyticsUsage_DefaultUsesLiveLimitsWithoutFallback(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{Name: "Live usage", Provider: models.ProviderOpenAI, Model: "test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "fixture", OAuthAccountID: "account"}
+	require.NoError(t, tc.llmConfigRepo.Create(ctx, cfg))
+	old := 12.0
+	require.NoError(t, tc.stores.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{Provider: "openai", AgentConfigID: cfg.ID, AccountID: cfg.OAuthAccountID, PrimaryLabel: "Session", PrimaryUsedPercent: &old, FetchedAt: time.Now()}))
+	require.NoError(t, tc.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "openai", Model: "test", Operation: "task", Status: "completed", InputTokens: 100, OutputTokens: 50, OccurredAt: time.Now()}))
+	calls := 0
+	tc.handler.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		calls++
+		if calls == 3 {
+			return nil, fmt.Errorf("provider unavailable")
+		}
+		fresh := float64(30 * calls)
+		return &models.AccountUsageSnapshot{PrimaryLabel: "Session", PrimaryUsedPercent: &fresh}, nil
+	})
+	for i := 1; i <= 3; i++ {
+		rec := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all").Execute()
+		tc.Assert(rec).StatusCode(http.StatusOK)
+		var view models.AnalyticsUsageViewModel
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &view))
+		require.Equal(t, i, calls, "each request must fetch provider usage")
+		require.Equal(t, 150, view.Totals.TotalTokens, "local usage must survive provider failures")
+		require.Len(t, view.AccountLimits, 1)
+		card := view.AccountLimits[0]
+		if i < 3 {
+			require.Empty(t, card.Error)
+			require.Len(t, card.Limits, 1)
+			require.NotNil(t, card.Limits[0].UsedPercent)
+			require.Equal(t, float64(30*i), *card.Limits[0].UsedPercent)
+		} else {
+			require.Equal(t, "Usage unavailable", card.Error)
+			require.Empty(t, card.Limits)
+			require.True(t, card.UpdatedAt.IsZero())
+		}
+	}
 }

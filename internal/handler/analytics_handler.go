@@ -101,7 +101,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 	if analyticsUsageProjection(c) == "local" {
 		view, err = h.usageAnalyticsSvc.BuildUsagePage(c.Request().Context(), filter)
 	} else {
-		view, err = h.usageAnalyticsSvc.BuildAnalyticsUsage(c.Request().Context(), filter)
+		view, err = h.usageAnalyticsSvc.BuildLiveAnalyticsUsage(c.Request().Context(), filter)
 	}
 	if err != nil {
 		applog.Infof("[handler] GetAnalyticsUsage error: %v", err)
