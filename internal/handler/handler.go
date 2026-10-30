@@ -773,6 +773,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Analytics API endpoints
 	e.GET("/api/analytics/usage", h.GetAnalyticsUsage)
+	e.GET("/api/analytics/usage/resets", h.GetUsageResetCredits)
+	e.POST("/api/analytics/usage/resets/consume", h.ConsumeUsageReset)
 	e.GET("/api/analytics/skills", h.GetSkillAnalytics)
 	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	e.GET("/api/analytics/success-failure-rates", h.GetSuccessFailureRates)

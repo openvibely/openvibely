@@ -1631,3 +1631,38 @@ func TestBrowserFunctional_LearningSeparatesSkillEventTypes(t *testing.T) {
  </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){};};
+ let redeemed=false,requests=[],finish;
+ function response(data){return {ok:true,json:async()=>data};}
+ window.fetch=async function(url,opts){
+ const u=new URL(url,location.href),p=u.searchParams;
+ if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return {ok:false,json:async()=>({message:'Temporary failure'})};return new Promise(resolve=>finish=()=>{redeemed=true;resolve(response({status:'reset',windows_reset:1}));});}
+ if(u.pathname.endsWith('/resets'))return response({available_count:redeemed?1:2,credits:redeemed?[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'}]:[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'},{id:'b',status:'available',title:'My reset',expires_at:null}]});
+ if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'openai'}]});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'openai',plan_type:'Pro',limits:[{label:'Weekly',used_percent:redeemed?0:99}]}]});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});
+ };
+ window.addEventListener('load',async()=>{
+ const result=document.getElementById('reconnect-result');const wait=()=>new Promise(r=>setTimeout(r,20));const assert=(x,m)=>{if(!x)throw Error(m);};
+ try{
+ const card=document.getElementById('accountUsageCards');
+ for(let i=0;i<150&&card.querySelectorAll('button').length!==2;i++)await wait();
+ assert(card.textContent.includes('Expires')&&card.textContent.includes('Does not expire'),'expiration labels missing');
+ const buttons=card.querySelectorAll('button');assert(buttons.length===2,'individual reset actions missing');buttons[1].click();
+ await wait();assert(requests.length===1&&requests[0].credit_id==='b'&&requests[0].account_key==='account','selected credit not redeemed directly');
+ assert(requests[0].idempotency_key,'missing idempotency key');assert(buttons[1].textContent==='Retry reset','failed reset has no retry');buttons[1].click();await wait();assert(requests.length===2&&requests[1].idempotency_key===requests[0].idempotency_key,'retry changed logical attempt');assert(Array.from(buttons).every(b=>b.disabled),'duplicate submission allowed');
+ finish();for(let i=0;i<150&&!card.textContent.includes('Usage reset.');i++)await wait();
+ assert(card.textContent.includes('Usage resets available: 1')&&card.textContent.includes('0.0%'),'credits and limits not refreshed');
+ assert(!card.textContent.includes('My reset'),'redeemed credit still offered');result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
