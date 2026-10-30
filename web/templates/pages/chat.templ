@@ -1920,10 +1920,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
                             document.body.addEventListener('pointerdown', function(event) {
                                 document.querySelectorAll('[data-project-picker]').forEach(function(picker) { if (!picker.contains(event.target)) picker.querySelector('[data-project-results]').classList.add('hidden'); });
                             });
-                            document.body.addEventListener('keydown', function(event) {
-                                var picker = event.target.closest('[data-project-picker]');
-                                if (picker && event.key === 'Escape') { event.preventDefault(); picker.querySelector('[data-project-search]').focus(); picker.querySelector('[data-project-results]').classList.add('hidden'); }
-                            });
                             document.body.addEventListener('input', function(event) {
                                 if (!event.target.matches('[data-project-search]')) return;
                                 var picker = event.target.closest('[data-project-picker]'), query = event.target.value.toLowerCase().trim(), count = 0;
