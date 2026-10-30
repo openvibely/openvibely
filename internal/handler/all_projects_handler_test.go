@@ -110,8 +110,9 @@ func TestAllProjectsPreferenceSurvivesLaunch(t *testing.T) {
 	require.Equal(t, models.AllProjectsID, selected)
 	rec = httptest.NewRecorder()
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/chat", nil))
-	require.Equal(t, 303, rec.Code)
-	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("Location"))
+	require.Equal(t, 200, rec.Code)
+	require.Contains(t, rec.Body.String(), `id="all-projects-chat"`)
+	require.NotContains(t, rec.Body.String(), `id="all-projects-choose"`)
 }
 
 func TestAllProjectsSavedSelectionOnWorkspaceEntry(t *testing.T) {
@@ -409,4 +410,20 @@ func TestAllProjectsDefaultDestinationIgnoresSavedSelection(t *testing.T) {
 	selected, err := tc.handler.settingsRepo.Get(t.Context(), uiPreferenceSelectedProjectIDKey)
 	require.NoError(t, err)
 	require.Equal(t, other.ID, selected)
+}
+
+func TestAllProjectsChatDoesNotRequireProjectChooser(t *testing.T) {
+	_, app, _ := setupTestHandler(t)
+	for _, fragment := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodGet, "/chat?project_id="+models.AllProjectsID, nil)
+		if fragment {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), `id="all-projects-chat"`)
+		require.NotContains(t, rec.Body.String(), `id="all-projects-choose"`)
+		require.Empty(t, rec.Header().Get("Location"))
+	}
 }

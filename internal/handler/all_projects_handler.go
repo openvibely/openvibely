@@ -31,7 +31,6 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 						// saved locations and replay any newer preference outbox.
 						return h.AllProjects(c)
 					}
-					return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+models.AllProjectsID)
 				}
 				query := c.QueryParams()
 				query.Set("project_id", models.AllProjectsID)
@@ -106,6 +105,15 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "Choose a project before making changes.")
 		}
 		switch path {
+		case "/chat":
+			projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+			if err != nil {
+				return err
+			}
+			if isHTMX(c) {
+				return render(c, http.StatusOK, pages.AllProjectsChatUnavailableContent())
+			}
+			return render(c, http.StatusOK, pages.AllProjectsChatUnavailable(projects))
 		case "/tasks", "/automations", "/analytics":
 			return h.AllProjects(c)
 		case "/tasks/sidebar":
