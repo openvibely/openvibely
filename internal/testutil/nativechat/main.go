@@ -57,7 +57,14 @@ func main() {
 		log.Fatalf("register native bridge: %s", response.Status)
 	}
 	stage("bridge registered; before window creation")
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "native-chat-test", Title: "Native chat regression", URL: target.String(), Width: 1280, Height: 800, Windows: application.WindowsWindow{WebView2CompositionHosting: true}})
+	options := application.WebviewWindowOptions{Name: "native-chat-test", Title: "Native chat regression", URL: target.String(), Width: 1280, Height: 800, Windows: application.WindowsWindow{WebView2CompositionHosting: true}}
+	// Memory diagnostics need a consistently visible, desktop-sized surface.
+	if os.Getenv("OPENVIBELY_NATIVE_VISIBLE") == "1" {
+		options.Width, options.Height = 1728, 1085
+		options.AlwaysOnTop = true
+		options.Mac.CollectionBehavior = application.MacWindowCollectionBehaviorCanJoinAllSpaces | application.MacWindowCollectionBehaviorFullScreenAuxiliary
+	}
+	window := app.Window.NewWithOptions(options)
 	stage("after window creation")
 	var input sync.Mutex
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
