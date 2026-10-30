@@ -1837,7 +1837,7 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 
                                     async function loadResetCredits(card, account) {
-                                        if(account.provider !== 'openai') return;
+                                        if(!['openai','anthropic'].includes(account.provider)) return;
                                         const section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';
                                         card.querySelector('.card-body').appendChild(section);
                                         section.textContent='Loading usage resets…';
@@ -1849,6 +1849,7 @@ templ analyticsContent(currentProject *models.Project) {
                                                 section.replaceChildren();
                                                 const heading=document.createElement('div');heading.className='font-semibold';
                                                 heading.textContent='Usage resets available: '+Number(data.available_count ?? data.availableCount ?? 0);section.appendChild(heading);
+                                                if(data.unavailable_reason){const reason=document.createElement('p');reason.className='text-xs opacity-60 mt-2';reason.textContent=String(data.unavailable_reason).replaceAll('_',' ');section.appendChild(reason);}
                                                 const credits=data.credits;
                                                 if(!Array.isArray(credits)){
                                                     const note=document.createElement('p');note.className='text-xs opacity-60 mt-2';note.textContent='Reset details unavailable.';section.appendChild(note);return;
@@ -1859,27 +1860,30 @@ templ analyticsContent(currentProject *models.Project) {
                                                     const details=document.createElement('div');
                                                     const title=document.createElement('div');title.className='text-sm';title.textContent=credit.title||'Usage reset';details.appendChild(title);
                                                     if(credit.description){const description=document.createElement('div');description.className='text-xs opacity-70';description.textContent=credit.description;details.appendChild(description);}
+                                                    if(credit.remaining_uses!==undefined){const info=document.createElement('div');info.className='text-xs opacity-70';const labels={five_hour:'5-hour limit',seven_day:'Weekly limit',seven_day_opus:'Opus weekly limit',seven_day_sonnet:'Sonnet weekly limit'};const limits=Array.isArray(credit.clears)?credit.clears.map(x=>labels[x]||String(x).replaceAll('_',' ')).join(', '):'';info.textContent=credit.remaining_uses+' use(s) remaining'+(limits?' · Resets '+limits:'')+(credit.gives_back_weekly?' · Returns usage to weekly allowance':'');details.appendChild(info);}
+                                                    if(credit.usable===false){const reason=document.createElement('div');reason.className='text-xs opacity-60';reason.textContent=String(credit.unavailable_reason||'Currently unavailable').replaceAll('_',' ');details.appendChild(reason);}
                                                     const expiry=document.createElement('div');expiry.className='text-xs opacity-60';
                                                     const rawExpiry=credit.expires_at ?? credit.expiresAt;
                                                     const date=rawExpiry==null?null:new Date(typeof rawExpiry==='number'?rawExpiry*1000:rawExpiry);
                                                     const validDate=date&&!Number.isNaN(date.getTime());
                                                     expiry.textContent=rawExpiry==null?'Does not expire':validDate?'Expires '+date.toLocaleString():'Expiration unavailable';details.appendChild(expiry);
                                                     const button=document.createElement('button');button.type='button';button.className='btn btn-sm btn-outline';button.textContent='Use reset';
-                                                    button.disabled=!credit.id||(validDate&&date.getTime()<=Date.now());
+                                                    button.disabled=!credit.id||credit.usable===false||(validDate&&date.getTime()<=Date.now());
                                                     button.addEventListener('click',async()=>{
-                                                        const buttons=section.querySelectorAll('button');buttons.forEach(b=>b.disabled=true);
+                                                        const buttons=Array.from(section.querySelectorAll('button'));const disabledBefore=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
                                                         button.textContent='Resetting…';
                                                         const message=document.createElement('p');message.className='text-xs mt-2';message.setAttribute('role','status');section.appendChild(message);
-                                                        if(!attempts.has(credit.id))attempts.set(credit.id,crypto.randomUUID());
                                                         try{
+                                                            if(!attempts.has(credit.id)){const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');attempts.set(credit.id,[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-'));}
                                                             const response=await fetch('/api/analytics/usage/resets/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_key:account.key,credit_id:credit.id,idempotency_key:attempts.get(credit.id)})});
                                                             const result=await response.json();if(!response.ok)throw Error(result.message||'Unable to use reset');
-                                                            const outcome=result.outcome||result.status;
-                                                            const text=outcome==='reset'||outcome==='already_redeemed'||outcome==='alreadyRedeemed'?'Usage reset.':outcome==='no_credit'||outcome==='noCredit'?'That reset is no longer available.':outcome==='nothing_to_reset'||outcome==='nothingToReset'?'Your usage does not need a reset right now.':'Reset request completed. Refreshing account limits.';
+                                                            const outcome=result.outcome||result.status||result.result;
+                                                            if(['reset','already_redeemed','alreadyRedeemed','already_used','no_credit','noCredit','not_limited','nothing_to_reset','nothingToReset','cooldown','ineligible'].includes(outcome))attempts.delete(credit.id);
+                                                            const text=outcome==='reset'||outcome==='already_redeemed'||outcome==='alreadyRedeemed'?'Usage reset.':outcome==='no_credit'||outcome==='noCredit'?'That reset is no longer available.':outcome==='nothing_to_reset'||outcome==='nothingToReset'||outcome==='not_limited'?'Your usage does not need a reset right now.':outcome==='already_used'?'That reset was already used.':outcome==='cooldown'?'Reset is on cooldown.':outcome==='ineligible'?'This reset is not currently available.':'Reset was not confirmed. '+String(result.reason||outcome||'Please refresh and try again.').replaceAll('_',' ');
                                                             const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','true');
                                                             try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
                                                             await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
-                                                        }catch(e){message.textContent=e.message;button.textContent='Retry reset';button.disabled=false;}
+                                                        }catch(e){message.textContent=e.message;button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}
                                                     },{signal:eventSignal});
                                                     row.append(details,button);section.appendChild(row);
                                                 });

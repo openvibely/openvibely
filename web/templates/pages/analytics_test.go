@@ -1666,3 +1666,43 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  });</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
+
+func TestBrowserFunctional_AnalyticsAnthropicResets(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){};};
+ const requests=[];let uses=2;
+ function response(data){return {ok:true,json:async()=>data};}
+ // Exercise UUID creation without the secure-context-only randomUUID API.
+ Object.defineProperty(crypto,'randomUUID',{value:undefined,configurable:true});
+ window.fetch=async function(url,opts){
+ const u=new URL(url,location.href),p=u.searchParams;
+ if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));uses--;return response({result:'reset',resets_left:uses});}
+ if(u.pathname.endsWith('/resets'))return response({available_count:uses+1,credits:[{id:'weekly',title:'Weekly reset',status:'available',expires_at:'2035-01-01T00:00:00Z',remaining_uses:uses,clears:['seven_day'],usable:uses>0},{id:'paused',title:'Paused reset',status:'available',expires_at:null,remaining_uses:1,usable:false,unavailable_reason:'paused'}]});
+ if(p.get('projection')==='accounts')return response({accounts:[{key:'claude',provider:'anthropic'}]});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});
+ };
+ window.addEventListener('load',async()=>{
+ const result=document.getElementById('reconnect-result');const wait=()=>new Promise(r=>setTimeout(r,20));const assert=(v,m)=>{if(!v)throw Error(m);};
+ try{
+ const card=document.getElementById('accountUsageCards');
+ for(let i=0;i<150&&card.querySelectorAll('button').length!==2;i++)await wait();
+ assert(card.textContent.includes('2 use(s) remaining')&&card.textContent.includes('Resets Weekly limit'),'grant details missing');
+ assert(card.textContent.includes('Expires')&&card.textContent.includes('Does not expire'),'expiration details missing');
+ assert(card.querySelectorAll('button')[1].disabled,'unavailable grant selectable');
+ card.querySelector('button').click();
+ for(let i=0;i<150&&!card.textContent.includes('Usage reset.');i++)await wait();
+ assert(requests.length===1&&requests[0].credit_id==='weekly'&&requests[0].account_key==='claude','wrong claim');
+ card.querySelector('button').click();
+ for(let i=0;i<150&&requests.length<2;i++)await wait();
+ assert(requests.length===2&&requests[0].idempotency_key!==requests[1].idempotency_key,'new confirmed use reused previous request ID');
+ assert(!card.querySelector('dialog'),'confirmation added');result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
