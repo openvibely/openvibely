@@ -6,14 +6,12 @@ templ ChangesExplorerScript() {
         html.changes-explorer-active #task-list-panel > #changes-explorer-host { display: block !important; overflow-y: auto; }
         html.changes-explorer-active #appearance-settings-nav, html.changes-explorer-active .settings-mobile-nav { display: none !important; }
         html.changes-explorer-active:not([data-shell-frame]) #changes-explorer-mobile { display: block; max-height: 35vh; overflow: auto; padding: 12px; }
-        html.changes-explorer-active [data-diff-expand-all] { display: none; }
         .changes-explorer .explorer-back { display: block; padding: 10px; margin-bottom: 12px; font-size: 13px; opacity: .75; }
         .changes-explorer .explorer-search { width: 100%; margin-bottom: 12px; }
         .changes-explorer summary { cursor: pointer; padding: 6px 10px; font-size: 13px; opacity: .8; overflow-wrap: anywhere; }
         .changes-explorer details > div { padding-left: 12px; }
         .changes-explorer .task-list-row { width: 100%; text-align: left; }
         .changes-explorer .explorer-empty { padding: 10px; opacity: .6; font-size: 13px; }
-        html.changes-explorer-active .diff-file-card[hidden] { display: none !important; }
     </style>
     <script>
     (function() {
@@ -36,9 +34,6 @@ templ ChangesExplorerScript() {
             if (!viewer) return;
             var file = files.find(function(f) { return f.path === selected; });
             if (!file) return;
-            viewer.querySelectorAll('#diff-content-inline > .diff-file-card, #diff-content-split > .diff-file-card').forEach(function(card) {
-                card.hidden = card.id !== 'diff-file-' + file.index && card.id !== 'diff-file-split-' + file.index;
-            });
             tree.querySelectorAll('[data-explorer-path]').forEach(function(button) {
                 if (button.dataset.explorerPath === selected) button.setAttribute('aria-current', 'page');
                 else button.removeAttribute('aria-current');
@@ -75,7 +70,8 @@ templ ChangesExplorerScript() {
                 button.onclick = function() {
                     selected = file.path; save(); applySelection(true);
                     var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
-                    var card = panel && panel.querySelector('.diff-file-card:not([hidden])');
+                    var prefix = panel && panel.id === 'diff-content-split' ? 'diff-file-split-' : 'diff-file-';
+                    var card = panel && document.getElementById(prefix + file.index);
                     var scroller = viewer.closest('#tab-changes');
                     if (card && scroller) {
                         delete card._diffScrollAnchor;
