@@ -38,6 +38,20 @@ func NormalizeTranscriptDevelopmentVersions(ctx context.Context, db *sql.DB) err
 		return err
 	}
 	if ranges != 0 && (legacy == 0 || organizations != 0) {
+		// Adopt the short-lived, unpublished offset-index migration without
+		// rebuilding rows or leaving a version for a removed migration file.
+		var offsetIndex int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='index' AND name='execution_stream_offsets'`).Scan(&offsetIndex); err != nil {
+			return err
+		}
+		if organizations != 0 && offsetIndex != 0 {
+			if _, err = tx.ExecContext(ctx, `DELETE FROM goose_db_version WHERE version_id=220`); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.ExecContext(ctx, streamOffsetIndexSQL); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	if organizations != 0 {
@@ -79,6 +93,9 @@ func NormalizeTranscriptDevelopmentVersions(ctx context.Context, db *sql.DB) err
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM goose_db_version WHERE version_id BETWEEN 217 AND 221; INSERT INTO goose_db_version(version_id,is_applied) VALUES(219,1)`); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, streamOffsetIndexSQL); err != nil {
 		return err
 	}
 	return tx.Commit()

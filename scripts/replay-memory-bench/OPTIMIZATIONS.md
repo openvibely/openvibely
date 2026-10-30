@@ -5,7 +5,7 @@ Base: task branch commit `1920be9db`. These changes are not a comparison against
 1. Format read_file lines using byte searches and a pre-sized builder. Preserve offsets, limits, trailing newlines and truncation text.
 2. Hash finalized output through a read-only string view instead of copying the full transcript.
 3. Search for delimiter candidates before applying the display-control regexp; find closing marker lines without scanning all tool text through a regexp.
-4. Migration 220 adds a covering index on stream execution ID and end offset. Keep offset assignment in SQLite, preserving retry/finalization behavior rather than caching offsets in the writer.
+4. The consolidated migration 219 adds a covering index on stream execution ID and end offset. Keep offset assignment in SQLite, preserving retry/finalization behavior rather than caching offsets in the writer.
 5. Use a separate history projection for deferred OpenAI task follow-ups. Omit display output only for completed turns with a nonempty native Responses checkpoint. Failed turns, empty checkpoints, foreign formats and other providers retain their existing path.
 6. Retain the SQLite driver's owned string storage as immutable replay JSON instead of copying each provider item again. This relies on the existing immutable ReplayRows contract.
 7. Reuse encoded WebSocket request properties, including tool schemas. Splice valid raw input items when present; decoded-map histories retain whole-payload JSON encoding. Preserve null input and JSON encoding errors.

@@ -84,7 +84,7 @@ func TestConsolidatedTranscriptMigration(t *testing.T) {
 			require.NoError(t, db.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version))
 			require.EqualValues(t, latestMigrationVersion, version)
 			var n int
-			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id=221`).Scan(&n))
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (220,221)`).Scan(&n))
 			require.Zero(t, n)
 			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (217,218) AND is_applied=1`).Scan(&n))
 			require.Equal(t, 2, n, "main's 217/218 must apply after adoption")
@@ -144,4 +144,27 @@ func TestTranscriptUpgradeFromMain218(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 218, v)
 	require.NoError(t, initializeSQLite(db))
+}
+
+func TestConsolidatedOffsetIndexAdoptsUnpublished220(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "offset-index.db"))
+	require.NoError(t, initializeSQLite(db))
+	_, err := db.Exec(`INSERT INTO goose_db_version(version_id,is_applied) VALUES(220,1)`)
+	require.NoError(t, err)
+	for range 2 {
+		require.NoError(t, initializeSQLite(db))
+		version, err := goose.GetDBVersion(db)
+		require.NoError(t, err)
+		require.EqualValues(t, 219, version)
+		var count int
+		require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='index' AND name='execution_stream_offsets'`).Scan(&count))
+		require.Equal(t, 1, count)
+	}
+	// Also update an earlier consolidated development database missing the index.
+	_, err = db.Exec(`DROP INDEX execution_stream_offsets`)
+	require.NoError(t, err)
+	require.NoError(t, initializeSQLite(db))
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='execution_stream_offsets'`).Scan(&count))
+	require.Equal(t, 1, count)
 }

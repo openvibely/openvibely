@@ -53,7 +53,8 @@ func upTranscriptStore219(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 	}
-	return nil
+	_, err := tx.ExecContext(ctx, streamOffsetIndexSQL)
+	return err
 }
 func downTranscriptStore219(ctx context.Context, tx *sql.Tx) error {
 	for v := int64(221); v >= 217; v-- {
@@ -337,3 +338,6 @@ DROP TRIGGER conversation_checkpoint_range_materialize;
 DROP TABLE conversation_checkpoint_ranges;
 DELETE FROM conversation_items WHERE item_id LIKE 'checkpoint:range:%';
 `
+
+// The unpublished transcript migration owns the offset-only covering index.
+const streamOffsetIndexSQL = `CREATE INDEX IF NOT EXISTS execution_stream_offsets ON execution_stream_text(execution_id,end_offset)`
