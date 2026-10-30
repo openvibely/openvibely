@@ -262,6 +262,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 							previousProjectID = newProjectId;
 							syncProjectSelector();
+							window._analyticsSelectedProjectID = newProjectId;
+							if (typeof window.openVibelyCancelAnalyticsDataForProject === 'function') window.openVibelyCancelAnalyticsDataForProject(newProjectId);
+							if (typeof window.openVibelySetTaskListProject === 'function') window.openVibelySetTaskListProject(newProjectId);
 							if (typeof window.openVibelyRetargetLiveEvents === 'function') {
 								window.openVibelyRetargetLiveEvents(newProjectId, '');
 							}
@@ -351,8 +354,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             return true;
                         } catch (_) {
                             if (generation !== projectSwitchGeneration) return false;
-                            syncProjectSelectorFromURL();
-                            if (window.openVibelyRetargetLiveEvents) {
+							syncProjectSelectorFromURL();
+							window._analyticsSelectedProjectID = sel.value;
+							if (typeof window.openVibelySetTaskListProject === 'function') window.openVibelySetTaskListProject(sel.value);
+							if (window.openVibelyRetargetLiveEvents) {
                                 const task = location.pathname.match(/^\/tasks\/([^/]+)/);
                                 window.openVibelyRetargetLiveEvents(sel.value, task ? decodeURIComponent(task[1]) : '');
                             }
