@@ -1,4 +1,4 @@
-package service
+package anthropic
 
 import (
 	"encoding/json"
@@ -6,16 +6,16 @@ import (
 	"testing"
 )
 
-func TestAnthropicClientToolSecondaryInfoAndAttachmentConversion(t *testing.T) {
+func TestToolSecondaryInfoLegacyCases(t *testing.T) {
 	if got := toolSecondaryInfo("read_file", json.RawMessage(`{"file_path":"/tmp/project/README.md"}`)); got != "README.md" {
 		t.Fatalf("read_file secondary = %q", got)
 	}
-	longCommand := strings.Repeat("x", 80)
-	if got := toolSecondaryInfo("Bash", json.RawMessage(`{"command":"`+longCommand+`"}`)); !strings.HasPrefix(got, "$ "+strings.Repeat("x", 60)) || !strings.HasSuffix(got, "…") {
+	longCommand := strings.Repeat("x", 400)
+	if got := toolSecondaryInfo("Bash", json.RawMessage(`{"command":"`+longCommand+`"}`)); !strings.HasPrefix(got, "$ "+strings.Repeat("x", 320)) || !strings.HasSuffix(got, "…") {
 		t.Fatalf("bash secondary not truncated as expected: %q", got)
 	}
-	longPattern := strings.Repeat("p", 50)
-	if got := toolSecondaryInfo("Grep", json.RawMessage(`{"pattern":"`+longPattern+`"}`)); !strings.HasPrefix(got, strings.Repeat("p", 40)) || !strings.HasSuffix(got, "…") {
+	longPattern := strings.Repeat("p", 200)
+	if got := toolSecondaryInfo("Grep", json.RawMessage(`{"pattern":"`+longPattern+`"}`)); !strings.HasPrefix(got, strings.Repeat("p", 140)) || !strings.HasSuffix(got, "…") {
 		t.Fatalf("grep secondary not truncated as expected: %q", got)
 	}
 	if got := toolSecondaryInfo("Glob", json.RawMessage(`{"pattern":"**/*.go"}`)); got != "**/*.go" {

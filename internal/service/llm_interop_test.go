@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+// Sentinel used only to verify that provider routing preserves errors.
+var testOutputLimitError = errors.New("response truncated: max_tokens limit reached (output budget exhausted before task completed)")
 
 // Test cross-provider adapter routing consistency
 func TestProviderInterop_AdapterRouting(t *testing.T) {
@@ -279,7 +283,7 @@ func TestProviderInterop_CanonicalResultConsistency(t *testing.T) {
 
 			var err error
 			if tt.wantErr {
-				err = errMaxTokens
+				err = testOutputLimitError
 			}
 
 			result, resErr := canonicalResult(tt.output, tt.textOnly, usage, err)
@@ -309,8 +313,8 @@ func TestProviderInterop_CanonicalResultConsistency(t *testing.T) {
 			}
 
 			// Verify error propagation
-			if tt.wantErr && resErr != errMaxTokens {
-				t.Errorf("expected errMaxTokens, got %v", resErr)
+			if tt.wantErr && resErr != testOutputLimitError {
+				t.Errorf("expected testOutputLimitError, got %v", resErr)
 			}
 
 			t.Logf("Canonical result verified: output_len=%d textOnly_len=%d tokens=%d err=%v",
@@ -326,7 +330,7 @@ func TestProviderInterop_ErrorWrappingConsistency(t *testing.T) {
 	mock.Response = ""
 	mock.TextOnly = ""
 	mock.Tokens = 0
-	mock.Err = errMaxTokens
+	mock.Err = testOutputLimitError
 	svc.SetLLMCaller(mock)
 	svc.initProviderAdapters()
 
@@ -345,8 +349,8 @@ func TestProviderInterop_ErrorWrappingConsistency(t *testing.T) {
 	})
 
 	// Should propagate max tokens error and set stop reason
-	if err != errMaxTokens {
-		t.Errorf("expected errMaxTokens, got %v", err)
+	if err != testOutputLimitError {
+		t.Errorf("expected testOutputLimitError, got %v", err)
 	}
 
 	if res.StopReason != "max_tokens" {

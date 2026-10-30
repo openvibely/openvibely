@@ -10,9 +10,8 @@ import (
 // RenderAvailableSkillsMarkdown returns the literal contents of top-level
 // skills/SKILLS.md index files (global + project), wrapped with a short
 // instruction header and fenced inside <available_skills>...</available_skills>.
-// The route hook reads this block to choose relevant standalone skills; normal
-// task turns receive only the selected subset rendered by
-// RenderSelectedSkillsMarkdown.
+// The model uses the index to discover skills and loads their instructions
+// through skill_view.
 func RenderAvailableSkillsMarkdown(globalRoot, projectRoot string) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Standalone Skills\n\n")
@@ -64,36 +63,6 @@ func RenderAvailableAgentSkillsMarkdown(globalRoot, projectRoot, agentKey string
 		fmt.Fprintf(&sb, "_No skills indexed for assigned agent `%s` in this turn._\n", strings.TrimSpace(agentKey))
 	}
 	sb.WriteString("</available_skills>\n")
-	return sb.String()
-}
-
-// RenderSelectedSkillsMarkdown renders the exact catalog skill handles selected
-// for the current task turn. The model may load these skills with skill_view;
-// unrelated catalog handles are intentionally omitted from this prompt block.
-func RenderSelectedSkillsMarkdown(catalog *Catalog, handles []string) string {
-	if catalog == nil || len(handles) == 0 {
-		return ""
-	}
-	entries := catalog.EntriesForHandles(handles)
-	if len(entries) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("## Selected Skills For This Task\n\n")
-	if catalog.IsAgentOwned() {
-		sb.WriteString("The lifecycle router selected these assigned-agent skills for this turn. Load any needed full body with `skill_view(\"<skill>\")`.\n\n")
-	} else {
-		sb.WriteString("The task keeps its assigned/default agent. The lifecycle router selected these standalone skills for this turn. Load any needed full body with `skill_view(\"<skill>\")`.\n\n")
-	}
-	sb.WriteString("<selected_skills>\n")
-	for _, entry := range entries {
-		if entry.AgentKey != "" {
-			fmt.Fprintf(&sb, "- `%s` (agent:%s)\n", entry.Handle, entry.AgentKey)
-		} else {
-			fmt.Fprintf(&sb, "- `%s` (%s)\n", entry.Handle, entry.Source)
-		}
-	}
-	sb.WriteString("</selected_skills>\n")
 	return sb.String()
 }
 
