@@ -45,12 +45,7 @@ type Writer struct {
 	afterPeriodicSnapshot func(string)
 	done                  chan struct{}
 	isError               bool   // true if CLI result event had is_error=true
-	resultSubtype         string // subtype from CLI result event (e.g. "error_max_turns")
 	sessionID             string // CLI session ID for --resume on subsequent calls
-}
-
-func NewWriter(execID, taskID string, repo persistence.ExecutionStore, ctx context.Context, interval time.Duration) *Writer {
-	return NewWriterWithPublisher(execID, taskID, repo, ctx, interval, nil)
 }
 
 func NewWriterWithPublisher(execID, taskID string, repo persistence.ExecutionStore, ctx context.Context, interval time.Duration, publisher ExecutionStreamPublisher) *Writer {
@@ -268,28 +263,17 @@ func (w *Writer) IsError() bool {
 	return w.isError
 }
 
-func (w *Writer) ResultSubtype() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.resultSubtype
-}
-
 func (w *Writer) SessionID() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.sessionID
 }
 
-func (w *Writer) setError(subtype string) {
+// MarkError records a canonical error event.
+func (w *Writer) MarkError() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.isError = true
-	w.resultSubtype = subtype
-}
-
-// MarkError is the exported form used by canonical event mapping.
-func (w *Writer) MarkError(subtype string) {
-	w.setError(subtype)
 }
 
 // SetSessionID persists the parsed provider session/thread id.

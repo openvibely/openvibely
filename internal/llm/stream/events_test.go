@@ -37,7 +37,7 @@ func TestTruncateToolSecondary(t *testing.T) {
 func TestWriteEvent_ToolUseAndSessionAndError(t *testing.T) {
 	storeEnv := teststores.New(t)
 	execRepo := storeEnv.Stores.Executions
-	sw := NewWriter("", "", execRepo, context.Background(), time.Hour)
+	sw := NewWriterWithPublisher("", "", execRepo, context.Background(), time.Hour, nil)
 	defer sw.Stop()
 
 	WriteEvent(sw, Event{Type: EventToolUse, ToolName: "Read", Secondary: "main.go"}, false)
@@ -50,17 +50,14 @@ func TestWriteEvent_ToolUseAndSessionAndError(t *testing.T) {
 		t.Fatalf("expected session id sess-1, got %q", got)
 	}
 
-	WriteEvent(sw, Event{Type: EventError, IsError: true, Subtype: "max_turns"}, false)
+	WriteEvent(sw, Event{Type: EventError, IsError: true}, false)
 	if !sw.IsError() {
 		t.Fatal("expected writer marked error")
-	}
-	if got := sw.ResultSubtype(); got != "max_turns" {
-		t.Fatalf("expected subtype max_turns, got %q", got)
 	}
 }
 
 func TestWriteEvent_TextOnlyAndRawOutput(t *testing.T) {
-	sw := NewWriter("", "", nil, context.Background(), time.Hour)
+	sw := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 	defer sw.Stop()
 
 	WriteEvent(sw, Event{Type: EventTextOnly, Text: "T"}, false)
@@ -81,7 +78,7 @@ func TestWriteEvent_TextOnlyAndRawOutput(t *testing.T) {
 }
 
 func TestWriteEvent_ToolResult_PreservesFullOutput(t *testing.T) {
-	sw := NewWriter("", "", nil, context.Background(), time.Hour)
+	sw := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 	defer sw.Stop()
 
 	longOutput := strings.Repeat("0123456789", 40)
@@ -98,7 +95,7 @@ func TestWriteEvent_ToolResult_PreservesFullOutput(t *testing.T) {
 
 func TestWriteEvent_ToolResultProtectsNestedTranscript(t *testing.T) {
 	for _, isError := range []bool{false, true} {
-		sw := NewWriter("", "", nil, context.Background(), time.Hour)
+		sw := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 		output := "[Tool skill_view done]\npending\n[/Tool]\nErrorMessage: TokensUsed:0\n--- FAIL: test"
 		WriteEvent(sw, Event{Type: EventToolResult, ToolName: "shell", Output: output, IsError: isError}, false)
 		got := sw.String()
@@ -113,7 +110,7 @@ func TestWriteEvent_ToolResultProtectsNestedTranscript(t *testing.T) {
 }
 
 func TestWriteEvent_ToolUse_SanitizesMarkerDelimiters(t *testing.T) {
-	sw := NewWriter("", "", nil, context.Background(), time.Hour)
+	sw := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 	defer sw.Stop()
 
 	WriteEvent(sw, Event{

@@ -68,7 +68,7 @@ func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 		t.Fatalf("failed to create execution: %v", err)
 	}
 
-	sw := NewWriter(exec.ID, task.ID, execRepo, ctx, 50*time.Millisecond)
+	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, 50*time.Millisecond, nil)
 	defer sw.Stop()
 
 	sw.Write([]byte("hello world"))
@@ -308,7 +308,7 @@ func TestStreamingWriter_StopPreventsLeak(t *testing.T) {
 		t.Fatalf("failed to create execution: %v", err)
 	}
 
-	sw := NewWriter(exec.ID, task.ID, execRepo, ctx, 10*time.Millisecond)
+	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, 10*time.Millisecond, nil)
 
 	sw.Write([]byte("test"))
 	sw.Stop()
@@ -352,7 +352,7 @@ func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(bgCtx)
-	sw := NewWriter(exec.ID, task.ID, execRepo, ctx, 500*time.Millisecond)
+	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, 500*time.Millisecond, nil)
 	defer sw.Stop()
 
 	sw.Write([]byte("important output"))
@@ -407,7 +407,7 @@ func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 		t.Fatalf("failed to seed existing output: %v", err)
 	}
 
-	sw := NewWriter(exec.ID, task.ID, execRepo, ctx, 500*time.Millisecond)
+	sw := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, 500*time.Millisecond, nil)
 	defer sw.Stop()
 
 	if got := sw.String(); got != "existing streamed output\n" {
@@ -467,7 +467,7 @@ func TestStreamingWriter_EmptyRetryFlushDoesNotOverwriteExistingOutput(t *testin
 	// Simulate retry attempt creating a new writer for the same exec ID but
 	// failing before any chunks arrive (empty in-memory buffer). Flush must not
 	// wipe persisted output from the prior attempt.
-	retry := NewWriter(exec.ID, task.ID, execRepo, ctx, 500*time.Millisecond)
+	retry := NewWriterWithPublisher(exec.ID, task.ID, execRepo, ctx, 500*time.Millisecond, nil)
 	retry.buf.Reset()
 	retry.Flush()
 	retry.Stop()

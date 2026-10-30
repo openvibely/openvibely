@@ -31,7 +31,6 @@ type Event struct {
 	Secondary string
 	Output    string
 	IsError   bool
-	Subtype   string
 	SessionID string
 }
 
@@ -103,7 +102,7 @@ func WriteEvent(writer *Writer, event Event, skipThinking bool) {
 		}
 	case EventError:
 		if event.IsError {
-			writer.MarkError(event.Subtype)
+			writer.MarkError()
 		}
 	}
 }

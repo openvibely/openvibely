@@ -9,7 +9,7 @@ import (
 )
 
 func TestCompactionReporterClosesThinkingAndKeepsTextClean(t *testing.T) {
-	writer := NewWriter("", "", nil, context.Background(), time.Hour)
+	writer := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 	defer writer.Stop()
 	thinking := true
 	WriteEvent(writer, Event{Type: EventThinkingOpen}, false)
@@ -31,7 +31,7 @@ func TestCompactionRecoversPersistedThinkingState(t *testing.T) {
 		"[Thinking]\nInterrupted\n[Tool bash done]\n[/Thinking]\n[/Tool]\n",
 		"[Thinking]\nInterrupted\n```text\n[/Thinking]\n```\n",
 	} {
-		writer := NewWriter("", "", nil, context.Background(), time.Hour)
+		writer := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 		writer.Write([]byte(text))
 		CompactionReporter(writer, nil)(llmcontracts.CompactionProgress{State: "started"})
 		writer.Stop()
@@ -44,7 +44,7 @@ func TestCompactionRecoversPersistedThinkingState(t *testing.T) {
 func TestCompactionClosesInterruptedThinkingFence(t *testing.T) {
 	for _, fence := range []string{"```", "~~~~", "`````"} {
 		for _, live := range []bool{false, true} {
-			writer := NewWriter("", "", nil, context.Background(), time.Hour)
+			writer := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 			writer.Write([]byte("[Thinking]\n" + fence + "go\npartial"))
 			var thinking *bool
 			if live {
@@ -63,7 +63,7 @@ func TestCompactionClosesInterruptedThinkingFence(t *testing.T) {
 func TestCompactionRecoveryIgnoresToolMarkdown(t *testing.T) {
 	for _, thinking := range []string{"[Thinking]\nInterrupted", "[Thinking]\n~~~~go\npartial"} {
 		prefix := "[Tool read_file done]\n```text\n[Thinking]\nfile excerpt\n[/Tool]\n"
-		writer := NewWriter("", "", nil, context.Background(), time.Hour)
+		writer := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 		writer.Write([]byte(prefix + thinking))
 		CompactionReporter(writer, nil)(llmcontracts.CompactionProgress{State: "started"})
 		writer.Stop()
@@ -87,7 +87,7 @@ func TestCompactionRecoveryIgnoresToolMarkdown(t *testing.T) {
 func TestCompactionClosesVisibleResponseFence(t *testing.T) {
 	for _, fence := range []string{"```", "~~~~", "`````"} {
 		for _, live := range []bool{false, true} {
-			writer := NewWriter("", "", nil, context.Background(), time.Hour)
+			writer := NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 			original := "Here is the code:\n" + fence + "go\npartial"
 			WriteEvent(writer, Event{Type: EventTextDelta, Text: original}, false)
 			var thinking *bool

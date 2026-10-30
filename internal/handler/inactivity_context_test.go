@@ -106,7 +106,7 @@ func TestStreamingActivityResetsInactivityContext(t *testing.T) {
 	)
 	defer cancel()
 	ctx = llmcontracts.WithActivityCallback(ctx, reset)
-	writer := llmstream.NewWriter("", "", nil, ctx, time.Hour)
+	writer := llmstream.NewWriterWithPublisher("", "", nil, ctx, time.Hour, nil)
 	defer writer.Stop()
 	select {
 	case duration := <-initialDuration:

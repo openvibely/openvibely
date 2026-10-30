@@ -2342,7 +2342,7 @@ func TestLocalCompactionActivityPersistsAcrossProviderRetry(t *testing.T) {
 			if (err != nil) != fail {
 				t.Fatalf("error=%v", err)
 			}
-			retry := stream.NewWriter(execution.ID, task.ID, repo, ctx, time.Hour)
+			retry := stream.NewWriterWithPublisher(execution.ID, task.ID, repo, ctx, time.Hour, nil)
 			defer retry.Stop()
 			stream.WriteEvent(retry, stream.Event{Type: stream.EventTextDelta, Text: "Resuming work"}, false)
 			retry.Flush()
