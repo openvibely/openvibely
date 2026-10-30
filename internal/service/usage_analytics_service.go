@@ -41,16 +41,8 @@ type UsageAnalyticsService struct {
 	httpClient              *http.Client
 }
 
-type accountUsageFetcher func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error)
+type accountUsageFetcher func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error)
 type oauthRefreshFunc func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error)
-
-const (
-	accountRefreshSuccessTTL       = time.Hour
-	accountRefreshFailureTTL       = 6 * time.Hour
-	accountRefreshRateLimitTTL     = 30 * time.Minute
-	accountRefreshUnavailableTTL   = 24 * time.Hour
-	accountRefreshFailureRawPrefix = `{"refresh_error":`
-)
 
 func NewUsageAnalyticsService(usageRepo persistence.UsageStore, llmConfigRepo persistence.LLMConfigStore) *UsageAnalyticsService {
 	s := &UsageAnalyticsService{
@@ -80,39 +72,6 @@ func (s *UsageAnalyticsService) SetOAuthRefreshers(anthropicRefresh, openAIRefre
 	if openAIRefresh != nil {
 		s.openAIOAuthRefresher = openAIRefresh
 	}
-}
-
-func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
-	if s == nil || s.usageRepo == nil {
-		return nil, fmt.Errorf("usage analytics service is not configured")
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	type accountResult struct {
-		view *models.AnalyticsUsageAccountLimitsViewModel
-		err  error
-	}
-	accounts := make(chan accountResult, 1)
-	go func() {
-		view, err := s.BuildAnalyticsAccountLimits(ctx, filter)
-		accounts <- accountResult{view, err}
-	}()
-	view := &models.AnalyticsUsageViewModel{}
-	localErr := s.populateLocalUsageMetrics(ctx, filter, view)
-	if localErr != nil {
-		cancel()
-	}
-	account := <-accounts
-	if localErr != nil {
-		return nil, localErr
-	}
-	if account.err != nil {
-		return nil, account.err
-	}
-	view.AccountLimits = account.view.AccountLimits
-	view.LastUpdatedAt = account.view.LastUpdatedAt
-	view.Errors = account.view.Errors
-	return view, nil
 }
 
 type UsageAccountDescriptor struct {
@@ -221,41 +180,7 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	return result, nil
 }
 
-// A forced refresh must not join a read that is allowed to return a cached snapshot.
-func accountLimitsReadKey(accountKey string, refresh bool) string {
-	return "limits:" + accountKey + ":refresh=" + strconv.FormatBool(refresh)
-}
-
-func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
-	if filter.AccountGroupKey == "" {
-		return s.buildAnalyticsAccountLimits(ctx, filter)
-	}
-	value, err := s.sharedAccountRead(ctx, accountLimitsReadKey(filter.AccountGroupKey, filter.Refresh), func(work context.Context) (any, error) { return s.buildAnalyticsAccountLimits(work, filter) })
-	if err != nil {
-		return nil, err
-	}
-	return value.(*models.AnalyticsUsageAccountLimitsViewModel), nil
-}
-func (s *UsageAnalyticsService) buildAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
-	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.populateAnalyticsAccountLimits(ctx, filter, view, configsByID, refreshErrors); err != nil {
-		return nil, err
-	}
-	return &models.AnalyticsUsageAccountLimitsViewModel{
-		AccountLimits: view.AccountLimits,
-		LastUpdatedAt: view.LastUpdatedAt,
-		Errors:        view.Errors,
-	}, nil
-}
-
 func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
-	return s.buildAnalyticsAccountLimitBaseUsing(ctx, filter, s.refreshAccountSnapshots)
-}
-
-func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBaseUsing(ctx context.Context, filter persistence.UsageFilter, fetch func(context.Context, []models.LLMConfig, string, bool) ([]models.AccountUsageSnapshot, map[string]string)) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, nil, nil, fmt.Errorf("usage analytics service is not configured")
 	}
@@ -304,8 +229,8 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBaseUsing(ctx context.
 				configsByID[configs[i].ID] = configs[i]
 			}
 			view.AccountLimits = append(view.AccountLimits, s.oauthAccountPlaceholders(configs, filter.Provider)...)
-			if fetched, errs := fetch(ctx, configs, filter.Provider, filter.Refresh); len(fetched) > 0 || len(errs) > 0 {
-				view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, fetched, configsByID)
+			if fetched, errs := s.fetchLiveAccountUsage(ctx, configs, filter.Provider); len(fetched) > 0 || len(errs) > 0 {
+				view.AccountLimits = mergeAccountUsageResults(view.AccountLimits, fetched, configsByID)
 				for key, value := range errs {
 					refreshErrors[key] = value
 				}
@@ -320,36 +245,6 @@ func (s *UsageAnalyticsService) BuildUsagePage(ctx context.Context, filter persi
 		return nil, fmt.Errorf("usage analytics service is not configured")
 	}
 	return s.usageRepo.GetUsagePage(ctx, filter)
-}
-
-func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
-	if s == nil || s.usageRepo == nil {
-		return nil, fmt.Errorf("usage analytics service is not configured")
-	}
-
-	view := &models.AnalyticsUsageViewModel{}
-	configsByID := map[string]models.LLMConfig{}
-	if s.llmConfigRepo != nil {
-		configs, err := s.llmConfigRepo.List(ctx)
-		if err != nil {
-			view.Errors = append(view.Errors, fmt.Sprintf("listing OAuth accounts: %v", err))
-		} else {
-			for i := range configs {
-				configsByID[configs[i].ID] = configs[i]
-			}
-			view.AccountLimits = append(view.AccountLimits, s.oauthAccountPlaceholders(configs, filter.Provider)...)
-		}
-	}
-
-	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, nil); err != nil {
-		return nil, err
-	}
-	if latestUsageAt, err := s.usageRepo.GetLatestUsageEventTime(ctx, filter); err != nil {
-		return nil, err
-	} else if latestUsageAt != nil && (view.LastUpdatedAt == nil || latestUsageAt.After(*view.LastUpdatedAt)) {
-		view.LastUpdatedAt = latestUsageAt
-	}
-	return view, nil
 }
 
 type UsageFilterInput struct {
@@ -694,43 +589,6 @@ func compactUsageAnalyticsAccountRows(accounts []models.AccountUsageView) []usag
 	return out
 }
 
-func (s *UsageAnalyticsService) populateAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
-	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
-	if err != nil {
-		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
-		return nil
-	}
-	if filter.AccountGroupKey != "" {
-		var selected []models.AccountUsageSnapshot
-		for _, snapshot := range snapshots {
-			for _, cfg := range configsByID {
-				if snapshotMatchesConfigAccount(snapshot, cfg) {
-					selected = append(selected, snapshot)
-					break
-				}
-			}
-		}
-		snapshots = selected
-	}
-	view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
-	view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
-	view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
-	for _, snapshot := range snapshots {
-		if view.LastUpdatedAt == nil || snapshot.FetchedAt.After(*view.LastUpdatedAt) {
-			updated := snapshot.FetchedAt
-			view.LastUpdatedAt = &updated
-		}
-	}
-	return nil
-}
-
-func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter persistence.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
-	if err := s.populateAnalyticsAccountLimits(ctx, filter, view, configsByID, refreshErrors); err != nil {
-		return err
-	}
-	return s.populateLocalUsageMetrics(ctx, filter, view)
-}
-
 func (s *UsageAnalyticsService) populateLocalUsageMetrics(ctx context.Context, filter persistence.UsageFilter, view *models.AnalyticsUsageViewModel) error {
 	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
 	if err != nil {
@@ -778,37 +636,6 @@ func (s *UsageAnalyticsService) populateLocalUsageMetrics(ctx context.Context, f
 	return nil
 }
 
-func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
-	if provider != "" {
-		return s.refreshProviderAccountSnapshots(ctx, configs, provider, force)
-	}
-	// Independent providers can refresh concurrently; each provider also
-	// parallelizes independent account/credential groups.
-	type result struct {
-		snapshots []models.AccountUsageSnapshot
-		errors    map[string]string
-	}
-	results := make([]chan result, 0, 2)
-	for _, name := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic)} {
-		ch := make(chan result, 1)
-		results = append(results, ch)
-		go func(provider string) {
-			snapshots, errs := s.refreshProviderAccountSnapshots(ctx, configs, provider, force)
-			ch <- result{snapshots, errs}
-		}(name)
-	}
-	var snapshots []models.AccountUsageSnapshot
-	errs := map[string]string{}
-	for _, ch := range results {
-		r := <-ch
-		snapshots = append(snapshots, r.snapshots...)
-		for key, value := range r.errors {
-			errs[key] = value
-		}
-	}
-	return snapshots, errs
-}
-
 func accountUsageGroups(configs []models.LLMConfig, provider string) [][]models.LLMConfig {
 	// Group transitively by account or credential owner. Independent groups
 	// run concurrently; aliases and credential fallbacks retain their order.
@@ -854,169 +681,6 @@ func accountUsageGroups(configs []models.LLMConfig, provider string) [][]models.
 	return groups
 }
 
-func (s *UsageAnalyticsService) refreshProviderAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
-	groups := accountUsageGroups(configs, provider)
-	type result struct {
-		snapshots []models.AccountUsageSnapshot
-		errors    map[string]string
-	}
-	results := make([]chan result, len(groups))
-	for i, group := range groups {
-		ch := make(chan result, 1)
-		results[i] = ch
-		go func(configs []models.LLMConfig) {
-			snapshots, errs := s.refreshAccountSnapshotGroup(ctx, configs, provider, force)
-			ch <- result{snapshots, errs}
-		}(group)
-	}
-	var snapshots []models.AccountUsageSnapshot
-	errs := map[string]string{}
-	for _, ch := range results {
-		r := <-ch
-		snapshots = append(snapshots, r.snapshots...)
-		for key, value := range r.errors {
-			errs[key] = value
-		}
-	}
-	return snapshots, errs
-}
-
-func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
-	if s.accountFetcher == nil {
-		return nil, nil
-	}
-	var snapshots []models.AccountUsageSnapshot
-	errorsByKey := map[string]string{}
-	credentials := newAccountUsageCredentials(configs, provider)
-	type pendingAccountFailure struct {
-		snapshot       models.AccountUsageSnapshot
-		message        string
-		accountKey     string
-		configID       string
-		configRevision int64
-		provider       models.LLMProvider
-	}
-	pendingFailures := map[string]pendingAccountFailure{}
-	var pendingFailureOwnerKeys []string
-	for {
-		cfg, ok := credentials.next()
-		if !ok {
-			break
-		}
-		credentialOwnerKey := accountUsageCredentialOwnerKeyForConfig(cfg)
-		key := accountUsageKeyForConfig(cfg)
-		latest, shouldRefresh := latestAccountSnapshotForConfig(ctx, s.usageRepo, cfg, force)
-		if !shouldRefresh {
-			if latest != nil && isAccountRefreshFailure(latest.RateLimitReachedType) {
-				// Failure cooldown belongs to the credential/config that produced it.
-				// Let a healthy sibling for the same account remain eligible.
-				continue
-			}
-			credentials.succeeded(cfg)
-			delete(pendingFailures, credentialOwnerKey)
-			continue
-		}
-		snapshot, err := s.accountFetcher(ctx, cfg)
-		if err != nil {
-			credentials.failed(cfg)
-			reason := accountRefreshFailureReason(err)
-			message := accountRefreshFailureMessage(reason)
-			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
-			if _, exists := pendingFailures[credentialOwnerKey]; !exists {
-				pendingFailureOwnerKeys = append(pendingFailureOwnerKeys, credentialOwnerKey)
-				pendingFailures[credentialOwnerKey] = pendingAccountFailure{
-					snapshot:       accountRefreshFailureSnapshot(cfg, latest, reason),
-					message:        message,
-					accountKey:     key,
-					configID:       cfg.ID,
-					configRevision: cfg.OAuthConfigRevision,
-					provider:       cfg.Provider,
-				}
-			}
-			continue
-		}
-		if snapshot == nil {
-			continue
-		}
-		if snapshot.Provider == "" {
-			snapshot.Provider = string(cfg.Provider)
-		}
-		if snapshot.AgentConfigID == "" {
-			snapshot.AgentConfigID = cfg.ID
-		}
-		snapshot.OAuthConnectionID = cfg.OAuthConnectionID
-		if snapshot.AccountID == "" {
-			snapshot.AccountID = accountIDForConfig(cfg)
-		}
-		stored, err := s.usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
-			ctx, snapshot, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider,
-		)
-		if err != nil {
-			applog.Infof("[usage] storing account usage snapshot failed provider=%s: %v", cfg.Provider, err)
-			continue
-		}
-		if !stored {
-			applog.Infof("[usage] skipped stale account usage snapshot provider=%s", cfg.Provider)
-			continue
-		}
-		credentials.succeeded(cfg)
-		delete(pendingFailures, credentialOwnerKey)
-		snapshots = append(snapshots, *snapshot)
-	}
-	for _, ownerKey := range pendingFailureOwnerKeys {
-		failure, ok := pendingFailures[ownerKey]
-		if !ok {
-			continue
-		}
-		stored, err := s.usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
-			ctx, &failure.snapshot, failure.configID, failure.configRevision, failure.provider,
-		)
-		if err != nil {
-			applog.Infof("[usage] storing account usage refresh failure failed provider=%s: %v", failure.snapshot.Provider, err)
-			continue
-		}
-		if !stored {
-			applog.Infof("[usage] skipped stale account usage refresh failure provider=%s", failure.snapshot.Provider)
-			continue
-		}
-		if !credentials.servedAccounts[failure.accountKey] {
-			errorsByKey[failure.accountKey] = failure.message
-		}
-		snapshots = append(snapshots, failure.snapshot)
-	}
-	return snapshots, errorsByKey
-}
-
-func latestAccountSnapshotForConfig(ctx context.Context, usageRepo persistence.UsageStore, cfg models.LLMConfig, force bool) (*models.AccountUsageSnapshot, bool) {
-	if usageRepo == nil {
-		return nil, false
-	}
-	snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(cfg.Provider))
-	if err != nil {
-		return nil, true
-	}
-	for i := range snapshots {
-		snapshot := &snapshots[i]
-		if !snapshotMatchesConfigAccount(*snapshot, cfg) {
-			continue
-		}
-		if isAccountRefreshFailure(snapshot.RateLimitReachedType) && !snapshotHasSameOAuthCredentialOwner(*snapshot, cfg) {
-			// Provider account identity is shared for display, but a failure cooldown
-			// applies only to the explicit OAuth connection that produced it.
-			continue
-		}
-		age := time.Since(snapshot.FetchedAt)
-		if force {
-			return snapshot, true
-		}
-		if isAccountRefreshFailure(snapshot.RateLimitReachedType) {
-			return snapshot, age > accountRefreshFailureCooldown(snapshot.RateLimitReachedType)
-		}
-		return snapshot, age > accountRefreshSuccessTTL
-	}
-	return nil, true
-}
-
 func (s *UsageAnalyticsService) oauthAccountPlaceholders(configs []models.LLMConfig, provider string) []models.AccountUsageView {
 	var accounts []models.AccountUsageView
 	for _, providerName := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic)} {
@@ -1044,90 +708,6 @@ func accountIDForConfig(cfg models.LLMConfig) string {
 	return strings.TrimSpace(cfg.OAuthAccountID)
 }
 
-func accountRefreshFailureSnapshot(cfg models.LLMConfig, previous *models.AccountUsageSnapshot, reason string) models.AccountUsageSnapshot {
-	snapshot := models.AccountUsageSnapshot{
-		Provider:             string(cfg.Provider),
-		AccountID:            accountIDForConfig(cfg),
-		AgentConfigID:        cfg.ID,
-		OAuthConnectionID:    cfg.OAuthConnectionID,
-		RateLimitReachedType: reason,
-		RawJSON:              accountRefreshFailureRawPrefix + strconv.Quote(reason) + "}",
-	}
-	if previous == nil {
-		return snapshot
-	}
-	snapshot.PlanType = previous.PlanType
-	snapshot.AccountDisplayName = previous.AccountDisplayName
-	snapshot.AccountDetail = previous.AccountDetail
-	snapshot.BillingLabel = previous.BillingLabel
-	snapshot.SubscriptionStatus = previous.SubscriptionStatus
-	snapshot.ExtraUsageLabel = previous.ExtraUsageLabel
-	snapshot.ExtraUsageMonthlyUSD = previous.ExtraUsageMonthlyUSD
-	snapshot.ExtraUsageUsedUSD = previous.ExtraUsageUsedUSD
-	snapshot.CreditsRemaining = previous.CreditsRemaining
-	snapshot.PrimaryLabel = previous.PrimaryLabel
-	snapshot.PrimaryUsedPercent = previous.PrimaryUsedPercent
-	snapshot.PrimaryWindowMinutes = previous.PrimaryWindowMinutes
-	snapshot.PrimaryResetsAt = previous.PrimaryResetsAt
-	snapshot.SecondaryLabel = previous.SecondaryLabel
-	snapshot.SecondaryUsedPercent = previous.SecondaryUsedPercent
-	snapshot.SecondaryWindowMinutes = previous.SecondaryWindowMinutes
-	snapshot.SecondaryResetsAt = previous.SecondaryResetsAt
-	snapshot.ModelLimitLabel = previous.ModelLimitLabel
-	snapshot.ModelLimitUsedPercent = previous.ModelLimitUsedPercent
-	snapshot.ModelLimitWindowMinutes = previous.ModelLimitWindowMinutes
-	snapshot.ModelLimitResetsAt = previous.ModelLimitResetsAt
-	snapshot.ExtraLimits = append([]models.AccountUsageExtraLimit(nil), previous.ExtraLimits...)
-	return snapshot
-}
-
-func isAccountRefreshFailure(reason string) bool {
-	return strings.HasPrefix(reason, "refresh_failed")
-}
-
-func accountRefreshFailureCooldown(reason string) time.Duration {
-	switch reason {
-	case "refresh_failed_rate_limited":
-		return accountRefreshRateLimitTTL
-	case "refresh_failed_unauthorized", "refresh_failed_forbidden":
-		return accountRefreshUnavailableTTL
-	default:
-		return accountRefreshFailureTTL
-	}
-}
-
-func accountRefreshFailureReason(err error) string {
-	var httpErr accountUsageHTTPError
-	if ok := errors.As(err, &httpErr); ok {
-		switch httpErr.StatusCode {
-		case http.StatusUnauthorized:
-			return "refresh_failed_unauthorized"
-		case http.StatusForbidden:
-			return "refresh_failed_forbidden"
-		case http.StatusTooManyRequests:
-			return "refresh_failed_rate_limited"
-		case http.StatusNotFound:
-			return "refresh_failed_unavailable"
-		}
-	}
-	return "refresh_failed"
-}
-
-func accountRefreshFailureMessage(reason string) string {
-	switch reason {
-	case "refresh_failed_unauthorized":
-		return "live account limits unavailable: OAuth credentials are invalid; reconnect this account"
-	case "refresh_failed_forbidden":
-		return "live account limits unavailable: provider denied the account usage endpoint"
-	case "refresh_failed_rate_limited":
-		return "live account limits temporarily unavailable: provider rate limited the usage endpoint"
-	case "refresh_failed_unavailable":
-		return "live account limits unavailable: provider usage endpoint is not available"
-	default:
-		return "live account limits unavailable; showing local usage history and last successful snapshot if available"
-	}
-}
-
 func sanitizeAccountUsageError(err error) error {
 	var httpErr accountUsageHTTPError
 	if ok := errors.As(err, &httpErr); ok {
@@ -1136,23 +716,21 @@ func sanitizeAccountUsageError(err error) error {
 	return err
 }
 
-func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) []models.AccountUsageView {
+func mergeAccountUsageResults(existing []models.AccountUsageView, snapshots []models.AccountUsageResult, configsByID map[string]models.LLMConfig) []models.AccountUsageView {
 	index := make(map[string]int, len(existing))
 	for i, account := range existing {
 		index[accountUsageKeyForViewWithConfigs(account, configsByID)] = i
 	}
 	for _, snapshot := range snapshots {
-		cfg, ok := configForAccountSnapshot(snapshot, configsByID)
+		cfg, ok := configForAccountUsageResult(snapshot, configsByID)
 		if !ok || cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
 		}
-		// The model that originally fetched this connection-bound snapshot may
-		// since have moved to another account. Sanitize legacy per-model account
-		// identities before attributing the rendered view to a model that still
-		// owns the snapshot's immutable connection generation.
-		snapshot = sanitizeSnapshotAccountDisplay(snapshot, configsByID)
+		// Attribute the response only to a matching credential generation,
+		// and exclude model aliases from the account display identity.
+		snapshot = sanitizeAccountUsageDisplay(snapshot, configsByID)
 		snapshot.AgentConfigID = cfg.ID
-		view := accountViewFromSnapshot(snapshot)
+		view := accountViewFromResult(snapshot)
 		view.AccountIdentity = preferredAccountIdentity(view.AccountIdentity, accountUsageDisplayIdentity(cfg))
 		key := accountUsageKeyForConfig(cfg)
 		if i, ok := index[key]; ok {
@@ -1165,12 +743,12 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 	return existing
 }
 
-func configForAccountSnapshot(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) (models.LLMConfig, bool) {
-	if cfg, ok := configsByID[snapshot.AgentConfigID]; ok && snapshotMatchesConfigGeneration(snapshot, cfg) {
+func configForAccountUsageResult(snapshot models.AccountUsageResult, configsByID map[string]models.LLMConfig) (models.LLMConfig, bool) {
+	if cfg, ok := configsByID[snapshot.AgentConfigID]; ok && accountUsageMatchesConfigGeneration(snapshot, cfg) {
 		return cfg, true
 	}
 	for _, cfg := range configsByID {
-		if snapshotMatchesConfigGeneration(snapshot, cfg) {
+		if accountUsageMatchesConfigGeneration(snapshot, cfg) {
 			return cfg, true
 		}
 	}
@@ -1299,60 +877,8 @@ func accountUsageDisplayKey(account models.AccountUsageView, configsByID map[str
 	return accountUsageKeyForViewWithConfigs(account, configsByID)
 }
 
-func repairAccountSnapshotFromRawJSON(snapshot models.AccountUsageSnapshot) models.AccountUsageSnapshot {
-	if isAccountRefreshFailure(snapshot.RateLimitReachedType) || strings.TrimSpace(snapshot.RawJSON) == "" {
-		return snapshot
-	}
-	hasParsedLimits := accountSnapshotHasParsedLimits(snapshot)
-	if hasParsedLimits && models.LLMProvider(snapshot.Provider) != models.ProviderAnthropic {
-		return snapshot
-	}
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(snapshot.RawJSON), &raw); err != nil || len(raw) == 0 {
-		return snapshot
-	}
-	cfg := models.LLMConfig{ID: snapshot.AgentConfigID, OAuthAccountID: snapshot.AccountID}
-	var repaired *models.AccountUsageSnapshot
-	var err error
-	switch models.LLMProvider(snapshot.Provider) {
-	case models.ProviderAnthropic:
-		cfg.Provider = models.ProviderAnthropic
-		repaired, err = normalizeAnthropicAccountUsage(cfg, raw)
-	case models.ProviderOpenAI:
-		cfg.Provider = models.ProviderOpenAI
-		repaired, err = normalizeOpenAIAccountUsage(cfg, raw)
-	}
-	if err != nil || repaired == nil || !accountSnapshotHasParsedLimits(*repaired) {
-		return snapshot
-	}
-	snapshot.PlanType = firstNonEmptyUsageString(snapshot.PlanType, repaired.PlanType)
-	if snapshot.CreditsRemaining == nil {
-		snapshot.CreditsRemaining = repaired.CreditsRemaining
-	}
-	snapshot.PrimaryLabel = repaired.PrimaryLabel
-	snapshot.PrimaryUsedPercent = repaired.PrimaryUsedPercent
-	snapshot.PrimaryWindowMinutes = repaired.PrimaryWindowMinutes
-	snapshot.PrimaryResetsAt = repaired.PrimaryResetsAt
-	snapshot.SecondaryLabel = repaired.SecondaryLabel
-	snapshot.SecondaryUsedPercent = repaired.SecondaryUsedPercent
-	snapshot.SecondaryWindowMinutes = repaired.SecondaryWindowMinutes
-	snapshot.SecondaryResetsAt = repaired.SecondaryResetsAt
-	snapshot.ModelLimitLabel = repaired.ModelLimitLabel
-	snapshot.ModelLimitUsedPercent = repaired.ModelLimitUsedPercent
-	snapshot.ModelLimitWindowMinutes = repaired.ModelLimitWindowMinutes
-	snapshot.ModelLimitResetsAt = repaired.ModelLimitResetsAt
-	if len(repaired.ExtraLimits) > 0 {
-		snapshot.ExtraLimits = repaired.ExtraLimits
-	}
-	return snapshot
-}
-
-func accountSnapshotHasParsedLimits(snapshot models.AccountUsageSnapshot) bool {
-	return snapshot.PrimaryLabel != "" || snapshot.PrimaryUsedPercent != nil || snapshot.SecondaryLabel != "" || snapshot.SecondaryUsedPercent != nil || snapshot.ModelLimitLabel != "" || snapshot.ModelLimitUsedPercent != nil || len(snapshot.ExtraLimits) > 0
-}
-
-func sanitizeSnapshotAccountDisplay(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) models.AccountUsageSnapshot {
-	cfg, ok := configForAccountSnapshot(snapshot, configsByID)
+func sanitizeAccountUsageDisplay(snapshot models.AccountUsageResult, configsByID map[string]models.LLMConfig) models.AccountUsageResult {
+	cfg, ok := configForAccountUsageResult(snapshot, configsByID)
 	if !ok {
 		return snapshot
 	}
@@ -1362,7 +888,7 @@ func sanitizeSnapshotAccountDisplay(snapshot models.AccountUsageSnapshot, config
 	return snapshot
 }
 
-func accountSnapshotIdentity(snapshot models.AccountUsageSnapshot) string {
+func accountUsageResultIdentity(snapshot models.AccountUsageResult) string {
 	if models.LLMProvider(strings.ToLower(strings.TrimSpace(snapshot.Provider))) == models.ProviderAnthropic {
 		// Anthropic profile details contain the account email when provided, with
 		// display name/name as the provider's documented fallback. Keep it in the
@@ -1378,16 +904,10 @@ func accountSnapshotIdentity(snapshot models.AccountUsageSnapshot) string {
 	return preferredAccountIdentity(snapshot.AccountDisplayName)
 }
 
-func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.AccountUsageView {
-	snapshot = repairAccountSnapshotFromRawJSON(snapshot)
-	errorMessage := ""
-	if isAccountRefreshFailure(snapshot.RateLimitReachedType) {
-		errorMessage = accountRefreshFailureMessage(snapshot.RateLimitReachedType)
-	}
-
+func accountViewFromResult(snapshot models.AccountUsageResult) models.AccountUsageView {
 	var primaryLimit *models.AccountLimitView
 	if snapshot.PrimaryLabel != "" || snapshot.PrimaryUsedPercent != nil {
-		primaryLimit = accountLimitViewFromSnapshotWindow(
+		primaryLimit = accountLimitViewFromWindow(
 			snapshot.Provider,
 			"primary",
 			snapshot.PrimaryLabel,
@@ -1399,7 +919,7 @@ func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.Accoun
 	}
 	var secondaryLimit *models.AccountLimitView
 	if snapshot.SecondaryLabel != "" || snapshot.SecondaryUsedPercent != nil {
-		secondaryLimit = accountLimitViewFromSnapshotWindow(
+		secondaryLimit = accountLimitViewFromWindow(
 			snapshot.Provider,
 			"secondary",
 			snapshot.SecondaryLabel,
@@ -1413,7 +933,7 @@ func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.Accoun
 	limits := composeAccountLimits(primaryLimit, secondaryLimit, extraLimits)
 	view := models.AccountUsageView{
 		Provider:             snapshot.Provider,
-		AccountIdentity:      accountSnapshotIdentity(snapshot),
+		AccountIdentity:      accountUsageResultIdentity(snapshot),
 		AccountID:            snapshot.AccountID,
 		AgentConfigID:        snapshot.AgentConfigID,
 		PlanType:             snapshot.PlanType,
@@ -1428,12 +948,11 @@ func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.Accoun
 		SecondaryLimit:       secondaryLimit,
 		ExtraLimits:          extraLimits,
 		Limits:               limits,
-		Error:                errorMessage,
 	}
 	return applyAccountUsageDisplayPolicy(view)
 }
 
-func accountLimitViewFromSnapshotWindow(provider, sourceKey, label, fallback string, used *float64, windowMinutes *int, resetsAt *string) *models.AccountLimitView {
+func accountLimitViewFromWindow(provider, sourceKey, label, fallback string, used *float64, windowMinutes *int, resetsAt *string) *models.AccountLimitView {
 	limitKey := sourceKey
 	if models.LLMProvider(strings.ToLower(strings.TrimSpace(provider))) == models.ProviderOpenAI {
 		kind := openAIWindowUnknown
@@ -1471,7 +990,7 @@ func applyAccountUsageDisplayPolicy(view models.AccountUsageView) models.Account
 	return view
 }
 
-func accountExtraLimitViews(snapshot models.AccountUsageSnapshot) []models.AccountLimitView {
+func accountExtraLimitViews(snapshot models.AccountUsageResult) []models.AccountLimitView {
 	seen := map[string]int{}
 	views := make([]models.AccountLimitView, 0, len(snapshot.ExtraLimits)+1)
 	for _, limit := range snapshot.ExtraLimits {
@@ -1532,15 +1051,6 @@ func accountUsageCredentialOwnerKeyForConfig(cfg models.LLMConfig) string {
 	return provider + "\x00config\x00" + strings.TrimSpace(cfg.ID)
 }
 
-func snapshotHasSameOAuthCredentialOwner(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
-	snapshotConnectionID := strings.TrimSpace(snapshot.OAuthConnectionID)
-	configConnectionID := strings.TrimSpace(cfg.OAuthConnectionID)
-	if snapshotConnectionID != "" || configConnectionID != "" {
-		return snapshotConnectionID != "" && snapshotConnectionID == configConnectionID
-	}
-	return strings.TrimSpace(snapshot.AgentConfigID) == strings.TrimSpace(cfg.ID)
-}
-
 func accountUsageKeyForConfig(cfg models.LLMConfig) string {
 	provider := string(cfg.Provider)
 	if strings.TrimSpace(cfg.OAuthAccountID) != "" {
@@ -1563,21 +1073,11 @@ func accountUsageKeyForViewWithConfigs(view models.AccountUsageView, configsByID
 	return accountUsageKeyForView(view)
 }
 
-func snapshotMatchesConfigGeneration(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
+func accountUsageMatchesConfigGeneration(snapshot models.AccountUsageResult, cfg models.LLMConfig) bool {
 	return strings.TrimSpace(snapshot.OAuthConnectionID) != "" &&
 		strings.TrimSpace(snapshot.OAuthConnectionID) == strings.TrimSpace(cfg.OAuthConnectionID) &&
 		snapshot.OAuthConfigRevision == cfg.OAuthConfigRevision &&
 		strings.TrimSpace(snapshot.Provider) == string(cfg.Provider)
-}
-
-func snapshotMatchesConfigAccount(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
-	if !snapshotMatchesConfigGeneration(snapshot, cfg) {
-		return false
-	}
-	if strings.TrimSpace(snapshot.AccountID) != "" && strings.TrimSpace(cfg.OAuthAccountID) != "" {
-		return strings.TrimSpace(snapshot.AccountID) == strings.TrimSpace(cfg.OAuthAccountID)
-	}
-	return true
 }
 
 type anthropicOAuthProfile struct {
@@ -1622,7 +1122,7 @@ func normalizeAnthropicOAuthProfile(raw map[string]any) anthropicOAuthProfile {
 	return profile
 }
 
-func applyAnthropicProfileToSnapshot(snapshot *models.AccountUsageSnapshot, profile anthropicOAuthProfile) {
+func applyAnthropicProfileToSnapshot(snapshot *models.AccountUsageResult, profile anthropicOAuthProfile) {
 	if snapshot == nil {
 		return
 	}
@@ -1649,7 +1149,7 @@ func applyAnthropicProfileToSnapshot(snapshot *models.AccountUsageSnapshot, prof
 	}
 }
 
-func applyAnthropicExtraUsageToSnapshot(snapshot *models.AccountUsageSnapshot, raw map[string]any) {
+func applyAnthropicExtraUsageToSnapshot(snapshot *models.AccountUsageResult, raw map[string]any) {
 	if snapshot == nil || raw == nil {
 		return
 	}
@@ -1909,7 +1409,7 @@ func abandonAccountUsageOAuthCandidate(cfg models.LLMConfig) models.LLMConfig {
 	return cfg
 }
 
-func (s *UsageAnalyticsService) fetchOAuthAccountUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+func (s *UsageAnalyticsService) fetchOAuthAccountUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
 	switch cfg.Provider {
 	case models.ProviderAnthropic:
 		fresh, err := s.ensureFreshAccountUsageOAuth(ctx, cfg, s.anthropicAccountUsageRefreshFunc())
@@ -1973,7 +1473,7 @@ func (s *UsageAnalyticsService) defaultOpenAIAccountUsageRefreshFunc() oauthRefr
 	return oauthRefreshFunc(llmoauth.OpenAIRefreshFunc())
 }
 
-func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
 	profileCfg, profile, profileErr := s.resolveAnthropicOAuthProfile(ctx, cfg)
 	if profileErr == nil {
 		cfg = profileCfg
@@ -2028,7 +1528,7 @@ func (s *UsageAnalyticsService) resolveAnthropicOAuthProfile(ctx context.Context
 	return fresh, normalizeAnthropicOAuthProfile(raw), nil
 }
 
-func (s *UsageAnalyticsService) fetchOpenAIOAuthUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+func (s *UsageAnalyticsService) fetchOpenAIOAuthUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
 	endpoint, err := openAIUsageEndpoint()
 	if err != nil {
 		return nil, err
@@ -2173,9 +1673,9 @@ func openAIUsageEndpoint() (string, error) {
 	return u.String(), nil
 }
 
-func normalizeAnthropicAccountUsage(cfg models.LLMConfig, raw map[string]any) (*models.AccountUsageSnapshot, error) {
+func normalizeAnthropicAccountUsage(cfg models.LLMConfig, raw map[string]any) (*models.AccountUsageResult, error) {
 	rawJSON, _ := json.Marshal(sanitizeAccountUsageRawJSON(raw, string(models.ProviderAnthropic)))
-	snapshot := &models.AccountUsageSnapshot{
+	snapshot := &models.AccountUsageResult{
 		Provider:      string(cfg.Provider),
 		AccountID:     accountIDForConfig(cfg),
 		AgentConfigID: cfg.ID,
@@ -2191,7 +1691,7 @@ func normalizeAnthropicAccountUsage(cfg models.LLMConfig, raw map[string]any) (*
 	return snapshot, nil
 }
 
-func applyAnthropicExtraWindows(snapshot *models.AccountUsageSnapshot, raw map[string]any) {
+func applyAnthropicExtraWindows(snapshot *models.AccountUsageResult, raw map[string]any) {
 	if snapshot == nil || raw == nil {
 		return
 	}
@@ -2271,7 +1771,7 @@ func anthropicLimitLabel(key string) string {
 	return label + " limit"
 }
 
-func applyAnthropicWindow(snapshot *models.AccountUsageSnapshot, window map[string]any, target, label string, windowMinutes int) {
+func applyAnthropicWindow(snapshot *models.AccountUsageResult, window map[string]any, target, label string, windowMinutes int) {
 	if snapshot == nil {
 		return
 	}
@@ -2299,10 +1799,10 @@ func applyAnthropicWindow(snapshot *models.AccountUsageSnapshot, window map[stri
 	}
 }
 
-func normalizeOpenAIAccountUsage(cfg models.LLMConfig, raw map[string]any) (*models.AccountUsageSnapshot, error) {
+func normalizeOpenAIAccountUsage(cfg models.LLMConfig, raw map[string]any) (*models.AccountUsageResult, error) {
 	rawJSON, _ := json.Marshal(sanitizeAccountUsageRawJSON(raw, string(models.ProviderOpenAI)))
 	planType := openAIPlanLabel(firstNonEmptyUsageString(stringValue(raw["plan_type"]), stringValue(raw["planType"])))
-	snapshot := &models.AccountUsageSnapshot{
+	snapshot := &models.AccountUsageResult{
 		Provider:      string(cfg.Provider),
 		AccountID:     accountIDForConfig(cfg),
 		AgentConfigID: cfg.ID,
@@ -2356,7 +1856,7 @@ func normalizeOpenAIAccountUsage(cfg models.LLMConfig, raw map[string]any) (*mod
 	return snapshot, nil
 }
 
-func applyOpenAICredits(snapshot *models.AccountUsageSnapshot, credits map[string]any) {
+func applyOpenAICredits(snapshot *models.AccountUsageResult, credits map[string]any) {
 	if snapshot == nil || credits == nil {
 		return
 	}
@@ -2376,7 +1876,7 @@ func applyOpenAICredits(snapshot *models.AccountUsageSnapshot, credits map[strin
 	}
 }
 
-func applyOpenAISpendControl(snapshot *models.AccountUsageSnapshot, spendControl map[string]any) {
+func applyOpenAISpendControl(snapshot *models.AccountUsageResult, spendControl map[string]any) {
 	if snapshot == nil || spendControl == nil {
 		return
 	}
@@ -2385,7 +1885,7 @@ func applyOpenAISpendControl(snapshot *models.AccountUsageSnapshot, spendControl
 	}
 }
 
-func applyOpenAIAdditionalRateLimits(snapshot *models.AccountUsageSnapshot, value any) {
+func applyOpenAIAdditionalRateLimits(snapshot *models.AccountUsageResult, value any) {
 	if snapshot == nil {
 		return
 	}
@@ -2419,7 +1919,7 @@ func applyOpenAIAdditionalRateLimits(snapshot *models.AccountUsageSnapshot, valu
 	}
 }
 
-func accountExtraLimitFromWindow(snapshot models.AccountUsageSnapshot, key, label string, window map[string]any, defaultWindowMinutes int, normalizeUtilization bool) models.AccountUsageExtraLimit {
+func accountExtraLimitFromWindow(snapshot models.AccountUsageResult, key, label string, window map[string]any, defaultWindowMinutes int, normalizeUtilization bool) models.AccountUsageExtraLimit {
 	limit := models.AccountUsageExtraLimit{
 		Provider:      snapshot.Provider,
 		AccountID:     snapshot.AccountID,
@@ -2510,7 +2010,7 @@ func openAIWindowMinutes(window map[string]any) *int {
 	return nil
 }
 
-func applyOpenAIWindow(snapshot *models.AccountUsageSnapshot, window map[string]any, primary bool) {
+func applyOpenAIWindow(snapshot *models.AccountUsageResult, window map[string]any, primary bool) {
 	if snapshot == nil {
 		return
 	}

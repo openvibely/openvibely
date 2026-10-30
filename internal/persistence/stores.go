@@ -815,13 +815,11 @@ type UpcomingStore interface {
 	ListWaitingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error)
 }
 
-// UsageStore persists model usage records and account limits.
+// UsageStore persists model usage records.
 type UsageStore interface {
-	CreateAccountUsageSnapshotIfOAuthRevision(ctx context.Context, snapshot *models.AccountUsageSnapshot, configID string, expectedRevision int64, provider models.LLMProvider) (bool, error)
 	GetDailyUsage(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error)
 	GetDailyUsageByModel(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error)
 	GetEvidence(ctx context.Context, filter UsageFilter) ([]models.UsageEvidenceRow, int, error)
-	GetLatestAccountUsageSnapshots(ctx context.Context, provider string) ([]models.AccountUsageSnapshot, error)
 	GetLatestUsageEventTime(ctx context.Context, filter UsageFilter) (*time.Time, error)
 	GetModelUsageBreakdown(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error)
 	GetUsagePage(ctx context.Context, filter UsageFilter) (*models.AnalyticsUsageViewModel, error)

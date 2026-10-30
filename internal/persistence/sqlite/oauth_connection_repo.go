@@ -37,13 +37,6 @@ const oauthConnectionColumns = `c.id, c.provider, c.name,
 // fallback for providers without a built-in generic label.
 const oauthConnectionAccountLabelSQL = `COALESCE(
 			NULLIF(TRIM(c.oauth_provider_display_name), ''),
-			(SELECT NULLIF(TRIM(snapshot.account_display_name), '')
-			 FROM account_usage_snapshots snapshot
-			 WHERE snapshot.oauth_connection_id = c.id
-			   AND snapshot.oauth_config_revision = c.oauth_revision
-			   AND TRIM(snapshot.account_display_name) != ''
-			 ORDER BY snapshot.fetched_at DESC, snapshot.created_at DESC, snapshot.rowid DESC
-			 LIMIT 1),
 			CASE c.provider
 				WHEN 'anthropic' THEN 'Anthropic account'
 				WHEN 'openai' THEN 'OpenAI account'
@@ -229,7 +222,7 @@ func replaceLinkedOAuthConnectionTx(ctx context.Context, tx *manualTx, modelID, 
 	}
 
 	if principalHash != "" {
-		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, expectedRevision+1, principalHash); err != nil {
+		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, principalHash); err != nil {
 			return false, err
 		}
 	}
@@ -266,7 +259,7 @@ func (r *LLMConfigRepo) UpdateLinkedOAuthConnectionProfileIfRevision(ctx context
 		return false, err
 	}
 	if principalHash != "" {
-		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, expectedRevision, principalHash); err != nil {
+		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, principalHash); err != nil {
 			return false, err
 		}
 	}
@@ -276,9 +269,9 @@ func (r *LLMConfigRepo) UpdateLinkedOAuthConnectionProfileIfRevision(ctx context
 	return true, nil
 }
 
-func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalID string, provider models.LLMProvider, canonicalRevision int64, principalHash string) error {
+func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalID string, provider models.LLMProvider, principalHash string) error {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, oauth_revision
+		SELECT id
 		FROM oauth_connections
 			WHERE provider = ? AND oauth_principal_hash = ? AND oauth_principal_verified = 1 AND id != ?
 		ORDER BY id`, provider, principalHash, canonicalID)
@@ -286,13 +279,12 @@ func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalI
 		return fmt.Errorf("listing verified OAuth principal connections: %w", err)
 	}
 	type sourceConnection struct {
-		id       string
-		revision int64
+		id string
 	}
 	var sources []sourceConnection
 	for rows.Next() {
 		var source sourceConnection
-		if err := rows.Scan(&source.id, &source.revision); err != nil {
+		if err := rows.Scan(&source.id); err != nil {
 			rows.Close()
 			return fmt.Errorf("scanning verified OAuth principal connection: %w", err)
 		}
@@ -306,13 +298,6 @@ func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalI
 	}
 
 	for _, source := range sources {
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE account_usage_snapshots
-			SET oauth_connection_id = ?,
-				oauth_config_revision = CASE WHEN oauth_config_revision = ? THEN ? ELSE -1 END
-			WHERE provider = ? AND oauth_connection_id = ?`, canonicalID, source.revision, canonicalRevision, provider, source.id); err != nil {
-			return fmt.Errorf("moving verified OAuth principal snapshots: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE agent_configs SET oauth_connection_id = ?, updated_at = datetime('now')
 			WHERE provider = ? AND auth_method = ? AND oauth_connection_id = ?`, canonicalID, provider, models.AuthMethodOAuth, source.id); err != nil {
@@ -366,11 +351,10 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 	}
 
 	type targetConnection struct {
-		id       string
-		revision int64
+		id string
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, oauth_revision
+		SELECT id
 		FROM oauth_connections
 			WHERE provider = ? AND id != ? AND oauth_principal_hash = ? AND oauth_principal_verified = 1
 		  AND oauth_needs_reauth = 0
@@ -383,7 +367,7 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 	var targets []targetConnection
 	for rows.Next() {
 		var target targetConnection
-		if err := rows.Scan(&target.id, &target.revision); err != nil {
+		if err := rows.Scan(&target.id); err != nil {
 			rows.Close()
 			return false, fmt.Errorf("scanning matching healthy OpenAI OAuth connection: %w", err)
 		}
@@ -402,13 +386,6 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 		return false, nil
 	}
 	target := targets[0]
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE account_usage_snapshots
-		SET oauth_connection_id = ?,
-			oauth_config_revision = CASE WHEN oauth_config_revision = ? THEN ? ELSE -1 END
-		WHERE provider = ? AND oauth_connection_id = ?`, target.id, sourceRevision, target.revision, models.ProviderOpenAI, sourceID); err != nil {
-		return false, fmt.Errorf("moving matched OpenAI OAuth snapshots: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_configs SET oauth_connection_id = ?, updated_at = datetime('now')
 		WHERE provider = ? AND auth_method = ? AND oauth_connection_id = ?`, target.id, models.ProviderOpenAI, models.AuthMethodOAuth, sourceID); err != nil {
