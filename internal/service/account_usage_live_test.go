@@ -11,9 +11,9 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 )
 
-// Any snapshot read or write through this store panics. Live cards must not
-// depend on history, even when a prior successful response exists.
-type liveUsageWithoutSnapshots struct{ persistence.UsageStore }
+// Any usage-store access panics. Provider cards must not read or persist
+// usage records, even when a prior successful response exists.
+type liveUsageWithoutStorage struct{ persistence.UsageStore }
 
 func TestLiveAccountUsageAlwaysFetchesAndNeverFallsBack(t *testing.T) {
 	env := teststores.New(t)
@@ -22,15 +22,15 @@ func TestLiveAccountUsageAlwaysFetchesAndNeverFallsBack(t *testing.T) {
 	if err := env.LLMConfigs.Create(ctx, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewUsageAnalyticsService(liveUsageWithoutSnapshots{}, env.LLMConfigs)
+	svc := NewUsageAnalyticsService(liveUsageWithoutStorage{}, env.LLMConfigs)
 	calls := 0
-	svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+	svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
 		calls++
 		if calls == 3 {
 			return nil, errors.New("private provider failure")
 		}
 		used := float64(calls * 10)
-		return &models.AccountUsageSnapshot{PrimaryLabel: "Session", PrimaryUsedPercent: &used}, nil
+		return &models.AccountUsageResult{PrimaryLabel: "Session", PrimaryUsedPercent: &used}, nil
 	})
 	accounts, err := svc.ListUsageAccounts(ctx)
 	if err != nil {
@@ -71,10 +71,10 @@ func TestLiveAccountUsageCancellationAndNavigationRead(t *testing.T) {
 	if err := env.LLMConfigs.Create(ctx, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewUsageAnalyticsService(liveUsageWithoutSnapshots{}, env.LLMConfigs)
+	svc := NewUsageAnalyticsService(liveUsageWithoutStorage{}, env.LLMConfigs)
 	started := make(chan struct{})
 	stopped := make(chan struct{})
-	svc.SetAccountUsageFetcher(func(ctx context.Context, _ models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+	svc.SetAccountUsageFetcher(func(ctx context.Context, _ models.LLMConfig) (*models.AccountUsageResult, error) {
 		close(started)
 		<-ctx.Done()
 		close(stopped)
@@ -127,10 +127,10 @@ func TestLiveAccountUsageCredentialFallbackAndReconnect(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			svc := NewUsageAnalyticsService(liveUsageWithoutSnapshots{}, env.LLMConfigs)
+			svc := NewUsageAnalyticsService(liveUsageWithoutStorage{}, env.LLMConfigs)
 			var calls []string
 			reconnected := false
-			svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+			svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageResult, error) {
 				calls = append(calls, cfg.ID)
 				if len(calls) == 1 {
 					return nil, errors.New("first credential unavailable")
@@ -143,7 +143,7 @@ func TestLiveAccountUsageCredentialFallbackAndReconnect(t *testing.T) {
 					reconnected = true
 				}
 				pct := 42.0
-				return &models.AccountUsageSnapshot{PrimaryLabel: "Session", PrimaryUsedPercent: &pct}, nil
+				return &models.AccountUsageResult{PrimaryLabel: "Session", PrimaryUsedPercent: &pct}, nil
 			})
 			view, err := svc.BuildLiveAnalyticsAccountLimits(ctx, persistence.UsageFilter{})
 			if err != nil {

@@ -257,8 +257,8 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	pct := 96.0
 	windowMinutes := 300
 	reset := time.Now().Add(time.Hour).Format(time.RFC3339)
-	usage.SetAccountUsageFetcher(func(ctx context.Context, c models.LLMConfig) (*models.AccountUsageSnapshot, error) {
-		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, AccountDisplayName: "owner@example.com", PlanType: "ChatGPT Pro", PrimaryLabel: "Session", PrimaryWindowMinutes: &windowMinutes, PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
+	usage.SetAccountUsageFetcher(func(ctx context.Context, c models.LLMConfig) (*models.AccountUsageResult, error) {
+		return &models.AccountUsageResult{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, AccountDisplayName: "owner@example.com", PlanType: "ChatGPT Pro", PrimaryLabel: "Session", PrimaryWindowMinutes: &windowMinutes, PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
 	})
 	broadcaster := events.NewBroadcaster()
 	sub, err := broadcaster.Subscribe()

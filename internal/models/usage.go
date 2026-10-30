@@ -34,9 +34,8 @@ type LLMUsageEvent struct {
 	CreatedAt                time.Time `json:"created_at"`
 }
 
-// AccountUsageSnapshot stores live OAuth account limit data fetched for Analytics.
-type AccountUsageSnapshot struct {
-	ID                      string                   `json:"id"`
+// AccountUsageResult is an in-memory provider response, never a persisted cache.
+type AccountUsageResult struct {
 	Provider                string                   `json:"provider"`
 	AccountID               string                   `json:"account_id,omitempty"`
 	AgentConfigID           string                   `json:"agent_config_id,omitempty"`
@@ -67,13 +66,10 @@ type AccountUsageSnapshot struct {
 	RateLimitReachedType    string                   `json:"rate_limit_reached_type,omitempty"`
 	RawJSON                 string                   `json:"raw_json"`
 	FetchedAt               time.Time                `json:"fetched_at"`
-	CreatedAt               time.Time                `json:"created_at"`
 }
 
 // AccountUsageExtraLimit stores provider-specific account limit rows beyond primary/secondary windows.
 type AccountUsageExtraLimit struct {
-	ID            string   `json:"id,omitempty"`
-	SnapshotID    string   `json:"snapshot_id,omitempty"`
 	Provider      string   `json:"provider"`
 	AccountID     string   `json:"account_id,omitempty"`
 	AgentConfigID string   `json:"agent_config_id,omitempty"`

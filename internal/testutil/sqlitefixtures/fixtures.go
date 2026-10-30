@@ -125,14 +125,6 @@ func (f *fixtures) SkillEvents(ctx context.Context, filter storefixture.SkillEve
 	return events, rows.Err()
 }
 
-func (f *fixtures) SeedAccountUsageSnapshot(ctx context.Context, snapshot *models.AccountUsageSnapshot) error {
-	return sqlite.NewUsageRepo(f.db).CreateAccountUsageSnapshot(ctx, snapshot)
-}
-func (f *fixtures) CountAccountUsageSnapshots(ctx context.Context) (int, error) {
-	var count int
-	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM account_usage_snapshots`).Scan(&count)
-	return count, err
-}
 func (f *fixtures) LinkModelOAuthConnection(ctx context.Context, modelID, connectionID string) error {
 	return sqlite.NewLLMConfigRepo(f.db).LinkOAuthConnection(ctx, modelID, connectionID)
 }

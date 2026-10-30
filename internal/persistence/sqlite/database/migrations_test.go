@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 218
+const latestMigrationVersion = 219
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -2746,11 +2746,14 @@ func TestMigration091_BackfillsHistoricalLLMUsageFromExecutions(t *testing.T) {
 		t.Fatalf("failed to insert execution: %v", err)
 	}
 
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpTo(db, ".", 218); err != nil {
 		t.Fatalf("failed to run migration 091: %v", err)
 	}
 
 	assertUsageTrackingSchema091(t, db)
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("upgrade after checking historical usage schema: %v", err)
+	}
 
 	var provider, projectID, executionID, operation string
 	var totalTokens, inputTokens, outputTokens int
@@ -2797,11 +2800,14 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 		t.Fatalf("failed to insert execution: %v", err)
 	}
 
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpTo(db, ".", 218); err != nil {
 		t.Fatalf("failed to run consolidated migration 091 from old usage chain: %v", err)
 	}
 
 	assertUsageTrackingSchema091(t, db)
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("upgrade after checking historical usage schema: %v", err)
+	}
 	if testColumnExists(t, db, "llm_usage_events", "request_status") {
 		t.Fatal("expected request_status to be normalized away")
 	}
