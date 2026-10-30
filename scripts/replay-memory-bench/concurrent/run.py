@@ -12,6 +12,7 @@ p.add_argument('--profiles', default='small,medium,large')
 p.add_argument('--modes', default='text-only,tool-use')
 p.add_argument('--workers', default='1,10')
 p.add_argument('--profile', action='store_true')
+p.add_argument('--memory-profile', action='store_true', help='Diagnostic heap captures at sampled phase RSS highs; exclude from timing reports')
 p.add_argument('--provider', choices=['openai','anthropic','openai-compatible'], default='openai')
 p.add_argument('--variants', default='main,branch', help='Comma-separated main,branch; branch alone for attribution-only runs')
 p.add_argument('--baseline-revision', default='unspecified')
@@ -46,21 +47,31 @@ for rep in range(a.first_run,a.first_run+a.runs):
         if peer.poll() is not None or time.monotonic()>deadline: raise RuntimeError('peer startup failed')
         time.sleep(.05)
        env=dict(os.environ,OV_FLOW_DIR=str(d),OV_FLOW_MODE=mode,OV_FLOW_PROFILE=profile,OV_FLOW_WORKERS=workers,OV_FLOW_PROVIDER=a.provider)
+       if a.memory_profile: env['OV_FLOW_MEMORY_PROFILE']='1'
        cmd=[binary,'-test.run=^TestConcurrentFlow$','-test.v','-test.timeout=5m']
        if a.profile: cmd += ['-test.cpuprofile='+str(d/'cpu.pprof'),'-test.memprofile='+str(d/'mem.pprof')]
        print('START',d.name,flush=True)
        app=subprocess.Popen(cmd,env=env,stdout=al,stderr=subprocess.STDOUT)
-       rss=[];start=time.monotonic()
+       rss=[];start=time.monotonic();phase_peaks={}
        while app.poll() is None:
         if time.monotonic()-start>310: raise RuntimeError('app timeout')
         r=subprocess.run(['ps','-o','rss=','-p',str(app.pid)],capture_output=True,text=True)
-        if r.stdout.strip(): rss.append([time.monotonic()-start,int(r.stdout.strip())*1024])
+        if r.stdout.strip():
+         value=int(r.stdout.strip())*1024;now=time.time_ns()
+         rss.append([time.monotonic()-start,value,now])
+         if a.memory_profile:
+          try: phase=json.loads((d/'phase.json').read_text())['Name']
+          except (OSError,ValueError,KeyError): phase=None
+          if phase and value>phase_peaks.get(phase,0)+4*1048576:
+           phase_peaks[phase]=value
+           request=dict(Phase=phase,UnixNS=now,RSS=value)
+           (d/'heap-request.tmp').write_text(json.dumps(request));(d/'heap-request.tmp').replace(d/'heap-request.json')
         time.sleep(.1)
        (d/'rss.json').write_text(json.dumps(rss))
        if app.returncode: raise RuntimeError((d/'app.log').read_text()[-10000:])
        missing=[name for name in ('turns.json','heap.json','storage.json','model.json','manifest.json','delivery.json',*(f'samples-{i}.json' for i in range(6))) if not (d/name).is_file()]
        if missing:raise RuntimeError(f'{d.name}: harness produced no complete result: {missing}')
-       (d/'accepted.json').write_text(json.dumps(dict(provider=a.provider,variant=variant,repetition=rep,profiled=a.profile)))
+       (d/'accepted.json').write_text(json.dumps(dict(provider=a.provider,variant=variant,repetition=rep,profiled=a.profile or a.memory_profile)))
        print('PASS',d.name,flush=True)
       finally:
        if app and app.poll() is None: app.kill();app.wait()

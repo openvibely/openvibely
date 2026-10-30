@@ -6,7 +6,7 @@ rows=[]
 for root in a.directories:
  for d in sorted(pathlib.Path(root).iterdir()):
   if not (d/'storage.json').exists():continue
-  if any(d.glob('runtime-*.trace')) or (d/'allocation-diagnostic.json').exists() or (d/'cpu.pprof').exists():
+  if any(d.glob('runtime-*.trace')) or (d/'allocation-diagnostic.json').exists() or (d/'cpu.pprof').exists() or (d/'memory-diagnostic.json').exists():
    raise ValueError(f'{d}: diagnostic run is not a performance measurement')
   manifest=json.loads((d/'manifest.json').read_text())
   provider=manifest.get('Provider','openai')

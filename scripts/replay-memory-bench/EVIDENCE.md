@@ -1,5 +1,17 @@
 # Archived benchmark evidence
 
+## Phase-aligned memory investigation and estimator follow-up
+
+Main `9e702736a` versus branch `659c90e24` phase discovery is separate from the final optimization comparison: previous branch `659c90e24` versus its estimator-only patch. Twelve final timing runs passed (396 turns). The Anthropic persistence candidate was rejected and reverted.
+
+- [Repository report](PROVIDER_MEMORY_FOLLOWUP.md)
+- [Download report](/files/238768abeed60d5ab1e53c4ca54fd0c4?project_id=b184292efa07a415fc59967a5fc328d1)
+- [Raw phase samples, profiles, timings, and source evidence](/files/9e66a5692ce7b6059dc0bd040bb1567a?project_id=b184292efa07a415fc59967a5fc328d1) (2,374,928 bytes)
+
+Archive SHA-256: `6abfb3a3b33d70c9bcb1986b5ba8ab6d6e0d370ad8a0fdc863468f89a4304ed1`.
+
+The archive separates unprofiled measurements from diagnostics and rejected experiments. Final timing directory labels `main`/`branch` mean previous branch/candidate, not Git main/branch. Temporary build worktrees were removed; app databases and binaries are omitted.
+
 ## Anthropic and OpenAI-compatible comparison
 
 [Full report](PROVIDER_RESULTS.md): main `9e702736a` versus task branch `dfe6f4b3f`, three repetitions per scenario. All 48 timing runs passed (1,584 turns), plus four separate diagnostic runs and ten smoke runs. This comparison measures the entire branch, not just the seven optimizations.

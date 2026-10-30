@@ -61,6 +61,9 @@ func TestConcurrentFlow(t *testing.T) {
 	if dir == "" {
 		t.Skip("opt-in app flow")
 	}
+	markPhase, finishMemory := appFlowMemoryPhases(t, dir)
+	defer finishMemory()
+	markPhase("startup")
 	ctx := context.Background()
 	diagnosticMode := os.Getenv("OV_FLOW_DIAGNOSTICS")
 	diagnosticsEnabled := diagnosticMode == "1" || diagnosticMode == "trace"
@@ -246,6 +249,7 @@ func TestConcurrentFlow(t *testing.T) {
 	var basePages, baseSize int64
 	require.NoError(t, conns.Reader.QueryRow("PRAGMA page_count").Scan(&basePages))
 	require.NoError(t, conns.Reader.QueryRow("PRAGMA page_size").Scan(&baseSize))
+	markPhase("setup-complete")
 	for turn := 0; turn < manifest.Turns; turn++ {
 		if profile == "mixed-paced" {
 			outputBytes = []int{2048, 8192, 16384}[turn%3]
@@ -307,6 +311,7 @@ func TestConcurrentFlow(t *testing.T) {
 		if profileAllocations {
 			captureAllocation("before")
 		}
+		markPhase(fmt.Sprintf("turn-%d", turn))
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		cpu0, _ := appFlowCPU()
@@ -404,6 +409,7 @@ func TestConcurrentFlow(t *testing.T) {
 		runtime.ReadMemStats(&after)
 		close(stop)
 		<-done
+		markPhase(fmt.Sprintf("between-turns-%d", turn))
 		if diagnostic {
 			trace.Stop()
 			require.NoError(t, traceFile.Close())
@@ -442,6 +448,7 @@ func TestConcurrentFlow(t *testing.T) {
 		// Assertions and fixture IO are outside the measured turn. The next turn keeps
 		// the normal live app state; no deliberate GC/reset between follow-ups.
 	}
+	markPhase("verification")
 	for _, task := range tasks {
 		history, e := stores.Executions.ListByTaskChronological(ctx, task)
 		require.NoError(t, e)
@@ -456,8 +463,10 @@ func TestConcurrentFlow(t *testing.T) {
 		}
 	}
 	appFlowJSON(t, filepath.Join(dir, "turns.json"), rows)
+	markPhase("final-gc")
 	runtime.GC()
 	runtime.GC()
+	markPhase("final-validation")
 	var retained runtime.MemStats
 	runtime.ReadMemStats(&retained)
 	appFlowJSON(t, filepath.Join(dir, "heap.json"), map[string]any{"baseline_heap": baseline.HeapAlloc, "retained_heap": retained.HeapAlloc, "retained_objects": retained.HeapObjects, "baseline_objects": baseline.HeapObjects, "initial_db_pages_bytes": basePages * baseSize})
@@ -512,10 +521,84 @@ func TestConcurrentFlow(t *testing.T) {
 		require.Positive(t, d.Persisted)
 	}
 	appFlowJSON(t, filepath.Join(dir, "delivery.json"), deliveries)
+	markPhase("checkpoint")
 	// Normalize storage only after the natural conversation has finished.
 	_, e = conns.Writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	require.NoError(t, e)
 	final, e := os.Stat(filepath.Join(dir, "app.db"))
 	require.NoError(t, e)
 	appFlowJSON(t, filepath.Join(dir, "storage.json"), map[string]any{"checkpointed_db_bytes": final.Size()})
+}
+
+// Phase markers are outside measured waves. Heap capture runs separately from
+// timing: the external RSS sampler requests a capture on phase high-water rises.
+// No GC is forced; Go's sampled in-use profile can lag by up to two GC cycles.
+func appFlowMemoryPhases(t *testing.T, dir string) (func(string), func()) {
+	type phase struct {
+		Name   string
+		UnixNS int64
+	}
+	phases := []phase{}
+	mark := func(name string) {
+		p := phase{name, time.Now().UnixNano()}
+		phases = append(phases, p)
+		raw, _ := json.Marshal(p)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "phase.tmp"), raw, 0600))
+		require.NoError(t, os.Rename(filepath.Join(dir, "phase.tmp"), filepath.Join(dir, "phase.json")))
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	enabled := os.Getenv("OV_FLOW_MEMORY_PROFILE") == "1"
+	if enabled {
+		appFlowJSON(t, filepath.Join(dir, "memory-diagnostic.json"), map[string]any{"forced_gc_at_peaks": false, "performance_comparison": false})
+		go func() {
+			defer close(done)
+			ticker := time.NewTicker(25 * time.Millisecond)
+			defer ticker.Stop()
+			var previous int64
+			var captures []map[string]any
+			defer func() { appFlowJSON(t, filepath.Join(dir, "memory-captures.json"), captures) }()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					raw, err := os.ReadFile(filepath.Join(dir, "heap-request.json"))
+					if err != nil {
+						continue
+					}
+					var request struct {
+						Phase  string
+						UnixNS int64
+						RSS    int64
+					}
+					if json.Unmarshal(raw, &request) != nil || request.UnixNS <= previous {
+						continue
+					}
+					previous = request.UnixNS
+					raw, _ = os.ReadFile(filepath.Join(dir, "phase.json"))
+					var current phase
+					_ = json.Unmarshal(raw, &current)
+					var before, after runtime.MemStats
+					runtime.ReadMemStats(&before)
+					started := time.Now().UnixNano()
+					name := fmt.Sprintf("memory-%s.pprof", request.Phase)
+					file, e := os.Create(filepath.Join(dir, name))
+					if e == nil {
+						e = pprof.WriteHeapProfile(file)
+						_ = file.Close()
+					}
+					runtime.ReadMemStats(&after)
+					capture := map[string]any{"file": name, "requested_phase": request.Phase, "captured_phase": current.Name, "requested_unix_ns": request.UnixNS, "started_unix_ns": started, "ended_unix_ns": time.Now().UnixNano(), "requested_rss": request.RSS, "heap_before": before.HeapAlloc, "heap_after": after.HeapAlloc, "heap_sys": before.HeapSys, "heap_released": before.HeapReleased, "gc": before.NumGC}
+					if e != nil {
+						capture["error"] = e.Error()
+						t.Errorf("memory capture: %v", e)
+					}
+					captures = append(captures, capture)
+				}
+			}
+		}()
+	} else {
+		close(done)
+	}
+	return mark, func() { close(stop); <-done; appFlowJSON(t, filepath.Join(dir, "phases.json"), phases) }
 }

@@ -29,6 +29,14 @@ python3 scripts/replay-memory-bench/concurrent/run.py \
 Repeat with new directories and `--first-run 2` / `3`; version order alternates. Run one measurement process at a time, with no tests/builds competing. `--profile` collects diagnostic pprof files: profile runs must remain separate from timing runs. `summarize.py DIR... --output REPORT_DIR` preserves per-turn/scenario results and raw counters; it produces no combined performance score. Raw `samples-N.json`, `rss.json`, `delivery.json`, and `turns.json` remain in each run directory.
 
 
+## Phase-aligned memory diagnostics
+
+The harness writes `phases.json` with wall-clock nanoseconds for startup, each request wave, between-turn work, final full-history verification, final GC, validation, and checkpoint/teardown. External `rss.json` samples now include wall-clock nanoseconds as a third column; the first two columns remain elapsed seconds and RSS bytes. Use `memory_phases.py ROOT... --output REPORT` to attribute samples to phases. A short unsampled phase is reported as absent, not as zero memory. A phase's RSS includes memory retained from earlier work.
+
+Run an ordinary measurement first. Then repeat separately with `--memory-profile`. In that diagnostic run the external sampler requests a heap profile when a phase's sampled RSS rises by at least 4 MiB above its last capture request. The app polls requests every 25 ms, writes `memory-PHASE.pprof`, and records trigger/capture times, phases and heap counters in `memory-captures.json`. Later high-water captures overwrite the same phase's profile; the metadata retains all capture attempts. Check for a phase change between trigger and capture before attribution. An approximately 100 ms RSS sampler can miss short peaks.
+
+No GC is forced at the peak: profiles identify sampled allocation sites but Go's in-use accounting can lag by up to two GC cycles. The pre/post counters and capture delay are provided rather than claiming an exact instantaneous live-heap snapshot. Profiling itself allocates and can perturb RSS; diagnostic runs are rejected by `summarize.py` and must not be used as timing/RAM comparison results. Startup/final retained-heap GC behavior is unchanged.
+
 ## Diagnostics and limitations
 
 Use `phases.py` for preparation/streaming/completion intervals, `reclamation.py` for natural frees and live counts, and `timeline.py` for individual timelines. `allocation_attribution.py` uses the `profile_sites.go.txt` helper and full-sampling profiles; consult `--help` and archived reconstruction scripts. Diagnostic timing/GC/heap results must not enter ordinary performance tables. Frees can reclaim objects from earlier turns.
@@ -42,3 +50,5 @@ Use `--provider anthropic` or `--provider openai-compatible` and distinct output
 For the full large-workload comparison, use `--profiles large --modes text-only,tool-use --workers 1,10 --runs 3` for each provider. This is 48 fresh app/database processes and 1,584 completed turns across the two providers and revisions. Run the two providers sequentially with no builds/tests/profiling alongside them. `summarize.py` accepts both output directories and groups by provider as well as mode, size, and concurrency. Turn 0 is the initial request; turn 5 is the fifth follow-up. Process CPU and allocations cover the whole concurrent wave.
 
 Integrity gates check exact request counts (no hidden retry or extra tool round), prior-turn context, protocol identity, actual tool-result messages, complete stored answers, persistence/live events, and overlapping streams. The mock understands each provider's real tool-call/result schema; it does not route these providers through the OpenAI Responses client.
+
+Phase investigation and the tested estimator optimization: [memory follow-up report](../PROVIDER_MEMORY_FOLLOWUP.md).
