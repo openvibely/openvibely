@@ -1,0 +1,108 @@
+package layout
+
+templ ChangesExplorerScript() {
+    <style>
+        #changes-explorer-host, #changes-explorer-mobile { display: none; }
+        html.changes-explorer-active #task-list-panel > #changes-explorer-host { display: block !important; overflow-y: auto; }
+        html.changes-explorer-active #appearance-settings-nav, html.changes-explorer-active .settings-mobile-nav { display: none !important; }
+        html.changes-explorer-active:not([data-shell-frame]) #changes-explorer-mobile { display: block; max-height: 35vh; overflow: auto; padding: 12px; }
+        html.changes-explorer-active [data-diff-expand-all] { display: none; }
+        .changes-explorer .explorer-back { display: block; padding: 10px; margin-bottom: 12px; font-size: 13px; opacity: .75; }
+        .changes-explorer .explorer-search { width: 100%; margin-bottom: 12px; }
+        .changes-explorer summary { cursor: pointer; padding: 6px 10px; font-size: 13px; opacity: .8; overflow-wrap: anywhere; }
+        .changes-explorer details > div { padding-left: 12px; }
+        .changes-explorer .task-list-row { width: 100%; text-align: left; }
+        .changes-explorer .explorer-empty { padding: 10px; opacity: .6; font-size: 13px; }
+        html.changes-explorer-active .diff-file-card[hidden] { display: none !important; }
+    </style>
+    <script>
+    (function() {
+        var nav = document.createElement('nav');
+        nav.className = 'changes-explorer';
+        nav.setAttribute('aria-label', 'Changed files');
+        var back = document.createElement('button');
+        back.type = 'button'; back.className = 'explorer-back'; back.textContent = '← Back to workspace';
+        back.onclick = function() { if (window.taskWorkspace) window.taskWorkspace.openThread(); };
+        var search = document.createElement('input');
+        search.type = 'search'; search.className = 'input input-bordered input-sm explorer-search';
+        search.placeholder = 'Filter files…'; search.setAttribute('aria-label', 'Filter changed files');
+        var tree = document.createElement('div');
+        var empty = document.createElement('p'); empty.className = 'explorer-empty';
+        nav.append(back, search, tree, empty);
+        var viewer = null, signature = '', files = [], selected = '', scope = '';
+        var states = new Map();
+        function save() { if (scope) states.set(scope, {selected: selected, query: search.value}); }
+        function applySelection(expand) {
+            if (!viewer) return;
+            var file = files.find(function(f) { return f.path === selected; });
+            if (!file) return;
+            viewer.querySelectorAll('#diff-content-inline > .diff-file-card, #diff-content-split > .diff-file-card').forEach(function(card) {
+                card.hidden = card.id !== 'diff-file-' + file.index && card.id !== 'diff-file-split-' + file.index;
+            });
+            tree.querySelectorAll('[data-explorer-path]').forEach(function(button) {
+                if (button.dataset.explorerPath === selected) button.setAttribute('aria-current', 'page');
+                else button.removeAttribute('aria-current');
+            });
+            if (expand) {
+                var chevron = document.getElementById('diff-chevron-' + file.index);
+                if (chevron && !chevron.classList.contains('rotate-90') && window.toggleDiffFile) window.toggleDiffFile(Number(file.index));
+            }
+            if (window._refreshDiffPerformance) window._refreshDiffPerformance();
+        }
+        function render() {
+            var closed = new Set(Array.from(tree.querySelectorAll('details')).filter(function(d) { return !d.open; }).map(function(d) { return d.dataset.folder; }));
+            tree.replaceChildren();
+            var folders = new Map(), query = search.value.trim().toLowerCase(), shown = 0;
+            files.forEach(function(file) {
+                if (query && file.path.toLowerCase().indexOf(query) < 0) return;
+                shown++;
+                var parts = file.path.split('/'), parent = tree, prefix = '';
+                parts.slice(0, -1).forEach(function(part) {
+                    prefix += part + '/';
+                    if (!folders.has(prefix)) {
+                        var details = document.createElement('details'); details.dataset.folder = prefix;
+                        details.open = !!query || !closed.has(prefix);
+                        var summary = document.createElement('summary'); summary.textContent = part;
+                        var children = document.createElement('div'); details.append(summary, children); parent.append(details);
+                        folders.set(prefix, children);
+                    }
+                    parent = folders.get(prefix);
+                });
+                var button = document.createElement('button'); button.type = 'button'; button.className = 'task-list-row';
+                button.dataset.explorerPath = file.path; button.title = file.path;
+                button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h6M11 10v6M8 19h6"/></svg>';
+                var label = document.createElement('span'); label.className = 'task-list-title'; label.textContent = parts[parts.length - 1]; button.append(label);
+                button.onclick = function() { selected = file.path; save(); applySelection(true); };
+                parent.append(button);
+            });
+            empty.hidden = shown > 0;
+            empty.textContent = files.length ? 'No matching files.' : 'No changed files.';
+            applySelection(false);
+        }
+        search.oninput = function() { save(); render(); };
+        window.syncChangesExplorer = function(active) {
+            if (!active) { nav.remove(); return; }
+            var host = document.getElementById(document.documentElement.hasAttribute('data-shell-frame') ? 'changes-explorer-host' : 'changes-explorer-mobile');
+            if (host && nav.parentNode !== host) host.append(nav);
+            var nextViewer = document.querySelector('#tab-changes #diff-viewer');
+            var nextScope = (document.getElementById('changes-content') || {}).dataset;
+            nextScope = nextScope ? nextScope.taskId : '';
+            var nextFiles = nextViewer ? Array.from(nextViewer.querySelectorAll('[data-diff-index]')).map(function(el) { return {index: el.dataset.diffIndex, path: el.dataset.diffPath}; }) : [];
+            var nextSignature = JSON.stringify(nextFiles);
+            if (scope !== nextScope) {
+                save(); scope = nextScope;
+                var state = states.get(scope) || {}; selected = state.selected || ''; search.value = state.query || '';
+                tree.replaceChildren();
+            }
+            var changed = viewer !== nextViewer || signature !== nextSignature;
+            viewer = nextViewer; signature = nextSignature; files = nextFiles;
+            if (!files.some(function(f) { return f.path === selected; })) selected = files.length ? files[0].path : '';
+            if (changed || !tree.childElementCount) render();
+            applySelection(changed);
+        };
+        document.addEventListener('openvibely:shell-frame-change', function() {
+            if (window.syncAppearanceSettings) window.syncAppearanceSettings();
+        });
+    })();
+    </script>
+}

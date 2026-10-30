@@ -212,22 +212,6 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 						<span>A merge conflict is active. Resolve the conflicting files or abort the merge before retrying.</span>
 					</div>
 				}
-				// File change summary list
-				if len(fileStats) > 0 {
-					<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">
-					<div class="text-sm font-semibold mb-2 min-w-0">
-						{ fmt.Sprintf("%d file(s) changed", len(fileStats)) }
-					</div>
-					<ul class="text-xs space-y-1 min-w-0 max-w-full overflow-hidden">
-						for _, fs := range fileStats {
-							<li class="flex items-center gap-2 min-w-0 max-w-full overflow-hidden">
-								<span class={ fileStatusBadgeClass(fs.Status), "shrink-0" }>{ fileStatusChar(fs.Status) }</span>
-								<span class="font-mono min-w-0 flex-1 truncate" title={ fs.Path }>{ fs.Path }</span>
-							</li>
-						}
-					</ul>
-				</div>
-			}
 
 			// Diff viewer
 			@components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView)
@@ -264,28 +248,6 @@ func mergeStatusLabel(status models.MergeStatus) string {
 		return "Conflicts"
 	default:
 		return ""
-	}
-}
-
-func fileStatusBadgeClass(status string) string {
-	switch status {
-	case "added":
-		return "badge badge-xs badge-success"
-	case "deleted":
-		return "badge badge-xs badge-error"
-	default:
-		return "badge badge-xs badge-warning"
-	}
-}
-
-func fileStatusChar(status string) string {
-	switch status {
-	case "added":
-		return "A"
-	case "deleted":
-		return "D"
-	default:
-		return "M"
 	}
 }
 

@@ -542,13 +542,15 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				if len(metas) > 1 {
 					<button
 						class="btn btn-xs btn-ghost opacity-60"
-						onclick="toggleAllDiffFiles(true)"
+						data-diff-expand-all
+                        onclick="toggleAllDiffFiles(true)"
 					>
 						Expand All
 					</button>
 					<button
 						class="btn btn-xs btn-ghost opacity-60"
-						onclick="toggleAllDiffFiles(false)"
+						data-diff-expand-all
+                        onclick="toggleAllDiffFiles(false)"
 					>
 						Collapse All
 					</button>
@@ -574,23 +576,11 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				</div>
 			</div>
 		</div>
-		<!-- File List -->
-		if len(metas) > 1 {
-			<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">
-				<div class="text-xs font-semibold uppercase tracking-wider mb-2 opacity-60">Changed Files</div>
-				<div class="flex flex-wrap gap-1 min-w-0 max-w-full overflow-hidden">
-					for _, m := range metas {
-						<a
-							href={ templ.SafeURL(fmt.Sprintf("#diff-file-%d", m.Index)) }
-							class="badge badge-sm badge-outline cursor-pointer max-w-full min-w-0 overflow-hidden"
-							onclick={ templ.ComponentScript{Call: fmt.Sprintf("expandAndScrollDiffFile(%d)", m.Index)} }
-						>
-							<span class="block truncate min-w-0">{ diffFileName(m.File.Path) }</span>
-						</a>
-					}
-				</div>
-			</div>
-		}
+        <div hidden data-diff-explorer-files>
+            for _, m := range metas {
+                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path }></span>
+            }
+        </div>
 		<!-- Diff Content with Review -->
 		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
 			for _, m := range metas {
@@ -1696,13 +1686,15 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision
 				if len(metas) > 1 {
 					<button
 						class="btn btn-xs btn-ghost opacity-60"
-						onclick="toggleAllDiffFiles(true)"
+						data-diff-expand-all
+                        onclick="toggleAllDiffFiles(true)"
 					>
 						Expand All
 					</button>
 					<button
 						class="btn btn-xs btn-ghost opacity-60"
-						onclick="toggleAllDiffFiles(false)"
+						data-diff-expand-all
+                        onclick="toggleAllDiffFiles(false)"
 					>
 						Collapse All
 					</button>
