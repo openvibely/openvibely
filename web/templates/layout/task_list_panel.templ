@@ -118,7 +118,7 @@ templ TaskListPanel(currentProjectID string) {
         html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
         html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
         #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; padding: 10px; margin-bottom: 12px; }
-        html.appearance-settings #task-list-header { visibility: hidden; }
+        html.appearance-settings:not(.changes-explorer-active) #task-list-header { visibility: hidden; }
         html.appearance-settings #task-list-divider { display: none !important; }
         .settings-mobile-nav { display: none; }
         html.appearance-settings .settings-mobile-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px; max-height: 40vh; overflow-y: auto; flex-shrink: 0; }
@@ -245,12 +245,13 @@ templ TaskListPanel(currentProjectID string) {
 				btn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');
 			}
 			function setCollapsed(collapsed) {
-                if (root.classList.contains("appearance-settings")) return;
+                if (root.classList.contains("appearance-settings") && !root.classList.contains("changes-explorer-active")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
 				try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
 				syncToggle();
 			}
 			function openSearch(open) {
+                if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) window.taskWorkspace.openThread();
 				searchBox.hidden = !open;
 				var btn = document.getElementById('task-list-search-toggle');
 				if (btn) btn.setAttribute('aria-expanded', String(open));
