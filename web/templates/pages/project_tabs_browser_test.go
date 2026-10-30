@@ -305,7 +305,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("reordered pins saved", `JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).filter(id=>id!=='__all_projects__').slice(0,2).join(',')`, "p01,p00")
 				for deadline := time.Now().Add(3 * time.Second); ; {
 					mu.Lock()
-					savedOrder := strings.Join(pins[1:3], ",")
+					savedOrder := strings.Join(pins[:2], ",")
 					mu.Unlock()
 					if savedOrder == "p01,p00" {
 						break
@@ -515,11 +515,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.waitFor("select tab to keep", `document.getElementById('project-selector').value`, "p02")
 					browser.waitFor("selected tab navigation", `location.search`, "?project_id=p02")
 					browser.evaluate(`(function(){var ids=Array.from(document.querySelectorAll('[data-close-project]')).map(button=>button.dataset.closeProject).filter(id=>id!=='p02');ids.forEach(id=>document.querySelector('[data-close-project="'+id+'"]').click());return 'closed';})()`)
-					browser.waitFor("last tab cannot close", `String(document.querySelectorAll('[data-project-tab]').length === 2 && document.querySelector('[data-close-project]').disabled)`, "true")
-					browser.waitFor("all projects and last project do not overflow", `(function(){var list=document.getElementById('desktop-project-tabs');return String(list.scrollWidth===list.clientWidth && list.scrollHeight===list.clientHeight);})()`, "true")
+					browser.waitFor("last tab cannot close", `String(document.querySelectorAll('[data-project-tab]').length === 1 && document.querySelector('[data-close-project]').disabled)`, "true")
+					browser.waitFor("last tab does not overflow", `(function(){var list=document.getElementById('desktop-project-tabs');return String(list.scrollWidth===list.clientWidth && list.scrollHeight===list.clientHeight);})()`, "true")
 					browser.waitFor("tab strip suppresses native scrollbar chrome", `(function(){var style=getComputedStyle(document.getElementById('desktop-project-tabs'));return style.overflowY+':'+style.scrollbarWidth;})()`, "hidden:none")
 					browser.evaluate(`(function(){document.querySelector('[data-close-project]').click(); document.querySelector('[data-project-tab]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete', bubbles: true}));return 'attempted';})()`)
-					browser.waitFor("last tab survives click and Delete", `String(document.querySelectorAll('[data-project-tab]').length === 2)`, "true")
+					browser.waitFor("last tab survives click and Delete", `String(document.querySelectorAll('[data-project-tab]').length === 1)`, "true")
 				})
 			}
 			mu.Lock()
@@ -528,6 +528,100 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 			if desktop && !strings.Contains(final, "p02") {
 				t.Fatal("opened tab not persisted", final)
 			}
+		})
+	}
+}
+
+func TestAllProjectsTabCanCloseAndReopen(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, desktop := range []bool{false, true} {
+		t.Run(fmt.Sprint(desktop), func(t *testing.T) {
+			var mu sync.Mutex
+			var pins []string
+			selected := "a"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/wails/runtime.js" {
+					w.Header().Set("Content-Type", "text/javascript")
+					fmt.Fprint(w, "export const Window = {};")
+					return
+				}
+				if r.URL.Path == "/ui/preferences" {
+					var req struct {
+						Pins      *[]string `json:"pinned_project_ids"`
+						ProjectID string    `json:"project_id"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						http.Error(w, err.Error(), 400)
+						return
+					}
+					mu.Lock()
+					if req.Pins != nil {
+						pins = append([]string{}, (*req.Pins)...)
+					}
+					if req.ProjectID != "" {
+						selected = req.ProjectID
+					}
+					mu.Unlock()
+					w.WriteHeader(204)
+					return
+				}
+				if r.URL.Path != "/tasks" && r.URL.Path != "/chat" {
+					w.WriteHeader(204)
+					return
+				}
+				mu.Lock()
+				id := r.URL.Query().Get("project_id")
+				if id == "" {
+					id = selected
+				}
+				var saved []string
+				if pins != nil {
+					saved = append([]string{}, pins...)
+				}
+				mu.Unlock()
+				w.Header().Set("Content-Type", "text/html")
+				if r.Header.Get("HX-Request") == "true" {
+					fmt.Fprintf(w, `<div id="loaded-project">%s</div>`, id)
+					return
+				}
+				ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), desktop), layout.UIPreferences{PinnedProjectIDs: saved})
+				if err := layout.Base("Tasks", []models.Project{{ID: "a", Name: "Alpha"}}, id).Render(ctx, w); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id=a", "all-projects-pin", func(b *composerFocusCDP) {
+				b.waitFor("default tabs", `Array.from(document.querySelectorAll('[data-project-tab]')).map(t=>t.dataset.projectTab).join(',')`, "__all_projects__,a")
+				b.click(`[data-close-project="__all_projects__"]`)
+				b.waitFor("closed", `String(!document.querySelector('[data-project-tab="__all_projects__"]'))`, "true")
+				waitSaved := func(want string) {
+					for deadline := time.Now().Add(3 * time.Second); ; {
+						mu.Lock()
+						got := strings.Join(pins, ",")
+						mu.Unlock()
+						if got == want {
+							return
+						}
+						if time.Now().After(deadline) {
+							t.Fatalf("pins=%s want %s", got, want)
+						}
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
+				waitSaved("a")
+				b.call("Page.reload", map[string]any{}, nil)
+				b.waitFor("stays closed after reload", `String(typeof window.openVibelyProjectTabsSync==='function' && document.querySelectorAll('[data-project-tab]').length===1 && !document.querySelector('[data-project-tab="__all_projects__"]'))`, "true")
+				b.click("#project-selector-trigger")
+				b.click(`[data-project-selector-option][data-project-id="__all_projects__"]`)
+				b.waitFor("reopened from plus", `String(!!document.querySelector('[data-project-tab="__all_projects__"][aria-selected="true"]') && location.search.includes('__all_projects__'))`, "true")
+				waitSaved("a,__all_projects__")
+				b.click(`[data-close-project="__all_projects__"]`)
+				b.waitFor("active close returns to neighbor", `String(!document.querySelector('[data-project-tab="__all_projects__"]') && document.getElementById('project-selector').value==='a' && location.search==='?project_id=a')`, "true")
+				waitSaved("a")
+			})
 		})
 	}
 }

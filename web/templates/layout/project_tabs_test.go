@@ -139,7 +139,7 @@ func TestProjectTabsPlatformRendering(t *testing.T) {
 			t.Fatal("selector must be in sidebar only on web")
 		}
 		if desktop {
-			for _, want := range []string{`import * as runtime from '/wails/runtime.js'`, `window.wails = runtime`, `data-pinned-projects="[&#34;__all_projects__&#34;,&#34;b&#34;,&#34;a&#34;]"`, `data-project-tab="a"`, `role="tablist"`, `--wails-draggable: drag`, `--wails-draggable: no-drag`, `overflow-x: auto`, `:focus-visible`, `aria-selected="true"`} {
+			for _, want := range []string{`import * as runtime from '/wails/runtime.js'`, `window.wails = runtime`, `data-pinned-projects="[&#34;b&#34;,&#34;a&#34;]"`, `data-project-tab="a"`, `role="tablist"`, `--wails-draggable: drag`, `--wails-draggable: no-drag`, `overflow-x: auto`, `:focus-visible`, `aria-selected="true"`} {
 				if !strings.Contains(html, want) {
 					t.Errorf("missing %s", want)
 				}
@@ -244,5 +244,25 @@ func TestProjectTabSeparatorDoesNotAnimateSelection(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "transition: opacity") {
 		t.Fatal("separator must disappear immediately when adjacent selection changes")
+	}
+}
+
+func TestAllProjectsPinDefaultsAndSavedOmission(t *testing.T) {
+	projects := withAllProjectsOption([]models.Project{{ID: "a", Name: "Alpha"}})
+	for _, tc := range []struct {
+		name string
+		ids  []string
+		want string
+	}{
+		{"unset", nil, `["__all_projects__"]`},
+		{"closed", []string{"a"}, `["a"]`},
+		{"empty saved", []string{}, `[]`},
+		{"reordered", []string{"a", models.AllProjectsID}, `["a","__all_projects__"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pinnedProjectJSON(pinnedProjects(projects, tc.ids)); got != tc.want {
+				t.Fatalf("got %s want %s", got, tc.want)
+			}
+		})
 	}
 }
