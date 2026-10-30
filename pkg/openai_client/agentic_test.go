@@ -5728,3 +5728,12 @@ func TestParseAgenticStream_TextDeltaFastPathPreservesEventFallback(t *testing.T
 	require.Len(t, result.toolCalls, 1)
 	require.Equal(t, "c1", result.toolCalls[0].CallID)
 }
+
+// parseAgenticStream parses a streaming response, handling text deltas and function calls.
+func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThinking func(string)) (*agenticTurnResult, error) {
+	return c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, nil, nil)
+}
+
+func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool)) (*agenticTurnResult, error) {
+	return c.parseAgenticStreamCapturingText(body, onText, onThinking, onToolUse, onToolResult, nil)
+}

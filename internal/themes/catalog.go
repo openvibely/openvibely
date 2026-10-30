@@ -254,15 +254,6 @@ func RuntimeCatalogJSON() string {
 	return runtimeCatalog.json
 }
 
-func ByID(id string) (Theme, bool) {
-	for _, theme := range Catalog() {
-		if theme.ID == id {
-			return theme, true
-		}
-	}
-	return Theme{}, false
-}
-
 func Names() []string {
 	catalog := Catalog()
 	names := make([]string, 0, len(catalog))

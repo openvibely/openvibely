@@ -590,9 +590,9 @@ func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
 	if len(publisher.events) != 0 {
 		t.Fatalf("seeded content should not publish, got %+v", publisher.events)
 	}
-	sw.WriteText([]byte("text only"))
+	sw.WriteTextString("text only")
 	if len(publisher.events) != 0 {
-		t.Fatalf("WriteText should not publish, got %+v", publisher.events)
+		t.Fatalf("WriteTextString should not publish, got %+v", publisher.events)
 	}
 	if _, err := sw.Write([]byte(" plus")); err != nil {
 		t.Fatalf("write failed: %v", err)
@@ -610,7 +610,7 @@ func TestStreamingWriterSnapshotsStayImmutable(t *testing.T) {
 	defer sw.Stop()
 	input := []byte(" 世界")
 	sw.Write(input)
-	sw.WriteText(input)
+	sw.WriteTextString(string(input))
 	saved, text := sw.String(), sw.TextString()
 	sw.flushPeriodicOnce()
 	for i := range input {
@@ -622,7 +622,7 @@ func TestStreamingWriterSnapshotsStayImmutable(t *testing.T) {
 		part := []byte(strings.Repeat("more", 1024))
 		for range 64 {
 			sw.Write(part)
-			sw.WriteText(part)
+			sw.WriteTextString(string(part))
 		}
 	}()
 	for range 100 {

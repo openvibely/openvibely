@@ -414,3 +414,12 @@ func TestPaletteThemesAreReadableAndLayered(t *testing.T) {
 		}
 	}
 }
+
+func ByID(id string) (Theme, bool) {
+	for _, theme := range Catalog() {
+		if theme.ID == id {
+			return theme, true
+		}
+	}
+	return Theme{}, false
+}

@@ -248,13 +248,6 @@ func (w *Writer) String() string {
 	return w.buf.String()
 }
 
-// WriteText writes to the text-only buffer (for response text, not thinking/tool markers).
-func (w *Writer) WriteText(p []byte) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.textBuf.Write(p)
-}
-
 // WriteTextString appends immutable text without a temporary byte conversion.
 func (w *Writer) WriteTextString(text string) {
 	w.mu.Lock()
