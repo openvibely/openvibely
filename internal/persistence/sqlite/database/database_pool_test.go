@@ -334,8 +334,8 @@ func TestNewReadWrite_DedicatesWriterAndQueryOnlyReaders(t *testing.T) {
 	if got := connections.Writer.Stats().MaxOpenConnections; got != 1 {
 		t.Fatalf("writer MaxOpenConnections = %d, want 1", got)
 	}
-	if got := connections.Reader.Stats().MaxOpenConnections; got != fileDatabaseReaderPoolSize {
-		t.Fatalf("reader MaxOpenConnections = %d, want %d", got, fileDatabaseReaderPoolSize)
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("reader MaxOpenConnections = %d, want 1", got)
 	}
 
 	ctx := context.Background()
