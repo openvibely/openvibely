@@ -4634,7 +4634,7 @@ func TestGitHubRuntimeCurrentEnterpriseRepositoryRequiresAPIEndpoint(t *testing.
 	}}
 	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
 
-	repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+	repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, "")
 	require.Nil(t, repo)
 	require.ErrorContains(t, err, "custom repository host requires a configured GitHub API endpoint")
 }

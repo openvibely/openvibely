@@ -3068,10 +3068,6 @@ func (s *GitHubService) GitAuthEnvForRepo(ctx context.Context, repoPath string) 
 	return gitHubTokenEnvForURL(token, repo.HTMLURL)
 }
 
-func gitHubTokenEnv(token string) []string {
-	return gitHubTokenEnvForURL(token, defaultGitHubWebBaseURL)
-}
-
 func gitHubTokenEnvForURL(token, rawURL string) []string {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {

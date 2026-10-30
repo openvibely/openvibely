@@ -263,7 +263,7 @@ func TestGitHubTokenEnvForURL_ScopesCredentialToExplicitHost(t *testing.T) {
 }
 
 func TestGitHubTokenEnv_UsesBasicAuthHeader(t *testing.T) {
-	env := gitHubTokenEnv("ghp_example")
+	env := gitHubTokenEnvForURL("ghp_example", defaultGitHubWebBaseURL)
 	var headerVal string
 	for _, item := range env {
 		if strings.HasPrefix(item, "GIT_CONFIG_VALUE_0=") {

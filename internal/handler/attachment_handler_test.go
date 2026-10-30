@@ -501,8 +501,8 @@ func TestTaskAttachmentUploadsAllowValidMultiFileBodyAboveSingleFileRequestCapAc
 				{name: "second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 14<<20)},
 			}
 			req, taskIDAfterUpload := tcCase.request(t, tc, project.ID, files)
-			if req.ContentLength <= browserAttachmentRequestLimit(maxUploadSize) {
-				t.Fatalf("test request length %d should exceed old one-file cap %d", req.ContentLength, browserAttachmentRequestLimit(maxUploadSize))
+			if req.ContentLength <= attachmentRequestLimit(maxUploadSize, 1) {
+				t.Fatalf("test request length %d should exceed old one-file cap %d", req.ContentLength, attachmentRequestLimit(maxUploadSize, 1))
 			}
 			if req.ContentLength > attachmentRequestLimit(maxUploadSize, maxTaskAttachmentFilesPerRequest) {
 				t.Fatalf("test request length %d should fit task request cap %d", req.ContentLength, attachmentRequestLimit(maxUploadSize, maxTaskAttachmentFilesPerRequest))
@@ -613,8 +613,8 @@ func TestTaskAttachmentUploadsAllowPaddedBoundaryDelimiterWhitespaceAcrossSurfac
 				{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 14<<20)},
 			}
 			req, taskIDAfterUpload := tcCase.request(t, tc, project.ID, files)
-			if req.ContentLength <= browserAttachmentRequestLimit(maxUploadSize) {
-				t.Fatalf("test request length %d should exceed old one-file cap %d", req.ContentLength, browserAttachmentRequestLimit(maxUploadSize))
+			if req.ContentLength <= attachmentRequestLimit(maxUploadSize, 1) {
+				t.Fatalf("test request length %d should exceed old one-file cap %d", req.ContentLength, attachmentRequestLimit(maxUploadSize, 1))
 			}
 
 			rec := httptest.NewRecorder()
@@ -798,7 +798,7 @@ func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(
 			if rec.Code != http.StatusRequestEntityTooLarge {
 				t.Fatalf("expected 413, got %d; body=%s", rec.Code, rec.Body.String())
 			}
-			maxRead := browserAttachmentRequestLimit(maxUploadSize) + 1
+			maxRead := attachmentRequestLimit(maxUploadSize, 1) + 1
 			if body.bytesRead > maxRead {
 				t.Fatalf("read %d bytes, want <= %d", body.bytesRead, maxRead)
 			}
@@ -827,7 +827,7 @@ func TestUploadAttachment_OversizedMultipartRequestIsBoundedBeforePersistence(t 
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected 413, got %d; body=%s", rec.Code, rec.Body.String())
 	}
-	maxRead := browserAttachmentRequestLimit(maxUploadSize) + 1
+	maxRead := attachmentRequestLimit(maxUploadSize, 1) + 1
 	if body.bytesRead > maxRead {
 		t.Fatalf("read %d bytes, want <= %d", body.bytesRead, maxRead)
 	}

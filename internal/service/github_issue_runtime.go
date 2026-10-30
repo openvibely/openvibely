@@ -985,10 +985,6 @@ func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOpt
 	return project, nil
 }
 
-func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntimeOptions) (*GitHubRepoRef, error) {
-	return resolveGitHubRepoForRuntimeToolURL(ctx, opts, "")
-}
-
 func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRuntimeOptions, repoURL string) (*GitHubRepoRef, error) {
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {

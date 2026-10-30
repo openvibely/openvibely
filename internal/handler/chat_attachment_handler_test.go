@@ -568,7 +568,7 @@ func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCa
 		require.NoError(t, err)
 	}
 	require.NoError(t, writer.Close())
-	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
+	require.Greater(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, 1))
 	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, maxFilesPerUpload))
 
 	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
@@ -607,7 +607,7 @@ func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing
 		{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 14<<20)},
 	}
 	body, contentType := newPaddedDelimiterMultipartBody(t, nil, "files", files)
-	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
+	require.Greater(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, 1))
 	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, maxFilesPerUpload))
 
 	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
@@ -653,7 +653,7 @@ func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSes
 	httpErr, ok := err.(*echo.HTTPError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, httpErr.Code)
-	maxRead := browserAttachmentRequestLimit(maxChatUploadSize) + 1
+	maxRead := attachmentRequestLimit(maxChatUploadSize, 1) + 1
 	assert.LessOrEqual(t, body.bytesRead, maxRead)
 	assert.Less(t, body.bytesRead, totalSize)
 	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", sessionID))

@@ -751,14 +751,6 @@ func ExtractModels(payload any, cfg Config) []DiscoveredModel {
 	return out
 }
 
-func ExtractModelIDs(payload any, cfg Config) []string {
-	var out []string
-	for _, model := range ExtractModels(payload, cfg) {
-		out = append(out, model.ID)
-	}
-	return out
-}
-
 func valueAt(payload any, path string) any {
 	current := payload
 	for _, part := range strings.Split(strings.TrimSpace(path), ".") {

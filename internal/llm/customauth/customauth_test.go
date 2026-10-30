@@ -455,14 +455,14 @@ func TestExtractProfileStateAndModelNames(t *testing.T) {
 	if state.InstanceID != "instance-1" || state.TeamID != "team-1" {
 		t.Fatalf("unexpected state: %#v", state)
 	}
-	ids := ExtractModelIDs(payload, cfg)
-	if len(ids) != 2 || ids[0] != "premium" || ids[1] != "fast" {
+	ids := ExtractModels(payload, cfg)
+	if len(ids) != 2 || ids[0].ID != "premium" || ids[1].ID != "fast" {
 		t.Fatalf("unexpected model IDs: %#v", ids)
 	}
-	stringIDs := ExtractModelIDs(map[string]any{
+	stringIDs := ExtractModels(map[string]any{
 		"models": []any{"premium", "fast"},
 	}, Config{ModelsArrayPath: "models", ModelIDField: "id"})
-	if len(stringIDs) != 2 || stringIDs[0] != "premium" || stringIDs[1] != "fast" {
+	if len(stringIDs) != 2 || stringIDs[0].ID != "premium" || stringIDs[1].ID != "fast" {
 		t.Fatalf("unexpected string model IDs: %#v", stringIDs)
 	}
 }

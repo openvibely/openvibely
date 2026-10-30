@@ -497,7 +497,7 @@ func TestAPIChatMessage_OversizedMultipartRequestIsRejectedBeforeSideEffects(t *
 	req, body, _ := newSizedMultipartUploadRequest(t, http.MethodPost, "/api/chat/message", map[string]string{
 		"message":    "Check this large upload",
 		"project_id": projectID,
-	}, "attachments", "too-large.txt", "text/plain", apiAttachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq), true)
+	}, "attachments", "too-large.txt", "text/plain", attachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq), true)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -532,7 +532,7 @@ func TestAPIChatMessage_OversizedMultipartWithSplitFileHeaderIsBounded(t *testin
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
-	maxRead := browserAttachmentRequestLimit(apiMaxFileSize) + 1
+	maxRead := attachmentRequestLimit(apiMaxFileSize, 1) + 1
 	assert.LessOrEqual(t, body.bytesRead, maxRead)
 	assert.Less(t, body.bytesRead, totalSize)
 	chatHistory, err := h.execRepo.ListChatHistory(ctx, projectID, 50)
@@ -734,8 +734,8 @@ func TestAPIChatMessage_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
 		"message":    "Check these padded boundary files",
 		"project_id": projectID,
 	}, "attachments", files)
-	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(apiMaxFileSize))
-	require.LessOrEqual(t, int64(body.Len()), apiAttachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq))
+	require.Greater(t, int64(body.Len()), attachmentRequestLimit(apiMaxFileSize, 1))
+	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", body)
 	req.Header.Set("Content-Type", contentType)

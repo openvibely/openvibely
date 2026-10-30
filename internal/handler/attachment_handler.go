@@ -51,14 +51,6 @@ func attachmentRequestLimit(maxFileSize int64, maxFiles int) int64 {
 	return maxFileSize*int64(maxFiles) + multipartRequestOverheadAllowance
 }
 
-func browserAttachmentRequestLimit(maxFileSize int64) int64 {
-	return attachmentRequestLimit(maxFileSize, 1)
-}
-
-func apiAttachmentRequestLimit(maxFileSize int64, maxFiles int) int64 {
-	return attachmentRequestLimit(maxFileSize, maxFiles)
-}
-
 func isMultipartContentType(contentType string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	return strings.HasPrefix(contentType, "multipart/")
