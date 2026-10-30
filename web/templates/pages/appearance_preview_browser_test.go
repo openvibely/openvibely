@@ -253,3 +253,30 @@ func TestBrowserFunctional_AppearanceSurfaceTreatment(t *testing.T) {
 		b.waitFor("surface preference persists", `String(new URLSearchParams(location.search).get('migration')==='2' && !!window.openVibelyDisplay && openVibelyDisplay.get('surfaces')==='default')`, "true")
 	})
 }
+
+func TestBrowserFunctional_ToolOutputPreference(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := Themes([]models.Project{{ID: "project", Name: "Project"}}, "project", nil).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"?section=chat", "tool-output-pref", func(b *composerFocusCDP) {
+		b.waitFor("preference ready", `String(!!window.selectOpenVibelyDisplay && document.readyState==='complete')`, "true")
+		b.waitFor("default full output", `openVibelyDisplay.get('output')`, "full")
+		b.evaluate(`document.querySelector('[data-display-pref="output"][data-display-option="compact"]').click(); 'selected'`)
+		b.waitFor("compact saved and selected", `String(openVibelyDisplay.get('output')==='compact' && localStorage.getItem('openvibely.outputDetail')==='compact' && document.querySelector('[data-display-pref="output"][data-display-option="compact"]').getAttribute('aria-pressed')==='true')`, "true")
+		b.call("Page.navigate", map[string]any{"url": server.URL + "?section=chat&reload=1"}, nil)
+		b.waitFor("compact survives reload", `String(location.search.includes('reload=1') && document.readyState==='complete' && !!window.selectOpenVibelyDisplay && openVibelyDisplay.get('output')==='compact')`, "true")
+		b.evaluate(`selectOpenVibelyDisplay('output','full'); 'full'`)
+		b.waitFor("full restored", `String(openVibelyDisplay.get('output')==='full' && localStorage.getItem('openvibely.outputDetail')==='full')`, "true")
+	})
+}
