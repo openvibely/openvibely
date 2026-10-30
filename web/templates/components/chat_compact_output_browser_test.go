@@ -113,13 +113,55 @@ func TestBrowserFunctional_CompactActivityHistoryAndStreaming(t *testing.T) {
  stream.querySelector('.stream-activity-summary').click();
  await renderIncrementalChatContent(stream,'Before.\n'+tools+'[Using tool: read_file]\n[Tool read_file done]\ncontents\n[/Tool]\nDone.',true);await paint();
  assert(stream.querySelector('.stream-activity-summary').getAttribute('aria-expanded')==='true','Expansion survives incremental result arrival');
- assert(stream.querySelectorAll('.chat-markdown').length===2,'Progress and response remain visible');
+ messages.scrollTop=messages.scrollHeight;messages.dispatchEvent(new Event('scroll'));await renderVisibleChatRows(messages);await paint();
+ assert(Array.from(stream.querySelectorAll('.chat-markdown')).some(n=>n.textContent.includes('Done.')),'Response remains available below activity');
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await renderVisibleChatRows(messages);await paint();
+ assert(Array.from(stream.querySelectorAll('.chat-markdown')).some(n=>n.textContent.includes('Before.')),'Progress remains available above activity');
  await setMode('full');await paint();await paint();
  await setMode('compact');await paint();await paint();
  assert(stream.querySelectorAll('.stream-activity-summary').length===1,'Switching live output modes must regroup sealed sections');
  await renderIncrementalChatContent(stream,'[Using tool: read_file]\n',true);
  applyChatExecutionTerminalStatus(pair,'cancelled');
  assert(!stream.querySelector('.stream-activity-summary').textContent.includes('Running'),'Cancelled activity must not claim to be running');
+ return {};
+ `)
+}
+
+func TestBrowserFunctional_CompactFoldFocus(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ document.documentElement.setAttribute('data-output-detail','compact');
+ await renderIncrementalChatContent(stream,'[Using tool: bash | echo hello]\n',false);
+ let toggle=stream.querySelector('.stream-activity-summary');
+ toggle.focus();toggle.click();
+ assert(document.activeElement===toggle,'fixture must focus the fold');
+ await renderIncrementalChatContent(stream,'[Using tool: bash | echo hello]\n[Tool bash done]\nhello\n[/Tool]\n',false);
+ assert(document.activeElement===stream.querySelector('.stream-activity-summary'),'Streaming update lost keyboard focus from expanded fold');
+ return {};
+ `)
+}
+func TestBrowserFunctional_CompactFoldVirtualization(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ document.getElementById('messages').id='chat-messages';
+ document.getElementById('pair').dataset.execStatus='completed';
+ document.documentElement.setAttribute('data-output-detail','compact');
+ let text='';for(let i=0;i<160;i++)text+='[Using tool: bash | echo row-'+i+']\n[Tool bash done]\n'+('output-'+i+' ').repeat(500)+'\n[/Tool]\n';
+ await renderStreamingContent(stream,text,true);await paint();await paint();
+ const count=stream.querySelectorAll('.stream-tool').length;
+ assert(count===0,'Collapsed group must not mount tool cards: '+count);
+ const summary=stream.querySelector('.stream-activity-summary');
+ summary.click();await paint();await paint();
+ const mounted=stream.querySelectorAll('.stream-tool').length;
+ assert(mounted>0 && mounted<40,'Expanded group must retain bounded rendering: '+mounted);
+ const messages=document.getElementById('chat-messages');messages.scrollTop=messages.scrollHeight;messages.dispatchEvent(new Event('scroll'));await paint();await paint();
+ assert(messages.textContent.includes('row-159'),'Last tool must mount when scrolled into view');
+ summary.click();await paint();
+ assert(stream.querySelectorAll('.stream-tool').length===0,'Collapsing must release the expanded tool DOM');
+ document.getElementById('pair').dataset.execStatus='running';
+ await renderIncrementalChatContent(stream,text+'[Using tool: read_file]\n',true);await paint();
+ assert(stream.querySelectorAll('.stream-tool').length===0,'Running compact groups must defer tool DOM too');
+ let liveToggle=stream.querySelector('.stream-activity-summary');liveToggle.focus();liveToggle.click();await paint();
+ await renderIncrementalChatContent(stream,text+'[Using tool: read_file]\n[Tool read_file done]\nfile contents\n[/Tool]\n',true);await paint();
+ assert(document.activeElement===stream.querySelector('.stream-activity-summary'),'Virtualized live group must restore keyboard focus');
  return {};
  `)
 }
