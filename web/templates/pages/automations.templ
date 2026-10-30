@@ -2188,7 +2188,11 @@ yamlViewport.scrollTop = 0;
 						var destinationProject = builder.querySelector('#automation-destination-project');
                 if (destinationProject) {
                     builder.addEventListener('htmx:configRequest', function(event) {
-                        if (event.detail.parameters.save_changes === 'true' && !destinationProject.value) {
+                        var parameters = event.detail.parameters;
+                        var editsDraft = ['builder_action', 'remove_node', 'remove_edge'].some(function(key) {
+                            return String(parameters[key] || '').trim() !== '';
+                        });
+                        if (parameters.save_changes === 'true' && !editsDraft && !destinationProject.value) {
                             event.preventDefault();
                             destinationProject.setCustomValidity('Choose a project.');
                             destinationProject.reportValidity();
