@@ -247,7 +247,9 @@ templ TaskListPanel(currentProjectID string) {
 			function setCollapsed(collapsed) {
                 if (root.classList.contains("appearance-settings") && !root.classList.contains("changes-explorer-active")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
-				try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
+				if (!root.classList.contains('changes-explorer-active')) {
+					try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
+				}
 				syncToggle();
 			}
 			function openSearch(open) {
