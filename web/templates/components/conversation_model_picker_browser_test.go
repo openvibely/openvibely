@@ -429,6 +429,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  // A steering snapshot is consumed even if settings fail before resubmission.
  form._chatNextSubmissionPayload={message:'old steering message',attachmentSessionID:'old-steering-attachment',fallbackFromSteer:true};
  trigger._ovModelState.error='simulated settings failure';
+ failNextRead=true;
  message.value='current visible draft';
  form.requestSubmit();await wait(150);
  assert(!form._chatNextSubmissionPayload,'settings failure clears captured steering snapshot');
@@ -601,6 +602,65 @@ document.body.dataset.testResult='pass';
 			}))
 			defer srv.Close()
 			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "fast mode "+scope, 1000, 800, 15*time.Second)
+		})
+	}
+}
+
+func TestBrowserFunctional_ComposerSendDoesNotOpenModelPicker(t *testing.T) {
+	chrome := testChromePath(t)
+	for _, taskID := range []string{"", "t"} {
+		name := "chat"
+		if taskID != "" {
+			name = "task"
+		}
+		t.Run(name, func(t *testing.T) {
+			var content bytes.Buffer
+			agents := []models.LLMConfig{{ID: "a", Name: "Model", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"}}
+			if err := ChatInputForm(ChatInputFormConfig{FormID: "send-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", ProjectID: "p", TaskID: taskID, Agents: agents, SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
+				t.Fatal(err)
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><script>
+ localStorage.clear();window.htmx={process:function(){}};
+ let failedReads=0,failedWrites=0,reads=0,writes=0,toasts=[];
+ window.showToast=(message,status)=>toasts.push({message,status});
+ window.fetch=async function(url,options){
+ if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
+ if(options?.method==='POST'){writes++;if(failedWrites-->0)return {ok:false};return {ok:true};}
+ reads++;if(failedReads-->0)return {ok:false};return {ok:true,json:async()=>({reasoning_effort:'low',service_tier:'default'})};
+ };
+ </script>`+content.String()+`<div id="browser-result"></div><script>
+ (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)},wait=()=>new Promise(r=>setTimeout(r,100));try{
+ const form=document.getElementById('send-form'),message=form.querySelector('textarea'),trigger=form.querySelector('.chat-model-select'),panel=document.getElementById('conversation-model-picker');
+ await trigger._ovModelState.ready;
+ const sent=[];form.addEventListener('submit',e=>{e.preventDefault();sent.push(new FormData(form));});
+ const enter=()=>message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ const click=()=>form.querySelector('button[type=submit]').click();
+ message.value='enter message';message.dispatchEvent(new Event('input',{bubbles:true}));enter();await wait();
+ assert(sent.length===1&&sent[0].get('message')==='enter message'&&panel.hidden,'Enter must send without opening picker');
+ message.value='click message';message.dispatchEvent(new Event('input',{bubbles:true}));click();await wait();
+ assert(sent.length===2&&sent[1].get('message')==='click message'&&panel.hidden,'click must send without opening picker');
+ if(form.hasAttribute('data-model-select-endpoint')){
+ // A prior settings error and a failed retry must preserve the draft and
+ // report the failure without changing focus to the picker.
+ trigger._ovModelState.error='Previous lookup failed';failedReads=1;
+ message.value='retry this draft';message.dispatchEvent(new Event('input',{bubbles:true}));message.focus();enter();await wait();
+ assert(sent.length===2&&panel.hidden&&document.activeElement===message,'failed lookup opened picker or sent message');
+ assert(message.value==='retry this draft'&&toasts.at(-1)?.status==='failed','failed send must retain draft and report error');
+ click();await wait();
+ assert(sent.length===3&&sent[2].get('message')==='retry this draft'&&panel.hidden,'Send must retry failed settings without opening picker');
+ // Failed writes must also be retried, retaining the chosen preference.
+ failedWrites=1;await window.ovModelPicker.save(trigger).catch(()=>{});
+ assert(trigger._ovModelState.failedSave,'write failure fixture');
+ const before=writes;message.value='retry saved settings';message.dispatchEvent(new Event('input',{bubbles:true}));enter();await wait();
+ assert(writes===before+1&&sent.length===4&&!trigger._ovModelState.error&&panel.hidden,'Send must retry settings save');
+ }
+ document.body.dataset.testResult='pass';
+ }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e)}})();
+ </script></body></html>`)
+			}))
+			defer srv.Close()
+			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "send without model picker", 900, 850, 15*time.Second)
 		})
 	}
 }
