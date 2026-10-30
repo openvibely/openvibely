@@ -1473,7 +1473,9 @@ func TestXRuntimeCreateTaskPersistsReplyContextBeforeWorkerSubmission(t *testing
 	taskRepo := db.Tasks
 	worker := NewWorkerService(nil, 1, projectRepo)
 	worker.SetTaskRepo(taskRepo)
-	worker.submitted = make(chan models.Task)
+	// Submit notifies observers without blocking; retain the event even if
+	// the producer runs before this test starts receiving.
+	worker.submitted = make(chan models.Task, 1)
 	taskSvc := NewTaskService(taskRepo, db.Attachments, worker)
 	xTaskContextRepo := db.XTaskContexts
 	xSvc := NewXService(
