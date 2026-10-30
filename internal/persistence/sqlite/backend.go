@@ -12,7 +12,7 @@ import (
 var _ persistence.Backend = (*Backend)(nil)
 
 // Backend is the SQLite persistence backend: a dedicated writer connection,
-// a query-only reader pool, goose migrations, and incremental vacuum.
+// a query-only reader connection, goose migrations, and incremental vacuum.
 type Backend struct {
 	conns            *database.Connections
 	unregisterWriter func()
