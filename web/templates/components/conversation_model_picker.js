@@ -187,7 +187,14 @@
     );
   }
   function taskEndpoint(btn) {
-    return btn.closest("form").getAttribute("data-model-select-endpoint");
+    const form = btn.closest("form");
+    const endpoint = form.getAttribute("data-model-select-endpoint");
+    if (!endpoint) return endpoint;
+    const project = form.querySelector('[name="_project_id"]')?.value;
+    if (!project) return endpoint;
+    const url = new URL(endpoint, window.location.href);
+    url.searchParams.set("project_id", project);
+    return url.pathname + url.search;
   }
   function save(btn) {
     const s = state(btn);
@@ -243,7 +250,7 @@
       s.pending = s.pending.catch(() => {});
       await s.pending;
       const response = await fetch(
-        endpoint + "?agent_id=" + encodeURIComponent(m.id),
+        endpoint + (endpoint.includes("?") ? "&" : "?") + "agent_id=" + encodeURIComponent(m.id),
       );
       if (!response.ok)
         throw Error("Could not load effort. Reopen the picker to retry.");

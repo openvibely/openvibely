@@ -283,7 +283,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
 		{ID: "mix", Name: "Ensemble", Provider: models.ProviderMixture},
 	}
 	var content bytes.Buffer
-	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/tasks/t/thread", TaskID: "t", Agents: agents, DefaultAgentID: "b", SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/tasks/t/thread", TaskID: "t", ProjectID: "task-project", Agents: agents, DefaultAgentID: "b", SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +292,8 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const stored={a:'high',b:'low'},posts=[];let failNextWrite=false,failNextRead=false;
  window.fetch=async function(url,options){
  if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
+ // Another project is selected globally; task requests must identify their own project.
+ if(new URL(url,location.href).searchParams.get('project_id')!=='task-project')throw Error('task settings request used the globally selected project');
  if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
  if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id'),id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
