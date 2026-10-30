@@ -4500,6 +4500,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					card.style.margin = '0';
 					card.style.zIndex = '1000';
 					card.style.pointerEvents = 'none';
+					// Escape scrolling/containing ancestors (including WebKit compositing
+					// layers). A higher z-index alone cannot escape their clipping.
+					document.body.appendChild(card);
 					return { card: card, placeholder: placeholder, originalStyle: originalStyle };
 				}
 
@@ -4508,8 +4511,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				}
 
 				function endPointerCardMotion(motion) {
-					if (!motion) return;
-					if (motion.placeholder) motion.placeholder.remove();
+					if (!motion || motion.ended) return;
+					motion.ended = true;
+					if (motion.placeholder && motion.placeholder.parentNode) {
+						motion.placeholder.replaceWith(motion.card);
+					} else {
+						motion.card.remove();
+					}
 					if (motion.originalStyle === null) motion.card.removeAttribute('style');
 					else motion.card.setAttribute('style', motion.originalStyle);
 				}
@@ -4617,6 +4625,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					if (!state || event.pointerId !== state.pointerId) return;
 					const dropZone = taskPointerDropZoneAt(event.clientX, event.clientY) || state.dropZone;
 					if (state.started) {
+						// Drop handlers inspect source lanes and snapshot the board. Restore
+						// every card before they calculate order or apply optimistic moves.
+						state.motions.forEach(endPointerCardMotion);
 						suppressedTaskClickID = state.card.getAttribute('data-task-id');
 						if (dropZone) {
 							const dropEvent = {
