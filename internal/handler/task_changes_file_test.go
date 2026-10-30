@@ -132,6 +132,8 @@ diff --git a/b.txt b/b.txt
 		{"chunk=-1", http.StatusBadRequest},
 		{"chunk=999", http.StatusBadRequest},
 		{"chunk=0&revision=stale", http.StatusConflict},
+		{"chunk=0&anchor_old_line=-1", http.StatusBadRequest},
+		{"chunk=0&anchor_new_line=oops", http.StatusBadRequest},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split&review=true&"+tc.query, nil)
 		rec := httptest.NewRecorder()
@@ -161,6 +163,28 @@ diff --git a/b.txt b/b.txt
 	if strings.Contains(noReviewBody, comment.ID) || strings.Contains(noReviewBody, comment.CommentText) {
 		t.Fatalf("expected review=false lazy card to omit review comments, got: %s", noReviewBody)
 	}
+	largeDiff := "diff --git a/large.txt b/large.txt\n--- a/large.txt\n+++ b/large.txt\n@@ -1,1000 +1,1000 @@\n" + strings.Repeat("-old\n+new\n", 1000)
+	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, largeDiff); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ view, anchor, chunk string }{
+		{"inline", "anchor_new_line=401", "4"},
+		{"split", "anchor_new_line=401", "2"},
+		{"split", "anchor_old_line=401", "2"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&chunk=0&view="+tc.view+"&"+tc.anchor, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		if err := h.GetTaskChangesFile(c); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rec.Body.String(), `data-chunk="`+tc.chunk+`"`) {
+			t.Fatalf("%s %s did not return anchor chunk %s", tc.view, tc.anchor, tc.chunk)
+		}
+	}
+
 }
 
 func TestHandlerLoadTaskReviewComments_PreservesOptionalReadContract(t *testing.T) {

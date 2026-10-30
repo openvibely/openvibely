@@ -111,3 +111,27 @@ func splitHunkLines(hunk DiffHunk) []SplitPair {
 	}
 	return buildSplitLines(hunk.Lines)
 }
+
+// DiffChunkContainingLine resolves a reading anchor in the destination layout.
+// Prefer the new side, matching the browser's row restoration, then the old side
+// for deleted lines or anchors whose new side is absent.
+func DiffChunkContainingLine(chunks []DiffFile, oldLine, newLine int) (int, bool) {
+	for _, side := range []struct {
+		line int
+		new  bool
+	}{{newLine, true}, {oldLine, false}} {
+		if side.line <= 0 {
+			continue
+		}
+		for index, chunk := range chunks {
+			for _, hunk := range chunk.Hunks {
+				for _, line := range hunk.Lines {
+					if (side.new && line.NewNum == side.line) || (!side.new && line.OldNum == side.line) {
+						return index, true
+					}
+				}
+			}
+		}
+	}
+	return 0, false
+}

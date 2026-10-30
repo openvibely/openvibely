@@ -68,27 +68,34 @@ templ diffViewerPerformanceScript() {
      if (snapshot.anchor && path.dataset.copyPath === snapshot.anchor.path) target = card;
     });
     if (!target) return;
-    var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset;
+    var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset, match = null;
     if (anchor.oldLine || anchor.newLine) {
      var rows = target.querySelectorAll('tr.diff-review-line');
      // Split rows can represent both sides. Prefer the new side when both
      // exist, but preserve old-only anchors (including deletions) by old line.
-     var match = null;
      for (var i=0; i<rows.length; i++) {
       if (anchor.newLine && Number(rows[i].dataset.newLine) === anchor.newLine) { match = rows[i]; break; }
-      if (!match && anchor.oldLine && Number(rows[i].dataset.oldLine) === anchor.oldLine) match = rows[i];
+      if (!match && anchor.oldLine && (!reserve || !anchor.newLine) && Number(rows[i].dataset.oldLine) === anchor.oldLine) match = rows[i];
      }
      if (match) { element = match; offset = anchor.offset; }
     }
     scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset;
-    if (target.hasAttribute('data-diff-lazy-url')) target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+    if (match) delete target._diffScrollAnchor;
+    else if (reserve && (anchor.oldLine || anchor.newLine) && viewer._diffPerformance &&
+             (target.dataset.diffLazyUrl || target.dataset.chunkUrl)) {
+     viewer._diffPerformance.restoreAnchor(target, snapshot);
+    } else if (target.hasAttribute('data-diff-lazy-url')) {
+     target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+    } else delete target._diffScrollAnchor;
    };
    window.retryLazyDiffFile = function(button) {
     var card = button.closest('[data-diff-lazy-url]');
     if (!card) return;
     delete card.dataset.diffLoadFailed;
     button.classList.add('hidden');
-    window._refreshDiffPerformance();
+    var viewer = card.closest('#diff-viewer');
+    if (card._diffRetryAnchor && viewer && viewer._diffPerformance) viewer._diffPerformance.restoreAnchor(card, card._diffRetryAnchor);
+    else window._refreshDiffPerformance();
    };
    document.body.addEventListener('htmx:afterSettle', window._refreshDiffPerformance);
    document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
@@ -98,7 +105,7 @@ templ diffViewerPerformanceScript() {
   }
 
   function createController(viewer) {
-   var activePanel = null, stopped = false, inFlight = 0;
+   var activePanel = null, stopped = false, inFlight = 0, anchorRestore = null;
    var pending = new Map(), visible = new Set(), observed = new Set();
    var headers = new Map(), chunks = new Set(), retained = [];
    function retain(chunk) {
@@ -158,30 +165,95 @@ templ diffViewerPerformanceScript() {
     var header = owner.querySelector('[data-diff-toggle]');
     return header && !header.hasAttribute('data-collapsed');
    }
+   function cancelAnchor() {
+    if (!anchorRestore) return;
+    var previous = anchorRestore; anchorRestore = null;
+    delete previous.card._diffScrollAnchor;
+    if (previous.abort) previous.abort.abort();
+   }
+   function cancelAnchorForInput(event) {
+    // A second layout toggle captures the pending line before refresh cancels
+    // its request. Do not discard that line during the button's pointerdown.
+    if ((event.type === 'pointerdown' || event.type === 'keydown') && event.target.closest &&
+        event.target.closest('#diff-btn-inline, #diff-btn-split')) return;
+    if (event.type === 'keydown' && !['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) return;
+    cancelAnchor();
+    pump();
+   }
+   ['wheel','touchstart','pointerdown','keydown'].forEach(function(type) {
+    scroller.addEventListener(type, cancelAnchorForInput, {passive:true});
+   });
+   function restoreAnchor(card, snapshot) {
+    cancelAnchor();
+    delete card._diffRetryAnchor;
+    delete card.dataset.diffLoadFailed;
+    var retry = card.querySelector('[data-diff-anchor-retry]');
+    if (retry) retry.remove();
+    // A retained chunk may already contain the destination line. Restore it
+    // without a request; evicted/unopened chunks are resolved by the server.
+    var anchor = snapshot.anchor, cached = null;
+    [anchor.newLine ? 'newLine' : 'oldLine'].some(function(side) {
+     if (!anchor[side]) return false;
+     return Array.from(card.querySelectorAll('[data-chunk-index]')).some(function(chunk) {
+      if (chunk._saved && chunk._saved.querySelector('tr.diff-review-line[data-' + (side === 'newLine' ? 'new' : 'old') + '-line="' + anchor[side] + '"]')) { cached = chunk; return true; }
+      return false;
+     });
+    });
+    if (cached) {
+     cached.appendChild(cached._saved); cached._saved = null; cached.style.minHeight = '';
+     window._restoreDiffScroll(snapshot, false);
+     return;
+    }
+    anchorRestore = {card:card, snapshot:snapshot, scrollTop:scroller.scrollTop, started:false};
+    card._diffScrollAnchor = anchorRestore;
+    // An ordinary first-chunk request cannot restore a deep line. Fence it
+    // before issuing the targeted request, retaining the shared concurrency cap.
+    var existing = pending.get(card);
+    if (existing) existing.abort();
+    pump();
+   }
    function pump() {
     if (stopped || !viewer.isConnected) return;
+    if (anchorRestore) {
+     if (!activePanel || !activePanel.contains(anchorRestore.card) || Math.abs(scroller.scrollTop-anchorRestore.scrollTop) >= 2) cancelAnchor();
+     else {
+      if (!anchorRestore.started && inFlight < 3 && !pending.has(anchorRestore.card)) {
+       anchorRestore.started = true;
+       load(anchorRestore.card, anchorRestore);
+      }
+      return;
+     }
+    }
     visible.forEach(function(card) {
      if (inFlight >= 3 || !card.isConnected || !activePanel || !activePanel.contains(card) ||
          (card.hasAttribute('data-chunk-index') && (card.firstElementChild || card._saved)) || !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
      load(card);
     });
    }
-   function load(card) {
+   function load(card, restore) {
     var abort = new AbortController();
     pending.set(card, abort); inFlight++;
+    if (restore) restore.abort = abort;
     var status = card.querySelector('[data-diff-load-status]');
     if (status) status.textContent = 'Loading diff…';
     else if (!card.firstChild) card.appendChild(document.createTextNode('Loading diff…'));
     card.setAttribute('aria-busy', 'true');
-    var url = new URL(card.dataset.diffLazyUrl, location.href);
+    var url = new URL(card.dataset.diffLazyUrl || card.dataset.chunkUrl, location.href);
     url.searchParams.set('file_path', card.dataset.diffFilePath);
     if (card.hasAttribute('data-chunk-index')) url.searchParams.set('chunk', card.dataset.chunkIndex);
+    if (restore) {
+     url.searchParams.set('chunk', '0');
+     url.searchParams.set('anchor_old_line', restore.snapshot.anchor.oldLine || 0);
+     url.searchParams.set('anchor_new_line', restore.snapshot.anchor.newLine || 0);
+    }
     fetch(url, {headers:{'HX-Request':'true'}, signal:abort.signal})
      .then(function(response) {
       if (!response.ok) throw new Error('Could not load diff');
       return response.text();
      }).then(function(html) {
-      if (stopped || !card.isConnected) return;
+      if (stopped || !card.isConnected || abort.signal.aborted) return;
+      if (restore && (anchorRestore !== restore || !activePanel.contains(card) || Math.abs(scroller.scrollTop-restore.scrollTop) >= 2)) return;
+      if (anchorRestore && !restore) return;
       var content = document.createElement('template');
       content.innerHTML = html;
       var response = content.content.querySelector('[data-diff-chunk-response]');
@@ -189,7 +261,7 @@ templ diffViewerPerformanceScript() {
       if (!replacement || (!response && replacement.id !== card.id)) throw new Error('Diff changed; reload the Changes view');
       // Swap only this card. HTMX preserves its normal cleanup, processing,
       // and afterSwap/afterSettle hooks, including saved collapse state.
-      var scroll = window._captureDiffScroll();
+      var scroll = restore ? restore.snapshot : window._captureDiffScroll();
       var saved = card._diffScrollAnchor;
       if (saved && scroller && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) scroll = saved.snapshot;
       if (response) {
@@ -202,41 +274,59 @@ templ diffViewerPerformanceScript() {
         chunkObserver.unobserve(card); chunkObserver.observe(card);
        } else {
         var destination = card.querySelector('.diff-file-body');
-        destination.replaceChildren();
         var count = Number(response.dataset.chunks);
+        var selectedChunk = Number(response.dataset.chunk);
         loadObserver.unobserve(card); observed.delete(card);
-        for (var i=0; i<count; i++) {
-         var chunk = document.createElement('div');
-         chunk.dataset.chunkIndex = String(i);
-         chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
-         chunk.dataset.diffFilePath = card.dataset.diffFilePath;
-         if (i === 0) { while (body.firstChild) chunk.appendChild(body.firstChild); }
-         else { chunk.style.minHeight = '4000px'; chunk.setAttribute('aria-label', 'Diff lines load when visible'); }
-         destination.appendChild(chunk);
+        if (!card.dataset.chunkUrl) {
+         destination.replaceChildren();
+         for (var i=0; i<count; i++) {
+          var chunk = document.createElement('div');
+          chunk.dataset.chunkIndex = String(i);
+          chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
+          chunk.dataset.diffFilePath = card.dataset.diffFilePath;
+          if (i === selectedChunk) { while (body.firstChild) chunk.appendChild(body.firstChild); }
+          else { chunk.style.minHeight = '4000px'; chunk.setAttribute('aria-label', 'Diff lines load when visible'); }
+          destination.appendChild(chunk);
+         }
+         card.dataset.chunkUrl = card.dataset.diffLazyUrl;
+         delete card.dataset.diffLazyUrl;
+        } else {
+         var targetChunk = destination.querySelector('[data-chunk-index="' + selectedChunk + '"]');
+         if (!targetChunk) throw new Error('Diff changed; reload the Changes view');
+         targetChunk.replaceChildren(); targetChunk._saved = null;
+         while (body.firstChild) targetChunk.appendChild(body.firstChild);
+         targetChunk.style.minHeight = '';
+         chunkObserver.unobserve(targetChunk); chunkObserver.observe(targetChunk);
         }
-        card.dataset.chunkUrl = card.dataset.diffLazyUrl;
-        delete card.dataset.diffLazyUrl;
         card.style.minHeight = '';
         visible.delete(card);
        }
        if (window.htmx) htmx.process(card);
       } else htmx.swap(card, html, {swapStyle:'outerHTML'});
+      if (restore) { anchorRestore = null; delete card._diffScrollAnchor; }
       window._restoreDiffScroll(scroll, false);
+      if (restore) delete card._diffScrollAnchor;
      }).catch(function(error) {
-      if (stopped || !card.isConnected || error.name === 'AbortError') return;
+      if (stopped || !card.isConnected || error.name === 'AbortError' || (restore && anchorRestore !== restore)) return;
+      if (restore) card._diffRetryAnchor = restore.snapshot;
       card.dataset.diffLoadFailed = 'true';
       var status = card.querySelector('[data-diff-load-status]');
       if (status) {
        status.textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
        card.querySelector('[data-diff-retry]').classList.remove('hidden');
       } else {
-       card.replaceChildren();
+       if (!restore) card.replaceChildren();
        var retry = document.createElement('button'); retry.className = 'btn btn-sm btn-ghost';
        retry.textContent = 'Unable to load lines. Retry';
-       retry.onclick = function() { delete card.dataset.diffLoadFailed; card.replaceChildren(); visible.add(card); pump(); };
-       card.appendChild(retry);
+       retry.onclick = function() {
+        if (restore) { restoreAnchor(card, restore.snapshot); return; }
+        delete card.dataset.diffLoadFailed; card.replaceChildren(); visible.add(card); pump();
+       };
+       if (restore) { retry.setAttribute('data-diff-anchor-retry', ''); card.querySelector('.diff-file-body').prepend(retry); }
+       else card.appendChild(retry);
       }
      }).finally(function() {
+      if (restore && anchorRestore === restore) { anchorRestore = null; delete card._diffScrollAnchor; }
       card.removeAttribute('aria-busy'); pending.delete(card); inFlight--;
       if (!stopped) refresh();
      });
@@ -257,6 +347,7 @@ templ diffViewerPerformanceScript() {
     var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
     reconsiderProtected();
     if (activePanel !== panel) {
+     cancelAnchor();
      pending.forEach(function(abort, card) { if (!panel || !panel.contains(card)) abort.abort(); });
      loadObserver.disconnect(); stickyObserver.disconnect();
      observed.clear(); visible.clear(); headers.clear(); chunkObserver.disconnect(); chunks.clear(); activePanel = panel;
@@ -289,8 +380,10 @@ templ diffViewerPerformanceScript() {
     });
     pump();
    }
-   return {refresh:refresh, destroy:function() {
+   return {refresh:refresh, restoreAnchor:restoreAnchor, destroy:function() {
     stopped = true;
+    cancelAnchor();
+    ['wheel','touchstart','pointerdown','keydown'].forEach(function(type) { scroller.removeEventListener(type, cancelAnchorForInput); });
     interactionObserver.disconnect();
     document.removeEventListener('selectionchange', reconsiderProtected);
     viewer.removeEventListener('focusout', reconsiderProtected);
