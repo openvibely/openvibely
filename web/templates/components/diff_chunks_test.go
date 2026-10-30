@@ -104,3 +104,29 @@ func TestChunkReviewAtBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffChunkContainingLine(t *testing.T) {
+	file := DiffFile{Path: "large", Hunks: []DiffHunk{{Header: "replacement"}}}
+	for i := 1; i <= 1000; i++ {
+		file.Hunks[0].Lines = append(file.Hunks[0].Lines, DiffLine{Type: "del", OldNum: i}, DiffLine{Type: "add", NewNum: i})
+	}
+	for _, view := range []string{"inline", "split"} {
+		chunks := DiffFileChunks(file, view)
+		expected := 4
+		if view == "split" {
+			expected = 2
+		}
+		for _, anchor := range [][2]int{{401, 0}, {0, 401}, {1, 401}, {401, 9999}} {
+			index, found := DiffChunkContainingLine(chunks, anchor[0], anchor[1])
+			if !found || index != expected {
+				t.Fatalf("%s anchor %v: got %d,%t want %d", view, anchor, index, found, expected)
+			}
+		}
+		if _, found := DiffChunkContainingLine(chunks, 0, 9999); found {
+			t.Fatal("missing line matched")
+		}
+		if _, found := DiffChunkContainingLine(chunks, 0, 0); found {
+			t.Fatal("empty anchor matched")
+		}
+	}
+}

@@ -15,8 +15,23 @@ import (
 )
 
 func TestBrowserFunctional_ProgressiveDiffChunks(t *testing.T) {
+	runProgressiveDiffBrowser(t, "")
+}
+
+func TestBrowserFunctional_DiffChunkLayoutAnchors(t *testing.T) {
+	for _, kind := range []string{"mixed", "deleted"} {
+		t.Run(kind, func(t *testing.T) { runProgressiveDiffBrowser(t, kind) })
+	}
+}
+
+func runProgressiveDiffBrowser(t *testing.T, kind string) {
 	chrome := testChromePath(t)
 	diff := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,30000 @@\n" + strings.Repeat("+line\n", 30000)
+	if kind == "mixed" {
+		diff = "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -1,15000 +1,15000 @@\n" + strings.Repeat("-old\n+new\n", 15000)
+	} else if kind == "deleted" {
+		diff = "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -1,30000 +0,0 @@\n" + strings.Repeat("-old\n", 30000)
+	}
 	file := ParseDiffOutput(diff)[0]
 	var markup bytes.Buffer
 	if err := DiffViewerWithReview(diff, "chunk-task", nil).Render(context.Background(), &markup); err != nil {
@@ -51,6 +66,60 @@ func TestBrowserFunctional_ProgressiveDiffChunks(t *testing.T) {
  fetch('/result?status=pass');
  } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
  });</script>`
+	if kind != "" {
+		script = `<script>
+ window.addEventListener('load',async()=>{
+ const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn)};
+ const assert=(v,m)=>{if(!v)throw Error(m)};
+ const settle=()=>new Promise(r=>setTimeout(r,250));
+ try {
+ const main=document.querySelector('#main-content');
+ const panel=mode=>document.querySelector('#diff-content-'+mode);
+ await wait(()=>panel('inline').querySelector('[data-chunk-index="0"] tr.diff-review-line'));
+ const target=panel('inline').querySelector('[data-chunk-index="40"]');
+ target.scrollIntoView();
+ await wait(()=>target.querySelector('tr.diff-review-line'));
+ const before=window._captureDiffScroll().anchor;
+ assert((before.newLine||before.oldLine)>1000,'fixture must start deep in the file');
+ const side=before.newLine?'new':'old', line=before.newLine||before.oldLine;
+ const restored=mode=>{
+  const row=panel(mode).querySelector('tr.diff-review-line[data-'+side+'-line="'+line+'"]');
+  return row && Math.abs(row.getBoundingClientRect().top-main.getBoundingClientRect().top-before.offset)<2;
+ };
+ switchDiffView('split',false);
+ await wait(()=>restored('split'));
+ await settle();assert(restored('split'),'split view lost the line after settling');
+ assert(!document.querySelector('#diff-file-split-0')._diffScrollAnchor,'completed restore retained a stale anchor');
+ // Returning through retained chunks must preserve the same line too.
+ await wait(()=>!target.querySelector('tr'));
+ switchDiffView('inline',false);
+ await wait(()=>restored('inline'));
+ switchDiffView('split',false);
+ await wait(()=>restored('split'));
+ // Evict the source chunk to exercise returning to an already opened layout.
+ await wait(()=>!target.querySelector('tr'));
+ target._saved=null;
+ switchDiffView('inline',false);
+ await wait(()=>restored('inline'));
+ await settle();assert(restored('inline'),'return to evicted inline chunk lost the line');
+ // A superseded request must not move the latest layout.
+ panel('split').querySelectorAll('[data-chunk-index]').forEach(chunk=>{chunk._saved=null;});
+ switchDiffView('split',false);
+ document.getElementById('diff-btn-inline').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+ switchDiffView('inline',false);
+ await wait(()=>restored('inline'));
+ await settle();assert(restored('inline'),'superseded request moved the reading position');
+ // Yield to a deliberate new scroll while the destination request is delayed.
+ panel('split').querySelectorAll('[data-chunk-index]').forEach(chunk=>{chunk._saved=null;});
+ switchDiffView('split',false);
+ main.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));
+ main.scrollTop=0;
+ await wait(()=>panel('split').querySelector('[data-chunk-index="0"] tr.diff-review-line'));
+ await settle();assert(main.scrollTop<100,'late anchor response undid user scroll');
+ fetch('/result?status=pass');
+ } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
+ });</script>`
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/result":
@@ -65,6 +134,16 @@ func TestBrowserFunctional_ProgressiveDiffChunks(t *testing.T) {
 			chunk, _ := strconv.Atoi(r.URL.Query().Get("chunk"))
 			view := r.URL.Query().Get("view")
 			chunks := DiffFileChunks(file, view)
+			oldLine, _ := strconv.Atoi(r.URL.Query().Get("anchor_old_line"))
+			newLine, _ := strconv.Atoi(r.URL.Query().Get("anchor_new_line"))
+			if index, found := DiffChunkContainingLine(chunks, oldLine, newLine); found {
+				chunk = index
+				select {
+				case <-time.After(80 * time.Millisecond):
+				case <-r.Context().Done():
+					return
+				}
+			}
 			if chunk < 0 || chunk >= len(chunks) {
 				http.Error(w, "invalid", 400)
 				return
@@ -73,7 +152,7 @@ func TestBrowserFunctional_ProgressiveDiffChunks(t *testing.T) {
 				t.Error(err)
 			}
 		default:
-			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script><style>.hidden{display:none}svg{width:16px;height:16px}#main-content{height:600px;overflow:auto}.diff-file-header{display:flex}.diff-file-body{overflow:hidden}td{height:20px}table{border-collapse:collapse}</style>`+script+`</head><body><main id="main-content">`+markup.String()+`</main></body></html>`)
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script><style>.hidden{display:none}svg{width:16px;height:16px}#main-content{height:600px;overflow:auto}.diff-file-header{display:flex}.diff-file-body{overflow:hidden}td{height:16px;padding:0}table{border-collapse:collapse;font-size:12px;line-height:16px}</style>`+script+`</head><body><main id="main-content">`+markup.String()+`</main></body></html>`)
 		}
 	}))
 	defer server.Close()

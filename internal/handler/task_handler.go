@@ -1926,7 +1926,20 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		if expected := c.QueryParam("revision"); expected != "" && expected != revision {
 			return echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
 		}
+		oldLine, newLine := 0, 0
+		for name, value := range map[string]*int{"anchor_old_line": &oldLine, "anchor_new_line": &newLine} {
+			if raw := c.QueryParam(name); raw != "" {
+				parsed, err := strconv.Atoi(raw)
+				if err != nil || parsed < 0 {
+					return echo.NewHTTPError(http.StatusBadRequest, "invalid line anchor")
+				}
+				*value = parsed
+			}
+		}
 		chunks := components.DiffFileChunks(meta.File, view)
+		if index, found := components.DiffChunkContainingLine(chunks, oldLine, newLine); found {
+			chunk = index
+		}
 		if chunk >= len(chunks) {
 			return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
 		}
