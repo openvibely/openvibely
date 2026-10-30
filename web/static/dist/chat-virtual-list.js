@@ -163,10 +163,10 @@
                 console.error('Transcript row rendering failed', error);
             }
         } else if (row.placeholder.isConnected && row.node) {
-            // Retained rows are detached from document-wide preference updates.
-            // Synchronize before insertion so measurements use the current mode.
-            window.syncToolDisclosures?.(row.node);
+            // Retained rows miss document-wide preference updates. Reattach first:
+            // deferred activity content needs a connected transcript to render.
             row.placeholder.replaceWith(row.node);
+            window.syncToolDisclosures?.(row.node);
             restored.push(row);
         }
     }
