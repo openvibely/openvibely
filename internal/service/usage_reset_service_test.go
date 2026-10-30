@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -181,5 +182,111 @@ func TestUsageResetAccountCredentialFallback(t *testing.T) {
 	}
 	if len(tokens) != 1 {
 		t.Fatalf("ambiguous POST was repeated using other credentials: %v", tokens)
+	}
+}
+
+func TestAnthropicUsageResetRequests(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	cfg := models.LLMConfig{Name: "Claude resets", Provider: models.ProviderAnthropic, Model: "claude-opus-5", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "fixture", OAuthAccountID: "organization:org-one", OAuthExpiresAt: time.Now().Add(4 * time.Hour).UnixMilli()}
+	if err := env.LLMConfigs.Create(ctx, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	claims := 0
+	wrongOrg := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fixture" || r.Header.Get("anthropic-beta") == "" {
+			t.Error("missing OAuth headers")
+		}
+		switch r.URL.Path {
+		case "/api/oauth/usage":
+			if r.Method != "GET" || r.URL.RawQuery != "cedar_ember=1&skip_spend=1" {
+				t.Errorf("wrong status request: %s %s", r.Method, r.URL)
+			}
+			w.Write([]byte(`{"cedar_ember":{"eligible":true,"grants":[{"id":"weekly","label":"Weekly reset","resets_left":2,"usable_now":true,"clears":["seven_day"],"ends_at":"2035-01-01T00:00:00Z"},{"id":"paused","resets_left":1,"usable_now":false,"paused":true,"ends_at":null}]}}`))
+		case "/api/oauth/profile":
+			org := "org-one"
+			if wrongOrg {
+				org = "different-org"
+			}
+			json.NewEncoder(w).Encode(map[string]any{"organization": map[string]string{"uuid": org}})
+		case "/api/organizations/org-one/reset_rate_limits":
+			claims++
+			if r.Method != "POST" {
+				t.Error("claim not POST")
+			}
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body) != 3 || body["program"] != "cedar_ember" || body["grant_id"] != "weekly" || body["request_id"] != "attempt-1" {
+				t.Errorf("wrong claim body %v", body)
+			}
+			w.Write([]byte(`{"result":"reset","resets_left":1,"cleared":["seven_day"]}`))
+		default:
+			t.Errorf("unexpected route %s", r.URL)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	old := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = old }()
+	svc := NewUsageAnalyticsService(env.Usage, env.LLMConfigs)
+	accounts, err := svc.ListUsageAccounts(ctx)
+	if err != nil || len(accounts) != 1 {
+		t.Fatal(err)
+	}
+	data, err := svc.UsageResetCredits(ctx, accounts[0].Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credits := data["credits"].([]any)
+	if data["available_count"] != 3 || len(credits) != 2 || credits[0].(map[string]any)["usable"] != true || credits[1].(map[string]any)["usable"] != false {
+		t.Fatalf("wrong grants: %v", data)
+	}
+	result, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "weekly", "attempt-1")
+	if err != nil || result["result"] != "reset" || claims != 1 {
+		t.Fatalf("claim %v err=%v", result, err)
+	}
+	wrongOrg = true
+	if _, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "weekly", "attempt-2"); err == nil {
+		t.Fatal("changed organization accepted")
+	}
+	if claims != 1 {
+		t.Fatal("claimed against changed organization")
+	}
+	if _, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "../bad", "attempt-3"); err == nil {
+		t.Fatal("invalid grant accepted")
+	}
+}
+
+func TestAnthropicResetGrantAvailability(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		eligible bool
+		fields   map[string]any
+		usable   bool
+	}{
+		{"usable", true, map[string]any{}, true},
+		{"ineligible", false, map[string]any{}, false},
+		{"paused", true, map[string]any{"paused": true}, false},
+		{"expired", true, map[string]any{"ends_at": "2029-01-01T00:00:00Z"}, false},
+		{"future", true, map[string]any{"starts_at": "2031-01-01T00:00:00Z"}, false},
+		{"blocked", true, map[string]any{"usable_now": false, "unavailable_reason": "needs_limit"}, false},
+		{"malformed date", true, map[string]any{"ends_at": "bad"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			grant := map[string]any{"id": "grant", "resets_left": float64(1), "usable_now": true}
+			for k, v := range tc.fields {
+				grant[k] = v
+			}
+			got := normalizeAnthropicResetGrants(map[string]any{"cedar_ember": map[string]any{"eligible": tc.eligible, "grants": []any{grant}}}, now)
+			credit := got["credits"].([]any)[0].(map[string]any)
+			if credit["usable"] != tc.usable {
+				t.Fatalf("grant=%v", credit)
+			}
+		})
 	}
 }
