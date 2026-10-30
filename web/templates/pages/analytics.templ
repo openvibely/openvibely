@@ -257,7 +257,7 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-usage" data-analytics-section="usage" class="hidden space-y-6 mb-6">
-					<div>@analyticsSectionHeading("Usage", "Provider limits, token usage, cache utilization, and recorded cost.")<label class="label justify-start gap-2"><input id="accountAlertsEnabled" type="checkbox" class="checkbox checkbox-sm" disabled/><span class="label-text">Account usage alerts for this project</span></label><span id="accountAlertsStatus" class="text-sm" role="status"></span><p id="usageEvidenceSelection" class="hidden"></p></div>
+					<div>@analyticsSectionHeading("Usage", "Provider limits, token usage, cache utilization, and recorded cost.")<p id="usageEvidenceSelection" class="hidden"></p></div>
 					<div id="usageSummary" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
 						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization", "Avg. tokens / day"} {
 							@analyticsKPICard(label, "usage")
@@ -1892,42 +1892,6 @@ templ analyticsContent(currentProject *models.Project) {
                                         await refreshResets();
                                     }
 									async function loadUsageAccounts(refreshUsage) {
-                                        const alertsToggle = document.getElementById('accountAlertsEnabled');
-                                        if (!alertsToggle.dataset.initialized) {
-                                            alertsToggle.dataset.initialized = 'true';
-                                            const params = new URLSearchParams();
-                                            params.set('project_id', usageEvidenceParams().get('project_id') || 'default');
-                                            const notificationURL = '/api/analytics/usage/notifications?' + params.toString();
-                                            fetchJSON(notificationURL).then(function(data) {
-                                                alertsToggle.checked = data.enabled;
-                                                alertsToggle.disabled = false;
-                                            }).catch(function(error) {
-                                                if (error.name !== 'AbortError') {
-                                                    delete alertsToggle.dataset.initialized;
-                                                    document.getElementById('accountAlertsStatus').textContent = 'Unable to load notification settings';
-                                                }
-                                            });
-                                            alertsToggle.onchange = async function() {
-                                                alertsToggle.disabled = true;
-                                                try {
-                                                    const response = await fetch(notificationURL, {
-                                                        method: 'POST', signal: eventSignal,
-                                                        headers: {'Content-Type': 'application/json'},
-                                                        body: JSON.stringify({enabled: alertsToggle.checked})
-                                                    });
-                                                    if (!response.ok) throw new Error('Unable to save notification setting');
-                                                    document.getElementById('accountAlertsStatus').textContent = '';
-                                                } catch (error) {
-                                                    if (error.name !== 'AbortError') {
-                                                        alertsToggle.checked = !alertsToggle.checked;
-                                                        document.getElementById('accountAlertsStatus').textContent = error.message;
-                                                    }
-                                                } finally {
-                                                    alertsToggle.disabled = false;
-                                                }
-                                            };
-                                        }
-
 										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
 										try {
 											const params=usageEvidenceParams();params.set('projection','accounts');
