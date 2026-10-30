@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/events"
@@ -121,21 +122,53 @@ func TestAccountMonitorResetBaselineExpiryAndGrants(t *testing.T) {
 	}
 }
 func TestAccountMonitorAlertIdempotency(t *testing.T) {
-	env := teststores.New(t)
-	ctx := context.Background()
-	projects, err := env.Stores.Projects.List(ctx)
-	if err != nil || len(projects) == 0 {
-		t.Fatal(projects, err)
-	}
-	svc := NewAlertService(env.Stores.Alerts, nil)
-	for i := 0; i < 2; i++ {
-		a := &models.Alert{ProjectID: projects[0].ID, Type: models.AlertCustom, Severity: models.SeverityWarning, Source: "account_usage", Title: "Usage", IdempotencyKey: "account-usage:test"}
-		if err := svc.CreateAccountUsageAlert(ctx, a, "/analytics?view=usage"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := env.Stores.Alerts.GetByIdempotencyKey(ctx, projects[0].ID, "account-usage:test"); err != nil {
-		t.Fatal(err)
+	for _, severity := range []models.AlertSeverity{models.SeverityWarning, models.SeverityInfo} {
+		t.Run(string(severity), func(t *testing.T) {
+			env := teststores.New(t)
+			ctx := context.Background()
+			projects, err := env.Stores.Projects.List(ctx)
+			if err != nil || len(projects) == 0 {
+				t.Fatal(projects, err)
+			}
+			broadcaster := events.NewBroadcaster()
+			sub, err := broadcaster.Subscribe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer broadcaster.Unsubscribe(sub)
+			svc := NewAlertService(env.Stores.Alerts, broadcaster)
+			for i := 0; i < 2; i++ {
+				a := &models.Alert{ProjectID: projects[0].ID, Type: models.AlertCustom, Severity: severity, Source: "account_usage", Title: "Usage", IdempotencyKey: "account-usage:test"}
+				if err := svc.CreateAccountUsageAlert(ctx, a, "/analytics?view=usage"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stored, err := env.Stores.Alerts.GetByIdempotencyKey(ctx, projects[0].ID, "account-usage:test")
+			if err != nil || stored.Severity != severity {
+				t.Fatalf("stored alert = %+v, err = %v", stored, err)
+			}
+			select {
+			case event := <-sub:
+				encoded, err := json.Marshal(event)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var payload map[string]any
+				if err := json.Unmarshal(encoded, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload["alert_severity"] != string(stored.Severity) {
+					t.Fatalf("toast severity differs from stored alert: %s", encoded)
+				}
+			default:
+				t.Fatal("missing toast event")
+			}
+			select {
+			case event := <-sub:
+				t.Fatal("duplicate toast event", event)
+			default:
+			}
+		})
 	}
 }
 

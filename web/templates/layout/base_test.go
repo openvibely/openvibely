@@ -829,6 +829,65 @@ func TestBase_SystemUpdateNoticeIsStickyAndActionable(t *testing.T) {
 	}
 }
 
+func TestAccountUsageToastSeverity(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute toast severity regression tests")
+	}
+	var base, sidebar bytes.Buffer
+	projects := []models.Project{{ID: "p", Name: "Project"}}
+	if err := Base("Test", projects, "p").Render(context.Background(), &base); err != nil {
+		t.Fatal(err)
+	}
+	if err := Sidebar(projects, "p").Render(context.Background(), &sidebar); err != nil {
+		t.Fatal(err)
+	}
+	extract := func(html, startMarker, endMarker string) string {
+		t.Helper()
+		start := strings.Index(html, startMarker)
+		if start < 0 {
+			t.Fatalf("missing %s", startMarker)
+		}
+		end := strings.Index(html[start:], endMarker)
+		if end < 0 {
+			t.Fatalf("missing %s", endMarker)
+		}
+		encoded, err := json.Marshal(html[start : start+end])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	style := extract(base.String(), "// Determine style based on status", "// Use full title")
+	dispatch := extract(sidebar.String(), "if (data.alert_source === 'account_usage'", "htmx.trigger('body', 'alertUpdate');")
+	script := `
+const assert = require('node:assert/strict');
+const style = new Function('status', ` + style + ` + ';return {alertClass, statusLabel};');
+const dispatch = new Function('data', 'window', ` + dispatch + `);
+for (const [severity, expectedClass, expectedLabel] of [
+ ['warning', 'alert-warning', 'Warning'],
+ ['info', 'alert-info', 'info'],
+ [undefined, 'alert-info', 'info']
+]) {
+ const calls = [];
+ dispatch({alert_source:'account_usage', alert_title:'Account usage', alert_severity:severity, alert_id:'alert-1', alert_url:'/analytics?view=usage'}, {showToast(...args){calls.push(args);}});
+ assert.equal(calls.length, 1);
+ const [title, status, taskID, options] = calls[0];
+ assert.equal(title, 'Account usage');
+ assert.equal(taskID, '');
+ assert.equal(options.toastKey, 'account-usage:alert-1');
+ assert.equal(options.clickURL, '/analytics?view=usage');
+ assert.deepEqual(style(status), {alertClass:expectedClass, statusLabel:expectedLabel});
+}
+assert.deepEqual(style('cancelled'), {alertClass:'alert-warning', statusLabel:'Cancelled'});
+assert.deepEqual(style('completed'), {alertClass:'alert-success', statusLabel:'Completed'});
+assert.deepEqual(style('failed'), {alertClass:'alert-error', statusLabel:'Failed'});
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("toast severity: %v\n%s", err, output)
+	}
+}
+
 // TestToastDismissalCleanup verifies the toast notification system properly
 // cleans up DOM elements after dismissal to prevent page unresponsiveness.
 func TestToastDismissalCleanup(t *testing.T) {
