@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+ "context"
 	"net/url"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
@@ -210,7 +211,7 @@ templ ChatLoadingDots(size string) {
 templ ChatBubble(role, content string, author ...string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
-			{ chatAuthorLabel(role, author) }
+			{ chatAuthorLabel(ctx, role, author) }
 		</div>
 		<div class="chat-bubble-inner">
 			if role == "User" {
@@ -285,7 +286,7 @@ templ ChatBubbleRunning(role, partialOutput string) {
 templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string, author ...string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2 flex items-center gap-2">
-			{ chatAuthorLabel(role, author) }
+			{ chatAuthorLabel(ctx, role, author) }
 			if len(attachments) > 0 {
 				<span class="badge badge-sm badge-neutral">
 					<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1264,7 +1265,9 @@ templ pendingAttachmentBadge(label, title string) {
 
 templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string, author ...string) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" data-tooltip-disabled>
-		<span class="text-xs font-semibold">{ chatAuthorLabel("User", author) }</span>
+		if templateui.MessageAuthorsEnabled(ctx) {
+ <span class="text-xs font-semibold">{ chatAuthorLabel(ctx, "User", author) }</span>
+ }
 		<div class="min-w-0 flex-1 truncate" data-pending-input-content>{ message }</div>
 		if hasAttachments {
 			@pendingAttachmentBadge("Attachments queued", "Attachments queued with this follow-up")
@@ -1300,7 +1303,11 @@ templ ChatSteeringInputRow(inputID, message string, hasAttachments bool, author 
 templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string, author ...string) {
 	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" data-tooltip-disabled>
 		<div class="min-w-0 flex-1">
-			<div class="text-xs font-semibold opacity-70">{ chatAuthorLabel("User", author) } · Steering pending</div>
+			<div class="text-xs font-semibold opacity-70">
+ if templateui.MessageAuthorsEnabled(ctx) {
+ { chatAuthorLabel(ctx, "User", author) } ·
+ }
+ Steering pending</div>
 			<div class="truncate" data-pending-input-content>{ message }</div>
 			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
@@ -6648,7 +6655,8 @@ func pickerDefaultDetail(agents []models.LLMConfig, defaultID string) string {
 	return detail
 }
 
-func chatAuthorLabel(role string, author []string) string {
+func chatAuthorLabel(ctx context.Context, role string, author []string) string {
+ if !templateui.MessageAuthorsEnabled(ctx) { return role }
  if role == "User" && len(author) > 0 && strings.TrimSpace(author[0]) != "" { return author[0] }
  return role
 }
