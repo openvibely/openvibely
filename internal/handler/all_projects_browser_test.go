@@ -29,6 +29,13 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
 	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
 	project := createProject(t, h, "Second browser project")
+	h.SetAgentRepo(stores.Agents)
+	scopedAgent := createRichTaskUIAgent(t, stores.Agents, "Destination project agent")
+	scopedAgent.Scope = models.AgentScopeProject
+	scopedAgent.ProjectID = project.ID
+	require.NoError(t, stores.Agents.Update(t.Context(), scopedAgent))
+	createRichTaskUIAgent(t, stores.Agents, "Shared draft agent")
+
 	task := models.Task{ProjectID: project.ID, Title: "Cross project browser task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, stores.Tasks.Create(t.Context(), &task))
 	other := models.Task{ProjectID: "default", Title: "Other project task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
@@ -223,6 +230,28 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  destination.value=owner;
  destination.dispatchEvent(new Event('change',{bubbles:true}));
  assert(destination.form===document.getElementById('task-thread-form'),'project not associated with creation form');
+ const agentRow=document.querySelector('[data-detail-property="agent_definition_id"]');
+ agentRow.click();
+ const agentOptions=Array.from(document.querySelectorAll('[data-options="agent_definition_id"] button'));
+ const scoped=agentOptions.find(b=>b.textContent==='Destination project agent');
+ const shared=agentOptions.find(b=>b.textContent==='Shared draft agent');
+ assert(scoped && !scoped.hidden,'destination agent missing');
+ scoped.click();
+ document.querySelector('input[name="title"]').value='Keep draft title';
+ document.getElementById('task-message-input').value='Keep draft message';
+ destination.value='default';destination.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(document.querySelector('[data-draft-property="agent_definition_id"]').value==='','foreign agent survived destination change');
+ agentRow.click();
+ assert(scoped.hidden && !shared.hidden,'agent scope filter failed');
+ const agentSearch=document.querySelector('#task-property-picker input');
+ agentSearch.value='Destination';agentSearch.dispatchEvent(new Event('input',{bubbles:true}));
+ assert(scoped.hidden,'search revealed another project agent');
+ agentSearch.value='';agentSearch.dispatchEvent(new Event('input',{bubbles:true}));
+ shared.click();
+ destination.value=owner;destination.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(document.querySelector('[data-draft-property="agent_definition_id"]').value===shared.dataset.value,'shared agent selection lost');
+ assert(document.querySelector('input[name="title"]').value==='Keep draft title' && document.getElementById('task-message-input').value==='Keep draft message','project change erased draft');
+
  window.taskWorkspace.closePanel();
  document.querySelector('[data-workspace-list-return]').click();
  await wait(()=>document.querySelector('[data-all-projects-view="tasks"]'));

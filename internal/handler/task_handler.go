@@ -421,7 +421,14 @@ func (h *Handler) NewTask(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
+	// The draft can change destination without reloading. Carry the compact
+	// catalog once; the picker filters it against the selected project.
+	var agentDefs []persistence.AgentTaskUIOption
+	if layout.WorkspaceProjectID(ctx, projectID) == models.AllProjectsID {
+		agentDefs = h.listAgentDefinitions(ctx)
+	} else {
+		agentDefs = h.listTaskFormAgentDefinitions(ctx, projectID, nil)
+	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.NewTaskContent(project, agents, agentDefs, projects...))
 	}

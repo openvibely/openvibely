@@ -50,7 +50,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     <button type="button" data-value="" class="ov-menu-option w-full">No agent</button>
     for _, agent := range definitions {
      if agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
-      <button type="button" data-value={ agent.ID } class="ov-menu-option w-full">{ agent.Name }</button>
+      <button type="button" data-value={ agent.ID } data-agent-scope={ string(agent.Scope) } data-agent-project={ agent.ProjectID } class="ov-menu-option w-full">{ agent.Name }</button>
      }
     }
    </div>
@@ -82,10 +82,26 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var root = document.getElementById('task-detail-content');
   var picker = root.querySelector('#task-property-picker'), dialog = root.querySelector('#task-detail-text-editor');
   var current = null, field = '', busy = false, revision = 0;
-  var pickerUI = window.createInspectorPicker(root, picker, function() { return busy; });
+  var pickerUI = window.createInspectorPicker(root, picker, function() { return busy; }, available);
   var pickerOpen = pickerUI.isOpen, hidePicker = pickerUI.close, returnToRow = pickerUI.returnFocus;
   root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
+  var destination = root.querySelector('#new-task-project');
+  function available(option) {
+   return !destination || option.dataset.agentScope !== 'project' || (!!destination.value && option.dataset.agentProject === destination.value);
+  }
+  if (destination) destination.addEventListener('change', function() {
+   hidePicker();
+   var input = root.querySelector('[data-draft-property="agent_definition_id"]');
+   var selectedOption = Array.from(picker.querySelectorAll('[data-options="agent_definition_id"] button')).find(function(option) { return option.dataset.value === input.value; });
+   if (input.value && (!selectedOption || !available(selectedOption))) {
+    input.value = '';
+    var row = root.querySelector('[data-detail-property="agent_definition_id"]');
+    row.dataset.value = '';
+    row.querySelector('[data-property-label]').textContent = 'No agent';
+   }
+
+  });
   function composerModel(value, label) {
    var input = root.querySelector('#task-thread-form-agent-id'), button = root.querySelector('#task-thread-form-agent-select');
    if (input) input.value = value || 'auto';
