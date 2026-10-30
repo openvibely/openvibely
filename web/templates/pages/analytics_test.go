@@ -191,7 +191,7 @@ var pending={};
 function response(data){return {ok:true,json:async function(){return data;}};}
 window.fetch=function(url){
  var p=new URL(url,location.href).searchParams;
- if(p.get('projection')==='accounts')return Promise.resolve(response({accounts:[{key:'a',provider:'openai'},{key:'c',provider:'anthropic'},{key:'b',provider:'openai'}]}));
+ if(p.get('projection')==='accounts')return Promise.resolve(response({accounts:[{key:'a',provider:'openai'},{key:'b',provider:'openai'},{key:'c',provider:'anthropic'}]}));
  if(p.get('projection')==='account_limits')return new Promise(function(resolve,reject){pending[p.get('account_key')]={resolve:resolve,reject:reject};});
  return Promise.resolve(response({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]}));
 };
@@ -200,21 +200,19 @@ window.addEventListener('load',async function(){
  function wait(){return new Promise(function(resolve){setTimeout(resolve,20);});}
  function assert(ok,message){if(!ok)throw new Error(message);}
  try {
-  for(var i=0;i<100&&!(pending.a&&pending.c);i++)await wait();
-  assert(pending.a&&pending.c&&!pending.b,'provider requests must be limited to two concurrent accounts');
+  for(var i=0;i<100&&!(pending.a&&pending.b&&pending.c);i++)await wait();
+  assert(pending.a&&pending.b&&pending.c,'all account cards must start loading independently');
   var cards=document.querySelectorAll('#accountUsageCards > .card');
-  assert(cards.length===3&&cards[1].textContent.includes('Anthropic'),'Anthropic shell missing');
+  assert(cards.length===3&&cards[2].textContent.includes('Anthropic'),'Anthropic shell missing');
   assert(Array.from(cards).every(c=>c.textContent.includes('Loading analytics')),'all shells must start loading');
-  pending.c.resolve(response({account_limits:[{provider:'anthropic',plan_type:'Claude Max',limits:[]}]}));
-  for(var i=0;i<100&&!pending.b;i++)await wait();
-  assert(pending.b,'next account did not start after a provider request completed');
-  assert(cards[1].textContent.includes('Claude Max')&&!cards[1].hasAttribute('aria-busy'),'Anthropic must render before OpenAI');
-  assert(cards[0].textContent.includes('Loading analytics')&&cards[2].textContent.includes('Loading analytics'),'OpenAI loading state lost');
+  pending.c.resolve(response({account_limits:[{provider:'anthropic',plan_type:'Claude Max',limits:[]}]}));await wait();
+  assert(cards[2].textContent.includes('Claude Max')&&!cards[2].hasAttribute('aria-busy'),'Anthropic must render before OpenAI');
+  assert(cards[0].textContent.includes('Loading analytics')&&cards[1].textContent.includes('Loading analytics'),'OpenAI loading state lost');
   pending.a.resolve(response({account_limits:[{provider:'openai',plan_type:'ChatGPT Pro',limits:[]}]}));await wait();
-  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[2].hasAttribute('aria-busy'),'OpenAI accounts must render independently');
+  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[1].hasAttribute('aria-busy'),'OpenAI accounts must render independently');
   pending.b.reject(new Error('unavailable'));await wait();
-  assert(cards[2].textContent.includes('Provider limits unavailable'),'failure not displayed');
-  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[1].textContent.includes('Claude Max'),'failure erased sibling results');
+  assert(cards[1].textContent.includes('Provider limits unavailable'),'failure not displayed');
+  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[2].textContent.includes('Claude Max'),'failure erased sibling results');
   assert(document.getElementById('usageSummary').textContent.includes('1,234'),'local usage disappeared');
   assert(!document.getElementById('accountUsageCards').hasAttribute('aria-busy'),'loading never finished');
   result.dataset.testResult='pass';

@@ -1958,17 +1958,7 @@ templ analyticsContent(currentProject *models.Project) {
 													card.removeAttribute('aria-busy');
 												}
 											}
-											let nextAccountIndex=0;
-											// Provider requests can stall; leave same-origin connections available for navigation.
-											const workerCount=Math.min(2,accounts.length);
-											await Promise.allSettled(Array.from({length:workerCount},async function(){
-												while(generation===dataGeneration){
-													const index=nextAccountIndex++;
-													if(index>=accounts.length)return;
-													await loadAccount(index);
-													if(generation!==dataGeneration)return;
-												}
-											}));
+											await Promise.allSettled(accounts.map(function(_,index){return loadAccount(index);}));
 										if(target.isConnected&&target.dataset.analyticsUsageGeneration===String(generation))target.removeAttribute('aria-busy');
 									} catch(e) {
 										if(e.name!=='AbortError'&&generation===dataGeneration){target.removeAttribute('aria-busy');target.textContent='Provider limits unavailable';}
