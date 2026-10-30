@@ -29,7 +29,8 @@ func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKe
 		return nil, fmt.Errorf("credit_id and idempotency_key are required and must be bounded")
 	}
 	defer s.accountReads.Forget("resets:" + accountKey)
-	defer s.accountReads.Forget("limits:" + accountKey)
+	defer s.accountReads.Forget(accountLimitsReadKey(accountKey, false))
+	defer s.accountReads.Forget(accountLimitsReadKey(accountKey, true))
 	return s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
 }
 
