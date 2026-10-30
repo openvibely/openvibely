@@ -118,6 +118,10 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 		}
 	}
 
+	freshPercent := 37.0
+	tc.handler.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		return &models.AccountUsageSnapshot{PrimaryLabel: "Session", PrimaryUsedPercent: &freshPercent}, nil
+	})
 	compact := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=account_limits").Execute()
 	local := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=local").Execute()
 	tc.Assert(local).StatusCode(http.StatusOK)
@@ -147,6 +151,9 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 	}
 	if len(view.AccountLimits) != 1 || view.AccountLimits[0].Provider != "openai" || len(view.AccountLimits[0].Limits) != 1 {
 		t.Fatalf("compact account limits = %+v", view.AccountLimits)
+	}
+	if got := view.AccountLimits[0].Limits[0].UsedPercent; got == nil || *got != freshPercent {
+		t.Fatalf("card used stored snapshot instead of fresh provider response: %+v", view.AccountLimits)
 	}
 }
 
