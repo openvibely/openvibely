@@ -181,7 +181,20 @@ func (r *UsageRepo) GetLatestAccountUsageSnapshots(ctx context.Context, provider
 		where += " AND s.provider = ?"
 		args = append(args, provider)
 	}
+	// Rank the small identity/timestamp projection once, then load only the
+	// winning rows. A correlated newer-row lookup rescans historical snapshots
+	// for every candidate and stalls unrelated requests on the shared reader.
 	rows, err := r.db.QueryContext(ctx, `
+		WITH ranked AS (
+			SELECT s.rowid AS snapshot_rowid, ROW_NUMBER() OVER (
+				PARTITION BY s.provider, COALESCE(s.oauth_connection_id, ''),
+					CASE WHEN COALESCE(s.oauth_connection_id, '') = '' THEN COALESCE(s.account_id, '') ELSE '' END,
+					CASE WHEN COALESCE(s.oauth_connection_id, '') = '' THEN COALESCE(s.agent_config_id, '') ELSE '' END
+				ORDER BY s.fetched_at DESC, s.created_at DESC, s.rowid DESC
+			) AS position
+			FROM account_usage_snapshots s
+			`+where+`
+		)
 		SELECT s.id, s.provider, COALESCE(s.account_id, ''), COALESCE(s.agent_config_id, ''),
 		       COALESCE(s.oauth_connection_id, ''), s.oauth_config_revision, s.plan_type,
 		       COALESCE(s.account_display_name, ''), COALESCE(s.account_detail, ''), COALESCE(s.billing_label, ''),		       COALESCE(s.subscription_status, ''), COALESCE(s.extra_usage_label, ''), s.extra_usage_monthly_limit_usd, s.extra_usage_used_usd,
@@ -190,30 +203,10 @@ func (r *UsageRepo) GetLatestAccountUsageSnapshots(ctx context.Context, provider
 		       s.secondary_label, s.secondary_used_percent, s.secondary_window_minutes, s.secondary_resets_at,
 		       s.model_limit_label, s.model_limit_used_percent, s.model_limit_window_minutes, s.model_limit_resets_at,
 		       s.rate_limit_reached_type, s.raw_json, s.fetched_at, s.created_at
-		FROM account_usage_snapshots s
-		`+where+`
-			  AND NOT EXISTS (
-			    SELECT 1 FROM account_usage_snapshots newer
-			    WHERE newer.provider = s.provider
-			      AND (
-			        (
-			          COALESCE(s.oauth_connection_id, '') != ''
-			          AND newer.oauth_connection_id = s.oauth_connection_id
-			        )
-			        OR (
-			          COALESCE(s.oauth_connection_id, '') = ''
-			          AND COALESCE(newer.oauth_connection_id, '') = ''
-			          AND COALESCE(newer.account_id, '') = COALESCE(s.account_id, '')
-			          AND COALESCE(newer.agent_config_id, '') = COALESCE(s.agent_config_id, '')
-			        )
-			      )
-			      AND (
-			        newer.fetched_at > s.fetched_at
-			        OR (newer.fetched_at = s.fetched_at AND newer.created_at > s.created_at)
-			        OR (newer.fetched_at = s.fetched_at AND newer.created_at = s.created_at AND newer.rowid > s.rowid)
-			      )
-			  )
-			ORDER BY s.provider ASC, s.fetched_at DESC, s.created_at DESC, s.rowid DESC`, args...)
+		FROM ranked
+		JOIN account_usage_snapshots s ON s.rowid = ranked.snapshot_rowid
+		WHERE ranked.position = 1
+		ORDER BY s.provider ASC, s.fetched_at DESC, s.created_at DESC, s.rowid DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing latest account usage snapshots: %w", err)
 	}
