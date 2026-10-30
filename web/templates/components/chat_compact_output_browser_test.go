@@ -165,3 +165,33 @@ func TestBrowserFunctional_CompactFoldVirtualization(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_CompactDeferredToolRemount(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='chat-messages';messages.style.height='160px';
+ document.getElementById('pair').dataset.execStatus='completed';
+ document.documentElement.setAttribute('data-output-detail','compact');
+ const source='[Using tool: bash]\n[Tool bash done]\nimportant output\n[/Tool]\n'+Array.from({length:150},(_,i)=>'Paragraph '+i+'\n\n').join('');
+ await renderStreamingContent(stream,source,true);await paint();await paint();
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await paint();await paint();
+ const row=stream._chatVirtualRows[0];
+ assert(row.node && row.node.isConnected,'fixture starts mounted');
+ messages.scrollTop=messages.scrollHeight;messages.dispatchEvent(new Event('scroll'));await paint();await paint();
+ assert(!row.node.isConnected,'fixture detached activity');
+ document.documentElement.setAttribute('data-output-detail','full');document.dispatchEvent(new CustomEvent('openvibely:display-change',{detail:{name:'output',value:'full'}}));await paint();
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await renderVisibleChatRows(messages);await paint();await paint();
+ assert(row.node.isConnected,'activity remounted');
+ const tool=row.node.querySelector('.stream-tool');
+ assert(tool && tool.getBoundingClientRect().height>0 && tool.textContent.includes('important output'),'Full mode must show deferred tool content after remount');
+ messages.scrollTop=messages.scrollHeight;messages.dispatchEvent(new Event('scroll'));await paint();await paint();
+ assert(!row.node.isConnected,'Full row must detach again');
+ document.documentElement.setAttribute('data-output-detail','compact');document.dispatchEvent(new CustomEvent('openvibely:display-change',{detail:{name:'output',value:'compact'}}));
+ messages.scrollTop=0;messages.dispatchEvent(new Event('scroll'));await renderVisibleChatRows(messages);await paint();await paint();
+ const summary=row.node.querySelector('.stream-activity-summary');
+ assert(summary.getBoundingClientRect().height>0 && summary.getAttribute('aria-expanded')==='false','Returning in Compact must show collapsed summary');
+ assert(!row.node.querySelector('.stream-tool'),'Collapsed remount must release tool content');
+ summary.click();await paint();await paint();
+ assert(row.node.querySelector('.stream-tool').getBoundingClientRect().height>0,'Remounted Compact group must still expand');
+ return {};
+ `)
+}
