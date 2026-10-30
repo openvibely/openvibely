@@ -9,11 +9,6 @@
       return {};
     }
   };
-  const write = (key, value) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch (_) {}
-  };
   const el = (tag, cls, text) => {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -186,22 +181,46 @@
       }[v] || v
     );
   }
-  function taskEndpoint(btn) {
+  function settingsEndpoint(btn) {
     const form = btn.closest("form");
     const endpoint = form.getAttribute("data-model-select-endpoint");
     if (!endpoint) return endpoint;
-    const project = form.querySelector('[name="_project_id"]')?.value;
-    if (!project) return endpoint;
     const url = new URL(endpoint, window.location.href);
-    url.searchParams.set("project_id", project);
+    if (form.dataset.conversationTaskId)
+      url.searchParams.set("task_id", form.dataset.conversationTaskId);
     return url.pathname + url.search;
+  }
+
+  async function importLegacyPreferences(btn) {
+    const form = btn.closest("form");
+    if (form.dataset.conversationTaskId) return;
+    const project = form.querySelector('[name="_project_id"]')?.value;
+    if (!project) return;
+    const keys = ["chat-model-", "chat-effort-", "chat-service-tier-"].map(k => k + project);
+    let selected, efforts, tiers;
+    try {
+      if (!keys.some(k => localStorage.getItem(k) !== null)) return;
+      selected = localStorage.getItem(keys[0]);
+      efforts = read(keys[1]); tiers = read(keys[2]);
+    } catch (_) { return; }
+    if (!options(btn).some(m => m.id === selected)) selected = btn.dataset.currentValue;
+    const overrides = {};
+    for (const model of options(btn)) {
+      const id = key(model);
+      if (efforts[id] !== undefined || tiers[id] !== undefined)
+        overrides[id] = {reasoning_effort: efforts[id] || "", service_tier: tiers[id] || ""};
+    }
+    const response = await fetch(settingsEndpoint(btn), {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({agent_id: selected, import_only: true, overrides}),
+    });
+    if (!response.ok) throw Error("Could not migrate model settings. Reopen the picker to retry.");
+    try { keys.forEach(k => localStorage.removeItem(k)); } catch (_) {}
   }
   function save(btn) {
     const s = state(btn);
     sync(btn);
-    if (!taskEndpoint(btn)) {
-      write(s.storage, s.efforts);
-      write(s.tierStorage, s.tiers);
+    if (!settingsEndpoint(btn)) {
       return Promise.resolve();
     }
     const body = new URLSearchParams({
@@ -210,7 +229,7 @@
       service_tier: tierField(btn)?.value || "",
     });
     const request = () =>
-      fetch(taskEndpoint(btn), { method: "POST", body }).then((r) => {
+      fetch(settingsEndpoint(btn), { method: "POST", body }).then((r) => {
         if (!r.ok) throw Error("Could not save model settings. Try again.");
       });
     s.pending = (s.pending || Promise.resolve()).catch(() => {}).then(request);
@@ -236,11 +255,12 @@
     );
     return s.pending;
   }
-  async function load(btn) {
+  async function load(btn, initial = false) {
     const s = state(btn),
-      m = current(btn),
-      endpoint = taskEndpoint(btn);
-    if (!endpoint || !m || (!m.provider && !m.effectiveID)) return;
+      endpoint = settingsEndpoint(btn);
+    initial = initial || s.initialLoad;
+    let m = current(btn);
+    if (!endpoint || !m) return;
     const token = ++s.loadToken;
     s.loading = true;
     sync(btn);
@@ -249,21 +269,33 @@
       // A failed write must not poison subsequent refreshes or selections.
       s.pending = s.pending.catch(() => {});
       await s.pending;
-      const response = await fetch(
-        endpoint + (endpoint.includes("?") ? "&" : "?") + "agent_id=" + encodeURIComponent(m.id),
-      );
+      if (initial) await importLegacyPreferences(btn);
+      const url = new URL(endpoint, window.location.href);
+      if (!initial) url.searchParams.set("agent_id", m.id);
+      const response = await fetch(url.pathname + url.search);
       if (!response.ok)
         throw Error("Could not load effort. Reopen the picker to retry.");
       const data = await response.json();
+      if (initial && data.agent_id !== undefined) {
+        const selected = options(btn).find(item => item.id === data.agent_id);
+        if (selected) {
+          m = selected;
+          if (token === s.loadToken) {
+            window._setChatCustomSelectValue(btn, selected.id);
+            btn.closest("form").querySelector('[name="agent_id"]').value = selected.id;
+          }
+        }
+      }
       const effort = data.reasoning_effort || "";
       const tier = data.service_tier || "";
       // A send started before another model was selected still needs this
       // result, even though the stale lookup must not update the current UI.
-      if (token !== s.loadToken) return { effort, tier };
+      if (token !== s.loadToken) return { effort, tier, modelID: m.id };
+      s.initialLoad = false;
       s.efforts[key(m)] = effort;
       s.tiers[key(m)] = tier;
       s.error = "";
-      return { effort, tier };
+      return { effort, tier, modelID: m.id };
     } catch (e) {
       if (token === s.loadToken) s.error = e.message;
     } finally {
@@ -721,24 +753,21 @@
     btn.setAttribute("aria-keyshortcuts", apple ? "Meta+M" : "Control+M");
     btn.title = apple ? "Models (⌘M)" : "Models (Ctrl+M)";
     if (state(btn)) return;
-    const form = btn.closest("form"),
-      project = form.querySelector('[name="_project_id"]')?.value || "",
-      storage = project ? "chat-effort-" + project : "";
+    const form = btn.closest("form");
     btn._ovModelState = {
-      efforts: storage ? read(storage) : {},
-      storage,
-      tierStorage: project ? "chat-service-tier-" + project : "",
-      tiers: project ? read("chat-service-tier-" + project) : {},
+      efforts: {},
+      tiers: {},
       pending: Promise.resolve(),
       loading: false,
       loadToken: 0,
       error: "",
+      initialLoad: true,
     };
     btn.setAttribute("aria-haspopup", "dialog");
     btn.setAttribute("aria-controls", panel.id);
     sync(btn);
-    if (taskEndpoint(btn)) {
-      btn._ovModelState.ready = load(btn);
+    if (settingsEndpoint(btn)) {
+      btn._ovModelState.ready = load(btn, true);
     } else btn._ovModelState.ready = Promise.resolve();
   }
   function loadSelection(btn) {
@@ -787,12 +816,13 @@
       init(btn);
       const s = state(btn);
       s.loadToken++;
+      s.initialLoad = false;
       s.loading = false;
       s.error = "";
       s.failedSave = false;
       sync(btn);
       // Fetch an existing task/model preference before persisting a newly selected model.
-      if (taskEndpoint(btn)) {
+      if (settingsEndpoint(btn)) {
         s.selectionPending = btn.dataset.currentValue;
         s.ready = loadSelection(btn);
       } else save(btn);
@@ -954,7 +984,7 @@
         return;
       }
       const s = state(btn);
-      if (!taskEndpoint(btn)) return;
+      if (!settingsEndpoint(btn)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       const submitter = e.submitter;
@@ -974,7 +1004,7 @@
       const payload = form._captureChatSubmission(
         form._chatNextSubmissionPayload,
       );
-      payload.managedModelSelection = true;
+      payload.managedModelSelection = !!form.dataset.conversationTaskId;
       // This attempt owns the captured snapshot while settings load. Do not
       // leave it on the form for a later Send if loading or saving fails.
       form._chatNextSubmissionPayload = null;
@@ -988,6 +1018,7 @@
             if (loadedEffort === undefined)
               throw Error("Could not load effort for the selected model.");
             payload.reasoningEffort = loadedEffort.effort;
+            if (loadedEffort.modelID) payload.modelID = loadedEffort.modelID;
           }
           if (waitingForTier && loadedEffort)
             payload.serviceTier = loadedEffort.tier;

@@ -85,7 +85,7 @@ func (r *TaskRepo) ApplyModelEffort(ctx context.Context, taskID string, agent *m
 // one statement. The picker can request another configuration before selecting it.
 func (r *TaskRepo) TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error) {
 	var out models.TaskModelSettings
-	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(a.id,''),COALESCE(a.provider,''),COALESCE(a.model,''),
+	err := r.db.QueryRowContext(ctx, `SELECT t.project_id,COALESCE(a.id,''),COALESCE(a.provider,''),COALESCE(a.model,''),
  COALESCE(a.reasoning_effort,''),COALESCE(a.service_tier,''),
  COALESCE(own.effort,inherited.effort,''),COALESCE(own.service_tier,inherited.service_tier,'')
  FROM tasks t
@@ -94,7 +94,7 @@ func (r *TaskRepo) TaskModelSettings(ctx context.Context, taskID, selectedID str
  WHEN ?='default' THEN COALESCE(p.default_agent_config_id,
      (SELECT id FROM agent_configs ORDER BY is_default DESC,name ASC,id ASC LIMIT 1))
  WHEN ?='' THEN t.agent_id ELSE ? END`+taskOverrideJoins+` WHERE t.id=?`, selectedID, selectedID, selectedID, taskID).Scan(
-		&out.Config.ID, &out.Config.Provider, &out.Config.Model, &out.Config.ReasoningEffort, &out.Config.ServiceTier, &out.Effort, &out.ServiceTier)
+		&out.ProjectID, &out.Config.ID, &out.Config.Provider, &out.Config.Model, &out.Config.ReasoningEffort, &out.Config.ServiceTier, &out.Effort, &out.ServiceTier)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

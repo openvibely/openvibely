@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,7 +33,11 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	}
 	var favoriteMu sync.Mutex
 	favorites := map[string]bool{}
+	pickerSettings := browserConversationSettings("m0")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if pickerSettings(w, r) {
+			return
+		}
 		if r.URL.Path == "/ui/model-favorites" {
 			favoriteMu.Lock()
 			defer favoriteMu.Unlock()
@@ -181,6 +186,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(sub.hidden && panel.querySelectorAll('.ov-mp-pick').length===1,'search all providers');
  panel.querySelector('.ov-mp-pick').click();
  assert(!panel.hidden && trigger.dataset.currentValue==='m23','select keeps picker open');
+ await trigger._ovModelState.ready;
  const slider=panel.querySelector('input[type=range]');
  document.documentElement.dataset.theme='light';
  assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#d5d8df','light track is light gray');
@@ -206,7 +212,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  list.style.maxHeight='';await wait();
  const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
  assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','global default uses provider and model subtext');
- defaultRow.click();
+ defaultRow.click();await trigger._ovModelState.ready;
  assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
  assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
@@ -295,7 +301,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  // Another project is selected globally; task requests must identify their own project.
  if(new URL(url,location.href).searchParams.get('project_id')!=='task-project')throw Error('task settings request used the globally selected project');
  if(options?.method==='POST'){if(failNextWrite){failNextWrite=false;return {ok:false};}const body=options.body;await new Promise(r=>setTimeout(r,20));stored[body.get('agent_id')==='default'?'b':body.get('agent_id')]=body.get('reasoning_effort');posts.push(body.get('agent_id'));return {ok:true};}
- if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id'),id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
+ if(failNextRead){failNextRead=false;return {ok:false};}const selected=new URL(url,location.href).searchParams.get('agent_id')||'a',id=selected==='default'?'b':selected;await new Promise(r=>setTimeout(r,id==='a'?80:20));return {ok:true,json:async()=>({reasoning_effort:stored[id]||''})};
  };
  </script>`+content.String()+`<div id="browser-result"></div><script>
  (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)},wait=ms=>new Promise(r=>setTimeout(r,ms));try{
@@ -451,7 +457,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
 		{ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
 	}
-	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
+	if err := ChatInputForm(ChatInputFormConfig{FormID: "task-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", TaskID: "t", ProjectID: "task-project", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true, IsRunning: true, StopEndpoint: "/stop", ActiveTurnID: "turn"}).Render(context.Background(), &content); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -464,7 +470,7 @@ func TestBrowserFunctional_TaskModelPickerQueuedSnapshot(t *testing.T) {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			_, _ = w.Write(htmx204)
-		case "/tasks/t/thread/model", "/ui/model-favorites":
+		case "/conversation/model-settings", "/ui/model-favorites":
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprint(w, `{}`)
 		case "/stop":
@@ -574,7 +580,7 @@ func TestBrowserFunctional_ModelPickerFastMode(t *testing.T) {
 localStorage.clear();window.htmx={process:function(){}};const stored={},posts=[];
 window.fetch=async(url,opts)=>{if(String(url).startsWith('/ui/model-favorites'))return {ok:true,json:async()=>({})};
 if(opts?.method==='POST'){const id=opts.body.get('agent_id');stored[id]=opts.body.get('service_tier');posts.push(Object.fromEntries(opts.body));return {ok:true};}
-const id=new URL(url,location.href).searchParams.get('agent_id');return {ok:true,json:async()=>({service_tier:stored[id]||'',reasoning_effort:''})};};
+const id=new URL(url,location.href).searchParams.get('agent_id')||'fast';return {ok:true,json:async()=>({service_tier:stored[id]||'',reasoning_effort:''})};};
 </script>`+content.String()+`<div id="browser-result"></div><script>
 (async()=>{const assert=(v,m)=>{if(!v)throw Error(m)};try{
 const trigger=document.getElementById('fast-form-agent-select');window.ovModelPicker.open(trigger);await trigger._ovModelState.ready;
@@ -590,7 +596,7 @@ toggle().click();await waitSave();assert(hidden.value==='priority','Fast selecti
 await choose('Fast model');assert(hidden.value==='default','restore per-model override');
 panel.querySelector('.ov-mp-speed .ov-mp-reset').click();await waitSave();assert(hidden.value===''&&toggle().getAttribute('aria-checked')==='true','Use default restores configured Fast');
 if(trigger.closest('form').dataset.modelSelectEndpoint){assert(posts.some(p=>p.agent_id==='fast'&&p.service_tier==='default'),'task override persisted');assert(stored.fast==='','task reset persisted');}
-else{assert(JSON.parse(localStorage.getItem('chat-service-tier-fast-project'))['other:gpt-6.1-terra']==='priority','chat override persisted');}
+assert(localStorage.getItem('chat-service-tier-fast-project')===null,'preferences are not stored in localStorage');
 await choose('Opus model');assert(!panel.querySelector('.ov-mp-speed').hidden,'Anthropic supported model exposes Fast');
 toggle().click();await waitSave();assert(hidden.value==='priority','Anthropic Fast override');
 await choose('Sonnet model');assert(panel.querySelector('.ov-mp-speed').hidden&&hidden.value==='','unsupported Anthropic model omits Fast');
@@ -603,6 +609,120 @@ document.body.dataset.testResult='pass';
 			}))
 			defer srv.Close()
 			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "fast mode "+scope, 1000, 800, 15*time.Second)
+		})
+	}
+}
+
+// Models a shared persistent API for the browser fixtures.
+func browserConversationSettings(selected string) func(http.ResponseWriter, *http.Request) bool {
+	var mu sync.Mutex
+	overrides := map[string]map[string]string{}
+	saved := false
+	return func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/conversation/model-settings" {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == http.MethodPost {
+			if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+				var payload struct {
+					AgentID    string                       `json:"agent_id"`
+					ImportOnly bool                         `json:"import_only"`
+					Overrides  map[string]map[string]string `json:"overrides"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&payload)
+				if !saved {
+					selected = payload.AgentID
+					for key, value := range payload.Overrides {
+						overrides[strings.SplitN(key, ":", 2)[0]] = value
+					}
+					saved = true
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return true
+			}
+			saved = true
+			_ = r.ParseForm()
+			selected = r.FormValue("agent_id")
+			overrides[selected] = map[string]string{"reasoning_effort": r.FormValue("reasoning_effort"), "service_tier": r.FormValue("service_tier")}
+			w.WriteHeader(http.StatusNoContent)
+			return true
+		}
+		id := r.URL.Query().Get("agent_id")
+		if id == "" {
+			id = selected
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": id, "reasoning_effort": overrides[id]["reasoning_effort"], "service_tier": overrides[id]["service_tier"]})
+		return true
+	}
+}
+
+func TestBrowserFunctional_ConversationSettingsSurviveStorageClear(t *testing.T) {
+	chrome := testChromePath(t)
+	for _, scope := range []string{"chat", "task"} {
+		t.Run(scope, func(t *testing.T) {
+			config := ChatInputFormConfig{FormID: "persist-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", ProjectID: "owner", SelectedAgentID: "a", ShowModelSelector: true, Agents: []models.LLMConfig{
+				{ID: "a", Name: "Assigned", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
+				{ID: "b", Name: "Legacy chat", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol"},
+			}}
+			if scope == "task" {
+				config.TaskID = "task"
+			}
+			var content bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &content); err != nil {
+				t.Fatal(err)
+			}
+			settings := browserConversationSettings("a")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/conversation/model-settings" {
+					if r.URL.Query().Get("project_id") != "owner" || (scope == "task" && r.URL.Query().Get("task_id") != "task") {
+						http.Error(w, "wrong project", 404)
+						return
+					}
+					settings(w, r)
+					return
+				}
+				if r.URL.Path == "/ui/model-favorites" {
+					fmt.Fprint(w, `{}`)
+					return
+				}
+				fmt.Fprint(w, `<!doctype html><html><body data-test-result="pending"><script>
+window.htmx={process(){}};
+if(!sessionStorage.getItem('reloaded')){
+ localStorage.setItem('chat-model-owner','b');
+ localStorage.setItem('chat-effort-owner',JSON.stringify({'b:gpt-6.1-sol':'medium'}));
+ localStorage.setItem('chat-service-tier-owner',JSON.stringify({'b:gpt-6.1-sol':'priority'}));
+}
+</script>`+content.String()+`<div id="browser-result"></div><script>
+(async()=>{try{
+const assert=(v,m)=>{if(!v)throw Error(m)},trigger=document.getElementById('persist-form-agent-select'),form=trigger.closest('form');
+const submitted=new Promise(resolve=>form.addEventListener('submit',event=>{event.preventDefault();resolve(new FormData(form));},{once:true}));
+form.querySelector('[name=message]').value='send before settings finish';
+form.requestSubmit();
+const sent=await submitted;
+await trigger._ovModelState.ready;
+const task=!!form.dataset.conversationTaskId;
+assert(!trigger._ovModelState.error,trigger._ovModelState.error);
+assert(trigger.dataset.currentValue===(task?'a':'b'),'selection comes from task assignment or migrated Chat settings');
+assert(sent.get('agent_id')===(task?'a':'b'),'Send waits for the restored model selection');
+if(!sessionStorage.getItem('reloaded')){
+ if(!task){assert(form.querySelector('[name=reasoning_effort]').value==='medium','legacy effort imported');assert(form.querySelector('[name=service_tier]').value==='priority','legacy Fast imported');}
+ window.ovModelPicker.open(trigger);
+ const panel=document.getElementById('conversation-model-picker'),slider=panel.querySelector('input[type=range]');
+ slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));await trigger._ovModelState.pending;
+ assert(!trigger._ovModelState.error,'save succeeded');
+ localStorage.clear();sessionStorage.setItem('reloaded','1');location.reload();return;
+}
+assert(form.querySelector('[name=reasoning_effort]').value==='high','saved effort survives clearing storage and reloading');
+assert(localStorage.getItem('chat-model-owner')===null,'does not recreate local preferences');
+document.body.dataset.testResult='pass';
+}catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;document.getElementById('browser-result').textContent=String(e);}})();
+</script></body></html>`)
+			}))
+			defer srv.Close()
+			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "shared preference persistence "+scope, 1000, 800, 20*time.Second)
 		})
 	}
 }

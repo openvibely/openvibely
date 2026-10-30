@@ -1547,9 +1547,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			data-steer-endpoint={ config.SteerEndpoint }
 			data-composer-auto-focus="true"
+			if config.ProjectID != "" {
+				data-model-select-endpoint={ "/conversation/model-settings?project_id=" + config.ProjectID }
+				if config.TaskID != "" {
+					data-conversation-task-id={ config.TaskID }
+				}
+			}
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
-				data-model-select-endpoint={ "/tasks/" + config.TaskID + "/thread/model" }
 			}
 			else
 			if config.ProjectID != "" {
@@ -2704,45 +2709,17 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						e.stopImmediatePropagation();
 						submitComposer(normalPostEndpoint, 'normal');
 					}, true);
-			// Model selector -> hidden input sync + localStorage persistence
+			// The shared picker loads and saves model preferences through the API.
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
 			var projectId = projectIdInput ? projectIdInput.value : '';
-			var modelStorageKey = projectId ? 'chat-model-' + projectId : '';
 			var modeStorageKey = projectId ? 'chat-mode-' + projectId : '';
 
 			if (agentSelect && agentInput) {
-				var agentOptList = agentSelect.parentElement ? agentSelect.parentElement.querySelector('.chat-custom-select-options') : null;
 				// Initialize the custom select UI (set label from current value, bind click handler)
 				if (window._initChatCustomSelect) window._initChatCustomSelect(agentSelect);
-				// Restore persisted selection
-				if (modelStorageKey) {
-					var saved = localStorage.getItem(modelStorageKey);
-					if (saved) {
-						// Verify the saved option still exists in the list
-						var optExists = false;
-						if (agentOptList) {
-							agentOptList.querySelectorAll('li[data-value]').forEach(function(li) {
-								if (li.dataset.value === saved) optExists = true;
-							});
-						}
-						if (optExists) {
-							if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(agentSelect, saved);
-							agentInput.value = saved;
-						} else {
-							localStorage.removeItem(modelStorageKey);
-						}
-					}
-				}
 				if (window.ovModelPicker) window.ovModelPicker.init(agentSelect);
 				agentSelect.addEventListener('chat-select-change', function(e) {
 					agentInput.value = e.detail.value;
-					if (modelStorageKey) {
-						localStorage.setItem(modelStorageKey, e.detail.value);
-					}
-					// Task threads have no localStorage persistence (keyed by
-					// ProjectID, which task threads omit); persist the
-					// selection server-side immediately so navigating away
-					// and back does not silently revert to the task default.
 					if (window.ovModelPicker) window.ovModelPicker.changed(agentSelect);
 				});
 			}

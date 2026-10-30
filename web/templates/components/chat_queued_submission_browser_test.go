@@ -42,7 +42,7 @@ func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
 				case "/htmx.js":
 					w.Header().Set("Content-Type", "text/javascript")
 					_, _ = w.Write(htmx204)
-				case "/tasks/task/thread/model":
+				case "/conversation/model-settings":
 					modelReads++
 					if tc.recovery && modelReads == 1 {
 						http.Error(w, "temporary settings failure", http.StatusInternalServerError)
