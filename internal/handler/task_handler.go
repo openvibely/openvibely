@@ -1914,6 +1914,24 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 	if expectedPath := c.QueryParam("file_path"); expectedPath != "" && (!exists || meta.File.Path != expectedPath) {
 		return echo.NewHTTPError(http.StatusConflict, "diff files changed; reload the Changes view")
 	}
+	if raw := c.QueryParam("chunk"); raw != "" {
+		chunk, err := strconv.Atoi(raw)
+		if err != nil || chunk < 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid chunk")
+		}
+		if !exists {
+			return echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
+		}
+		revision := components.DiffFileRevision(meta.File, reviewComments)
+		if expected := c.QueryParam("revision"); expected != "" && expected != revision {
+			return echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
+		}
+		chunks := components.DiffFileChunks(meta.File, view)
+		if chunk >= len(chunks) {
+			return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
+		}
+		return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], meta.Index, view, taskID, reviewComments, reviewMode, chunk, len(chunks), revision))
+	}
 	return render(c, http.StatusOK, components.LoadDiffFileCardMeta(meta, exists, view, taskID, reviewComments, reviewMode))
 }
 

@@ -1,0 +1,113 @@
+package components
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+const diffChunkRows = 200
+
+// File revisions include review annotations so unchanged cards can survive refreshes.
+func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
+	relevant := make([]models.ReviewComment, 0)
+	for _, comment := range comments {
+		if comment.FilePath == file.Path {
+			relevant = append(relevant, comment)
+		}
+	}
+	data, _ := json.Marshal(struct {
+		File     DiffFile
+		Comments []models.ReviewComment
+	}{file, relevant})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func progressiveDiffMetas(files []DiffFile, comments []models.ReviewComment) []DiffFileRenderMeta {
+	result := make([]DiffFileRenderMeta, 0, len(files))
+	for index, file := range files {
+		lines, chars := diffFileMetrics(file)
+		result = append(result, DiffFileRenderMeta{Index: index, File: file, LineCount: lines, CharCount: chars, AutoLoad: true, Revision: DiffFileRevision(file, comments)})
+	}
+	return result
+}
+
+// DiffFileChunks keeps split pairs together, even when one replacement block
+// spans several pages. Original line numbers remain the review identities.
+func DiffFileChunks(file DiffFile, view string) []DiffFile {
+	chunks := make([]DiffFile, 0)
+	current := file
+	current.Hunks = nil
+	rows, bytes := 0, 0
+	flush := func() {
+		if len(current.Hunks) > 0 {
+			chunks = append(chunks, current)
+			current.Hunks = nil
+			rows, bytes = 0, 0
+		}
+	}
+	for _, hunk := range file.Hunks {
+		var units [][]DiffLine
+		var pairs []SplitPair
+		if view == "split" {
+			pairs = buildSplitLines(hunk.Lines)
+			for _, pair := range pairs {
+				var lines []DiffLine
+				if pair.Left.Type == "ctx" {
+					lines = append(lines, pair.Left)
+				} else {
+					if pair.Left.Type != "empty" {
+						lines = append(lines, pair.Left)
+					}
+					if pair.Right.Type != "empty" {
+						lines = append(lines, pair.Right)
+					}
+				}
+				units = append(units, lines)
+			}
+		} else {
+			for _, line := range hunk.Lines {
+				units = append(units, []DiffLine{line})
+			}
+		}
+		part := DiffHunk{Header: hunk.Header}
+		appendPart := func() {
+			if len(part.Lines) > 0 {
+				current.Hunks = append(current.Hunks, part)
+				part = DiffHunk{Header: hunk.Header}
+			}
+		}
+		for index, unit := range units {
+			size := 0
+			for _, line := range unit {
+				size += len(line.Content)
+			}
+			if rows >= diffChunkRows || (bytes+size > 64*1024 && rows > 0) {
+				appendPart()
+				flush()
+			}
+			part.Lines = append(part.Lines, unit...)
+			if view == "split" {
+				part.SplitPairs = append(part.SplitPairs, pairs[index])
+			}
+			rows++
+			bytes += size
+		}
+		appendPart()
+	}
+	flush()
+	if len(chunks) == 0 {
+		chunks = append(chunks, file)
+	}
+	return chunks
+}
+
+// Preserve exact alignment when a chunk cuts through unequal replacement runs.
+func splitHunkLines(hunk DiffHunk) []SplitPair {
+	if hunk.SplitPairs != nil {
+		return hunk.SplitPairs
+	}
+	return buildSplitLines(hunk.Lines)
+}

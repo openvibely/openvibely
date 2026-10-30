@@ -1737,7 +1737,7 @@ func TestDiffViewerWithReview_RendersSharedReviewCommentRows(t *testing.T) {
 	}
 }
 
-func TestDiffViewerWithReview_LargeFileRendersLoadDiffButton(t *testing.T) {
+func TestDiffViewerWithReview_LargeFileLoadsProgressively(t *testing.T) {
 	diff := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,1000 @@\n" + strings.Repeat("+line\n", autoLoadFileDiffLines+20)
 
 	var buf bytes.Buffer
@@ -1746,11 +1746,11 @@ func TestDiffViewerWithReview_LargeFileRendersLoadDiffButton(t *testing.T) {
 	}
 	body := buf.String()
 
-	if !strings.Contains(body, "Large file diff not shown by default") {
-		t.Error("expected deferred large-file message")
+	if strings.Contains(body, "Large file diff not shown by default") || strings.Contains(body, ">Load diff<") {
+		t.Error("large files should load automatically")
 	}
-	if !strings.Contains(body, "Load diff") {
-		t.Error("expected load diff button")
+	if !strings.Contains(body, "chunk=0") {
+		t.Error("expected chunked lazy request")
 	}
 	if !strings.Contains(body, `data-copy-path="big.txt"`) {
 		t.Error("expected deferred large-file header copy path button")

@@ -32,7 +32,10 @@ templ ChangesExplorerScript() {
         var empty = document.createElement('p'); empty.className = 'explorer-empty';
         nav.append(back, search, tree, empty);
         var viewer = null, signature = '', files = [], selected = '', scope = '';
-        var states = new Map();
+        var states = new Map(), pageSize = 100, shownLimit = pageSize;
+        var more = document.createElement('button'); more.type = 'button'; more.className = 'btn btn-sm btn-ghost';
+        more.textContent = 'Show more files'; more.onclick = function() { shownLimit += pageSize; render(); };
+        nav.append(more);
         function save() { if (scope) states.set(scope, {selected: selected, query: search.value}); }
         function applySelection(expand) {
             if (!viewer) return;
@@ -55,6 +58,7 @@ templ ChangesExplorerScript() {
             files.forEach(function(file) {
                 if (query && file.path.toLowerCase().indexOf(query) < 0) return;
                 shown++;
+                if (shown > shownLimit) return;
                 var parts = file.path.split('/'), parent = tree, prefix = '';
                 parts.slice(0, -1).forEach(function(part) {
                     prefix += part + '/';
@@ -86,11 +90,12 @@ templ ChangesExplorerScript() {
                 };
                 parent.append(button);
             });
+            more.hidden = shown <= shownLimit;
             empty.hidden = shown > 0;
             empty.textContent = files.length ? 'No matching files.' : 'No changed files.';
             applySelection(false);
         }
-        search.oninput = function() { save(); render(); };
+        search.oninput = function() { shownLimit = pageSize; save(); render(); };
         window.syncChangesExplorer = function(active) {
             if (!active) { nav.remove(); return; }
             var host = document.getElementById(document.documentElement.hasAttribute('data-shell-frame') ? 'changes-explorer-host' : 'changes-explorer-mobile');
@@ -101,7 +106,7 @@ templ ChangesExplorerScript() {
             var nextFiles = nextViewer ? Array.from(nextViewer.querySelectorAll('[data-diff-index]')).map(function(el) { return {index: el.dataset.diffIndex, path: el.dataset.diffPath}; }) : [];
             var nextSignature = JSON.stringify(nextFiles);
             if (scope !== nextScope) {
-                save(); scope = nextScope;
+                save(); scope = nextScope; shownLimit = pageSize;
                 var state = states.get(scope) || {}; selected = state.selected || ''; search.value = state.query || '';
                 tree.replaceChildren();
             }

@@ -1,7 +1,6 @@
 package components
 
-// File bodies stay mounted once loaded. Only unopened files and the unused
-// layout are deferred; this is not row virtualization.
+// Progressive file loading with bounded mounted chunks and preserved reading anchors.
 templ diffViewerPerformanceScript() {
  <script>
  (function() {
@@ -101,7 +100,39 @@ templ diffViewerPerformanceScript() {
   function createController(viewer) {
    var activePanel = null, stopped = false, inFlight = 0;
    var pending = new Map(), visible = new Set(), observed = new Set();
-   var headers = new Map();
+   var headers = new Map(), chunks = new Set(), retained = [];
+   function retain(chunk) {
+    var index = retained.indexOf(chunk);
+    if (index >= 0) retained.splice(index, 1);
+    retained.push(chunk);
+    while (retained.length > 20) retained.shift()._saved = null;
+   }
+   function protectedContent(node) {
+    var selection = window.getSelection();
+    return node.contains(document.activeElement) || node.querySelector('.review-comment-form') ||
+      (selection && !selection.isCollapsed && selection.containsNode(node, true));
+   }
+   var chunkObserver = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+     var chunk = entry.target;
+     var measured = chunk.getBoundingClientRect().height;
+     if (measured > 0) chunk._height = measured;
+     chunk._near = entry.isIntersecting;
+     if (entry.isIntersecting) {
+      if (chunk._saved) { chunk.appendChild(chunk._saved); chunk._saved = null; chunk.style.minHeight = ''; }
+      if (!chunk.firstElementChild) { visible.add(chunk); }
+     } else if (chunk.firstElementChild && !protectedContent(chunk)) {
+      var height = chunk.getBoundingClientRect().height || chunk._height;
+      if (!height) return;
+      chunk.style.minHeight = height + 'px';
+      chunk._saved = document.createDocumentFragment();
+      while (chunk.firstChild) chunk._saved.appendChild(chunk.firstChild);
+      retain(chunk);
+      visible.delete(chunk);
+     }
+    });
+    pump();
+   }, {root:viewer.closest('#tab-changes') || document.getElementById('main-content'), rootMargin:'600px 0px'});
    var scroller = viewer.closest('#tab-changes') || document.getElementById('main-content');
    var loadObserver = new IntersectionObserver(function(entries) {
     entries.forEach(function(entry) {
@@ -123,23 +154,28 @@ templ diffViewerPerformanceScript() {
    }, {root:scroller, rootMargin:'-1px 0px 0px 0px', threshold:[0,1]});
 
    function expanded(card) {
-    var header = card.querySelector('[data-diff-toggle]');
+    var owner = card.closest('.diff-file-card') || card;
+    var header = owner.querySelector('[data-diff-toggle]');
     return header && !header.hasAttribute('data-collapsed');
    }
    function pump() {
     if (stopped || !viewer.isConnected) return;
     visible.forEach(function(card) {
      if (inFlight >= 3 || !card.isConnected || !activePanel || !activePanel.contains(card) ||
-         !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
+         (card.hasAttribute('data-chunk-index') && (card.firstElementChild || card._saved)) || !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
      load(card);
     });
    }
    function load(card) {
     var abort = new AbortController();
     pending.set(card, abort); inFlight++;
-    card.querySelector('[data-diff-load-status]').textContent = 'Loading diff…';
+    var status = card.querySelector('[data-diff-load-status]');
+    if (status) status.textContent = 'Loading diff…';
+    else if (!card.firstChild) card.appendChild(document.createTextNode('Loading diff…'));
+    card.setAttribute('aria-busy', 'true');
     var url = new URL(card.dataset.diffLazyUrl, location.href);
     url.searchParams.set('file_path', card.dataset.diffFilePath);
+    if (card.hasAttribute('data-chunk-index')) url.searchParams.set('chunk', card.dataset.chunkIndex);
     fetch(url, {headers:{'HX-Request':'true'}, signal:abort.signal})
      .then(function(response) {
       if (!response.ok) throw new Error('Could not load diff');
@@ -148,40 +184,94 @@ templ diffViewerPerformanceScript() {
       if (stopped || !card.isConnected) return;
       var content = document.createElement('template');
       content.innerHTML = html;
-      var replacement = content.content.firstElementChild;
-      if (!replacement || replacement.id !== card.id) throw new Error('Diff changed; reload the Changes view');
+      var response = content.content.querySelector('[data-diff-chunk-response]');
+      var replacement = response ? response.querySelector('.diff-file-card') : content.content.firstElementChild;
+      if (!replacement || (!response && replacement.id !== card.id)) throw new Error('Diff changed; reload the Changes view');
       // Swap only this card. HTMX preserves its normal cleanup, processing,
       // and afterSwap/afterSettle hooks, including saved collapse state.
       var scroll = window._captureDiffScroll();
       var saved = card._diffScrollAnchor;
       if (saved && scroller && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) scroll = saved.snapshot;
-      htmx.swap(card, html, {swapStyle:'outerHTML'});
+      if (response) {
+       var body = replacement.querySelector('.diff-file-body');
+       if (card.hasAttribute('data-chunk-index')) {
+        card.replaceChildren();
+        while (body.firstChild) card.appendChild(body.firstChild);
+        card.style.minHeight = '';
+        visible.delete(card);
+        chunkObserver.unobserve(card); chunkObserver.observe(card);
+       } else {
+        var destination = card.querySelector('.diff-file-body');
+        destination.replaceChildren();
+        var count = Number(response.dataset.chunks);
+        loadObserver.unobserve(card); observed.delete(card);
+        for (var i=0; i<count; i++) {
+         var chunk = document.createElement('div');
+         chunk.dataset.chunkIndex = String(i);
+         chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
+         chunk.dataset.diffFilePath = card.dataset.diffFilePath;
+         if (i === 0) { while (body.firstChild) chunk.appendChild(body.firstChild); }
+         else { chunk.style.minHeight = '4000px'; chunk.setAttribute('aria-label', 'Diff lines load when visible'); }
+         destination.appendChild(chunk);
+        }
+        card.dataset.chunkUrl = card.dataset.diffLazyUrl;
+        delete card.dataset.diffLazyUrl;
+        card.style.minHeight = '';
+        visible.delete(card);
+       }
+       if (window.htmx) htmx.process(card);
+      } else htmx.swap(card, html, {swapStyle:'outerHTML'});
       window._restoreDiffScroll(scroll, false);
      }).catch(function(error) {
       if (stopped || !card.isConnected || error.name === 'AbortError') return;
       card.dataset.diffLoadFailed = 'true';
-      card.querySelector('[data-diff-load-status]').textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
-      card.querySelector('[data-diff-retry]').classList.remove('hidden');
+      var status = card.querySelector('[data-diff-load-status]');
+      if (status) {
+       status.textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
+       card.querySelector('[data-diff-retry]').classList.remove('hidden');
+      } else {
+       card.replaceChildren();
+       var retry = document.createElement('button'); retry.className = 'btn btn-sm btn-ghost';
+       retry.textContent = 'Unable to load lines. Retry';
+       retry.onclick = function() { delete card.dataset.diffLoadFailed; card.replaceChildren(); visible.add(card); pump(); };
+       card.appendChild(retry);
+      }
      }).finally(function() {
-      pending.delete(card); inFlight--;
+      card.removeAttribute('aria-busy'); pending.delete(card); inFlight--;
       if (!stopped) refresh();
      });
    }
+   function reconsiderProtected() {
+    chunks.forEach(function(chunk) {
+     if (!chunk._near && chunk.firstElementChild && !protectedContent(chunk)) {
+      chunkObserver.unobserve(chunk); chunkObserver.observe(chunk);
+     }
+    });
+   }
+   var interactionObserver = new MutationObserver(reconsiderProtected);
+   interactionObserver.observe(viewer, {childList:true, subtree:true});
+   document.addEventListener('selectionchange', reconsiderProtected);
+   viewer.addEventListener('focusout', reconsiderProtected);
    function refresh() {
     if (stopped || !viewer.isConnected) return;
     var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+    reconsiderProtected();
     if (activePanel !== panel) {
+     pending.forEach(function(abort, card) { if (!panel || !panel.contains(card)) abort.abort(); });
      loadObserver.disconnect(); stickyObserver.disconnect();
-     observed.clear(); visible.clear(); headers.clear(); activePanel = panel;
+     observed.clear(); visible.clear(); headers.clear(); chunkObserver.disconnect(); chunks.clear(); activePanel = panel;
     }
     if (!panel) return;
     observed.forEach(function(card) {
-     if (!card.isConnected) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
+     if (!card.isConnected || !card.hasAttribute('data-diff-lazy-url')) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
     });
     headers.forEach(function(header, sentinel) {
      if (!header.isConnected) { stickyObserver.unobserve(sentinel); headers.delete(sentinel); }
     });
-    panel.querySelectorAll('[data-diff-lazy-url]').forEach(function(card) {
+    viewer.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
+     if (!chunks.has(chunk)) { chunks.add(chunk); if (chunk._saved) retain(chunk); chunkObserver.observe(chunk); }
+    });
+    panel.querySelectorAll('.diff-file-card[data-diff-lazy-url]').forEach(function(card) {
      if (observed.has(card)) return;
      observed.add(card); loadObserver.observe(card);
     });
@@ -201,7 +291,11 @@ templ diffViewerPerformanceScript() {
    }
    return {refresh:refresh, destroy:function() {
     stopped = true;
+    interactionObserver.disconnect();
+    document.removeEventListener('selectionchange', reconsiderProtected);
+    viewer.removeEventListener('focusout', reconsiderProtected);
     loadObserver.disconnect(); stickyObserver.disconnect();
+    chunkObserver.disconnect(); chunks.clear(); retained.length = 0;
     pending.forEach(function(abort) { abort.abort(); });
     visible.clear(); observed.clear(); headers.clear();
    }};

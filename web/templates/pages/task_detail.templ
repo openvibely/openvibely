@@ -1798,6 +1798,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					var changesContent = document.getElementById('changes-content');
 					if (!changesContent) return;
 					if (!_isChangesTabActive()) return;
+                    if (changesContent.querySelector('.review-comment-form')) return;
 
 					// Debounce: skip if an update is already in flight
 					if (_fileChangesUpdatePending) return;
@@ -1828,6 +1829,11 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							// Diff unchanged — no DOM mutation, no scroll disruption.
 							return;
 						}
+                        // A response arriving while the reader starts a draft must
+                        // not remove the editor. The next refresh retries it.
+                        var selection = window.getSelection();
+                        if (changesContent.querySelector('.review-comment-form') ||
+                            (selection && !selection.isCollapsed && selection.containsNode(changesContent, true))) return;
 						_lastDiffFingerprint = newFp;
 
 						// Content changed — apply the swap with UI state preservation.
@@ -1838,7 +1844,43 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							var diffScroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
                             var oldViewer = changesContent.querySelector('#diff-viewer');
                             if (oldViewer && oldViewer._diffPerformance) oldViewer._diffPerformance.destroy();
-                            changesContent.innerHTML = html;
+                            // Reuse unchanged bodies by path and revision, even if file order moved.
+                            if (oldViewer) {
+                                ['inline', 'split'].forEach(function(mode) {
+                                    var previous = new Map();
+                                    oldViewer.querySelectorAll('#diff-content-' + mode + ' .diff-file-card').forEach(function(card) {
+                                        var path = card.querySelector('[data-copy-path]');
+                                        if (path) previous.set(path.dataset.copyPath, card);
+                                    });
+                                    offscreen.querySelectorAll('#diff-content-' + mode + ' .diff-file-card').forEach(function(card) {
+                                        var path = card.querySelector('[data-copy-path]');
+                                        var old = path && previous.get(path.dataset.copyPath);
+                                        if (!old) return;
+                                        var header = old.querySelector('[data-diff-toggle]');
+                                        var nextViewer = offscreen.querySelector('#diff-viewer');
+                                        if (header && nextViewer && window._diffFileState) {
+                                            var bucket = window._diffFileState[nextViewer.dataset.stateKey] || {};
+                                            bucket[card.id.replace('diff-file-', '').replace('split-', '')] = !header.hasAttribute('data-collapsed');
+                                            window._diffFileState[nextViewer.dataset.stateKey] = bucket;
+                                        }
+                                        if (header && header.hasAttribute('data-collapsed')) {
+                                            card.querySelector('[data-diff-toggle]').setAttribute('data-collapsed', '');
+                                            card.querySelector('.diff-file-body').style.maxHeight = '0';
+                                        }
+                                        if (!old.dataset.fileRevision || old.dataset.fileRevision !== card.dataset.fileRevision || !old.dataset.chunkUrl) return;
+                                        var body = old.querySelector('.diff-file-body');
+                                        var nextBody = card.querySelector('.diff-file-body');
+                                        body.id = nextBody.id;
+                                        body.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
+                                            chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
+                                        });
+                                        nextBody.replaceWith(body);
+                                        card.dataset.chunkUrl = card.dataset.diffLazyUrl;
+                                        delete card.dataset.diffLazyUrl;
+                                    });
+                                });
+                            }
+                            changesContent.replaceChildren(...Array.from(offscreen.childNodes));
 							if (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {
 								htmx.process(changesContent);
 							}

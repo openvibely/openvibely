@@ -124,6 +124,31 @@ diff --git a/b.txt b/b.txt
 		}
 	}
 
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		{"chunk=0", http.StatusOK},
+		{"chunk=-1", http.StatusBadRequest},
+		{"chunk=999", http.StatusBadRequest},
+		{"chunk=0&revision=stale", http.StatusConflict},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split&review=true&"+tc.query, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		if err := h.GetTaskChangesFile(c); err != nil {
+			e.HTTPErrorHandler(err, c)
+		}
+		if rec.Code != tc.status {
+			t.Fatalf("%s: got %d want %d", tc.query, rec.Code, tc.status)
+		}
+		if tc.status == http.StatusOK && !strings.Contains(rec.Body.String(), "data-diff-chunk-response") {
+			t.Fatal("missing chunk metadata")
+		}
+	}
+
 	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=false", nil)
 	noReviewRec := httptest.NewRecorder()
 	noReviewContext := e.NewContext(noReviewReq, noReviewRec)
