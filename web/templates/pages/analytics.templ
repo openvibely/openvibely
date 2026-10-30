@@ -1915,6 +1915,8 @@ templ analyticsContent(currentProject *models.Project) {
                                     }
 									async function loadUsageAccounts(refreshUsage) {
 										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
+										if (!target) return;
+										target.dataset.analyticsUsageGeneration=String(generation);
 										try {
 											const params=usageEvidenceParams();params.set('projection','accounts');
 											const inventory=await fetchJSON('/api/analytics/usage?'+params.toString());
@@ -1934,8 +1936,8 @@ templ analyticsContent(currentProject *models.Project) {
                                                 }
                                                 return card;
 											});
-											await Promise.allSettled(accounts.map(async function(account,index){
-												const card=cards[index];
+											async function loadAccount(index) {
+												const account=accounts[index], card=cards[index];
 												try {
 													const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);
 													if(refreshUsage)query.set('refresh','true');
@@ -1946,15 +1948,31 @@ templ analyticsContent(currentProject *models.Project) {
 													if(bodies.length){card.replaceChildren(...bodies);await loadResetCredits(card,account);}
 													else card.querySelector('p').textContent='No live limit snapshot yet';
 												} catch(e) {
-													if(e.name==='AbortError'||generation!==dataGeneration)return;
-													card.querySelector('p').textContent='Provider limits unavailable';
+													if(e.name==='AbortError'||generation!==dataGeneration){
+														const message=card.querySelector('p');
+														if(card.isConnected&&message)message.textContent='Provider usage loading cancelled. Refresh to retry.';
+													} else {
+														card.querySelector('p').textContent='Provider limits unavailable';
+													}
+												} finally {
+													card.removeAttribute('aria-busy');
 												}
-												card.removeAttribute('aria-busy');
+											}
+											let nextAccountIndex=0;
+											// Provider requests can stall; leave same-origin connections available for navigation.
+											const workerCount=Math.min(2,accounts.length);
+											await Promise.allSettled(Array.from({length:workerCount},async function(){
+												while(generation===dataGeneration){
+													const index=nextAccountIndex++;
+													if(index>=accounts.length)return;
+													await loadAccount(index);
+													if(generation!==dataGeneration)return;
+												}
 											}));
-											if(generation===dataGeneration)target.removeAttribute('aria-busy');
-										} catch(e) {
-											if(e.name==='AbortError'||generation!==dataGeneration)return;
-											target.removeAttribute('aria-busy');target.textContent='Provider limits unavailable';
+										if(target.isConnected&&target.dataset.analyticsUsageGeneration===String(generation))target.removeAttribute('aria-busy');
+									} catch(e) {
+										if(e.name!=='AbortError'&&generation===dataGeneration){target.removeAttribute('aria-busy');target.textContent='Provider limits unavailable';}
+										else if(target.isConnected&&target.dataset.analyticsUsageGeneration===String(generation))target.removeAttribute('aria-busy');
 										}
 									}
 								// Load Success/Failure Rates
