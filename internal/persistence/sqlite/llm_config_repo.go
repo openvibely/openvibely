@@ -24,7 +24,7 @@ const llmConfigColumns = `a.id, a.name, a.provider, a.model, a.reasoning_effort,
 	a.max_workers, a.worker_timeout, a.oauth_client_id, a.oauth_client_secret, a.oauth_authorize_url, a.oauth_token_url, a.oauth_scopes, a.ollama_base_url, a.base_url, a.transport, a.preset_slug, a.models_url, a.auth_header_name, a.auth_header_value_prefix, a.extra_headers_json, a.extra_body_json, a.default_max_tokens, a.context_window, a.compaction_threshold, a.provider_context_window, a.provider_max_output_tokens, a.token_exchange_format, a.token_refresh_format, a.custom_auth_config_json, a.custom_auth_state_json, a.oauth_config_revision, a.mixture_config_json, a.auto_start_tasks,
 	COALESCE(a.oauth_connection_id, ''), COALESCE(c.name, ''), COALESCE(c.provider, ''),
 	COALESCE(c.oauth_access_token, ''), COALESCE(c.oauth_refresh_token, ''), COALESCE(c.oauth_expires_at, 0),
-	COALESCE(c.oauth_account_id, ''), COALESCE(c.oauth_needs_reauth, 1), COALESCE(c.oauth_revision, -1)`
+		COALESCE(c.oauth_account_id, ''), COALESCE(c.oauth_needs_reauth, 1), COALESCE(c.oauth_revision, -1), COALESCE(c.oauth_provider_display_name, '')`
 
 // llmConfigCardColumns is the bounded Models-page projection. Credential bodies,
 // edit-only endpoint settings, request JSON, custom-auth JSON, and full mixture
@@ -108,7 +108,7 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 		&a.DefaultMaxTokens, &a.ContextWindow, &a.CompactionThreshold, &a.ProviderContextWindow, &a.ProviderMaxOutputTokens, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.CustomAuthConfigJSON, &a.CustomAuthStateJSON, &a.OAuthConfigRevision, &a.MixtureConfigJSON, &a.AutoStartTasks,
 		&a.OAuthConnectionID, &a.OAuthConnectionName, &connectionProvider,
 		&connectionAccessToken, &connectionRefreshToken, &connectionExpiresAt,
-		&connectionAccountID, &connectionNeedsReauth, &connectionRevision); err != nil {
+		&connectionAccountID, &connectionNeedsReauth, &connectionRevision, &a.OAuthProviderDisplayName); err != nil {
 		return err
 	}
 	if a.OAuthConnectionID == "" {
