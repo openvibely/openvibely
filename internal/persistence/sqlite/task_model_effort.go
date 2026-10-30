@@ -4,66 +4,103 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// Effort overrides are tied to a saved configuration AND its underlying model.
-// Editing a configuration to use another model must not inherit stale effort.
 func (r *TaskRepo) SetModelEffort(ctx context.Context, taskID string, agent models.LLMConfig, effort string) error {
+	return r.SetModelOverrides(ctx, taskID, agent, &effort, nil)
+}
 
-	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO task_model_efforts (task_id, agent_config_id, model, effort) VALUES (?, ?, ?, ?)
- ON CONFLICT(task_id, agent_config_id) DO UPDATE SET model=excluded.model, effort=excluded.effort`, taskID, agent.ID, agent.Model, effort)
+// SetModelOverrides saves both controls atomically. Nil preserves the other
+// control; an empty value resets only that control to the model default.
+func (r *TaskRepo) SetModelOverrides(ctx context.Context, taskID string, agent models.LLMConfig, effort, tier *string) error {
+	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO task_model_overrides(task_id,agent_config_id,model,effort,service_tier)
+ VALUES(?,?,?,?,?) ON CONFLICT(task_id,agent_config_id,model) DO UPDATE SET
+ effort=COALESCE(excluded.effort,task_model_overrides.effort),
+ service_tier=COALESCE(excluded.service_tier,task_model_overrides.service_tier)`, taskID, agent.ID, agent.Model, effort, tier)
 	return err
 }
 
 func (r *TaskRepo) ModelEffort(ctx context.Context, taskID string, agent models.LLMConfig) (string, error) {
-	return modelEffort(ctx, r.db, taskID, agent)
+	effort, _, err := modelOverrides(ctx, r.db, taskID, agent)
+	return effort, err
 }
 
-type modelEffortQuerier interface {
+type modelOverrideQuerier interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
-func modelEffort(ctx context.Context, db modelEffortQuerier, taskID string, agent models.LLMConfig) (string, error) {
-	var effort string
-	err := db.QueryRowContext(ctx, "SELECT effort FROM task_model_efforts WHERE task_id = ? AND agent_config_id = ? AND model = ?", taskID, agent.ID, agent.Model).Scan(&effort)
+// Each field inherits independently. NULL inherits; explicit empty does not.
+const taskOverrideJoins = `
+ LEFT JOIN tasks parent ON parent.id=t.parent_task_id
+     AND t.swarm_role='planner' AND parent.swarm_role='swarm_parent'
+ LEFT JOIN task_model_overrides own ON own.task_id=t.id
+     AND own.agent_config_id=a.id AND own.model=a.model
+ LEFT JOIN task_model_overrides inherited ON inherited.task_id=parent.id
+     AND inherited.agent_config_id=a.id AND inherited.model=a.model`
+
+func validModelOverrides(agent models.LLMConfig, effort, tier string) (string, string) {
+	if !models.ValidConversationEffort(agent, effort) {
+		effort = ""
+	}
+	if !models.ValidServiceTier(agent, tier) {
+		tier = ""
+	}
+	return effort, tier
+}
+
+func modelOverrides(ctx context.Context, db modelOverrideQuerier, taskID string, agent models.LLMConfig) (string, string, error) {
+	var effort, tier string
+	err := db.QueryRowContext(ctx, `SELECT COALESCE(own.effort,inherited.effort,''),
+ COALESCE(own.service_tier,inherited.service_tier,'')
+ FROM tasks t CROSS JOIN (SELECT ? AS id, ? AS model) a`+taskOverrideJoins+` WHERE t.id=?`, agent.ID, agent.Model, taskID).Scan(&effort, &tier)
 	if errors.Is(err, sql.ErrNoRows) {
-		// A swarm parent conversation runs on its planner. Other swarm roles
-		// keep their own defaults. An explicit empty child row resets inheritance.
-		err = db.QueryRowContext(ctx, `SELECT e.effort FROM tasks child
-            JOIN tasks parent ON parent.id = child.parent_task_id
-            JOIN task_model_efforts e ON e.task_id = parent.id
-            WHERE child.id = ? AND child.swarm_role = 'planner'
-              AND parent.swarm_role = 'swarm_parent'
-              AND e.agent_config_id = ? AND e.model = ?`, taskID, agent.ID, agent.Model).Scan(&effort)
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
-		}
+		return "", "", nil
 	}
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if !models.ValidConversationEffort(agent, effort) {
-		return "", nil
-	}
-	return effort, nil
+	effort, tier = validModelOverrides(agent, effort, tier)
+	return effort, tier, nil
 }
 
 func (r *TaskRepo) ApplyModelEffort(ctx context.Context, taskID string, agent *models.LLMConfig) error {
 	if agent == nil {
 		return nil
 	}
-	effort, err := r.ModelEffort(ctx, taskID, *agent)
+	effort, tier, err := modelOverrides(ctx, r.db, taskID, *agent)
 	if err != nil {
 		return err
 	}
 	if effort != "" {
 		agent.ReasoningEffort = effort
 	}
-	tier, err := r.ModelServiceTier(ctx, taskID, *agent)
-	if err == nil && tier != "" {
+	if tier != "" {
 		agent.ServiceTier = tier
 	}
-	return err
+	return nil
+}
+
+// TaskModelSettings reads task, configuration defaults, and both overrides in
+// one statement. The picker can request another configuration before selecting it.
+func (r *TaskRepo) TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error) {
+	var out models.TaskModelSettings
+	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(a.id,''),COALESCE(a.provider,''),COALESCE(a.model,''),
+ COALESCE(a.reasoning_effort,''),COALESCE(a.service_tier,''),
+ COALESCE(own.effort,inherited.effort,''),COALESCE(own.service_tier,inherited.service_tier,'')
+ FROM tasks t
+ LEFT JOIN projects p ON p.id=t.project_id
+ LEFT JOIN agent_configs a ON a.id=CASE
+ WHEN ?='default' THEN COALESCE(p.default_agent_config_id,
+     (SELECT id FROM agent_configs ORDER BY is_default DESC,name ASC,id ASC LIMIT 1))
+ WHEN ?='' THEN t.agent_id ELSE ? END`+taskOverrideJoins+` WHERE t.id=?`, selectedID, selectedID, selectedID, taskID).Scan(
+		&out.Config.ID, &out.Config.Provider, &out.Config.Model, &out.Config.ReasoningEffort, &out.Config.ServiceTier, &out.Effort, &out.ServiceTier)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out.Effort, out.ServiceTier = validModelOverrides(out.Config, out.Effort, out.ServiceTier)
+	return &out, nil
 }

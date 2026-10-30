@@ -649,6 +649,8 @@ type TaskPullRequestStore interface {
 
 // TaskStore persists tasks and their lifecycle state.
 type TaskStore interface {
+	TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error)
+	SetModelOverrides(ctx context.Context, taskID string, agent models.LLMConfig, effort, tier *string) error
 	ActivateAllBacklog(ctx context.Context, projectID string) (int, error)
 	ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error)
 	ActiveMergeConflictOwner(ctx context.Context, projectID string) (string, error)
