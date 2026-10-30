@@ -28,7 +28,12 @@ func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var content bytes.Buffer
 			agents := []models.LLMConfig{{ID: "a", Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-5.5"}, {ID: "b", Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-5.5"}}
-			err := ChatInputForm(ChatInputFormConfig{FormID: "audit-form", InputID: "message", TargetID: "messages", PostEndpoint: "/send", SteerEndpoint: "/steer", IsRunning: true, ActiveTurnID: "turn", TaskID: tc.taskID, ProjectID: "project", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content)
+			sendEndpoint, steerEndpoint := "/send", "/steer"
+			if tc.taskID != "" {
+				sendEndpoint += "?project_id=project"
+				steerEndpoint += "?project_id=project"
+			}
+			err := ChatInputForm(ChatInputFormConfig{FormID: "audit-form", InputID: "message", TargetID: "messages", PostEndpoint: sendEndpoint, SteerEndpoint: steerEndpoint, IsRunning: true, ActiveTurnID: "turn", TaskID: tc.taskID, ProjectID: "project", Agents: agents, SelectedAgentID: "a", ShowModelSelector: true}).Render(context.Background(), &content)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,6 +65,10 @@ func TestBrowserFunctional_ChatQueuedSubmissionSnapshots(t *testing.T) {
 					defer mu.Unlock()
 					_ = json.NewEncoder(w).Encode(records)
 				case "/send", "/steer":
+					if tc.taskID != "" && r.URL.Query().Get("project_id") != "project" {
+						http.Error(w, "task request lost project context", http.StatusNotFound)
+						return
+					}
 					_ = r.ParseForm()
 					record := map[string]string{"path": r.URL.Path}
 					for key := range r.PostForm {
