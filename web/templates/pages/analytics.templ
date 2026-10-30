@@ -1843,17 +1843,18 @@ templ analyticsContent(currentProject *models.Project) {
 
                                     async function loadResetCredits(card, account) {
                                         if(!['openai','anthropic'].includes(account.provider)) return;
-                                        const section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';
-                                        card.querySelector('.card-body').appendChild(section);
-                                        section.textContent='Loading usage resets…';
+                                        let section=null;
                                         const attempts=new Map();
                                         async function refreshResets(){
                                             try {
                                                 const data=await fetchJSON('/api/analytics/usage/resets?account_key='+encodeURIComponent(account.key));
-                                                if(!section.isConnected)return;
+                                                if(!card.isConnected)return;
+                                                const availableCount=Number(data.available_count ?? data.availableCount ?? 0);
+                                                if(!(availableCount>0)){if(section)section.remove();return;}
+                                                if(!section){section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';card.querySelector('.card-body').appendChild(section);}
                                                 section.replaceChildren();
                                                 const heading=document.createElement('div');heading.className='font-semibold';
-                                                heading.textContent='Usage resets available: '+Number(data.available_count ?? data.availableCount ?? 0);section.appendChild(heading);
+                                                heading.textContent='Usage resets available: '+availableCount;section.appendChild(heading);
                                                 if(data.unavailable_reason){const reason=document.createElement('p');reason.className='text-xs opacity-60 mt-2';reason.textContent=String(data.unavailable_reason).replaceAll('_',' ');section.appendChild(reason);}
                                                 const credits=data.credits;
                                                 if(!Array.isArray(credits)){
@@ -1892,7 +1893,7 @@ templ analyticsContent(currentProject *models.Project) {
                                                     },{signal:eventSignal});
                                                     row.append(details,button);section.appendChild(row);
                                                 });
-                                            }catch(e){if(e.name!=='AbortError')section.textContent='Usage resets unavailable.';}
+                                            }catch(e){if(e.name!=='AbortError'&&card.isConnected){if(!section){section=document.createElement('div');section.className='mt-4 pt-4 border-t border-base-300';card.querySelector('.card-body').appendChild(section);}section.textContent='Usage resets unavailable.';}}
                                         }
                                         await refreshResets();
                                     }
