@@ -13,7 +13,8 @@ import (
 )
 
 // ChatOutputBefore serves preceding complete public blocks for automatic scroll
-// loading. Authorization is the same project boundary as the containing thread.
+// loading. before=0 refreshes the latest window after a stale cursor. Authorization
+// is the same project boundary as the containing thread.
 func (h *Handler) ChatOutputBefore(c echo.Context) error {
 	ctx := c.Request().Context()
 	project, err := h.getCurrentProjectID(c)
@@ -21,7 +22,7 @@ func (h *Handler) ChatOutputBefore(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
 	before, err := strconv.ParseInt(c.QueryParam("before"), 10, 64)
-	if err != nil || before <= 0 {
+	if err != nil || before < 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid output cursor")
 	}
 	store, ok := h.execRepo.(interface {
@@ -40,7 +41,7 @@ func (h *Handler) ChatOutputBefore(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError)
 	}
-	if tail.Revision != c.QueryParam("revision") {
+	if before != 0 && tail.Revision != c.QueryParam("revision") {
 		return echo.NewHTTPError(http.StatusConflict, "Output changed; refresh the thread")
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")

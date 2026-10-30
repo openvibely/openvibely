@@ -30,26 +30,51 @@
         const pair = node.closest('[data-execution-pair]');
         if (!pair) return;
         initialize(pair);
-        const [before, revision] = node.dataset.outputWindow.split(':');
+        let cursor = node.dataset.outputWindow;
         const project = pair.closest('[data-project-id]')?.dataset.projectId || document.getElementById('project-selector')?.value || '';
         const controller = new AbortController();
         pending.set(node, controller);
-        const params = new URLSearchParams({ before, revision, project_id: project });
-        try {
-            const response = await fetch('/chat/output/' + encodeURIComponent(pair.dataset.execId) + '?' + params, {signal: controller.signal});
-            if (!response.ok) return; // A subsequent upward scroll can retry transient failures.
-            const page = await response.json();
-            if (!node.isConnected || controller.signal.aborted || page.revision !== revision) return;
+        const current = () => node.isConnected && !controller.signal.aborted && node.dataset.outputWindow === cursor;
+        const request = (before, revision) => fetch('/chat/output/' + encodeURIComponent(pair.dataset.execId) + '?' +
+            new URLSearchParams({before, revision, project_id: project}), {signal: controller.signal});
+        async function apply(page, replace) {
             const height = messages.scrollHeight;
-            const text = page.text + (node.getAttribute('data-raw-content') || '');
-            window.setChatRawContent(node, text);
-            node.dataset.outputWindow = page.before !== '0' ? page.before + ':' + revision : '';
+            const text = page.text + (replace ? '' : (node.getAttribute('data-raw-content') || ''));
+            const rawRevision = window.setChatRawContent(node, text);
+            cursor = page.before !== '0' ? page.before + ':' + page.revision : '';
+            node.dataset.outputWindow = cursor;
+            if (replace) {
+                // Invalidate the old navigation seed too; never cache a mixture
+                // of the obsolete response and newly fetched history.
+                node._outputWindowSeed = {text, cursor, revision: rawRevision};
+            }
             await window.renderStreamingContent(node, text);
-            if (!node.isConnected) return;
-            // Keep the already visible suffix at the same reading position.
+            if (!current()) return;
+            // Keep the visible suffix at the same reading position.
             messages.scrollTop += messages.scrollHeight - height;
             positions.set(messages, messages.scrollTop);
             window.rebaseChatVirtualScroll?.(messages);
+        }
+        try {
+            let [before, revision] = cursor.split(':');
+            let response = await request(before, revision);
+            if (!current()) return;
+            if (response.status === 409) {
+                response = await request('0', '');
+                if (!response.ok || !current()) return;
+                const latest = await response.json();
+                if (!current()) return;
+                await apply(latest, true);
+                if (!current() || !cursor) return;
+                // Retry the user's upward request once with the refreshed cursor.
+                // A second conflict waits for another gesture, rather than looping.
+                [before, revision] = cursor.split(':');
+                response = await request(before, revision);
+            }
+            if (!response.ok || !current()) return;
+            const page = await response.json();
+            if (!current() || page.revision !== revision) return;
+            await apply(page, false);
         } catch (error) {
             if (error.name !== 'AbortError') console.debug('History load failed', error);
         } finally { pending.delete(node); }

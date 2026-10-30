@@ -191,3 +191,76 @@ func TestBrowserFunctional_ByteWindowToolStateAndTouch(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_ByteWindowStaleCursorRecovery(t *testing.T) {
+	for _, scenario := range []string{"retry", "complete", "conflict-again"} {
+		t.Run(scenario, func(t *testing.T) {
+			chrome := chatNavigationChromePath(t)
+			oldText := "OBSOLETE_TEXT\n\n" + strings.Repeat("Latest paragraph.\n\n", 120)
+			newText := "REFRESHED_TEXT\n\n" + strings.Repeat("Latest paragraph.\n\n", 120)
+			var requests, refreshes, retries atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				if r.URL.Path == "/chat/output/stale-exec" {
+					requests.Add(1)
+					if r.URL.Query().Get("project_id") != "stale-project" {
+						http.Error(w, "wrong project", http.StatusNotFound)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					switch r.URL.Query().Get("before") {
+					case "123":
+						http.Error(w, "stale cursor", http.StatusConflict)
+					case "0":
+						refreshes.Add(1)
+						tail := models.DisplayTail{Text: newText, Revision: "fresh", Before: 456}
+						if scenario == "complete" {
+							tail.Before = 0
+						}
+						_ = json.NewEncoder(w).Encode(tail)
+					case "456":
+						retries.Add(1)
+						if scenario == "conflict-again" || r.URL.Query().Get("revision") != "fresh" {
+							http.Error(w, "changed again", http.StatusConflict)
+							return
+						}
+						_ = json.NewEncoder(w).Encode(models.DisplayTail{Text: "FRESH_EARLIER\n\n", Revision: "fresh"})
+					default:
+						http.Error(w, "unexpected cursor", http.StatusBadRequest)
+					}
+					return
+				}
+				if r.URL.Path != "/chat" {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				history := []models.Execution{{ID: "stale-exec", TaskID: "stale-task", Status: models.ExecCompleted, PromptSent: "Question", Output: oldText, StartedAt: time.Unix(1, 0), DisplayTail: &models.DisplayTail{Before: 123, Revision: "old"}}}
+				_ = Chat([]models.Project{{ID: "stale-project", Name: "Stale"}}, "stale-project", nil, history, nil, nil, nil, false, false, 5).Render(r.Context(), w)
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=stale-project", "stale-window", func(b *composerFocusCDP) {
+				b.waitFor("initial window", `String(!!document.querySelector('.chat-stream-content')?._outputWindowSeed && document.getElementById('chat-messages').dataset.transcriptHydrating!=='true')`, "true")
+				b.evaluate(`(() => {const m=document.getElementById('chat-messages');m.scrollTop=0;window.cursorAnchor=()=>Array.from(document.querySelectorAll('.chat-stream-content p')).find(p=>p.textContent==='Latest paragraph.')?.getBoundingClientRect().top;window.cursorAnchorTop=window.cursorAnchor();m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));return 'load';})()`)
+				b.waitFor("fresh replacement and cache seed", `String((()=>{const n=document.querySelector('.chat-stream-content');const text=n.getAttribute('data-raw-content');return text.includes('REFRESHED_TEXT') && !text.includes('OBSOLETE_TEXT') && n._outputWindowSeed.text.includes('REFRESHED_TEXT') && !n._outputWindowSeed.text.includes('FRESH_EARLIER')})())`, "true")
+				expectedRequests := int32(3)
+				if scenario == "conflict-again" {
+					b.waitFor("bounded retry finished", `String(performance.getEntriesByType('resource').filter(e=>e.name.includes('/chat/output/')).length===3)`, "true")
+					b.waitFor("fresh cursor retained", `document.querySelector('.chat-stream-content').dataset.outputWindow`, "456:fresh")
+				} else {
+					b.waitFor("cursor exhausted", `document.querySelector('.chat-stream-content').dataset.outputWindow`, "")
+					if scenario == "retry" {
+						b.waitFor("older content automatically retried", `String(document.querySelector('.chat-stream-content').getAttribute('data-raw-content').startsWith('FRESH_EARLIER'))`, "true")
+					} else {
+						expectedRequests = 2
+					}
+				}
+				b.waitFor("reading position preserved", `String(Number.isFinite(window.cursorAnchorTop) && Math.abs(window.cursorAnchor()-window.cursorAnchorTop)<3)`, "true")
+				if requests.Load() != expectedRequests || refreshes.Load() != 1 || retries.Load() != expectedRequests-2 {
+					t.Fatalf("requests=%d refreshes=%d retries=%d", requests.Load(), refreshes.Load(), retries.Load())
+				}
+			})
+		})
+	}
+}

@@ -98,4 +98,20 @@ func TestOutputWindowProjectScopeAndContinuation(t *testing.T) {
 	require.Equal(t, output, joined)
 	stale := htmxGet(e, fmt.Sprintf("/chat/output/%s?before=%d&revision=stale&project_id=%s", execution.ID, tail.Before, project.ID))
 	require.Equal(t, http.StatusConflict, stale.Code)
+
+	// A conflict can refresh the latest bounded window without an old revision,
+	// but must retain exactly the same project authorization.
+	refreshPath := fmt.Sprintf("/chat/output/%s?before=0&revision=stale&project_id=", execution.ID)
+	require.Equal(t, http.StatusNotFound, htmxGet(e, refreshPath+other.ID).Code)
+	refresh := htmxGet(e, refreshPath+project.ID)
+	require.Equal(t, http.StatusOK, refresh.Code)
+	require.Equal(t, "no-store", refresh.Header().Get("Cache-Control"))
+	var latest models.DisplayTail
+	require.NoError(t, json.Unmarshal(refresh.Body.Bytes(), &latest))
+	require.Equal(t, tail.Before, latest.Before)
+	require.Equal(t, tail.Revision, latest.Revision)
+	require.Equal(t, execution.Output, latest.Text)
+	for _, cursor := range []string{"", "-1", "invalid"} {
+		require.Equal(t, http.StatusBadRequest, htmxGet(e, fmt.Sprintf("/chat/output/%s?before=%s&project_id=%s", execution.ID, cursor, project.ID)).Code)
+	}
 }
