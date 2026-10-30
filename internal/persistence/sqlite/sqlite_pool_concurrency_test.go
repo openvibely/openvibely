@@ -68,6 +68,65 @@ func TestDedicatedWriterDoesNotWaitForReaderPool(t *testing.T) {
 	}
 }
 
+func TestInteractiveTaskReadHasCapacityDuringAnalyticsReads(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-reader-capacity.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	defer unregister()
+
+	const navigationReaderReserve = 1
+	const concurrentAnalyticsReads = 5
+	if got := connections.Reader.Stats().MaxOpenConnections; got < concurrentAnalyticsReads+navigationReaderReserve {
+		t.Fatalf("reader pool capacity = %d, want at least %d for concurrent Analytics reads plus navigation", got, concurrentAnalyticsReads+navigationReaderReserve)
+	}
+
+	ctx := context.Background()
+	if _, err := connections.Writer.ExecContext(ctx, `
+		INSERT INTO projects(id, name) VALUES ('analytics-project', 'Analytics project');
+		INSERT INTO tasks(id, project_id, title, category, status) VALUES ('analytics-task', 'analytics-project', 'Navigation task', 'active', 'pending');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	// The usage summary, task-run activity, and three account-card requests can
+	// all use the database during Analytics startup. Hold five real pool slots
+	// and require the interactive task read to get its own.
+	var analyticsReaders []*sql.Conn
+	for i := 0; i < concurrentAnalyticsReads; i++ {
+		conn, err := connections.Reader.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		analyticsReaders = append(analyticsReaders, conn)
+		if _, err := conn.ExecContext(ctx, `BEGIN`); err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM llm_usage_events`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() {
+		for _, conn := range analyticsReaders {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+			_ = conn.Close()
+		}
+	}()
+
+	navigationCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	task, err := NewTaskRepo(connections.Reader, nil).GetByID(navigationCtx, "analytics-task")
+	if err != nil {
+		t.Fatalf("task navigation read while Analytics readers are active: %v", err)
+	}
+	if task == nil || task.ID != "analytics-task" {
+		t.Fatalf("task navigation read = %#v, want analytics-task", task)
+	}
+}
+
 func TestDedicatedWriterDoesNotConsumeReaderCapacity(t *testing.T) {
 	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "dedicated.db"))
 	if err != nil {
