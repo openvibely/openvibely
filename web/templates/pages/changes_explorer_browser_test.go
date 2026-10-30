@@ -2,6 +2,8 @@ package pages
 
 import (
 	"fmt"
+	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -31,7 +33,26 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
+		case "/tasks":
+			content := templ.Raw(`<a id="open-explorer-task" href="/tasks/explorer-task" hx-get="/tasks/explorer-task" hx-target="#main-content" hx-push-url="true">Task</a>`)
+			if err := layout.Base("Tasks", []models.Project{project}, project.ID).Render(templ.WithChildren(r.Context(), content), w); err != nil {
+				t.Error(err)
+			}
+		case "/themes":
+			if err := ThemesContent(nil).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
 		case "/tasks/explorer-task":
+			if r.Header.Get("HX-Request") == "true" {
+				tab := r.URL.Query().Get("tab")
+				if tab == "" {
+					tab = "chat"
+				}
+				if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, tab, nil).Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+				return
+			}
 			err := TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(r.Context(), w)
 			if err != nil {
 				t.Error(err)
@@ -58,7 +79,9 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	runComposerFocusCDP(t, chrome, server.URL+"/tasks/explorer-task?project_id="+project.ID, "changes-explorer", func(b *composerFocusCDP) {
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, "changes-explorer", func(b *composerFocusCDP) {
+		b.waitFor("board ready", `String(document.readyState==='complete' && !!window.htmx)`, "true")
+		b.evaluate(`document.getElementById('open-explorer-task').click();'task'`)
 		b.waitFor("workspace ready", `String(document.readyState==='complete' && !!window.taskWorkspace && !!document.getElementById('task-message-input'))`, "true")
 		b.evaluate(`document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'open'`)
 		b.waitFor("tree replaces collapsed task list", `String(document.documentElement.classList.contains('changes-explorer-active') && !document.documentElement.classList.contains('task-list-collapsed') && document.querySelectorAll('#changes-explorer-host [data-explorer-path]').length===2)`, "true")
@@ -79,6 +102,15 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.evaluate(`document.querySelector('.explorer-back').click();'back'`)
 		b.waitFor("workspace and draft restored", `String(!document.documentElement.classList.contains('appearance-settings') && document.documentElement.classList.contains('task-list-collapsed') && document.getElementById('task-message-input').value==='Keep this draft')`, "true")
 		b.evaluate(`window.taskWorkspace.openChanges();'reopen'`)
+		b.waitFor("changes reopened", `String(!!document.querySelector('#tab-changes #diff-viewer') && !document.querySelector('#changes-content.htmx-settling'))`, "true")
+		b.evaluate(`document.querySelector('.sidebar-aside [data-nav-base="/themes"]').click();'settings'`)
+		b.waitFor("settings ready", `String(!!document.getElementById('themes-container') && !document.querySelector('#main-content.htmx-settling'))`, "true")
+		b.waitFor("return URL retains task and changes view", `(function(){var u=new URL(document.querySelector('#appearance-settings-nav [data-settings-back]').href);return u.pathname+'?tab='+u.searchParams.get('tab');})()`, "/tasks/explorer-task?tab=changes")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return'`)
+		b.waitFor("returned to changes", `String(location.pathname==='/tasks/explorer-task' && document.documentElement.classList.contains('changes-explorer-active') && !!document.querySelector('#tab-changes #diff-viewer') && !document.querySelector('#main-content.htmx-settling'))`, "true")
+		b.evaluate(`document.querySelector('.explorer-back').click();'thread'`)
+		b.waitFor("original collapse state after settings round trip", `String(document.documentElement.classList.contains('task-list-collapsed') && !document.documentElement.classList.contains('changes-explorer-active'))`, "true")
+		b.evaluate(`window.taskWorkspace.openChanges();'changes'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("mobile explorer", `String(!!document.querySelector('#changes-explorer-mobile .changes-explorer') && document.getElementById('changes-explorer-mobile').getBoundingClientRect().height>0)`, "true")
 		b.evaluate(`search.value='';search.dispatchEvent(new Event('input'));'clear filter'`)
