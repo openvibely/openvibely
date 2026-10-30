@@ -202,6 +202,24 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  document.querySelector('[data-automation-live-duplicate]').click();
  await wait(()=>document.getElementById('automation-builder'));
  assert(document.getElementById('project-selector').value==='__all_projects__','duplicate switched tabs');
+ document.querySelector('[data-automation-view-details]').click();
+ await wait(()=>document.querySelector('[data-automation-details-panel]') && !document.querySelector('[data-automation-details-panel]').hidden);
+ var editedPrompt=document.querySelector('[data-automation-details-form] textarea[name$="_prompt"]');
+ editedPrompt.value='Preserve edited task instructions';
+ editedPrompt.dispatchEvent(new Event('input',{bubbles:true}));
+ var editedGoal=document.querySelector('[data-automation-details-form] textarea[name$="_goal"]');
+ editedGoal.value='Keep the edited goal too';
+ editedGoal.dispatchEvent(new Event('input',{bubbles:true}));
+ var previousProjectPicker=document.getElementById('automation-destination-project');
+ previousProjectPicker.value='default';
+ previousProjectPicker.dispatchEvent(new Event('change',{bubbles:true}));
+ await wait(()=>document.getElementById('automation-destination-project')!==previousProjectPicker);
+ assert(document.querySelector('[data-automation-details-form] textarea[name$="_prompt"]').value==='Preserve edited task instructions','changing project discarded Details prompt');
+ assert(document.querySelector('[data-automation-details-form] textarea[name$="_goal"]').value==='Keep the edited goal too','changing project discarded Details goal');
+ assert(!document.querySelector('[data-automation-details-panel]').hidden,'changing project left Details');
+ assert(document.getElementById('project-selector').value==='__all_projects__','changing project left workspace');
+ assert(document.getElementById('automation-destination-project'),'changing project saved the draft');
+
  document.querySelector('[data-automation-breadcrumb] a').click();
  await wait(()=>document.querySelector('[data-all-projects-view="automations"]'));
  assert(document.getElementById('project-selector').value==='__all_projects__','duplicate breadcrumb switched tabs');

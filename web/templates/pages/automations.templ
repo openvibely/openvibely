@@ -2195,13 +2195,33 @@ yamlViewport.scrollTop = 0;
                             return;
                         }
                         event.detail.parameters.destination_project = destinationProject.value;
+
                     });
                     destinationProject.addEventListener('change', function() {
                         destinationProject.setCustomValidity('');
                         var form = document.getElementById('automation-design-form');
                         var initial = form.querySelector('[data-automation-initial-view]');
                         initial.value = yamlPanel && !yamlPanel.hidden ? 'yaml' : detailsPanel && !detailsPanel.hidden ? 'details' : '';
-                        form.requestSubmit();
+                        var previewFields = [];
+                        var yamlDisabled = yamlEditor && yamlEditor.disabled;
+                        if (detailsPanel && !detailsPanel.hidden && detailsForm) {
+                            // Both native and HTMX submissions need the Details values.
+                            // Exclude stale YAML so the server applies these edited fields.
+                            syncCandidate(false);
+                            if (yamlEditor) yamlEditor.disabled = true;
+                            new FormData(detailsForm).forEach(function(value, key) {
+                                if (key === 'candidate_json' || key.startsWith('node_') || key.startsWith('edge_')) {
+                                    var input = document.createElement('input');
+                                    input.type = 'hidden'; input.name = key; input.value = value;
+                                    form.append(input); previewFields.push(input);
+                                }
+                            });
+                        }
+                        try { form.requestSubmit(); }
+                        finally {
+                            previewFields.forEach(function(input) { input.remove(); });
+                            if (yamlEditor) yamlEditor.disabled = yamlDisabled;
+                        }
                     });
                 }
                 						var viewRoot = builder.querySelector('[data-automation-view-root]');
