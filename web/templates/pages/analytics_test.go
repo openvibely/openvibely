@@ -115,13 +115,15 @@ try {
  renderAccountUsageCards([
   {provider:'openai',account_identity:'owner@example.com',limits:[]},
   {provider:'anthropic',limits:[]},
-  {provider:'anthropic',account_identity:'sibling@example.com',error:'usage unavailable',limits:[]}
+  {provider:'anthropic',account_identity:'sibling@example.com',error:'usage unavailable',limits:[{label:'stale weekly limit',used_percent:85}],plan_type:'Stale plan',extra_usage_label:'stale credits',extra_usage_monthly_usd:200,extra_usage_used_usd:80}
  ],target);
  const cards=Array.from(target.querySelectorAll('.card-body'));
  if(cards.length!==3)throw new Error('expected all provider account cards');
  if(!cards[0].textContent.includes('Account: owner@example.com'))throw new Error('successful usage account email not shown');
  if(cards[1].textContent.includes('Account:'))throw new Error('missing account identity should not show a generic label');
  if(cards[2].textContent.includes('Account:'))throw new Error('failed usage should not show a sibling account identity');
+ if(cards[2].textContent.includes('stale weekly limit')||cards[2].textContent.includes('85.0%')||cards[2].textContent.includes('Stale plan')||cards[2].textContent.includes('stale credits')||cards[2].textContent.includes('$200.00')||cards[2].textContent.includes('$80.00'))throw new Error('failed usage should not display cached values');
+ if(!cards[2].textContent.includes('usage unavailable'))throw new Error('failed usage should still show its error');
  const unsafe=document.createElement('div');
  renderAccountUsageCards([{provider:'openai',account_identity:'<img src=x onerror=alert(1)>',limits:[]}],unsafe);
  if(unsafe.querySelector('img')||!unsafe.textContent.includes('<img src=x onerror=alert(1)>'))throw new Error('account identity must be escaped as text');
