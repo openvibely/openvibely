@@ -475,30 +475,25 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			document.body.addEventListener('htmx:afterSettle', syncActiveRow);
 			window.addEventListener('popstate', syncActiveRow);
 			window.addEventListener('resize', function() { setWidth(currentWidth(), false); });
-				function activeProjectID() {
-					var sel = document.getElementById('project-selector');
-					if (sel && sel.value) return sel.value;
-					return new URLSearchParams(location.search).get('project_id') || '';
-				}
-				function setTaskListProject(projectID) {
-					var pid = projectID || activeProjectID();
-					if (!pid || pid === currentProjectID()) return;
-					clearTimeout(refreshTimer); refreshTimer = null;
-					groups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(pid));
-					if (window.htmx) {
-						htmx.trigger(groups, 'htmx:abort');
-						htmx.process(groups);
-						htmx.trigger(groups, 'taskListRefresh');
-					}
-				}
-				window.openVibelySetTaskListProject = setTaskListProject;
-				function syncProject() { setTaskListProject(activeProjectID()); }
-				function deferSyncProject() { setTimeout(syncProject, 0); }
-				document.body.addEventListener('htmx:pushedIntoHistory', deferSyncProject);
-				document.body.addEventListener('htmx:replacedInHistory', deferSyncProject);
-				document.body.addEventListener('htmx:historyRestore', deferSyncProject);
-				document.body.addEventListener('htmx:afterSettle', syncProject);
-			window.addEventListener('popstate', deferSyncProject);
+			function activeProjectID() {
+				var fromURL = new URLSearchParams(location.search).get('project_id');
+				if (fromURL) return fromURL;
+				var sel = document.getElementById('project-selector');
+				return sel ? sel.value : '';
+			}
+			function syncProject() {
+				var pid = activeProjectID();
+				if (!pid || pid === currentProjectID()) return;
+				clearTimeout(refreshTimer); refreshTimer = null;
+				groups.setAttribute('hx-get', '/tasks/sidebar?project_id=' + encodeURIComponent(pid));
+				if (window.htmx) { htmx.process(groups); htmx.trigger(groups, 'taskListRefresh'); }
+			}
+			document.addEventListener('change', function(e) { if (e.target && e.target.id === 'project-selector') syncProject(); });
+			document.body.addEventListener('htmx:pushedIntoHistory', syncProject);
+			document.body.addEventListener('htmx:replacedInHistory', syncProject);
+			document.body.addEventListener('htmx:historyRestore', syncProject);
+			document.body.addEventListener('htmx:afterSettle', syncProject);
+			window.addEventListener('popstate', syncProject);
 			document.addEventListener('DOMContentLoaded', syncToggle);
 			syncToggle();
 		})();

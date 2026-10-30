@@ -19,3 +19,8 @@ func stopHandlerBrowserProcess(cmd *exec.Cmd) {
 	killHandlerBrowserProcess(cmd)
 	_ = cmd.Wait()
 }
+
+func stopHandlerBrowserProcessWithWait(cmd *exec.Cmd, waited <-chan struct{}) {
+	killHandlerBrowserProcess(cmd)
+	<-waited
+}

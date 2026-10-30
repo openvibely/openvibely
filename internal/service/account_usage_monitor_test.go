@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/events"
@@ -19,6 +20,101 @@ import (
 func monitorTestState() accountMonitorState {
 	return accountMonitorState{Grants: map[string]monitoredGrant{}, Limits: map[string]monitoredLimit{}, Sent: map[string]bool{}}
 }
+func TestAccountMonitorLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider models.LLMProvider
+		stored   string
+		accounts []models.AccountUsageView
+		multiple bool
+		want     string
+	}{
+		{name: "OpenAI email and plan", provider: models.ProviderOpenAI, accounts: []models.AccountUsageView{{AccountIdentity: "owner@example.com", PlanType: "ChatGPT Pro"}}, want: "OpenAI (owner@example.com · ChatGPT Pro)"},
+		{name: "Anthropic email and plan", provider: models.ProviderAnthropic, accounts: []models.AccountUsageView{{AccountIdentity: "owner@example.com", PlanType: "Claude Max"}}, want: "Anthropic (owner@example.com · Claude Max)"},
+		{name: "name without email", provider: models.ProviderAnthropic, accounts: []models.AccountUsageView{{AccountIdentity: "Account owner", PlanType: "Pro Lite"}}, want: "Anthropic (Account owner · Pro Lite)"},
+		{name: "plan only", provider: models.ProviderOpenAI, accounts: []models.AccountUsageView{{AccountIdentity: "OpenAI account", PlanType: "ChatGPT Pro"}}, want: "OpenAI (ChatGPT Pro)"},
+		{name: "single stored identity on failed usage", provider: models.ProviderAnthropic, stored: "owner@example.com", accounts: []models.AccountUsageView{{Error: "refresh failed", AccountIdentity: "stale@example.com", PlanType: "Stale plan"}}, want: "Anthropic (owner@example.com)"},
+		{name: "no metadata", provider: models.ProviderOpenAI, want: "OpenAI"},
+		{name: "ambiguous sign-ins without usage", provider: models.ProviderAnthropic, stored: "first@example.com", multiple: true, want: "Anthropic"},
+		{name: "snapshot sign-in wins", provider: models.ProviderAnthropic, stored: "first@example.com", multiple: true, accounts: []models.AccountUsageView{{Error: "failed", AccountIdentity: "first@example.com"}, {AccountIdentity: "fetcher@example.com", PlanType: "Claude Max"}}, want: "Anthropic (fetcher@example.com · Claude Max)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := []models.LLMConfig{{Name: "Model alias", Provider: tc.provider, OAuthConnectionID: "first", OAuthProviderDisplayName: tc.stored}}
+			if tc.multiple {
+				group = append(group, models.LLMConfig{Name: "Other model alias", Provider: tc.provider, OAuthConnectionID: "second"})
+			}
+			label := accountMonitorLabel(group, &models.AnalyticsUsageAccountLimitsViewModel{AccountLimits: tc.accounts})
+			if label != tc.want {
+				t.Fatalf("label = %q, want %q", label, tc.want)
+			}
+			state := monitorTestState()
+			state.ResetsInitialized = true
+			now := time.Now().UTC()
+			pct := 96.0
+			limits := []models.AccountLimitView{{LimitKey: "weekly", Label: "Weekly", UsedPercent: &pct}}
+			resets := map[string]any{"credits": []any{map[string]any{"id": "grant", "status": "available", "remaining_uses": 1, "expires_at": now.Add(time.Hour).Format(time.RFC3339)}}}
+			events := evaluateAccountMonitor(&state, limits, resets, now, label)
+			wantSuffixes := []string{" — Weekly: 96% used (nearing limit)", " received a usage reset", " reset expires soon"}
+			if len(events) != len(wantSuffixes) {
+				t.Fatalf("events = %+v", events)
+			}
+			for i, event := range events {
+				if event.Title != tc.want+wantSuffixes[i] {
+					t.Fatalf("title = %q, want %q", event.Title, tc.want+wantSuffixes[i])
+				}
+			}
+		})
+	}
+}
+
+func TestAccountMonitorReportsActualUsage(t *testing.T) {
+	for _, tc := range []struct {
+		pct        float64
+		percentage string
+		threshold  string
+		reached    bool
+	}{
+		{pct: 79.9},
+		{pct: 80},
+		{pct: 81, percentage: "81%", threshold: ":80"},
+		{pct: 95, percentage: "95%", threshold: ":80"},
+		{pct: 95.1, percentage: "95.1%", threshold: ":95"},
+		{pct: 96, percentage: "96%", threshold: ":95"},
+		{pct: 99.9, percentage: "99.9%", threshold: ":95"},
+		{pct: 100, percentage: "100%", threshold: ":100", reached: true},
+		{pct: 101, percentage: "101%", threshold: ":100", reached: true},
+	} {
+		t.Run(fmt.Sprint(tc.pct), func(t *testing.T) {
+			state := monitorTestState()
+			limits := []models.AccountLimitView{{LimitKey: "weekly", Label: "Weekly", UsedPercent: &tc.pct}}
+			events := evaluateAccountMonitor(&state, limits, nil, time.Now(), "Anthropic (owner@example.com · Claude Max)")
+			if tc.threshold == "" {
+				if len(events) != 0 {
+					t.Fatalf("unexpected event below threshold: %+v", events)
+				}
+				return
+			}
+			if len(events) != 1 {
+				t.Fatalf("want exactly one event, got %+v", events)
+			}
+			event := events[0]
+			wantSeverity := models.SeverityWarning
+			if tc.reached {
+				wantSeverity = models.SeverityError
+			}
+			if event.Severity != wantSeverity {
+				t.Fatalf("severity = %s, want %s", event.Severity, wantSeverity)
+			}
+			if !strings.HasSuffix(event.Key, tc.threshold) || !strings.Contains(event.Title, tc.percentage) || event.Message != "Weekly is "+tc.percentage+" used." {
+				t.Fatalf("wrong threshold or reported usage: %+v", event)
+			}
+			if strings.Contains(event.Title, "limit reached") != tc.reached || strings.Contains(event.Title, "nearing limit") == tc.reached {
+				t.Fatalf("incorrect limit status: %s", event.Title)
+			}
+		})
+	}
+}
+
 func TestAccountMonitorThresholdWindows(t *testing.T) {
 	state := monitorTestState()
 	now := time.Now()
@@ -39,9 +135,18 @@ func TestAccountMonitorThresholdWindows(t *testing.T) {
 	if c[0].Key != b[0].Key {
 		t.Fatal("regression must not emit a lower threshold", c)
 	}
+	pct = 100
+	reached := evaluateAccountMonitor(&state, limits, nil, now, "OpenAI")
+	if len(reached) != 1 || reached[0].Key == b[0].Key {
+		t.Fatal("reaching 100% must generate its own alert", reached)
+	}
+	repeated := evaluateAccountMonitor(&state, limits, nil, now, "OpenAI")
+	if len(repeated) != 1 || repeated[0].Key != reached[0].Key {
+		t.Fatal("repeated 100% checks must preserve the deduplication key", repeated)
+	}
 	window = "2028-01-02T00:00:00Z"
 	d := evaluateAccountMonitor(&state, limits, nil, now, "OpenAI")
-	if d[0].Key == a[0].Key {
+	if d[0].Key == reached[0].Key {
 		t.Fatal("new window must alert again")
 	}
 }
@@ -74,21 +179,53 @@ func TestAccountMonitorResetBaselineExpiryAndGrants(t *testing.T) {
 	}
 }
 func TestAccountMonitorAlertIdempotency(t *testing.T) {
-	env := teststores.New(t)
-	ctx := context.Background()
-	projects, err := env.Stores.Projects.List(ctx)
-	if err != nil || len(projects) == 0 {
-		t.Fatal(projects, err)
-	}
-	svc := NewAlertService(env.Stores.Alerts, nil)
-	for i := 0; i < 2; i++ {
-		a := &models.Alert{ProjectID: projects[0].ID, Type: models.AlertCustom, Severity: models.SeverityWarning, Source: "account_usage", Title: "Usage", IdempotencyKey: "account-usage:test"}
-		if err := svc.CreateAccountUsageAlert(ctx, a, "/analytics?view=usage"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := env.Stores.Alerts.GetByIdempotencyKey(ctx, projects[0].ID, "account-usage:test"); err != nil {
-		t.Fatal(err)
+	for _, severity := range []models.AlertSeverity{models.SeverityError, models.SeverityWarning, models.SeverityInfo} {
+		t.Run(string(severity), func(t *testing.T) {
+			env := teststores.New(t)
+			ctx := context.Background()
+			projects, err := env.Stores.Projects.List(ctx)
+			if err != nil || len(projects) == 0 {
+				t.Fatal(projects, err)
+			}
+			broadcaster := events.NewBroadcaster()
+			sub, err := broadcaster.Subscribe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer broadcaster.Unsubscribe(sub)
+			svc := NewAlertService(env.Stores.Alerts, broadcaster)
+			for i := 0; i < 2; i++ {
+				a := &models.Alert{ProjectID: projects[0].ID, Type: models.AlertCustom, Severity: severity, Source: "account_usage", Title: "Usage", IdempotencyKey: "account-usage:test"}
+				if err := svc.CreateAccountUsageAlert(ctx, a, "/analytics?view=usage"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stored, err := env.Stores.Alerts.GetByIdempotencyKey(ctx, projects[0].ID, "account-usage:test")
+			if err != nil || stored.Severity != severity {
+				t.Fatalf("stored alert = %+v, err = %v", stored, err)
+			}
+			select {
+			case event := <-sub:
+				encoded, err := json.Marshal(event)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var payload map[string]any
+				if err := json.Unmarshal(encoded, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload["alert_severity"] != string(stored.Severity) {
+					t.Fatalf("toast severity differs from stored alert: %s", encoded)
+				}
+			default:
+				t.Fatal("missing toast event")
+			}
+			select {
+			case event := <-sub:
+				t.Fatal("duplicate toast event", event)
+			default:
+			}
+		})
 	}
 }
 
@@ -98,6 +235,12 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	projects, _ := env.Stores.Projects.List(ctx)
 	cfg := models.LLMConfig{Name: "Test", Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "fixture", OAuthAccountID: "fixture-account", OAuthExpiresAt: time.Now().Add(4 * time.Hour).UnixMilli()}
 	if err := env.LLMConfigs.Create(ctx, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	alias := cfg
+	alias.ID = ""
+	alias.Name = "Another model on the same account"
+	if err := env.LLMConfigs.Create(ctx, &alias); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -112,9 +255,10 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	defer func() { openaiclient.OpenAIChatGPTAPIBaseURL = old }()
 	usage := NewUsageAnalyticsService(env.Usage, env.LLMConfigs)
 	pct := 96.0
+	windowMinutes := 300
 	reset := time.Now().Add(time.Hour).Format(time.RFC3339)
 	usage.SetAccountUsageFetcher(func(ctx context.Context, c models.LLMConfig) (*models.AccountUsageSnapshot, error) {
-		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, PrimaryLabel: "Session", PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
+		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, AccountDisplayName: "owner@example.com", PlanType: "ChatGPT Pro", PrimaryLabel: "Session", PrimaryWindowMinutes: &windowMinutes, PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
 	})
 	broadcaster := events.NewBroadcaster()
 	sub, err := broadcaster.Subscribe()
@@ -134,12 +278,40 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 		if event.AlertSource != "account_usage" || event.ProjectID != projects[0].ID || !strings.HasPrefix(event.AlertURL, "/analytics?") {
 			t.Fatal(event)
 		}
+		wantTitle := "OpenAI (owner@example.com · ChatGPT Pro) — 5-hour session: 96% used (nearing limit)"
+		if event.AlertTitle != wantTitle {
+			t.Fatalf("toast title = %q, want %q", event.AlertTitle, wantTitle)
+		}
+		stored, err := env.Stores.Alerts.GetByIDForProject(ctx, event.ProjectID, event.AlertID)
+		if err != nil || stored.Title != wantTitle {
+			t.Fatalf("stored alert = %+v, err = %v", stored, err)
+		}
 	default:
 		t.Fatal("missing toast event")
 	}
 	select {
 	case event := <-sub:
 		t.Fatal("duplicate event", event)
+	default:
+	}
+	pct = 100
+	if err := NewAccountUsageMonitor(usage, env.Stores.Settings, env.Stores.Projects, alerts).RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sub:
+		if !strings.HasSuffix(event.AlertTitle, "5-hour session: limit reached (100% used)") {
+			t.Fatalf("missing actual limit-reached title: %+v", event)
+		}
+	default:
+		t.Fatal("100% must alert even after the 95% warning")
+	}
+	if err := NewAccountUsageMonitor(usage, env.Stores.Settings, env.Stores.Projects, alerts).RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sub:
+		t.Fatal("duplicate 100% alert", event)
 	default:
 	}
 	if err := env.Stores.Settings.Set(ctx, "account_usage_alerts:"+projects[0].ID, "false"); err != nil {

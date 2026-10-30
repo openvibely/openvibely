@@ -26,3 +26,7 @@ func killHandlerBrowserProcess(cmd *exec.Cmd) {
 func stopHandlerBrowserProcess(cmd *exec.Cmd) {
 	testutil.StopBrowserProcessGroup(cmd)
 }
+
+func stopHandlerBrowserProcessWithWait(cmd *exec.Cmd, waited <-chan struct{}) {
+	testutil.StopBrowserProcessGroupWithWait(cmd, waited)
+}

@@ -73,14 +73,15 @@ type LLMConfig struct {
 	UpdatedAt       time.Time   `json:"updated_at"`
 
 	// OAuth fields (used when AuthMethod=oauth for Claude Max or OpenAI)
-	AuthMethod          AuthMethod `json:"auth_method"`
-	OAuthAccessToken    string     `json:"-"` // Never serialized
-	OAuthRefreshToken   string     `json:"-"` // Never serialized
-	OAuthExpiresAt      int64      `json:"oauth_expires_at,omitempty"`
-	OAuthAccountID      string     `json:"-"` // ChatGPT workspace/account id for OpenAI OAuth
-	OAuthNeedsReauth    bool       `json:"oauth_needs_reauth,omitempty"`
-	OAuthConnectionID   string     `json:"oauth_connection_id,omitempty"`
-	OAuthConnectionName string     `json:"-"`
+	AuthMethod               AuthMethod `json:"auth_method"`
+	OAuthAccessToken         string     `json:"-"` // Never serialized
+	OAuthRefreshToken        string     `json:"-"` // Never serialized
+	OAuthExpiresAt           int64      `json:"oauth_expires_at,omitempty"`
+	OAuthAccountID           string     `json:"-"` // ChatGPT workspace/account id for OpenAI OAuth
+	OAuthNeedsReauth         bool       `json:"oauth_needs_reauth,omitempty"`
+	OAuthConnectionID        string     `json:"oauth_connection_id,omitempty"`
+	OAuthConnectionName      string     `json:"-"`
+	OAuthProviderDisplayName string     `json:"-"`
 
 	// Per-model worker pool configuration
 	MaxWorkers    int `json:"max_workers"`    // 0 = use global default; positive values have no product-level maximum
