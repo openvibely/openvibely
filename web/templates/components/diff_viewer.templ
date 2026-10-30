@@ -40,6 +40,7 @@ type DiffFile struct {
 type DiffHunk struct {
 	Header string
 	Lines  []DiffLine
+ SplitPairs []SplitPair
 }
 
 // DiffLine represents a single line in the diff
@@ -88,6 +89,7 @@ func diffViewContentClass(mode string, activeView string) string {
 // DiffFileRenderMeta controls how a file should render under diff limits.
 type DiffFileRenderMeta struct {
 	Index           int
+	Revision string
 	File            DiffFile
 	LineCount       int
 	CharCount       int
@@ -457,7 +459,7 @@ templ DiffViewerWithReviewView(diffOutput string, taskID string, reviewComments 
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments, initialView, diffContentRevision(diffOutput, reviewComments))
+		@diffViewerWithReviewContent(progressiveDiffMetas(ParseDiffOutput(diffOutput), reviewComments), taskID, reviewComments, initialView, diffContentRevision(diffOutput, reviewComments))
 	}
 }
 
@@ -2123,7 +2125,7 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 							<tr class="diff-hunk-header">
 								<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
 							</tr>
-							for _, pair := range buildSplitLines(hunk.Lines) {
+							for _, pair := range splitHunkLines(hunk) {
 								<tr
 									class="diff-review-line"
 									data-file-path={ f.Path }
@@ -2199,7 +2201,7 @@ templ splitDiffFile(f DiffFile, idx int, defaultExpanded bool) {
 							<tr class="diff-hunk-header">
 								<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
 							</tr>
-							for _, pair := range buildSplitLines(hunk.Lines) {
+							for _, pair := range splitHunkLines(hunk) {
 								<tr>
 									<!-- Left side (old) -->
 									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
@@ -2533,7 +2535,7 @@ func DiffRenderMetaByIndex(diffOutput string, fileIndex int) (DiffFileRenderMeta
 }
 
 func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (DiffFileRenderMeta, int, bool) {
-	if diffOutput == "" || fileIndex < 0 || fileIndex >= maxDiffFiles {
+	if diffOutput == "" || fileIndex < 0 {
 		return DiffFileRenderMeta{}, 0, false
 	}
 
@@ -2568,9 +2570,6 @@ func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (Dif
 				}
 			}
 			currentIndex++
-			if currentIndex >= maxDiffFiles {
-				return DiffFileRenderMeta{}, lineStart, false
-			}
 			blockStart = lineStart
 		}
 
@@ -2675,8 +2674,9 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 	<div
 		id={ diffFileCardID(meta.Index, view) }
 		class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2"
+        data-file-revision={ meta.Revision }
 		if meta.AutoLoad && taskID != "" {
-			data-diff-lazy-url={ fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode) }
+			data-diff-lazy-url={ diffLazyURL(meta, taskID, view, reviewMode) }
 			data-diff-file-path={ meta.File.Path }
 		}
 	>

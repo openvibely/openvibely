@@ -1,0 +1,31 @@
+package components
+
+import (
+ "fmt"
+ "net/url"
+ "github.com/openvibely/openvibely/internal/models"
+)
+
+func diffLazyURL(meta DiffFileRenderMeta, taskID, view string, review bool) string {
+ path := fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, review)
+ if meta.Revision != "" { path += "&chunk=0&revision=" + url.QueryEscape(meta.Revision) }
+ return path
+}
+
+templ DiffChunk(file DiffFile, index int, view, taskID string, comments []models.ReviewComment, review bool, chunk, count int, revision string) {
+ <div data-diff-chunk-response data-chunk={ fmt.Sprint(chunk) } data-chunks={ fmt.Sprint(count) } data-file-revision={ revision }>
+  if view == "split" {
+   if review {
+    @splitDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments))
+   } else {
+    @splitDiffFile(file, index, true)
+   }
+  } else {
+   if review {
+    @inlineDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments))
+   } else {
+    @inlineDiffFile(file, index, true)
+   }
+  }
+ </div>
+}

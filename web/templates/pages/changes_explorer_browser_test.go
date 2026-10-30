@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -27,6 +28,24 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		}
 	}
 	var cleared atomic.Bool
+	var edited atomic.Bool
+	var many atomic.Bool
+	largeDiff := diff
+	for i := 0; i < 350; i++ {
+		largeDiff += fmt.Sprintf("diff --git a/extra%d.txt b/extra%d.txt\n--- a/extra%d.txt\n+++ b/extra%d.txt\n@@ -0,0 +1 @@\n+extra file %d\n", i, i, i, i, i)
+	}
+	currentDiff := func() string {
+		if cleared.Load() {
+			return ""
+		}
+		if many.Load() {
+			return largeDiff
+		}
+		if edited.Load() {
+			return strings.ReplaceAll(diff, "+src/nested/second.go line 0", "+updated second file")
+		}
+		return diff
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -60,16 +79,25 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		case "/tasks/explorer-task/thread":
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
-			currentDiff := diff
-			if cleared.Load() {
-				currentDiff = ""
-			}
-			if err := TaskChangesContent(currentDiff, task.ID, nil).Render(r.Context(), w); err != nil {
+			current := currentDiff()
+			if err := TaskChangesContent(current, task.ID, nil).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/file":
 			index, _ := strconv.Atoi(r.URL.Query().Get("file_index"))
-			if err := components.LoadDiffFileCard(diff, index, r.URL.Query().Get("view"), task.ID, nil, true).Render(r.Context(), w); err != nil {
+			files := components.ParseDiffOutput(currentDiff())
+			if index < 0 || index >= len(files) {
+				http.Error(w, "changed", 409)
+				return
+			}
+			view := r.URL.Query().Get("view")
+			chunk, _ := strconv.Atoi(r.URL.Query().Get("chunk"))
+			chunks := components.DiffFileChunks(files[index], view)
+			if chunk < 0 || chunk >= len(chunks) {
+				http.Error(w, "invalid chunk", 400)
+				return
+			}
+			if err := components.DiffChunk(chunks[chunk], index, view, task.ID, nil, true, chunk, len(chunks), components.DiffFileRevision(files[index], nil)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/summary":
@@ -100,6 +128,11 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("existing task search stays open and retains query", `String(!document.documentElement.classList.contains('changes-explorer-active') && document.activeElement===document.getElementById('task-list-search-input') && document.getElementById('task-list-search-input').getBoundingClientRect().height>0 && document.getElementById('task-list-search-input').value==='Explore')`, "true")
 		b.evaluate(`document.getElementById('task-list-search-toggle').click();document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'return to changes'`)
 		b.waitFor("all inline file cards remain visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && ['diff-file-0','diff-file-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0))`, "true")
+		b.evaluate(`window.retainedDiffBody=document.getElementById('diff-body-0');window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;'capture body'`)
+		edited.Store(true)
+		b.evaluate(`_updateDiffViewer('');'update second file'`)
+		b.waitFor("new revision", `String(document.getElementById('diff-viewer').dataset.diffRevision!==window.beforeDiffRevision)`, "true")
+		b.waitFor("unchanged body preserved", `String(document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
 		b.evaluate(`toggleAllDiffFiles(false);document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'expand and navigate'`)
 		b.waitFor("second lazy diff loaded", `String(document.getElementById('diff-file-0').getBoundingClientRect().height>0 && document.getElementById('diff-file-1').getBoundingClientRect().height>0 && !!document.querySelector('#diff-file-1 .diff-line-content') && document.getElementById('diff-file-1').getBoundingClientRect().height>2000)`, "true")
 		b.evaluate(`document.getElementById('tab-changes').scrollTop=900;'scroll'`)
@@ -147,5 +180,15 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		cleared.Store(false)
 		b.evaluate(`_updateDiffViewer('');'refresh files'`)
 		b.waitFor("live refresh repopulates explorer", `String(document.querySelectorAll('[data-explorer-path]').length===2 && !document.getElementById('diff-file-0').hidden && !document.getElementById('diff-file-1').hidden)`, "true")
+		many.Store(true)
+		b.evaluate(`_updateDiffViewer('');'many files'`)
+		b.waitFor("explorer first page", `String(document.querySelector('#diff-viewer').dataset.fileCount==='352' && document.querySelectorAll('[data-explorer-path]').length===100)`, "true")
+		b.evaluate(`Array.from(document.querySelectorAll('.changes-explorer button')).find(el=>el.textContent==='Show more files').click();'next page'`)
+		b.waitFor("explorer next page", `String(document.querySelectorAll('[data-explorer-path]').length===200)`, "true")
+		b.evaluate(`var input=document.querySelector('.explorer-search');input.value='extra349';input.dispatchEvent(new Event('input'));'search unloaded file'`)
+		b.waitFor("search beyond old limit", `String(document.querySelectorAll('[data-explorer-path]').length===1 && !!document.querySelector('[data-explorer-path="extra349.txt"]'))`, "true")
+		b.evaluate(`document.querySelector('[data-explorer-path="extra349.txt"]').click();'open distant file'`)
+		b.waitFor("distant file loads", `String(!!document.querySelector('#diff-file-351 .diff-line-content, #diff-file-split-351 .diff-line-content'))`, "true")
+
 	})
 }
