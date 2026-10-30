@@ -167,3 +167,28 @@ func TestThreadInputMutationsRejectForeignProject(t *testing.T) {
 	tc.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/chat/queued/"+input.ID+"/steer?project_id="+project.ID, nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
+
+func TestTaskModelSettingsUseExplicitProjectAfterSwitch(t *testing.T) {
+	tc := NewStoreTestContext(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Task owner"}
+	require.NoError(t, tc.projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Open thread", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, tc.taskRepo.Create(ctx, task))
+	require.NoError(t, tc.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, "default"))
+	endpoint := "/tasks/" + task.ID + "/thread/model"
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, httptest.NewRequest(method, endpoint+"?agent_id=default", nil))
+			require.Equal(t, http.StatusNotFound, rec.Code)
+			rec = httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, httptest.NewRequest(method, endpoint+"?agent_id=default&project_id="+project.ID, nil))
+			if method == http.MethodGet {
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			} else {
+				require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
