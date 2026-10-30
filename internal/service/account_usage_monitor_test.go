@@ -142,7 +142,7 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 		t.Fatal("duplicate event", event)
 	default:
 	}
-	if err := env.Stores.Settings.Set(ctx, AccountUsageAlertsSetting(projects[0].ID), "false"); err != nil {
+	if err := env.Stores.Settings.Set(ctx, "account_usage_alerts:"+projects[0].ID, "false"); err != nil {
 		t.Fatal(err)
 	}
 	reset = time.Now().Add(2 * time.Hour).Format(time.RFC3339)
@@ -150,9 +150,9 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case event := <-sub:
-		t.Fatal("disabled project notified", event)
+	case <-sub:
 	default:
+		t.Fatal("automatic monitoring must ignore the removed preference")
 	}
 }
 

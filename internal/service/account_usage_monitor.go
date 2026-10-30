@@ -18,8 +18,6 @@ import (
 
 const accountMonitorLease = "account_usage_monitor:lease"
 
-func AccountUsageAlertsSetting(projectID string) string { return "account_usage_alerts:" + projectID }
-
 type AccountUsageMonitor struct {
 	usage    *UsageAnalyticsService
 	settings persistence.SettingsStore
@@ -100,17 +98,7 @@ func (m *AccountUsageMonitor) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	enabled := make([]models.Project, 0, len(projects))
-	for _, p := range projects {
-		value, err := m.settings.Get(ctx, AccountUsageAlertsSetting(p.ID))
-		if err != nil {
-			return err
-		}
-		if value != "false" {
-			enabled = append(enabled, p)
-		}
-	}
-	if len(enabled) == 0 {
+	if len(projects) == 0 {
 		return nil
 	}
 	configs, err := m.usage.llmConfigRepo.List(ctx)
@@ -133,7 +121,7 @@ func (m *AccountUsageMonitor) RunOnce(ctx context.Context) error {
 			go func(group []models.LLMConfig) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if err := m.checkAccount(ctx, group, enabled); err != nil {
+				if err := m.checkAccount(ctx, group, projects); err != nil {
 					errsMu.Lock()
 					errs = append(errs, err.Error())
 					errsMu.Unlock()
