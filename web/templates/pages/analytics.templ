@@ -1922,7 +1922,7 @@ templ analyticsContent(currentProject *models.Project) {
 												const card=cards[index];
 												try {
 													const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);
-													if(refreshUsage)query.set('refresh','true');
+													query.set('refresh','true');
 													const data=await fetchJSON('/api/analytics/usage?'+query.toString());
 													const temporary=document.createElement('div');
 													renderAccountUsageCards(data.account_limits||[],temporary);

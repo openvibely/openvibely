@@ -238,7 +238,7 @@ function response(data){return {ok:true,json:async function(){return data;}};}
 window.fetch=function(url){
  var p=new URL(url,location.href).searchParams;
  if(p.get('projection')==='accounts')return Promise.resolve(response({accounts:[{key:'a',provider:'openai'},{key:'b',provider:'openai'},{key:'c',provider:'anthropic'}]}));
- if(p.get('projection')==='account_limits')return new Promise(function(resolve,reject){pending[p.get('account_key')]={resolve:resolve,reject:reject};});
+ if(p.get('projection')==='account_limits')return new Promise(function(resolve,reject){pending[p.get('account_key')]={resolve:resolve,reject:reject,refresh:p.get('refresh')};});
  return Promise.resolve(response({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]}));
 };
 window.addEventListener('load',async function(){
@@ -248,6 +248,7 @@ window.addEventListener('load',async function(){
  try {
   for(var i=0;i<100&&!pending.c;i++)await wait();
   assert(pending.a&&pending.b&&pending.c,'all accounts must start without waiting');
+  assert(Object.values(pending).every(request=>request.refresh==='true'),'opening Usage must fetch fresh provider limits for every card');
   var cards=document.querySelectorAll('#accountUsageCards > .card');
   assert(cards.length===3&&cards[2].textContent.includes('Anthropic'),'Anthropic shell missing');
   assert(Array.from(cards).every(c=>c.textContent.includes('Loading analytics')),'all shells must start loading');
