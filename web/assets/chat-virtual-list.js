@@ -5,7 +5,7 @@
     const lists = new Map();
     let nextID = 0;
     let suspended = false;
-    const rowSelector = '.chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
+    const rowSelector = '.stream-activity, .chat-markdown, .stream-tool, details.stream-thinking, .chat-bubble-user-msg';
     const messagesSelector = '#chat-messages, #task-thread-messages';
     const element = row => row.node?.isConnected ? row.node : row.placeholder;
     const hasVisibleArea = messages => messages.isConnected && messages.clientWidth > 0 &&
@@ -138,10 +138,13 @@
             const generation = row.generation = (row.generation || 0) + 1;
             const finish = () => {
                 if (row.generation !== generation) return;
+                // The preference may have changed while an async row rendered.
+                window.syncToolDisclosures?.(row.node);
                 row.ready = true;
                 row.loading = null;
                 if (row.node.isConnected) row.node.style.minHeight = '';
                 lists.get(row.owner.closest(messagesSelector))?.schedule();
+                row.restoreFocus?.();
             };
             try {
                 const rendered = row.render(row.node, row.model, row.index, synchronous);
@@ -160,7 +163,10 @@
                 console.error('Transcript row rendering failed', error);
             }
         } else if (row.placeholder.isConnected && row.node) {
+            // Retained rows miss document-wide preference updates. Reattach first:
+            // deferred activity content needs a connected transcript to render.
             row.placeholder.replaceWith(row.node);
+            window.syncToolDisclosures?.(row.node);
             restored.push(row);
         }
     }
@@ -420,12 +426,38 @@
         }
         return true;
     };
+    window.regroupChatActivity = function () {
+        document.querySelectorAll('[data-chat-virtual-owner]').forEach(owner => {
+            const data = owner._chatVirtualData;
+            const work = model => model.kind === 'using' || model.kind === 'thinking';
+            if (!data?.ungrouped && owner._chatVirtualRender && data?.sourceModels?.some((model, index, all) => index > 0 && work(model) && work(all[index - 1]))) window.installChatVirtualRows(owner, data, owner._chatVirtualRender);
+        });
+    };
     window.installChatVirtualRows = function (owner, data, render) {
+        owner._chatVirtualRender = render;
+        const compact = !data.ungrouped && document.documentElement.getAttribute('data-output-detail') === 'compact';
+        data.sourceModels ||= data.models;
+        if (data.activityMode !== compact) {
+            const grouped = [];
+            data.sourceModels.forEach(model => {
+                const previous = grouped[grouped.length - 1];
+                if (compact && (model.kind === 'using' || model.kind === 'thinking') && previous && (previous.kind === 'using' || previous.kind === 'thinking')) {
+                    previous.segments.push(...model.segments);
+                    delete previous.height;
+                } else grouped.push(compact ? {...model, segments: model.segments.slice()} : model);
+            });
+            data.models = grouped;
+            data.activityMode = compact;
+        }
+
         const messages = owner.closest(messagesSelector);
         const list = ensureList(messages);
         const width = messages.clientWidth;
         const restore = saveAnchor(list);
-        const old = new Map(Array.from(owner.querySelectorAll('[data-chat-lazy-row]'), el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
+        const active = document.activeElement;
+        let focusedActivityKey = owner.contains(active) && active.matches('.stream-activity-summary')
+            ? active.parentElement.getAttribute('data-tool-disclosure-key') : null;
+        const old = new Map(Array.from(owner.children).filter(el => el.hasAttribute('data-chat-lazy-row')).map(el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
         const fragment = document.createDocumentFragment();
         owner._chatVirtualData = data;
         owner.setAttribute('data-chat-virtual-owner', 'true');
@@ -441,6 +473,13 @@
                 model.width = Number(prior.dataset.chatRowWidth);
             }
             const row = {lazy:true, owner, model, index, render, placeholder, node, ready:false};
+            if (focusedActivityKey) row.restoreFocus = () => {
+                if (!focusedActivityKey || !row.node?.isConnected) return;
+                const fold = Array.from(row.node.querySelectorAll('[data-tool-disclosure-key]')).find(el => el.getAttribute('data-tool-disclosure-key') === focusedActivityKey);
+                if (!fold) return;
+                if (document.activeElement === document.body || document.activeElement === active) fold.querySelector('.stream-activity-summary').focus({preventScroll:true});
+                focusedActivityKey = null;
+            };
             sizePlaceholder(row, estimate(model, width));
             fragment.appendChild(node || placeholder);
             list.rows.set(placeholder, row);

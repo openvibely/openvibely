@@ -118,7 +118,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var wide = window.matchMedia('(min-width: 1024px)');
 					function apply() {
 						var prefs = {};
-						try { prefs = { surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
+						try { prefs = { output: localStorage.getItem('openvibely.outputDetail'), surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
+						root.setAttribute('data-output-detail', prefs.output === 'compact' ? 'compact' : 'full');
 						root.setAttribute('data-surface-style', prefs.surfaces === 'layered' ? 'layered' : 'default');
 						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
 						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
@@ -133,6 +134,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
+                        output: { key: 'openvibely.outputDetail', attr: 'data-output-detail', values: ['full', 'compact'] },
  surfaces: { key: 'openvibely.surfaceStyle', attr: 'data-surface-style', values: ['default', 'layered'] },
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['focused', 'full'] },
@@ -149,6 +151,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							if (p.values.indexOf(value) === -1) value = p.values[0];
 							try { localStorage.setItem(p.key, value); } catch (_) {}
 							root.setAttribute(p.attr, value);
+                            document.dispatchEvent(new CustomEvent('openvibely:display-change', {detail:{name:name,value:value}}));
 						}
 					};
 					if (wide.addEventListener) wide.addEventListener('change', apply);
@@ -2449,7 +2452,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					font-size: 0.8125rem;
 					line-height: 1.5;
 				}
-				/* --- Tool use (copied from Claude Code VSCode: root/toolSummary/toolBody) --- */
+                .stream-activity { display: flow-root; }
+                .stream-activity-body { display: contents; }
+                .stream-activity-body[hidden], .stream-activity-summary[hidden] { display: none !important; }
+                .stream-activity-summary { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: .8125rem; color: inherit; opacity: .75; text-align: left; }
+                .tool-disclosure-caret { display: flex; width: 16px; }
+                .tool-disclosure-caret svg { width: 16px; height: 16px; }
+                .stream-activity-summary[aria-expanded="true"] .tool-disclosure-caret { transform: rotate(90deg); }
+                .stream-activity-summary:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+                /* --- Tool use (copied from Claude Code VSCode: root/toolSummary/toolBody) --- */
 				/* Live responses use text-sm while saved responses inherit the page font.
 				   Keep tool geometry identical when the same output moves between them. */
 				.stream-tool { position: relative; margin: 2px 0; font-size: 1rem; line-height: 1.5; }
