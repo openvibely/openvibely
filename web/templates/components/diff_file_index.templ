@@ -1,0 +1,90 @@
+package components
+
+// The index owns file identity. Layouts allocate only lightweight slots until
+// a file approaches the viewport; chunk responses supply the actual cards.
+templ diffFileIndexScript() {
+ <script>
+ (function() {
+  if (window._prepareDiffPanel) return;
+  function state(viewer) {
+   window._diffFileState = window._diffFileState || {};
+   var key = viewer.dataset.stateKey || 'default';
+   return window._diffFileState[key] || (window._diffFileState[key] = {});
+  }
+  window._diffFileIndex = function(viewer) {
+   if (!viewer._fileIndex) viewer._fileIndex = Array.from(viewer.querySelectorAll('[data-diff-explorer-files] [data-diff-index]')).map(function(node) {
+    return {index:Number(node.dataset.diffIndex), path:node.dataset.diffPath, revision:node.dataset.fileRevision,
+      adds:node.dataset.diffAdds, dels:node.dataset.diffDels};
+   });
+   return viewer._fileIndex;
+  };
+  window._setDiffSlotState = function(slot, expanded) {
+   if (!slot || !slot.classList.contains('diff-file-slot')) return;
+   slot.style.minHeight = expanded ? '140px' : '44px';
+   slot.setAttribute('aria-expanded', String(expanded));
+   if (expanded) slot.removeAttribute('data-collapsed');
+   else slot.setAttribute('data-collapsed','1');
+  };
+  window._prepareDiffPanel = function(viewer, panel) {
+   if (!viewer || !panel || !viewer.dataset.taskId || panel.dataset.diffFilesReady) return;
+   panel.dataset.diffFilesReady = 'true';
+   var split = panel.id === 'diff-content-split', bucket = state(viewer);
+   var fragment = document.createDocumentFragment();
+   window._diffFileIndex(viewer).forEach(function(file) {
+    var slot = document.createElement('div');
+    slot.id = (split ? 'diff-file-split-' : 'diff-file-') + file.index;
+    slot.className = 'diff-file-slot bg-base-200 rounded-lg px-4 py-2 cursor-pointer';
+    slot.dataset.diffFilePath = file.path;
+    slot.dataset.fileRevision = file.revision;
+    slot.dataset.diffLazyUrl = '/tasks/' + encodeURIComponent(viewer.dataset.taskId) + '/changes/file?file_index=' + file.index + '&view=' + (split?'split':'inline') + '&review=true&chunk=0&revision=' + encodeURIComponent(file.revision);
+    slot.dataset.diffAdds = file.adds; slot.dataset.diffDels = file.dels;
+    slot.textContent = file.path;
+    slot.setAttribute('role','button'); slot.tabIndex = 0;
+    slot.onclick = function(event) { if (event.target === slot && slot.classList.contains('diff-file-slot')) toggleDiffFile(file.index); };
+    slot.onkeydown = function(event) {
+     if (event.target === slot && slot.classList.contains('diff-file-slot') && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault(); toggleDiffFile(file.index);
+     }
+    };
+    window._setDiffSlotState(slot, bucket[file.index] !== false);
+    fragment.appendChild(slot);
+   });
+   panel.appendChild(fragment);
+  };
+  window._reconcileDiffFiles = function(previous, next) {
+   if (!previous || !next) return;
+   var oldState = Object.assign({},state(previous)), nextState = state(next), oldFiles = new Map();
+   Object.keys(nextState).forEach(function(key) { delete nextState[key]; });
+   window._diffFileIndex(previous).forEach(function(file) { oldFiles.set(file.path,file); });
+   window._diffFileIndex(next).forEach(function(file) {
+    var old = oldFiles.get(file.path);
+    if (old && Object.prototype.hasOwnProperty.call(oldState,old.index)) nextState[file.index] = oldState[old.index];
+   });
+   ['inline','split'].forEach(function(mode) {
+    var oldPanel = previous.querySelector('#diff-content-'+mode), panel = next.querySelector('#diff-content-'+mode);
+    if (!oldPanel || !oldPanel.childElementCount || !panel) return;
+    window._prepareDiffPanel(next,panel);
+    var slots = new Map(Array.from(panel.children, function(slot) { return [slot.dataset.diffFilePath,slot]; }));
+    oldPanel.querySelectorAll('.diff-file-card').forEach(function(card) {
+     var path = card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
+     var slot = slots.get(path);
+     if (!slot || !card.dataset.fileRevision || card.dataset.fileRevision !== slot.dataset.fileRevision) return;
+     var index = Number(slot.id.replace('diff-file-','').replace('split-',''));
+     card.id = slot.id;
+     card.dataset.diffFilePath = path;
+     if (card.dataset.diffLazyUrl) card.dataset.diffLazyUrl = slot.dataset.diffLazyUrl;
+     if (card.dataset.chunkUrl) card.dataset.chunkUrl = slot.dataset.diffLazyUrl;
+     var header = card.querySelector('[data-diff-toggle]');
+     if (header) { header.dataset.diffToggle = String(index); header.setAttribute('onclick','toggleDiffFile('+index+')'); }
+     var chevron = card.querySelector('[id^="diff-chevron-"]');
+     if (chevron) chevron.id = 'diff-chevron-' + (mode==='split'?'split-':'') + index;
+     var body = card.querySelector('.diff-file-body');
+     if (body) body.id = 'diff-body-' + (mode==='split'?'split-':'') + index;
+     card.querySelectorAll('[data-chunk-index]').forEach(function(chunk) { chunk.dataset.diffLazyUrl = slot.dataset.diffLazyUrl; });
+     slot.replaceWith(card);
+    });
+   });
+  };
+ })();
+ </script>
+}

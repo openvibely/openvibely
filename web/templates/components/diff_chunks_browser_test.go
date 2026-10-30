@@ -40,12 +40,14 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 	result := make(chan string, 1)
 	script := `<script>
  window.addEventListener('load',async()=>{
- const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn)};
+ const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn+'; '+JSON.stringify({scroll:document.querySelector('#main-content').scrollTop,anchor:window._captureDiffScroll()?.anchor,rows:Array.from(document.querySelectorAll('#diff-content-inline:not(.hidden) tr.diff-review-line,#diff-content-split:not(.hidden) tr.diff-review-line')).filter(row=>row.getBoundingClientRect().bottom>document.querySelector('#main-content').getBoundingClientRect().top+40).slice(0,3).map(row=>({old:row.dataset.oldLine,new:row.dataset.newLine,top:row.getBoundingClientRect().top-document.querySelector('#main-content').getBoundingClientRect().top}))}))};
  const assert=(v,m)=>{if(!v)throw Error(m)};
  try {
  const main=document.querySelector('#main-content');
  const panel=()=>document.querySelector('#diff-content-inline');
  await wait(()=>panel().querySelector('[data-chunk-index="0"] tr.diff-review-line'));
+ assert(document.querySelector('#diff-content-split').childElementCount===0,'inactive layout allocated file cards or slots');
+ assert(panel().querySelector('.diff-stat-add').textContent==='+30000','header shows chunk statistics instead of file totals');
  assert(panel().querySelectorAll('[data-chunk-index]').length>=150,'large file did not become chunked');
  assert(panel().querySelectorAll('tr.diff-review-line').length<=600,'initial DOM unbounded');
  const first=panel().querySelector('[data-chunk-index="0"]');
@@ -69,7 +71,7 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 	if kind != "" {
 		script = `<script>
  window.addEventListener('load',async()=>{
- const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn)};
+ const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn+'; '+JSON.stringify({scroll:document.querySelector('#main-content').scrollTop,anchor:window._captureDiffScroll()?.anchor,rows:Array.from(document.querySelectorAll('#diff-content-inline:not(.hidden) tr.diff-review-line,#diff-content-split:not(.hidden) tr.diff-review-line')).filter(row=>row.getBoundingClientRect().bottom>document.querySelector('#main-content').getBoundingClientRect().top+40).slice(0,3).map(row=>({old:row.dataset.oldLine,new:row.dataset.newLine,top:row.getBoundingClientRect().top-document.querySelector('#main-content').getBoundingClientRect().top}))}))};
  const assert=(v,m)=>{if(!v)throw Error(m)};
  const settle=()=>new Promise(r=>setTimeout(r,250));
  try {

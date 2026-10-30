@@ -1844,42 +1844,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							var diffScroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
                             var oldViewer = changesContent.querySelector('#diff-viewer');
                             if (oldViewer && oldViewer._diffPerformance) oldViewer._diffPerformance.destroy();
-                            // Reuse unchanged bodies by path and revision, even if file order moved.
-                            if (oldViewer) {
-                                ['inline', 'split'].forEach(function(mode) {
-                                    var previous = new Map();
-                                    oldViewer.querySelectorAll('#diff-content-' + mode + ' .diff-file-card').forEach(function(card) {
-                                        var path = card.querySelector('[data-copy-path]');
-                                        if (path) previous.set(path.dataset.copyPath, card);
-                                    });
-                                    offscreen.querySelectorAll('#diff-content-' + mode + ' .diff-file-card').forEach(function(card) {
-                                        var path = card.querySelector('[data-copy-path]');
-                                        var old = path && previous.get(path.dataset.copyPath);
-                                        if (!old) return;
-                                        var header = old.querySelector('[data-diff-toggle]');
-                                        var nextViewer = offscreen.querySelector('#diff-viewer');
-                                        if (header && nextViewer && window._diffFileState) {
-                                            var bucket = window._diffFileState[nextViewer.dataset.stateKey] || {};
-                                            bucket[card.id.replace('diff-file-', '').replace('split-', '')] = !header.hasAttribute('data-collapsed');
-                                            window._diffFileState[nextViewer.dataset.stateKey] = bucket;
-                                        }
-                                        if (header && header.hasAttribute('data-collapsed')) {
-                                            card.querySelector('[data-diff-toggle]').setAttribute('data-collapsed', '');
-                                            card.querySelector('.diff-file-body').style.maxHeight = '0';
-                                        }
-                                        if (!old.dataset.fileRevision || old.dataset.fileRevision !== card.dataset.fileRevision || !old.dataset.chunkUrl) return;
-                                        var body = old.querySelector('.diff-file-body');
-                                        var nextBody = card.querySelector('.diff-file-body');
-                                        body.id = nextBody.id;
-                                        body.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
-                                            chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
-                                        });
-                                        nextBody.replaceWith(body);
-                                        card.dataset.chunkUrl = card.dataset.diffLazyUrl;
-                                        delete card.dataset.diffLazyUrl;
-                                    });
-                                });
-                            }
+                            // The file index can reconcile visited layouts without constructing cards for unopened files.
+                            if (window._reconcileDiffFiles) window._reconcileDiffFiles(oldViewer,offscreen.querySelector('#diff-viewer'));
                             changesContent.replaceChildren(...Array.from(offscreen.childNodes));
 							if (typeof htmx !== 'undefined' && typeof htmx.process === 'function') {
 								htmx.process(changesContent);

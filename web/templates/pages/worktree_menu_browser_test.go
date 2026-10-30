@@ -9,6 +9,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 func TestBrowserFunctional_WorktreeActionsAboveDiffHeader(t *testing.T) {
@@ -22,6 +23,7 @@ func TestBrowserFunctional_WorktreeActionsAboveDiffHeader(t *testing.T) {
 		b.evaluate(`document.querySelector('#changes-actions-dropdown').parentElement.style.cssText='position:relative;z-index:0;transform:translateZ(0)'; 'ok'`)
 		for _, mode := range []string{"inline", "split"} {
 			b.evaluate(fmt.Sprintf(`switchDiffView(%q,false); 'ok'`, mode))
+			b.waitFor("diff header loaded", `String(Array.from(document.querySelectorAll('.diff-file-header')).some(el=>el.getClientRects().length>0))`, "true")
 			b.click(`#changes-actions-dropdown > [role="button"]`)
 			b.waitFor("menu visible", `String(document.querySelector('#changes-actions-menu').matches(':popover-open'))`, "true")
 			b.waitFor("menu within viewport", `(function(){const r=document.querySelector('#changes-actions-menu').getBoundingClientRect();return String(r.width>0 && r.left>=0 && r.top>=0 && r.right<=innerWidth && r.bottom<=innerHeight)})()`, "true")
@@ -64,6 +66,12 @@ func worktreeActionsFixture(t *testing.T, runner string, results chan string) *h
 			return
 		}
 		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/tasks/layer-task/changes/file" {
+			if err := components.LoadDiffFileCard(diff, 0, r.URL.Query().Get("view"), task.ID, nil, true).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
 			return
 		}
 		if r.URL.Path == "/tasks/layer-task/changes" {

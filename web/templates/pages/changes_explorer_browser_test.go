@@ -183,12 +183,16 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		many.Store(true)
 		b.evaluate(`_updateDiffViewer('');'many files'`)
 		b.waitFor("explorer first page", `String(document.querySelector('#diff-viewer').dataset.fileCount==='352' && document.querySelectorAll('[data-explorer-path]').length===100)`, "true")
+		b.waitFor("distant files remain lightweight", `String(document.querySelectorAll('#diff-viewer .diff-file-card').length<30 && document.querySelectorAll('#diff-viewer .diff-file-slot').length>300)`, "true")
 		b.evaluate(`Array.from(document.querySelectorAll('.changes-explorer button')).find(el=>el.textContent==='Show more files').click();'next page'`)
 		b.waitFor("explorer next page", `String(document.querySelectorAll('[data-explorer-path]').length===200)`, "true")
 		b.evaluate(`var input=document.querySelector('.explorer-search');input.value='extra349';input.dispatchEvent(new Event('input'));'search unloaded file'`)
 		b.waitFor("search beyond old limit", `String(document.querySelectorAll('[data-explorer-path]').length===1 && !!document.querySelector('[data-explorer-path="extra349.txt"]'))`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="extra349.txt"]').click();'open distant file'`)
 		b.waitFor("distant file loads", `String(!!document.querySelector('#diff-file-351 .diff-line-content, #diff-file-split-351 .diff-line-content'))`, "true")
+		b.waitFor("navigation leaves intervening files unloaded", `String(document.querySelectorAll('#diff-viewer .diff-file-card').length<40 && document.querySelectorAll('#diff-viewer .diff-file-slot').length>300)`, "true")
+		b.evaluate(`toggleAllDiffFiles(false);switchDiffView('inline',false);'collapse across layouts'`)
+		b.waitFor("unvisited files remain collapsed", `String(document.getElementById('diff-file-200').hasAttribute('data-collapsed') && !document.querySelector('#diff-file-200 .diff-line-content'))`, "true")
 
 	})
 }
