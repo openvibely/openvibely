@@ -62,7 +62,8 @@ func TestUsageAccountInventoryShowsProviderIdentityAndSafeFallback(t *testing.T)
 		t.Fatal(err)
 	}
 
-	accounts, err := NewUsageAnalyticsService(env.Usage, env.LLMConfigs).ListUsageAccounts(ctx)
+	svc := NewUsageAnalyticsService(env.Usage, env.LLMConfigs)
+	accounts, err := svc.ListUsageAccounts(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,11 +74,19 @@ func TestUsageAccountInventoryShowsProviderIdentityAndSafeFallback(t *testing.T)
 	for _, account := range accounts {
 		identities[account.Provider] = account.Identity
 	}
-	if identities["openai"] != "owner@example.com" {
-		t.Fatalf("OpenAI account identity = %q, want verified email", identities["openai"])
+	if identities["openai"] != "OpenAI account" {
+		t.Fatalf("ambiguous OpenAI organization identity = %q, want generic label instead of a sibling connection's email", identities["openai"])
 	}
 	if identities["anthropic"] == "" || identities["anthropic"] == "anthropic-account-id" {
 		t.Fatalf("Anthropic fallback identity should be a useful display label, got %q", identities["anthropic"])
+	}
+	configs, err := env.LLMConfigs.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placeholders := svc.oauthAccountPlaceholders(configs, string(models.ProviderOpenAI))
+	if len(placeholders) != 1 || placeholders[0].AccountIdentity != "OpenAI account" {
+		t.Fatalf("ambiguous OpenAI placeholder = %+v, want generic provider label", placeholders)
 	}
 	encoded, err := json.Marshal(accounts)
 	if err != nil {
@@ -87,6 +96,19 @@ func TestUsageAccountInventoryShowsProviderIdentityAndSafeFallback(t *testing.T)
 		if strings.Contains(string(encoded), secret) {
 			t.Fatalf("account inventory exposed private OAuth data %q: %s", secret, encoded)
 		}
+	}
+}
+
+func TestAccountUsageGroupDisplayIdentityUsesConnectionLabelWhenUnambiguous(t *testing.T) {
+	cfg := models.LLMConfig{
+		Provider: models.ProviderOpenAI, OAuthConnectionID: "openai-connection",
+		OAuthAccountID: "openai-account-id", OAuthProviderDisplayName: "OpenAI owner",
+	}
+	got := accountUsageGroupDisplayIdentity([]models.LLMConfig{cfg}, map[string]string{
+		cfg.OAuthConnectionID: "owner@example.com",
+	})
+	if got != "owner@example.com" {
+		t.Fatalf("single-connection group identity = %q, want connection email", got)
 	}
 }
 

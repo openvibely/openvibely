@@ -121,11 +121,8 @@ type UsageAccountDescriptor struct {
 	Identity string `json:"identity,omitempty"`
 }
 
-func accountUsageDisplayIdentity(cfg models.LLMConfig) string {
-	if identity := strings.TrimSpace(cfg.OAuthProviderDisplayName); identity != "" {
-		return preferredAccountIdentity(identity)
-	}
-	switch models.LLMProvider(strings.ToLower(strings.TrimSpace(string(cfg.Provider)))) {
+func accountUsageProviderFallbackIdentity(provider models.LLMProvider) string {
+	switch provider {
 	case models.ProviderOpenAI:
 		return "OpenAI account"
 	case models.ProviderAnthropic:
@@ -135,16 +132,31 @@ func accountUsageDisplayIdentity(cfg models.LLMConfig) string {
 	}
 }
 
-func accountUsageGroupDisplayIdentity(group []models.LLMConfig, labelsByConnectionID map[string]string) string {
-	identities := make([]string, 0, len(group))
-	for _, cfg := range group {
-		identity := strings.TrimSpace(labelsByConnectionID[cfg.OAuthConnectionID])
-		if identity == "" {
-			identity = accountUsageDisplayIdentity(cfg)
-		}
-		identities = append(identities, identity)
+func accountUsageDisplayIdentity(cfg models.LLMConfig) string {
+	if identity := strings.TrimSpace(cfg.OAuthProviderDisplayName); identity != "" {
+		return preferredAccountIdentity(identity)
 	}
-	return preferredAccountIdentity(identities...)
+	return accountUsageProviderFallbackIdentity(cfg.Provider)
+}
+
+func accountUsageGroupDisplayIdentity(group []models.LLMConfig, labelsByConnectionID map[string]string) string {
+	if len(group) == 0 {
+		return "Connected account"
+	}
+	credentialOwners := make(map[string]struct{}, len(group))
+	for _, cfg := range group {
+		credentialOwners[accountUsageCredentialOwnerKeyForConfig(cfg)] = struct{}{}
+	}
+	if len(credentialOwners) > 1 {
+		// The group may represent an organization with multiple user sign-ins.
+		// Until one connection supplies the usage snapshot, don't borrow a sibling's email.
+		return accountUsageProviderFallbackIdentity(group[0].Provider)
+	}
+	cfg := group[0]
+	if identity := strings.TrimSpace(labelsByConnectionID[cfg.OAuthConnectionID]); identity != "" {
+		return preferredAccountIdentity(identity)
+	}
+	return accountUsageDisplayIdentity(cfg)
 }
 
 func preferredAccountIdentity(candidates ...string) string {
@@ -998,29 +1010,23 @@ func latestAccountSnapshotForConfig(ctx context.Context, usageRepo persistence.U
 
 func (s *UsageAnalyticsService) oauthAccountPlaceholders(configs []models.LLMConfig, provider string) []models.AccountUsageView {
 	var accounts []models.AccountUsageView
-	seenAccounts := map[string]bool{}
-	for _, cfg := range configs {
-		if cfg.AuthMethod != models.AuthMethodOAuth || cfg.OAuthAccessToken == "" {
+	for _, providerName := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic)} {
+		if provider != "" && provider != providerName {
 			continue
 		}
-		if cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderOpenAI {
-			continue
+		for _, group := range accountUsageGroups(configs, providerName) {
+			if len(group) == 0 {
+				continue
+			}
+			cfg := group[0]
+			accounts = append(accounts, models.AccountUsageView{
+				Provider:        string(cfg.Provider),
+				AccountIdentity: accountUsageGroupDisplayIdentity(group, nil),
+				AccountID:       accountIDForConfig(cfg), AgentConfigID: cfg.ID,
+				Limits: []models.AccountLimitView{},
+				Error:  "live account usage unavailable; reconnect OAuth or retry refresh",
+			})
 		}
-		if provider != "" && string(cfg.Provider) != provider {
-			continue
-		}
-		key := accountUsageKeyForConfig(cfg)
-		if seenAccounts[key] {
-			continue
-		}
-		seenAccounts[key] = true
-		accounts = append(accounts, models.AccountUsageView{
-			Provider:        string(cfg.Provider),
-			AccountIdentity: accountUsageDisplayIdentity(cfg),
-			AccountID:       accountIDForConfig(cfg), AgentConfigID: cfg.ID,
-			Limits: []models.AccountLimitView{},
-			Error:  "live account usage unavailable; reconnect OAuth or retry refresh",
-		})
 	}
 	return accounts
 }
