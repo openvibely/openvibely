@@ -784,6 +784,99 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/analytics/usage/resets": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get usage reset credits",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connected OAuth account key",
+                        "name": "account_key",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Provider reset credits",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "502": {
+                        "description": "Account or provider request failed",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Usage service unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/analytics/usage/resets/consume": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Consume a usage reset credit",
+                "parameters": [
+                    {
+                        "description": "Account, credit, and idempotency key",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.ConsumeUsageResetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Provider reset result",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid reset request",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Account or provider request failed",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Usage service unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/capacity/global": {
             "get": {
                 "description": "Returns global worker pool usage and available slots. max_workers=0 means unlimited; any positive value is a finite ceiling without a product-level upper bound.",
@@ -1777,6 +1870,20 @@ const docTemplate = `{
                 "tokens_used": {
                     "type": "integer",
                     "example": 150
+                }
+            }
+        },
+        "handler.ConsumeUsageResetRequest": {
+            "type": "object",
+            "properties": {
+                "account_key": {
+                    "type": "string"
+                },
+                "credit_id": {
+                    "type": "string"
+                },
+                "idempotency_key": {
+                    "type": "string"
                 }
             }
         },
