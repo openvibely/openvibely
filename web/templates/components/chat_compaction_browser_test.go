@@ -22,7 +22,7 @@ func TestBrowserFunctional_ChatCompactionActivity(t *testing.T) {
 	for _, prefix := range []string{"", "[Tool read_file done]\n```text\nfile excerpt\n[/Tool]\n"} {
 		for _, thinking := range []string{"", "[Thinking]\n"} {
 			for _, fence := range []string{"```", "~~~~", "`````"} {
-				writer := llmstream.NewWriter("", "", nil, context.Background(), time.Hour)
+				writer := llmstream.NewWriterWithPublisher("", "", nil, context.Background(), time.Hour, nil)
 				writer.Write([]byte(prefix + thinking + "Examining code\n" + fence + "go\npartial"))
 				report := llmstream.CompactionReporter(writer, nil)
 				report(llmcontracts.CompactionProgress{State: "started"})

@@ -157,7 +157,7 @@ func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
 			HasAttachments: steering.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(steering.ID, steering.Content, steering.AttachmentSessionID != ""))
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(steering.ID, steering.Content, steering.AttachmentSessionID != "", steering.AuthorName))
 }
 
 func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
@@ -195,7 +195,7 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 			HasAttachments: steering.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", taskID))
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", taskID, steering.AuthorName))
 }
 
 // Editing holds are renewed by the open editor and expire after disconnects.

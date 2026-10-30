@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
-	"testing/fstest"
 
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations"
 	"github.com/pressly/goose/v3"
@@ -82,12 +80,16 @@ func TestConsolidatedTranscriptMigration(t *testing.T) {
 				require.NoError(t, db.QueryRow(`SELECT max(sequence) FROM conversation_items`).Scan(&sequence))
 				require.Equal(t, priorSequence, sequence, "adoption must preserve journal cursors")
 			}
-			version, err := goose.GetDBVersion(db)
-			require.NoError(t, err)
+			var version int64
+			require.NoError(t, db.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version))
 			require.EqualValues(t, 219, version)
 			var n int
-			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (217,218,220,221)`).Scan(&n))
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (220,221)`).Scan(&n))
 			require.Zero(t, n)
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (217,218) AND is_applied=1`).Scan(&n))
+			require.Equal(t, 2, n, "main's 217/218 must apply after adoption")
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name IN ('organizations','task_model_overrides')`).Scan(&n))
+			require.Equal(t, 2, n)
 			require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='conversation_checkpoint_ranges'`).Scan(&n))
 			require.Equal(t, 1, n)
 			require.NoError(t, initializeSQLite(db)) // adoption is idempotent
@@ -124,28 +126,9 @@ func TestDevelopmentTranscriptAdoptionRollsBack(t *testing.T) {
 	require.Zero(t, n)
 }
 
-// These fixtures are exact copies of pinned main's 217/218, not registered
-// branch migrations. They verify the reserved numbering against main's schema.
 func TestTranscriptUpgradeFromMain218(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "main.db"))
-	combined := fstest.MapFS{}
-	entries, err := migrations.FS.ReadDir(".")
-	require.NoError(t, err)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		raw, err := migrations.FS.ReadFile(entry.Name())
-		require.NoError(t, err)
-		combined[entry.Name()] = &fstest.MapFile{Data: raw}
-	}
-	for _, name := range []string{"217_organizations.sql", "218_task_model_overrides.sql"} {
-		raw, err := os.ReadFile(filepath.Join("testdata", "transcript-main-baseline", name))
-		require.NoError(t, err)
-		combined[name] = &fstest.MapFile{Data: raw}
-	}
-	goose.SetBaseFS(combined)
-	defer goose.SetBaseFS(migrations.FS)
+	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("sqlite3"))
 	require.NoError(t, goose.UpTo(db, ".", 218))
 
@@ -156,7 +139,6 @@ func TestTranscriptUpgradeFromMain218(t *testing.T) {
 		require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&count))
 		require.Equal(t, 1, count)
 	}
-	goose.SetBaseFS(combined)
 	require.NoError(t, goose.DownTo(db, ".", 218))
 	v, err := goose.GetDBVersion(db)
 	require.NoError(t, err)

@@ -23,7 +23,9 @@ type DisplayTail struct {
 }
 
 type Execution struct {
-	DisplayTail *DisplayTail `json:"-"`
+	DisplayTail  *DisplayTail `json:"-"`
+	AuthorUserID string       `json:"author_user_id,omitempty"`
+	AuthorName   string       `json:"author_name,omitempty"`
 	// HistoryOrder is the server tie-breaker for equal start times in transcript windows.
 	HistoryOrder int64 `json:"-"`
 

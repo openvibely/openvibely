@@ -496,119 +496,11 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 				return templ_7745c5c3_Err
 			}
 		}
-		if len(fileStats) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden\"><div class=\"text-sm font-semibold mb-2 min-w-0\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d file(s) changed", len(fileStats)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 219, Col: 57}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div><ul class=\"text-xs space-y-1 min-w-0 max-w-full overflow-hidden\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, fs := range fileStats {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<li class=\"flex items-center gap-2 min-w-0 max-w-full overflow-hidden\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				{
-					templ_7745c5c3_ElementWriter := templ_7745c5c3_Buffer
-					templ_7745c5c3_Buffer := templ.GetBuffer()
-					var templ_7745c5c3_ElementScripts []templ.ComponentScript
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<span class=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var24 = []any{fileStatusBadgeClass(fs.Status), "shrink-0"}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_Var24...)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var25 string
-					templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.CSSClasses(templ_7745c5c3_Var24).String()).Resolve(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 1, Col: 0}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_ElementWriter, templ_7745c5c3_ElementScripts...)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_ElementWriter)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ.ReleaseBuffer(templ_7745c5c3_Buffer)
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, ">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var26 string
-				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fileStatusChar(fs.Status))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 224, Col: 95}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</span> <span class=\"font-mono min-w-0 flex-1 truncate\" title=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var27 string
-				templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fs.Path).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 225, Col: 71}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var28 string
-				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fs.Path)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worktree.templ`, Line: 225, Col: 83}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</span></li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</ul></div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
 		templ_7745c5c3_Err = components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -645,28 +537,6 @@ func mergeStatusLabel(status models.MergeStatus) string {
 		return "Conflicts"
 	default:
 		return ""
-	}
-}
-
-func fileStatusBadgeClass(status string) string {
-	switch status {
-	case "added":
-		return "badge badge-xs badge-success"
-	case "deleted":
-		return "badge badge-xs badge-error"
-	default:
-		return "badge badge-xs badge-warning"
-	}
-}
-
-func fileStatusChar(status string) string {
-	switch status {
-	case "added":
-		return "A"
-	case "deleted":
-		return "D"
-	default:
-		return "M"
 	}
 }
 
@@ -727,7 +597,7 @@ func changesActionsPopoverScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<script>\n (() => {\n  if (window._changesActionsPopoverInstalled) return;\n  window._changesActionsPopoverInstalled = true;\n  const current = () => document.getElementById('changes-actions-menu');\n  const close = () => { const menu=current(); if(menu && menu.matches(':popover-open')) menu.hidePopover(); };\n  function position(menu) {\n   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;\n   const trigger=document.querySelector('[popovertarget=\"changes-actions-menu\"]');\n   if(!trigger) { menu.hidePopover(); return; }\n   const rect=trigger.getBoundingClientRect();\n   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }\n   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';\n   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';\n   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';\n  }\n  document.addEventListener('beforetoggle', event => {\n   // Native input can flush microtasks before the popover has entered the top\n   // layer. Measure on the next frame, after opening and before it is painted.\n   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));\n  }, true);\n  window.addEventListener('resize',()=>position(current()));\n  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);\n  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<script>\n (() => {\n  if (window._changesActionsPopoverInstalled) return;\n  window._changesActionsPopoverInstalled = true;\n  const current = () => document.getElementById('changes-actions-menu');\n  const close = () => { const menu=current(); if(menu && menu.matches(':popover-open')) menu.hidePopover(); };\n  function position(menu) {\n   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;\n   const trigger=document.querySelector('[popovertarget=\"changes-actions-menu\"]');\n   if(!trigger) { menu.hidePopover(); return; }\n   const rect=trigger.getBoundingClientRect();\n   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }\n   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';\n   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';\n   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';\n  }\n  document.addEventListener('beforetoggle', event => {\n   // Native input can flush microtasks before the popover has entered the top\n   // layer. Measure on the next frame, after opening and before it is painted.\n   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));\n  }, true);\n  window.addEventListener('resize',()=>position(current()));\n  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);\n  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

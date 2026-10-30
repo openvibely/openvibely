@@ -93,6 +93,7 @@ templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
 
 templ TaskListPanel(currentProjectID string) {
 	<aside id="task-list-panel" aria-label="Tasks">
+        <div id="changes-explorer-host"></div>
 		<nav id="appearance-settings-nav" aria-label="Settings">
 			@SettingsLinks(currentProjectID)
 		</nav>
@@ -109,13 +110,15 @@ templ TaskListPanel(currentProjectID string) {
 		></div>
 	</aside>
 	<nav class="settings-mobile-nav" aria-label="Settings">@SettingsLinks(currentProjectID)</nav>
+	<div id="changes-explorer-mobile"></div>
+    @ChangesExplorerScript()
 	<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
 	<style>
         #appearance-settings-nav { display: none; }
-        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav) { display: none !important; }
+        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
         html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
         #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; padding: 10px; margin-bottom: 12px; }
-        html.appearance-settings #task-list-header { visibility: hidden; }
+        html.appearance-settings:not(.changes-explorer-active) #task-list-header { visibility: hidden; }
         html.appearance-settings #task-list-divider { display: none !important; }
         .settings-mobile-nav { display: none; }
         html.appearance-settings .settings-mobile-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px; max-height: 40vh; overflow-y: auto; flex-shrink: 0; }
@@ -127,8 +130,10 @@ templ TaskListPanel(currentProjectID string) {
         (function() {
             var root = document.documentElement;
             var inSettings = false;
+            var inContextSidebar = false;
+            var contextChanges = null;
             var wasCollapsed = false;
-            var workspaceURL = /^\/(themes|models|agents|skills|channels|personality|workers|settings\/workers)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
+            var workspaceURL = /^\/(themes|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
             var workspaceScroll = 0;
             var boardScroll = new Map();
             var boardScrollSelector = '#tasks-page, #kanban-board, .category-drop-zone, .task-drop-zone';
@@ -148,11 +153,15 @@ templ TaskListPanel(currentProjectID string) {
             window.syncAppearanceSettings = function() {
                 var appearance = !!document.getElementById('themes-container');
                 var workers = !!document.getElementById('worker-settings-content');
-                var active = appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container');
-                if (active && !inSettings) {
+                var changes = document.getElementById('tab-changes');
+                var reviewing = !!changes && !changes.classList.contains('hidden');
+                root.classList.toggle('changes-explorer-active', reviewing);
+                if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
+                var settings = appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
+                var active = reviewing || settings;
+                if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');
-                    root.classList.remove('task-list-collapsed');
-                } else if (!active && inSettings) {
+                } else if (!active && inContextSidebar) {
                     root.classList.toggle('task-list-collapsed', wasCollapsed);
                     if (location.pathname + location.search + location.hash === workspaceURL) {
                         document.getElementById('main-content').scrollTop = workspaceScroll;
@@ -165,9 +174,18 @@ templ TaskListPanel(currentProjectID string) {
                         });
                     }
                 }
-                inSettings = active;
+                // Open on entry or when changing contextual pages, without
+                // overwriting the workspace preference or undoing a manual
+                // explorer collapse during an ordinary diff refresh.
+                if (active && (!inContextSidebar || settings !== inSettings || (reviewing && changes !== contextChanges))) {
+                    root.classList.remove('task-list-collapsed');
+                }
+                contextChanges = reviewing ? changes : null;
+                inSettings = settings;
+                inContextSidebar = active;
                 root.classList.toggle('appearance-settings', active);
-                document.getElementById('task-list-panel').setAttribute('aria-label', active ? 'Settings' : 'Tasks');
+                if (window.syncTaskListToggle) window.syncTaskListToggle();
+                document.getElementById('task-list-panel').setAttribute('aria-label', reviewing ? 'Changed files' : active ? 'Settings' : 'Tasks');
                 if (!active) return;
                 var projectID = new URLSearchParams(location.search).get('project_id') || (document.getElementById('project-selector') || {}).value || '';
                 document.querySelectorAll('[data-settings-link]').forEach(function(link) {
@@ -234,13 +252,20 @@ templ TaskListPanel(currentProjectID string) {
 				btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 				btn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');
 			}
+			window.syncTaskListToggle = syncToggle;
 			function setCollapsed(collapsed) {
-                if (root.classList.contains("appearance-settings")) return;
+                if (root.classList.contains("appearance-settings") && !root.classList.contains("changes-explorer-active")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
-				try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
+				if (!root.classList.contains('changes-explorer-active')) {
+					try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
+				}
 				syncToggle();
 			}
 			function openSearch(open) {
+                if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) {
+                    window.taskWorkspace.openThread();
+                    open = true;
+                }
 				searchBox.hidden = !open;
 				var btn = document.getElementById('task-list-search-toggle');
 				if (btn) btn.setAttribute('aria-expanded', String(open));
@@ -581,6 +606,19 @@ templ SettingsLinks(currentProjectID string) {
 		</svg>
 		<span class="task-list-title">Personality</span>
 	</a>
+	<a class="task-list-row"
+                        data-nav-base="/organization"
+                        href={ templ.SafeURL(fmt.Sprintf("/organization?project_id=%s", currentProjectID)) }
+                        hx-get={ fmt.Sprintf("/organization?project_id=%s", currentProjectID) }
+                        hx-target="#main-content"
+                        hx-push-url="true"
+                        aria-label="Organization" title="Organization"
+                    >
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 0 0-6-3.465M17 20H7m10 0v-2a5 5 0 0 0-10 0v2m0 0H2v-2a4 4 0 0 1 6-3.465M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm6 3a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM8 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"></path>
+						</svg>
+						<span class="task-list-title">Organization</span>
+					</a>
 	<a class="task-list-row" data-nav-base="/workers" href={ templ.SafeURL("/workers?project_id=" + url.QueryEscape(currentProjectID)) } hx-get={ "/workers?project_id=" + url.QueryEscape(currentProjectID) } hx-target="#main-content" hx-push-url="true">
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>

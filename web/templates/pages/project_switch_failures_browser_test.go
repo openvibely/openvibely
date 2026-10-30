@@ -125,16 +125,16 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		for _, stalledBody := range []bool{false, true} {
 			browser.evaluate(fmt.Sprintf(`window.stalledBody=%t;window.stallAttempts=0;window.stallAborted=false;window.retryPayload=null;window.fetch=function(url,options){if(url!=='/ui/preferences')return originalFetch.apply(this,arguments);window.stallAttempts++;if(window.stallAttempts===1){var stalled=new Promise(function(resolve,reject){if(options.signal)options.signal.addEventListener('abort',function(){window.stallAborted=true;reject(new DOMException('Timed out','AbortError'));},{once:true});});return window.stalledBody?Promise.resolve({ok:false,status:400,json:function(){return stalled;}}):stalled;}window.retryPayload=JSON.parse(options.body);return Promise.resolve({ok:true,status:204});};window.openVibelySaveProjectPreferences({pinned_project_ids:['a','b']});window.openVibelySaveProjectPreferences({pinned_project_ids:['b','c'],project_id:'b'});'ok';`, stalledBody))
 			browser.waitFor("stalled save aborts and retries latest values", `String(window.stallAborted)+':'+JSON.stringify(window.retryPayload)`, `true:{"pinned_project_ids":["b","c"],"project_id":"b"}`)
-			browser.waitFor("retried save acknowledges outbox", `String(!localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.project-preference-outbox.project_id'))`, "true")
+			browser.waitFor("retried save acknowledges outbox", `String(!localStorage.getItem('openvibely.local-owner.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.local-owner.project-preference-outbox.project_id'))`, "true")
 		}
 		browser.evaluate(`window.setTimeout=window.realSaveTimer;'ok';`)
 		// Hold a save open, queue a newer tab order and page, then destroy the
 		// document. keepalive cannot send the newer in-memory queue by itself.
 		browser.evaluate(`window.fetch=function(url,options){if(url==='/ui/preferences')return new Promise(function(resolve){window.releaseOldSave=resolve;});return originalFetch.apply(this,arguments);};window.openVibelySaveProjectPreferences({pinned_project_ids:['a','b','c']});window.openVibelySaveProjectPreferences({pinned_project_ids:['c','b','a'],project_locations:{b:'/schedule?project_id=b'}});window.releaseOldSave({ok:true,status:204});'ok';`)
-		browser.waitFor("old acknowledgment retains latest durable order", `JSON.stringify(JSON.parse(localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')).value)`, `["c","b","a"]`)
+		browser.waitFor("old acknowledgment retains latest durable order", `JSON.stringify(JSON.parse(localStorage.getItem('openvibely.local-owner.project-preference-outbox.pinned_project_ids')).value)`, `["c","b","a"]`)
 		browser.evaluate(`sessionStorage.clear();'ok';`)
 		browser.reload()
-		browser.waitFor("startup replays and clears outbox", `String(!localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.project-preference-outbox.project_locations'))`, "true")
+		browser.waitFor("startup replays and clears outbox", `String(!localStorage.getItem('openvibely.local-owner.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.local-owner.project-preference-outbox.project_locations'))`, "true")
 		browser.waitFor("recovered tabs rendered in order", `Array.from(document.querySelectorAll('[data-project-tab]')).map(el=>el.dataset.projectTab).join(',')`, "c,b,a")
 		browser.evaluate(`var s=document.getElementById('project-selector');s.value='b';s.dispatchEvent(new Event('change',{bubbles:true}));'ok';`)
 		browser.waitFor("recovered page used when switching", `location.pathname+':'+(document.getElementById('loaded-project')||{}).textContent`, "/schedule:b")

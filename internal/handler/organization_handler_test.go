@@ -1,0 +1,574 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/stretchr/testify/require"
+)
+
+func organizationTestApp(t *testing.T, enabled bool) (*TestContext, *echo.Echo) {
+	tc := NewStoreTestContext(t)
+	cfg := auth.Config{Enabled: enabled, Username: "alice", Password: "alice-password-long", SessionSecret: "org-test-secret"}.Normalized()
+	tc.handler.SetAuthConfig(cfg)
+	s := service.NewOrganizationService(tc.stores.Organizations, cfg.SessionSecret)
+	require.NoError(t, s.Bootstrap(t.Context(), cfg.Username, cfg.Password, enabled))
+	tc.handler.SetOrganizationService(s)
+	// Match production ordering: authenticate before route ownership checks.
+	e := echo.New()
+	e.Use(tc.handler.AuthMiddleware())
+	tc.handler.RegisterRoutes(e)
+	return tc, e
+}
+func orgRequest(e *echo.Echo, method, path string, form url.Values, cookie *http.Cookie) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "http://example.com"+path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://example.com")
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
+}
+func orgCookie(t *testing.T, r *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, c := range r.Result().Cookies() {
+		if c.Name == auth.DefaultCookieName {
+			return c
+		}
+	}
+	t.Fatal("session cookie missing")
+	return nil
+}
+
+func TestOrganizationHTTPJoinRolesPreferencesAndRemoval(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	login := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
+	require.Equal(t, http.StatusFound, login.Code, login.Body.String())
+	ownerCookie := orgCookie(t, login)
+	require.True(t, ownerCookie.HttpOnly)
+	invite := orgRequest(e, http.MethodPost, "/organization/invitations", url.Values{"role": {"member"}}, ownerCookie)
+	require.Equal(t, http.StatusOK, invite.Code, invite.Body.String())
+	require.Equal(t, "no-store", invite.Header().Get("Cache-Control"))
+	match := regexp.MustCompile(`/invite\?token=([A-Za-z0-9_-]+)`).FindStringSubmatch(invite.Body.String())
+	require.Len(t, match, 2)
+	join := orgRequest(e, http.MethodPost, "/invite", url.Values{"token": {match[1]}, "username": {"bob"}, "password": {"bob-password-long"}}, nil)
+	require.Equal(t, http.StatusSeeOther, join.Code, join.Body.String())
+	bobCookie := orgCookie(t, join)
+	again := orgRequest(e, http.MethodPost, "/invite", url.Values{"token": {match[1]}, "username": {"mallory"}, "password": {"mallory-password-long"}}, nil)
+	require.Equal(t, http.StatusBadRequest, again.Code)
+	me := orgRequest(e, http.MethodGet, "/auth/me", nil, bobCookie)
+	require.Equal(t, http.StatusOK, me.Code)
+	var identity struct {
+		UserID string `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &identity))
+	require.Equal(t, "member", identity.Role)
+	denied := orgRequest(e, http.MethodPost, "/organization/invitations", url.Values{"role": {"admin"}}, bobCookie)
+	require.Equal(t, http.StatusForbidden, denied.Code)
+	denied = orgRequest(e, http.MethodPost, "/organization", url.Values{"name": {"hijacked"}}, bobCookie)
+	require.Equal(t, http.StatusForbidden, denied.Code)
+	for _, item := range []struct {
+		cookie *http.Cookie
+		theme  string
+	}{{ownerCookie, "dark"}, {bobCookie, "light"}} {
+		req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"`+item.theme+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(item.cookie)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	}
+	bob, err := tc.stores.Organizations.UserByID(t.Context(), identity.UserID)
+	require.NoError(t, err)
+	ownPrefs, err := tc.stores.Organizations.Preferences(t.Context(), models.BootstrapUserID, []string{"ui.theme"})
+	require.NoError(t, err)
+	require.Equal(t, "dark", ownPrefs["ui.theme"])
+	bobPrefs, err := tc.stores.Organizations.Preferences(t.Context(), bob.UserID, []string{"ui.theme"})
+	require.NoError(t, err)
+	require.Equal(t, "light", bobPrefs["ui.theme"])
+	lastOwner := orgRequest(e, http.MethodPost, "/organization/members/"+models.BootstrapUserID, url.Values{"action": {"remove"}}, ownerCookie)
+	require.Equal(t, http.StatusConflict, lastOwner.Code)
+	remove := orgRequest(e, http.MethodPost, "/organization/members/"+bob.UserID, url.Values{"action": {"remove"}}, ownerCookie)
+	require.Equal(t, http.StatusSeeOther, remove.Code, remove.Body.String())
+	me = orgRequest(e, http.MethodGet, "/auth/me", nil, bobCookie)
+	require.Equal(t, http.StatusUnauthorized, me.Code)
+	logout := orgRequest(e, http.MethodPost, "/logout", nil, ownerCookie)
+	require.Equal(t, http.StatusFound, logout.Code)
+	me = orgRequest(e, http.MethodGet, "/auth/me", nil, ownerCookie)
+	require.Equal(t, http.StatusUnauthorized, me.Code)
+}
+
+func TestOrganizationAuthOffAndCrossOrigin(t *testing.T) {
+	_, e := organizationTestApp(t, false)
+	page := orgRequest(e, http.MethodGet, "/organization", nil, nil)
+	require.Equal(t, http.StatusOK, page.Code)
+	require.Contains(t, page.Body.String(), "Authentication is off")
+	invite := orgRequest(e, http.MethodPost, "/organization/invitations", url.Values{"role": {"member"}}, nil)
+	require.Equal(t, http.StatusForbidden, invite.Code)
+	_, e = organizationTestApp(t, true)
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/login", strings.NewReader("username=alice&password=alice-password-long"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestOrganizationMemberRemovalClosesWebSocket(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	s := tc.handler.organizationSvc
+	invite, err := s.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	member, err := s.Accept(t.Context(), invite, "socket-user", "socket-password-long", "")
+	require.NoError(t, err)
+	token, err := s.NewSession(t.Context(), member.UserID, time.Hour)
+	require.NoError(t, err)
+	server := httptest.NewServer(e)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, strings.Replace(server.URL, "http", "ws", 1)+"/events/ws", &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {server.URL}, "Cookie": {auth.DefaultCookieName + "=" + token}}})
+	require.NoError(t, err)
+	defer conn.CloseNow()
+	var frame liveFrame
+	require.NoError(t, wsjson.Read(ctx, conn, &frame))
+	require.Equal(t, "ready", frame.Event)
+	require.NoError(t, wsjson.Write(ctx, conn, liveCommand{Op: "live", ID: "project", ProjectID: "default"}))
+	require.NoError(t, wsjson.Read(ctx, conn, &frame))
+	require.Equal(t, "subscribed", frame.Event)
+	ownerToken, err := s.NewSession(t.Context(), models.BootstrapUserID, time.Hour)
+	require.NoError(t, err)
+	rec := orgRequest(e, http.MethodPost, "/organization/members/"+member.UserID, url.Values{"action": {"remove"}}, &http.Cookie{Name: auth.DefaultCookieName, Value: ownerToken})
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	require.Error(t, wsjson.Read(ctx, conn, &frame))
+	require.NoError(t, ctx.Err(), "membership removal must close the socket before the test deadline")
+}
+
+func TestOrganizationHostedLogoutRevokesSignedCookie(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	h.appBaseURL = "http://example.com"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "owner-subject", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	token, err := auth.SignHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	// A signature alone does not restore an old or revoked session.
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+	require.Equal(t, http.StatusOK, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
+	require.Equal(t, http.StatusFound, orgRequest(e, http.MethodPost, "/logout", nil, cookie).Code)
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
+}
+
+func TestOrganizationUsesAppShellAndHTMXFragments(t *testing.T) {
+	_, e := organizationTestApp(t, false)
+	full := orgRequest(e, http.MethodGet, "/organization", nil, nil)
+	require.Equal(t, http.StatusOK, full.Code)
+	require.Contains(t, full.Body.String(), `id="main-content"`)
+	require.Contains(t, full.Body.String(), `data-nav-base="/organization"`)
+	require.Contains(t, full.Body.String(), `hx-get="/organization?project_id=`)
+	require.Contains(t, full.Body.String(), `id="organization-container"`)
+	require.NotContains(t, full.Body.String(), "Back to OpenVibely")
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/organization", nil)
+	req.Header.Set("HX-Request", "true")
+	fragment := httptest.NewRecorder()
+	e.ServeHTTP(fragment, req)
+	require.Equal(t, http.StatusOK, fragment.Code)
+	require.Contains(t, fragment.Body.String(), `id="organization-container"`)
+	require.NotContains(t, fragment.Body.String(), "<html")
+	require.NotContains(t, fragment.Body.String(), `id="main-content"`)
+	require.Contains(t, fragment.Body.String(), `hx-post="/organization" hx-target="#main-content"`)
+}
+
+func TestOrganizationInviteReferrerPolicyAndOriginValidation(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	page := orgRequest(e, http.MethodGet, "/invite?token="+token, nil, nil)
+	require.Equal(t, http.StatusOK, page.Code)
+	// Browsers may send Origin: null for HTTP POST forms under no-referrer.
+	// strict-origin retains the submitting origin but omits the token-bearing URL.
+	require.Equal(t, "strict-origin", page.Header().Get("Referrer-Policy"))
+	form := url.Values{"token": {token}, "username": {"bob"}, "password": {"bob-password-long"}}
+	for _, origin := range []string{"null", "http://evil.example", "http://example.com:9999"} {
+		req := httptest.NewRequest(http.MethodPost, "http://example.com/invite", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", origin)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusForbidden, rec.Code, origin)
+	}
+	// Rejections must not consume the invitation.
+	accepted := orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusSeeOther, accepted.Code, accepted.Body.String())
+}
+
+func TestOrganizationSignupShowsReadableValidationAndAllowsRetry(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	form := url.Values{"token": {token}, "username": {"testuser1"}, "password": {"123456"}}
+	rejected := orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusBadRequest, rejected.Code)
+	require.Contains(t, rejected.Header().Get("Content-Type"), "text/html")
+	require.Contains(t, rejected.Body.String(), "at least 12 characters")
+	require.Contains(t, rejected.Body.String(), `value="testuser1"`)
+	require.NotContains(t, rejected.Body.String(), "123456")
+	require.NotContains(t, rejected.Body.String(), "bytes")
+	// Six multi-byte characters still do not meet the twelve-character minimum.
+	form.Set("password", "éééééé")
+	rejected = orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusBadRequest, rejected.Code)
+	require.Contains(t, rejected.Body.String(), "at least 12 characters")
+	form.Set("password", "a-longer-password")
+	accepted := orgRequest(e, http.MethodPost, "/invite", form, nil)
+	require.Equal(t, http.StatusSeeOther, accepted.Code)
+}
+
+func TestOrganizationLoginFailuresDoNotBlockOtherAccounts(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	// Unknown-account failures must not prevent the owner signing in from
+	// the same direct/proxy address. Successful logins never consume failures.
+	for i := 0; i < 10; i++ {
+		rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"unknown"}, "password": {"wrong"}}, nil)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+	}
+	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"unknown"}, "password": {"wrong"}}, nil)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	for i := 0; i < 12; i++ {
+		rec = orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}}, nil)
+		require.Equal(t, http.StatusFound, rec.Code, rec.Body.String())
+	}
+	require.NoError(t, tc.handler.organizationSvc.ConfigureTrustedProxies("127.0.0.1/32"))
+	for _, ip := range []string{"198.51.100.1", "198.51.100.2"} {
+		for i := 0; i < 10; i++ {
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/login", strings.NewReader(url.Values{"username": {"unknown"}, "password": {"wrong"}}.Encode()))
+			req.RemoteAddr = "127.0.0.1:12345"
+			req.Header.Set("Origin", "http://example.com")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("X-Forwarded-For", ip)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusUnauthorized, rec.Code)
+		}
+	}
+}
+
+func TestOrganizationLoginCannotBeBypassedThroughSignup(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	for i := 0; i < 10; i++ {
+		rec := orgRequest(e, http.MethodPost, "/invite", url.Values{"token": {token}, "username": {"alice"}, "password": {"wrong-password"}}, nil)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+	}
+	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"wrong"}}, nil)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestOrganizationHostedSameSecondSessionsAreIndependent(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	h.appBaseURL = "http://example.com"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "owner-subject", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	// Identical identity and timestamps reproduce the original collision.
+	first, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	second, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NotEqual(t, first, second)
+	for _, token := range []string{first, second} {
+		verified, err := auth.VerifyHostedSession(token, h.hostedSSOKey, h.hostedSSOInstanceID, now)
+		require.NoError(t, err)
+		require.NotEmpty(t, verified.SessionID)
+		require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+		require.Equal(t, http.StatusOK, orgRequest(e, http.MethodGet, "/auth/me", nil, &http.Cookie{Name: auth.DefaultCookieName, Value: token}).Code)
+	}
+	firstCookie := &http.Cookie{Name: auth.DefaultCookieName, Value: first}
+	secondCookie := &http.Cookie{Name: auth.DefaultCookieName, Value: second}
+	require.Equal(t, http.StatusFound, orgRequest(e, http.MethodPost, "/logout", nil, firstCookie).Code)
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, firstCookie).Code)
+	require.Equal(t, http.StatusOK, orgRequest(e, http.MethodGet, "/auth/me", nil, secondCookie).Code)
+	// Another login in that same second must not resurrect the logged-out token.
+	third, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), third, models.BootstrapUserID, claims.ExpiresAt))
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, firstCookie).Code)
+}
+
+func TestOrganizationProtectsLastOwnerControlsAndKeepsServerGuard(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	token, err := tc.handler.organizationSvc.NewSession(t.Context(), models.BootstrapUserID, time.Hour)
+	require.NoError(t, err)
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	page := orgRequest(e, http.MethodGet, "/organization", nil, cookie)
+	require.Equal(t, http.StatusOK, page.Code)
+	formPattern := regexp.MustCompile(`(?s)<form method="post" action="/organization/members/local-owner".*?</form>`)
+	form := formPattern.FindString(page.Body.String())
+	require.NotEmpty(t, form)
+	require.Regexp(t, `<select[^>]*disabled`, form)
+	require.Regexp(t, `<button[^>]*value="role"[^>]*disabled`, form)
+	require.Regexp(t, `<button[^>]*value="remove"[^>]*disabled`, form)
+	require.Contains(t, page.Body.String(), "Promote another owner")
+	require.Contains(t, page.Body.String(), `id="organization-error" role="alert"`)
+	// Stale tabs and forged form submissions must still be rejected.
+	rejected := orgRequest(e, http.MethodPost, "/organization/members/local-owner", url.Values{"action": {"role"}, "role": {"member"}}, cookie)
+	require.Equal(t, http.StatusConflict, rejected.Code)
+	require.Contains(t, rejected.Body.String(), "last owner")
+	invite, err := tc.handler.organizationSvc.Invite(t.Context(), models.BootstrapUserID, "member")
+	require.NoError(t, err)
+	other, err := tc.handler.organizationSvc.Accept(t.Context(), invite, "second-owner", "a-long-password", "")
+	require.NoError(t, err)
+	require.NoError(t, tc.stores.Organizations.ChangeMember(t.Context(), models.BootstrapUserID, other.UserID, "owner", false))
+	page = orgRequest(e, http.MethodGet, "/organization", nil, cookie)
+	form = formPattern.FindString(page.Body.String())
+	require.NotContains(t, form, "disabled")
+}
+
+func TestOrganizationHostedIdentityReplacesPlaceholder(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "verified-owner", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	// A fresh verified SSO exchange updates the profile before issuing a session.
+	_, err = h.organizationSvc.Store.BindHostedOwner(t.Context(), claims.Subject, claims.Email)
+	require.NoError(t, err)
+	me := orgRequest(e, http.MethodGet, "/auth/me", nil, cookie)
+	require.Equal(t, http.StatusOK, me.Code, me.Body.String())
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &data))
+	for key, value := range map[string]string{"username": claims.Email, "display": claims.Email, "email": claims.Email, "subject": claims.Subject, "auth_source": auth.HostedAuthSource, "role": "owner", "user_id": models.BootstrapUserID} {
+		require.Equal(t, value, data[key], key)
+	}
+	saved, err := tc.stores.Organizations.UserByID(t.Context(), models.BootstrapUserID)
+	require.NoError(t, err)
+	require.Equal(t, claims.Email, saved.Username)
+	require.Equal(t, claims.Email, saved.DisplayName)
+	require.Equal(t, "owner", saved.Role)
+	e.GET("/test/identity", func(c echo.Context) error {
+		p, ok := models.PrincipalFromContext(c.Request().Context())
+		require.True(t, ok)
+		return c.JSON(http.StatusOK, p)
+	})
+	response := orgRequest(e, http.MethodGet, "/test/identity", nil, cookie)
+	require.Contains(t, response.Body.String(), claims.Email)
+	require.NoError(t, h.organizationSvc.Logout(t.Context(), token))
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
+}
+
+func TestOrganizationPendingPreferencesRequireMatchingAccount(t *testing.T) {
+	for _, mode := range []string{"local", "hosted", "disabled"} {
+		t.Run(mode, func(t *testing.T) {
+			tc, e := organizationTestApp(t, mode != "disabled")
+			id := models.BootstrapUserID
+			var cookie *http.Cookie
+			if mode == "local" {
+				invite, err := tc.handler.organizationSvc.Invite(t.Context(), id, "member")
+				require.NoError(t, err)
+				user, err := tc.handler.organizationSvc.Accept(t.Context(), invite, "bob", "bob-long-password", "")
+				require.NoError(t, err)
+				id = user.UserID
+				token, err := tc.handler.organizationSvc.NewSession(t.Context(), id, time.Hour)
+				require.NoError(t, err)
+				cookie = &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+			} else if mode == "hosted" {
+				h := tc.handler
+				h.authMode = auth.AuthModeHostedSSO
+				h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+				h.hostedSSOInstanceID = "instance"
+				now := time.Now()
+				claims := auth.SessionClaims{Version: 1, Subject: "hosted-owner", Email: "owner@example.com", Display: "owner@example.com", InstanceID: "instance", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+				token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+				require.NoError(t, err)
+				require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, id, claims.ExpiresAt))
+				cookie = &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+			}
+			for _, expected := range []string{"", "another-account", id} {
+				req := httptest.NewRequest(http.MethodPost, "http://example.com/ui/preferences", strings.NewReader(`{"project_locations":{"default":"/tasks?project_id=default"}}`))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-Preference-User-ID", expected)
+				if cookie != nil {
+					req.AddCookie(cookie)
+				}
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				prefs, err := tc.stores.Organizations.Preferences(t.Context(), id, []string{"ui.project_locations"})
+				require.NoError(t, err)
+				if expected != id {
+					require.Equal(t, http.StatusConflict, rec.Code)
+					require.Empty(t, prefs["ui.project_locations"])
+				} else {
+					require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+					require.Contains(t, prefs["ui.project_locations"], "default")
+				}
+			}
+		})
+	}
+}
+
+func TestOrganizationOldHostedCookieDoesNotOverwriteProfile(t *testing.T) {
+	tc, e := organizationTestApp(t, true)
+	h := tc.handler
+	h.authMode = auth.AuthModeHostedSSO
+	h.hostedSSOKey = []byte("0123456789abcdef0123456789abcdef")
+	h.hostedSSOInstanceID = "instance-1"
+	now := time.Now()
+	claims := auth.SessionClaims{Version: 1, Subject: "same-owner", Email: "old@example.com", Display: "old@example.com", InstanceID: "instance-1", AuthSource: auth.HostedAuthSource, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Hour).Unix()}
+	_, err := tc.stores.Organizations.BindHostedOwner(t.Context(), claims.Subject, claims.Email)
+	require.NoError(t, err)
+	token, err := auth.IssueHostedSession(claims, h.hostedSSOKey)
+	require.NoError(t, err)
+	require.NoError(t, h.organizationSvc.RegisterHostedSession(t.Context(), token, models.BootstrapUserID, claims.ExpiresAt))
+	// A later SSO exchange supplies an updated email for the same account.
+	_, err = tc.stores.Organizations.BindHostedOwner(t.Context(), claims.Subject, "new@example.com")
+	require.NoError(t, err)
+	cookie := &http.Cookie{Name: auth.DefaultCookieName, Value: token}
+	me := orgRequest(e, http.MethodGet, "/auth/me", nil, cookie)
+	require.Equal(t, http.StatusOK, me.Code)
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(me.Body.Bytes(), &data))
+	require.Equal(t, "new@example.com", data["username"])
+	require.Equal(t, "new@example.com", data["display"])
+	require.Equal(t, "new@example.com", data["email"])
+	require.Equal(t, auth.HostedAuthSource, data["auth_source"])
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	req.AddCookie(cookie)
+	session := h.recognizeSession(req, now)
+	require.NotNil(t, session.orgUser)
+	require.Equal(t, "new@example.com", session.orgUser.Username)
+	saved, err := tc.stores.Organizations.UserByID(t.Context(), models.BootstrapUserID)
+	require.NoError(t, err)
+	require.Equal(t, "new@example.com", saved.Username)
+	require.Equal(t, "new@example.com", saved.DisplayName)
+	require.NoError(t, h.organizationSvc.Logout(t.Context(), token))
+	require.Equal(t, http.StatusUnauthorized, orgRequest(e, http.MethodGet, "/auth/me", nil, cookie).Code)
+}
+
+func TestOrganizationLoginErrorsStayOnForm(t *testing.T) {
+	_, e := organizationTestApp(t, true)
+	username := `missing"><script>alert(1)</script>`
+	form := url.Values{"username": {username}, "password": {"never-echo-this-password"}, "next": {"L3Rhc2tz"}}
+	for i := 0; i < 11; i++ {
+		rec := orgRequest(e, http.MethodPost, "/login", form, nil)
+		expectedStatus, message := http.StatusUnauthorized, "Incorrect username or password."
+		if i == 10 {
+			expectedStatus, message = http.StatusTooManyRequests, "Too many attempts. Try again later."
+		}
+		require.Equal(t, expectedStatus, rec.Code)
+		require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+		require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+		require.Contains(t, rec.Body.String(), `role="alert"`)
+		require.Contains(t, rec.Body.String(), message)
+		require.Contains(t, rec.Body.String(), `action="/login"`)
+		require.Contains(t, rec.Body.String(), `value="missing&#34;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"`)
+		require.Contains(t, rec.Body.String(), `name="next" value="L3Rhc2tz"`)
+		require.NotContains(t, rec.Body.String(), "never-echo-this-password")
+		require.NotContains(t, rec.Body.String(), "<script>alert(1)</script>")
+	}
+	// A successful retry still redirects normally and creates a session.
+	rec := orgRequest(e, http.MethodPost, "/login", url.Values{"username": {"alice"}, "password": {"alice-password-long"}, "next": {"L3Rhc2tz"}}, nil)
+	require.Equal(t, http.StatusFound, rec.Code)
+	require.Equal(t, "/tasks", rec.Header().Get("Location"))
+	require.NotEmpty(t, orgCookie(t, rec).Value)
+}
+
+func TestOrganizationInvitationRateLimitsStayOnForm(t *testing.T) {
+	for _, limit := range []string{"signup", "login"} {
+		t.Run(limit, func(t *testing.T) {
+			tc, e := organizationTestApp(t, true)
+			svc := tc.handler.organizationSvc
+			token, err := svc.Invite(t.Context(), models.BootstrapUserID, "member")
+			require.NoError(t, err)
+			username := `missing"><script>alert(1)</script>`
+			if limit == "signup" {
+				for i := 0; i < 30; i++ {
+					require.True(t, svc.AllowSignup("192.0.2.1"))
+				}
+			} else {
+				for i := 0; i < 10; i++ {
+					finish, allowed := svc.BeginLogin("192.0.2.1", username)
+					require.True(t, allowed)
+					finish(true)
+				}
+			}
+			form := url.Values{"token": {token}, "username": {username}, "password": {"never-echo-this-password"}}
+			rec := orgRequest(e, http.MethodPost, "/invite", form, nil)
+			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+			require.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+			require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+			require.Contains(t, rec.Body.String(), `role="alert"`)
+			require.Contains(t, rec.Body.String(), "Too many attempts. Try again later.")
+			require.Contains(t, rec.Body.String(), `action="/invite"`)
+			require.Contains(t, rec.Body.String(), token)
+			require.Contains(t, rec.Body.String(), `value="missing&#34;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"`)
+			require.NotContains(t, rec.Body.String(), "never-echo-this-password")
+			require.NotContains(t, rec.Body.String(), "<script>alert(1)</script>")
+			// Rejection must not consume the invitation. Another client can join.
+			form.Set("username", "newmember")
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/invite", strings.NewReader(form.Encode()))
+			req.RemoteAddr = "192.0.2.2:12345"
+			req.Header.Set("Origin", "http://example.com")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			accepted := httptest.NewRecorder()
+			e.ServeHTTP(accepted, req)
+			require.Equal(t, http.StatusSeeOther, accepted.Code, accepted.Body.String())
+		})
+	}
+}
+
+func TestOrganizationInvitationStatus(t *testing.T) {
+	const now int64 = 1700000000
+	for _, tt := range []struct {
+		status     string
+		invitation models.OrgInvitation
+		canRevoke  bool
+	}{
+		{"Pending", models.OrgInvitation{ExpiresAt: now + 1}, true},
+		{"Expired", models.OrgInvitation{ExpiresAt: now}, false},
+		{"Expired", models.OrgInvitation{ExpiresAt: now - 1}, false},
+		{"Accepted", models.OrgInvitation{ExpiresAt: now - 1, Used: true}, false},
+		{"Revoked", models.OrgInvitation{ExpiresAt: now - 1, Revoked: true}, false},
+	} {
+		t.Run(tt.status, func(t *testing.T) {
+			tt.invitation.ID = "test-invite"
+			var body strings.Builder
+			require.NoError(t, organizationTemplate.Execute(&body, organizationPageData{
+				Org: &models.Organization{Name: "Test"}, Admin: true, Local: true, Now: now,
+				Principal: models.Principal{Role: "owner"}, Invitations: []models.OrgInvitation{tt.invitation},
+			}))
+			require.Contains(t, body.String(), "<td> "+tt.status+"</td>")
+			require.Equal(t, tt.canRevoke, strings.Contains(body.String(), "/organization/invitations/test-invite/revoke"))
+		})
+	}
+}

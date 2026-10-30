@@ -141,8 +141,10 @@ func TestAddReviewComment_MissingFields(t *testing.T) {
 }
 
 func TestUpdateReviewComment(t *testing.T) {
-	_, e, reviewRepo, _, _, taskID := setupReviewHandler(t)
+	h, e, reviewRepo, _, _, taskID := setupReviewHandler(t)
 	ctx := context.Background()
+	task, lookupErr := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, lookupErr)
 
 	comment := &models.ReviewComment{
 		TaskID:      taskID,
@@ -158,7 +160,7 @@ func TestUpdateReviewComment(t *testing.T) {
 
 	form := url.Values{}
 	form.Set("comment_text", "Edited comment text")
-	req := httptest.NewRequest(http.MethodPatch, "/reviews/"+comment.ID, strings.NewReader(form.Encode()))
+	req := httptest.NewRequest(http.MethodPatch, "/reviews/"+comment.ID+"?project_id="+task.ProjectID, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -180,8 +182,10 @@ func TestUpdateReviewComment(t *testing.T) {
 }
 
 func TestDeleteReviewComment(t *testing.T) {
-	_, e, reviewRepo, _, _, taskID := setupReviewHandler(t)
+	h, e, reviewRepo, _, _, taskID := setupReviewHandler(t)
 	ctx := context.Background()
+	task, lookupErr := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, lookupErr)
 
 	// Create a comment first
 	comment := &models.ReviewComment{
@@ -196,7 +200,7 @@ func TestDeleteReviewComment(t *testing.T) {
 		t.Fatalf("create comment: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/reviews/"+comment.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/reviews/"+comment.ID+"?project_id="+task.ProjectID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

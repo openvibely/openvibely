@@ -1005,6 +1005,10 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 		return fmt.Errorf("creating task: %w", err)
 	}
 	t.DisplayOrder = displayOrder
+	if p, ok := models.PrincipalFromContext(ctx); ok {
+		_, err := exec.ExecContext(ctx, `UPDATE tasks SET author_user_id=?, author_name=? WHERE id=?`, p.UserID, p.Username, t.ID)
+		return err
+	}
 	return nil
 }
 

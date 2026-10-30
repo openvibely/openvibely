@@ -1843,6 +1843,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								htmx.process(changesContent);
 							}
 
+							// Direct refreshes do not emit HTMX afterSettle. Update the
+							// explorer before restoring the selected file's scroll anchor.
+							if (window.syncAppearanceSettings) window.syncAppearanceSettings();
+
 							// Let the browser settle the new DOM, then restore UI state.
 							requestAnimationFrame(function() {
 								// Restore diff view mode (inline/split) without saving during refresh restore.

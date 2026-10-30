@@ -182,28 +182,18 @@ func TestGetCurrentProjectID_EmptyFallbackUsesSelectorProjection(t *testing.T) {
 	}
 }
 
-func TestGetCurrentProjectID_InvalidIDFallsBackToFirst(t *testing.T) {
-	h, projectSvc := setupProjectTestHandler(t)
-	ctx := context.Background()
-
-	// Get the first project from list (migrations may seed one)
-	projects, _ := projectSvc.List(ctx)
-	firstID := ""
-	if len(projects) > 0 {
-		firstID = projects[0].ID
-	}
-
+func TestGetCurrentProjectID_InvalidIDIsRejected(t *testing.T) {
+	h, _ := setupProjectTestHandler(t)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/alerts?project_id=nonexistent-id", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
+	c := e.NewContext(req, httptest.NewRecorder())
 	got, err := h.getCurrentProjectID(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil || got != "" {
+		t.Fatalf("unknown explicit project must not fall back: project=%q err=%v", got, err)
 	}
-	if got != firstID {
-		t.Errorf("got %q, want %q", got, firstID)
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok || httpErr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %v", err)
 	}
 }
 

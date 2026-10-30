@@ -11,45 +11,54 @@ import (
 )
 
 func TestConversationServiceTier(t *testing.T) {
-	h, e, repo := setupTestHandler(t)
-	ctx := context.Background()
-	agent := createAgent(t, repo, func(a *models.LLMConfig) {
-		a.Provider = models.ProviderOpenAI
-		a.Model = "gpt-6.1-sol"
-		a.ServiceTier = "priority"
-	})
-	project := createProject(t, h, "Fast")
-	task := createTask(t, h, project.ID, "Fast task", func(tk *models.Task) { tk.AgentID = &agent.ID })
-	endpoint := "/tasks/" + task.ID + "/thread/model"
-	for _, tier := range []string{"default", "priority", ""} {
-		res := postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {tier}})
-		require.Equal(t, http.StatusNoContent, res.Code, res.Body.String())
-		got, _, err := h.resolveTaskThreadExecutionAgent(ctx, task)
-		require.NoError(t, err)
-		want := tier
-		if want == "" {
-			want = "priority"
-		}
-		require.Equal(t, want, got.ServiceTier)
-		req := httptest.NewRequest(http.MethodGet, endpoint+"?agent_id="+agent.ID, nil)
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), `"service_tier":"`+tier+`"`)
+	for _, model := range []string{"gpt-6.1-sol", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5"} {
+		t.Run(model, func(t *testing.T) {
+			provider := models.ProviderAnthropic
+			if model == "gpt-6.1-sol" {
+				provider = models.ProviderOpenAI
+			}
+			h, e, repo := setupTestHandler(t)
+			ctx := context.Background()
+			agent := createAgent(t, repo, func(a *models.LLMConfig) {
+				a.Provider = provider
+				a.Model = model
+				a.ServiceTier = "priority"
+			})
+			project := createProject(t, h, "Fast")
+			task := createTask(t, h, project.ID, "Fast task", func(tk *models.Task) { tk.AgentID = &agent.ID })
+			endpoint := "/tasks/" + task.ID + "/thread/model"
+			for _, tier := range []string{"default", "priority", ""} {
+				res := postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {tier}})
+				require.Equal(t, http.StatusNoContent, res.Code, res.Body.String())
+				got, _, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+				require.NoError(t, err)
+				want := tier
+				if want == "" {
+					want = "priority"
+				}
+				require.Equal(t, want, got.ServiceTier)
+				req := httptest.NewRequest(http.MethodGet, endpoint+"?agent_id="+agent.ID, nil)
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Contains(t, rec.Body.String(), `"service_tier":"`+tier+`"`)
+			}
+			require.Equal(t, http.StatusBadRequest, postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {"bogus"}}).Code)
+			require.Equal(t, http.StatusBadRequest, postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {"default"}, "reasoning_effort": {"bogus"}}).Code)
+			got, _, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+			require.NoError(t, err)
+			require.Equal(t, "priority", got.ServiceTier)
+			saved, err := repo.GetByID(ctx, agent.ID)
+			require.NoError(t, err)
+			require.Equal(t, "priority", saved.ServiceTier)
+			agent.Model = "claude-sonnet-5-5"
+			agent.Provider = models.ProviderAnthropic
+			agent.ServiceTier = ""
+			require.NoError(t, repo.Update(ctx, agent))
+			require.Equal(t, http.StatusBadRequest, postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {"priority"}}).Code)
+
+		})
 	}
-	require.Equal(t, http.StatusBadRequest, postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {"bogus"}}).Code)
-	require.Equal(t, http.StatusBadRequest, postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {"default"}, "reasoning_effort": {"bogus"}}).Code)
-	got, _, err := h.resolveTaskThreadExecutionAgent(ctx, task)
-	require.NoError(t, err)
-	require.Equal(t, "priority", got.ServiceTier)
-	saved, err := repo.GetByID(ctx, agent.ID)
-	require.NoError(t, err)
-	require.Equal(t, "priority", saved.ServiceTier)
-	agent.Model = "claude-opus-5-5"
-	agent.Provider = models.ProviderAnthropic
-	agent.ServiceTier = ""
-	require.NoError(t, repo.Update(ctx, agent))
-	require.Equal(t, http.StatusBadRequest, postForm(e, endpoint, url.Values{"agent_id": {agent.ID}, "service_tier": {"priority"}}).Code)
 }
 
 func TestChatServiceTierQueuesSnapshot(t *testing.T) {

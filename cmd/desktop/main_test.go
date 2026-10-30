@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/config"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -267,6 +268,7 @@ func TestDesktopStartupServesDocumentWithoutRedirect(t *testing.T) {
 	unpin := httptest.NewRequest(http.MethodPost, "/ui/preferences", io.NopCloser(strings.NewReader(`{"pinned_project_ids":[]}`)))
 	unpin.ContentLength = 0
 	unpin.Header.Set("Content-Type", "application/json")
+	unpin.Header.Set("X-Preference-User-ID", models.BootstrapUserID)
 	saved := httptest.NewRecorder()
 	proxy.ServeHTTP(saved, unpin)
 	if saved.Code != http.StatusNoContent {

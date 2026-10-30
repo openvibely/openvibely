@@ -164,11 +164,20 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 		session := h.recognizeSession(r, time.Now())
 		return session.localUser != nil || session.hostedClaims != nil
 	}
+	var membershipChanges <-chan struct{}
+	if h.organizationSvc != nil {
+		membershipChanges = h.organizationSvc.Changes()
+	}
 	writeFrame(liveFrame{Event: "ready"})
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-membershipChanges:
+			membershipChanges = h.organizationSvc.Changes()
+			if !authorized() {
+				return nil
+			}
 		case cmd := <-commands:
 			if !authorized() {
 				return nil
@@ -221,6 +230,9 @@ func (h *Handler) LiveWebSocket(c echo.Context) error {
 				}
 			}(cmd)
 		case f := <-out:
+			if h.organizationSvc != nil && !authorized() {
+				return nil
+			}
 			if !dispatchLiveFrame(subscriptions, f, writeFrame) {
 				return nil
 			}

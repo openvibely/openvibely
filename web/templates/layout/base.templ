@@ -61,6 +61,11 @@ func uiPreferences(ctx context.Context) UIPreferences {
 	return prefs
 }
 
+func preferenceUserID(ctx context.Context) string {
+ if p, ok := models.PrincipalFromContext(ctx); ok { return p.UserID }
+ return models.BootstrapUserID
+}
+
 func documentTitle(title string) string {
 	if title == "" {
 		return "OpenVibely"
@@ -83,6 +88,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 		data-openvibely-runtime={ serverRuntimeMode(ctx) }
 		data-openvibely-native-window={ nativeWindowMarker(ctx) }
 		data-build-version={ pageBuildVersion(ctx) }
+ data-preference-user-id={ preferenceUserID(ctx) }
 		data-runtime={ serverRuntimeMode(ctx) }
 		data-project-locations={ uiPreferences(ctx).ProjectLocations }
 		data-ui-theme={ uiPreferences(ctx).Theme }
@@ -117,7 +123,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
 						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
 						root.setAttribute('data-tab-style', prefs.tabs === 'attached' ? 'attached' : 'detached');
-						root.setAttribute('data-thread-width', prefs.thread === 'focused' ? 'focused' : 'full');
+						root.setAttribute('data-thread-width', prefs.thread === 'full' ? 'full' : 'focused');
 						root.setAttribute('data-assistant-bubbles', prefs.bubbles === 'on' ? 'on' : 'off');
 						root.setAttribute('data-board-columns', ['filled', 'inset', 'tintstrip'].indexOf(prefs.columns) !== -1 ? prefs.columns : 'tint');
 						var active = desktop || wide.matches;
@@ -129,7 +135,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var displayPrefs = {
  surfaces: { key: 'openvibely.surfaceStyle', attr: 'data-surface-style', values: ['default', 'layered'] },
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
-						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['full', 'focused'] },
+						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['focused', 'full'] },
 						step: { key: 'openvibely.surfaceStep', attr: 'data-surface-step', values: ['off', 'on'] },
 						tabs: { key: 'openvibely.tabStyle', attr: 'data-tab-style', values: ['detached', 'attached'] },
 						bubbles: { key: 'openvibely.assistantBubbles', attr: 'data-assistant-bubbles', values: ['off', 'on'] },

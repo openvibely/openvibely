@@ -43,6 +43,7 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 	alerts := NewAlertRepo(db)
 	alerts.SetAutomationRepo(automations)
 	return persistence.Stores{
+		Organizations:        NewOrganizationRepo(db),
 		Agents:               NewAgentRepo(db),
 		AgentMutations:       NewAgentMutationRepo(db),
 		Alerts:               alerts,
@@ -69,7 +70,7 @@ func NewStores(db *sql.DB, broadcaster *events.Broadcaster) persistence.Stores {
 		Projects:             NewProjectRepo(db),
 		ReviewComments:       NewReviewCommentRepo(db),
 		Schedules:            NewScheduleRepo(db),
-		Settings:             NewSettingsRepo(db),
+		Settings:             &persistence.UserSettings{SettingsStore: NewSettingsRepo(db), Organizations: NewOrganizationRepo(db)},
 		SkillAnalytics:       NewSkillAnalyticsRepo(db),
 		SlackAuth:            NewSlackAuthRepo(db),
 		SlackInboundReceipts: NewSlackInboundReceiptRepo(db),
