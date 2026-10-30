@@ -100,8 +100,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	runComposerFocusCDP(t, chrome, server.URL, "imported-theme-chrome", func(browser *composerFocusCDP) {
 		browser.waitFor("theme runtime", `String(!!(window.openVibelyThemes && window.openVibelyThemes.apply))`, "true")
 		browser.waitFor("page body ready", `String(document.readyState !== 'loading' && !!document.getElementById('fixture-hover-card') && !!document.getElementById('desktop-project-titlebar'))`, "true")
-		// Exercise full theme surfaces with assistant bubbles and filled board columns enabled.
-		browser.evaluate(`document.documentElement.setAttribute('data-assistant-bubbles','on'); document.documentElement.setAttribute('data-board-columns','filled'); 'ok'`)
+		// Set layout preferences explicitly so theme assertions do not depend on app defaults.
+		browser.evaluate(`document.documentElement.setAttribute('data-thread-width','full'); document.documentElement.setAttribute('data-assistant-bubbles','on'); document.documentElement.setAttribute('data-board-columns','filled'); 'ok'`)
 		// Palette colors must preserve native geometry and fading.
 		browser.evaluate(`document.querySelectorAll('.theme-toggle-pill, .theme-toggle-pill span').forEach(function(el) { el.style.transition = 'none'; });
 		window.toggleGeometry = function() {
@@ -123,6 +123,9 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 				} else {
 					browser.waitFor(theme.ID+" chat surfaces share card shadow", `(function(){var c=getComputedStyle(document.querySelector('#fixture-settings-card')).boxShadow;return String(c!=='none'&&['#fixture-bubble','#fixture-composer'].every(function(s){return getComputedStyle(document.querySelector(s)).boxShadow===c;}));})()`, "true")
 				}
+				browser.evaluate(`document.documentElement.setAttribute('data-thread-width','focused'); 'ok'`)
+				browser.waitFor(theme.ID+" compact composer has no shadow", `getComputedStyle(document.querySelector('#fixture-composer')).boxShadow`, "none")
+				browser.evaluate(`document.documentElement.setAttribute('data-thread-width','full'); 'ok'`)
 				browser.waitFor(theme.ID+" preserves default toggle geometry and fading", `window.toggleGeometry() === window.originalToggleGeometry ? 'true' : window.toggleGeometry() + ' expected ' + window.originalToggleGeometry`, "true")
 				if theme.ID != "openvibely-light" && theme.ID != "openvibely-dark" {
 					browser.waitFor(theme.ID+" consumes dedicated toggle colors", `JSON.stringify(['.theme-toggle-pill','.theme-toggle-thumb','.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'moon' : 'sun'),'.theme-toggle-'+(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')].map(function(selector, i) { var probe = document.getElementById('probe'); probe.style.color = 'var(--ov-mode-'+['track','thumb','active','inactive'][i]+')'; return getComputedStyle(document.querySelector(selector))[i < 2 ? 'backgroundColor' : 'color'] === getComputedStyle(probe).color; }))`, "[true,true,true,true]")
