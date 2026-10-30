@@ -54,6 +54,10 @@ func TestBrowserFunctional_AnalyticsProjectSwitchRefreshesTaskListWhileProviderU
 					return
 				}
 			}
+			if r.Header.Get("HX-Request") == "true" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(analyticsA)
@@ -109,23 +113,33 @@ func TestBrowserFunctional_AnalyticsProviderUsageDoesNotBlockTaskListNavigation(
 			_, _ = io.WriteString(w, `<div data-navigation-destination="task-a">Task A detail</div>`)
 			return
 		}
+		if r.Header.Get("HX-Request") == "true" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(analytics)
 	}))
 	defer server.Close()
 
-	runComposerFocusCDP(t, chrome, server.URL+"/analytics?project_id=a&view=usage&provider_network=1&provider_count=8", "analytics-provider-usage-task-navigation", func(browser *composerFocusCDP) {
-		browser.waitFor("provider usage cards rendered", `String(document.querySelectorAll('#accountUsageCards > .card').length)`, "8")
-		if got := browser.evaluate(`JSON.stringify({count:window.pendingProviderRequests&&window.pendingProviderRequests.length,signals:window.pendingProviderRequests&&window.pendingProviderRequests.map(function(request){return !!request.signal&&!request.signal.aborted;})})`); got != `{"count":2,"signals":[true,true]}` {
-			t.Fatalf("provider usage concurrency state = %s, want two active requests", got)
+	runComposerFocusCDP(t, chrome, server.URL+"/analytics?project_id=a&view=usage&provider_network=1&provider_count=3", "analytics-provider-usage-task-navigation", func(browser *composerFocusCDP) {
+		browser.waitFor("provider usage cards rendered", `String(document.querySelectorAll('#accountUsageCards > .card').length)`, "3")
+		browser.waitFor("three provider card requests are pending", `String(window.pendingProviderRequests&&window.pendingProviderRequests.length)`, "3")
+		if got := browser.evaluate(`JSON.stringify(window.pendingProviderRequests.map(function(request){return !!request.signal&&!request.signal.aborted;}))`); got != `[true,true,true]` {
+			t.Fatalf("provider usage request signals = %s, want three pending requests", got)
 		}
 		browser.waitFor("task list has a clickable task", `String(!!document.querySelector('#task-list-groups [data-task-list-row="task-a"]'))`, "true")
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			select {
 			case <-providerRequestStarted:
 			case <-time.After(5 * time.Second):
-				t.Fatalf("only %d provider usage requests reached the server; expected two active requests", i)
+				t.Fatalf("only %d provider usage requests reached the server; expected three card requests", i)
 			}
+		}
+		select {
+		case <-providerRequestCanceled:
+			t.Fatal("provider usage request was canceled before navigation began")
+		default:
 		}
 
 		browser.click(`#task-list-groups [data-task-list-row="task-a"]`)
@@ -139,7 +153,7 @@ func TestBrowserFunctional_AnalyticsProviderUsageDoesNotBlockTaskListNavigation(
 		}
 		browser.waitFor("task detail loads and clears its loading indicator", `String(!!document.querySelector('#main-content [data-navigation-destination="task-a"]') && !document.getElementById('main-content').hasAttribute('data-page-loading'))`, "true")
 		browser.waitFor("all provider requests are aborted on navigation", `String(window.pendingProviderRequests.every(function(request){return request.signal.aborted;}))`, "true")
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 3; i++ {
 			select {
 			case <-providerRequestCanceled:
 			case <-time.After(5 * time.Second):
@@ -179,6 +193,10 @@ func TestBrowserFunctional_AnalyticsProviderUsageDoesNotBlockSidebarNavigation(t
 				_, _ = io.WriteString(w, `<div data-navigation-destination="tasks">Tasks page</div>`)
 				return
 			}
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(analytics)
