@@ -16,7 +16,13 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "explorer-project", Name: "Explorer"}
 	task := &models.Task{ID: "explorer-task", ProjectID: project.ID, Title: "Explore changes", Status: models.StatusCompleted, Category: models.CategoryCompleted}
-	diff := "diff --git a/src/first.go b/src/first.go\n--- a/src/first.go\n+++ b/src/first.go\n@@ -1 +1 @@\n-old\n+first\ndiff --git a/src/nested/second.go b/src/nested/second.go\n--- a/src/nested/second.go\n+++ b/src/nested/second.go\n@@ -1 +1 @@\n-old\n+second\n"
+	diff := ""
+	for _, path := range []string{"src/first.go", "src/nested/second.go"} {
+		diff += fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,160 +1,160 @@\n", path, path, path, path)
+		for line := 0; line < 160; line++ {
+			diff += fmt.Sprintf("-old %d\n+%s line %d\n", line, path, line)
+		}
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -52,7 +58,12 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("tree replaces collapsed task list", `String(document.documentElement.classList.contains('changes-explorer-active') && !document.documentElement.classList.contains('task-list-collapsed') && document.querySelectorAll('#changes-explorer-host [data-explorer-path]').length===2)`, "true")
 		b.waitFor("only first diff visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && document.getElementById('diff-file-1').hidden)`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'select'`)
-		b.waitFor("second lazy diff loaded", `String(document.getElementById('diff-file-0').hidden && !document.getElementById('diff-file-1').hidden && document.getElementById('diff-file-1').textContent.includes('second'))`, "true")
+		b.waitFor("second lazy diff loaded", `String(document.getElementById('diff-file-0').hidden && !document.getElementById('diff-file-1').hidden && !!document.querySelector('#diff-file-1 .diff-line-content') && document.getElementById('diff-file-1').getBoundingClientRect().height>2000)`, "true")
+		b.evaluate(`document.getElementById('tab-changes').scrollTop=900;'scroll'`)
+		b.waitFor("long diff scrolled", `String(document.getElementById('tab-changes').scrollTop>500)`, "true")
+		b.evaluate(`document.querySelector('[data-explorer-path="src/first.go"]').click();'select loaded file'`)
+		b.waitFor("loaded file starts at header", `String(!document.getElementById('diff-file-0').hidden && Math.abs(document.getElementById('diff-file-0').getBoundingClientRect().top-document.getElementById('tab-changes').getBoundingClientRect().top)<2)`, "true")
+		b.evaluate(`document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'second'`)
 		b.evaluate(`switchDiffView('split',false);'split'`)
 		b.waitFor("split selection preserved", `String(document.getElementById('diff-file-split-0').hidden && !document.getElementById('diff-file-split-1').hidden && document.getElementById('diff-file-split-1').textContent.includes('second'))`, "true")
 		b.evaluate(`var search=document.querySelector('.explorer-search');search.value='second';search.dispatchEvent(new Event('input'));'filter'`)

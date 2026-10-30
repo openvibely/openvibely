@@ -72,7 +72,16 @@ templ ChangesExplorerScript() {
                 button.dataset.explorerPath = file.path; button.title = file.path;
                 button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h6M11 10v6M8 19h6"/></svg>';
                 var label = document.createElement('span'); label.className = 'task-list-title'; label.textContent = parts[parts.length - 1]; button.append(label);
-                button.onclick = function() { selected = file.path; save(); applySelection(true); };
+                button.onclick = function() {
+                    selected = file.path; save(); applySelection(true);
+                    var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+                    var card = panel && panel.querySelector('.diff-file-card:not([hidden])');
+                    var scroller = viewer.closest('#tab-changes');
+                    if (card && scroller) {
+                        delete card._diffScrollAnchor;
+                        scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+                    }
+                };
                 parent.append(button);
             });
             empty.hidden = shown > 0;
