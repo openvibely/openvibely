@@ -85,6 +85,7 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("workspace ready", `String(document.readyState==='complete' && !!window.taskWorkspace && !!document.getElementById('task-message-input'))`, "true")
 		b.evaluate(`document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'open'`)
 		b.waitFor("tree replaces collapsed task list", `String(document.documentElement.classList.contains('changes-explorer-active') && !document.documentElement.classList.contains('task-list-collapsed') && document.querySelectorAll('#changes-explorer-host [data-explorer-path]').length===2)`, "true")
+		b.waitFor("explorer controls visible in sidebar", `String(document.querySelector('#changes-explorer-host .explorer-back').getBoundingClientRect().height>0 && document.querySelector('#changes-explorer-host [data-explorer-path]').getBoundingClientRect().height>0)`, "true")
 		b.waitFor("only first diff visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && document.getElementById('diff-file-1').hidden)`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'select'`)
 		b.waitFor("second lazy diff loaded", `String(document.getElementById('diff-file-0').hidden && !document.getElementById('diff-file-1').hidden && !!document.querySelector('#diff-file-1 .diff-line-content') && document.getElementById('diff-file-1').getBoundingClientRect().height>2000)`, "true")

@@ -115,7 +115,7 @@ templ TaskListPanel(currentProjectID string) {
 	<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
 	<style>
         #appearance-settings-nav { display: none; }
-        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav) { display: none !important; }
+        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
         html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
         #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; padding: 10px; margin-bottom: 12px; }
         html.appearance-settings #task-list-header { visibility: hidden; }
