@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/transcript"
@@ -41,7 +42,9 @@ const displayOutputSQL = finalizedDisplayOutputSQL + ` || ` + streamOutputSQL
 func replaceDisplayOutput(ctx context.Context, tx sqlExecutor, id, output string) error {
 	// A digest avoids rebuilding the transcript when FinalizeOutput and Complete
 	// receive the same final output. Pending chunks always invalidate this check.
-	digest := sha256.Sum256([]byte(output))
+	// Sum256 only reads the slice and does not retain it; output remains alive
+	// throughout the call. Avoid copying the complete transcript just to hash it.
+	digest := sha256.Sum256(unsafe.Slice(unsafe.StringData(output), len(output)))
 	var same bool
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(display_digest=?,0) AND NOT EXISTS (
  SELECT 1 FROM execution_stream_text WHERE execution_id=executions.id)

@@ -1650,3 +1650,27 @@ func (r *ExecutionRepo) GetDisplayExecution(ctx context.Context, id string) (*mo
 	}
 	return &execution, nil
 }
+
+// ListTaskResponsesHistory omits display output only for completed executions
+// with a nonempty native Responses checkpoint. The OpenAI adapter replaces
+// their prompt/output with that checkpoint. Failed and legacy turns keep output.
+func (r *ExecutionRepo) ListTaskResponsesHistory(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	projection := `CASE WHEN status='completed' AND EXISTS (
+ SELECT 1 FROM conversation_items c WHERE c.execution_id=executions.id
+ AND c.generation=0 AND c.is_current=1 AND c.operation='put' AND c.lane='metadata'
+ AND c.item_id LIKE 'replay:%:header'
+ AND json_extract(c.payload,'$.format')='envelope'
+ AND json_extract(c.payload,'$.items_key')='responses_input'
+ AND json_extract(c.payload,'$.item_count')>0
+ ) THEN '' ELSE ` + executionOutputSelect + ` END`
+	columns := strings.Replace(executionSelectColumnsLight, executionOutputSelect, projection, 1)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+columns+` FROM executions WHERE task_id=? ORDER BY started_at DESC,rowid DESC LIMIT ?`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanExecutionsNewestFirstAsChronological(rows)
+}

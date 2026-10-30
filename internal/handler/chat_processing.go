@@ -515,7 +515,16 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Load deferred history before attachment recovery and lifecycle selection.
 	// Both need the same historical files that the model will receive.
 	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
-		priorExecs, err := h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
+		var priorExecs []models.Execution
+		var err error
+		reader, optimized := h.execRepo.(interface {
+			ListTaskResponsesHistory(context.Context, string, int) ([]models.Execution, error)
+		})
+		if optimized && params.Agent.Provider == models.ProviderOpenAI {
+			priorExecs, err = reader.ListTaskResponsesHistory(ctx, params.TaskID, taskThreadHistoryLimit)
+		} else {
+			priorExecs, err = h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
+		}
 		if err != nil {
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, "Load conversation history: "+err.Error(), 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")

@@ -1,11 +1,13 @@
 package agenttools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -89,31 +91,49 @@ func execReadFile(workDir string, input json.RawMessage) (string, error) {
 		return "", fmt.Errorf("read %s: %w", params.FilePath, err)
 	}
 
-	lines := strings.Split(string(data), "\n")
+	return formatNumberedLines(data, params.Offset, params.Limit), nil
+}
 
-	if params.Offset > 0 {
-		if params.Offset >= len(lines) {
-			return fmt.Sprintf("(file has %d lines, offset %d is past end)", len(lines), params.Offset), nil
+// formatNumberedLines matches strings.Split(data, "\n") line semantics
+// without materializing the line slice or formatting each line through fmt.
+func formatNumberedLines(data []byte, offset, limit int) string {
+	total := bytes.Count(data, []byte{'\n'}) + 1
+	start := max(offset, 0)
+	if offset > 0 && offset >= total {
+		return fmt.Sprintf("(file has %d lines, offset %d is past end)", total, offset)
+	}
+	pos := 0
+	for range start {
+		pos += bytes.IndexByte(data[pos:], '\n') + 1
+	}
+	count := min(total-start, limit)
+	end := len(data)
+	if count < total-start {
+		end = pos
+		for range count {
+			end += bytes.IndexByte(data[end:], '\n') + 1
 		}
-		lines = lines[params.Offset:]
 	}
-
-	truncated := false
-	if len(lines) > params.Limit {
-		lines = lines[:params.Limit]
-		truncated = true
+	var out strings.Builder
+	out.Grow(end - pos + count*8 + 80)
+	var number [20]byte
+	line := offset + 1
+	for range count {
+		next := bytes.IndexByte(data[pos:], '\n')
+		if next < 0 {
+			next = len(data) - pos
+		}
+		out.Write(strconv.AppendInt(number[:0], int64(line), 10))
+		out.WriteByte('\t')
+		out.Write(data[pos : pos+next])
+		out.WriteByte('\n')
+		pos += next + 1
+		line++
 	}
-
-	var sb strings.Builder
-	startLine := params.Offset + 1
-	for i, line := range lines {
-		fmt.Fprintf(&sb, "%d\t%s\n", startLine+i, line)
+	if count < total-start {
+		fmt.Fprintf(&out, "\n... (truncated, showing %d of %d lines from offset %d)", limit, total, offset)
 	}
-	if truncated {
-		fmt.Fprintf(&sb, "\n... (truncated, showing %d of %d lines from offset %d)", params.Limit, len(strings.Split(string(data), "\n")), params.Offset)
-	}
-
-	return sb.String(), nil
+	return out.String()
 }
 
 func execWriteFile(workDir string, input json.RawMessage) (string, error) {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unsafe"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -218,11 +219,15 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 		return nil
 	}
 	for rows.Next() {
-		var id, itemID, raw string
+		var id, itemID, text string
+		var raw []byte
 		var lane models.ConversationLane
-		if err := rows.Scan(&id, &itemID, &lane, &raw); err != nil {
+		if err := rows.Scan(&id, &itemID, &lane, &text); err != nil {
 			return nil, err
 		}
+		// SQLite returns an owned Go string. ReplayRows are immutable; retain its
+		// storage without allocating a second copy of each provider item.
+		raw = unsafe.Slice(unsafe.StringData(text), len(text))
 		if lane == models.ConversationMetadata {
 			if len(itemID) != 26 || !strings.HasSuffix(itemID, ":header") {
 				return nil, fmt.Errorf("invalid replay header identity %q", itemID)
@@ -234,7 +239,7 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 				return nil, err
 			}
 			var frame transcript.ReplayFrame
-			if err := json.Unmarshal([]byte(raw), &frame); err != nil {
+			if err := json.Unmarshal(raw, &frame); err != nil {
 				return nil, err
 			}
 			if frame.Count < 0 {
@@ -272,7 +277,7 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 				return nil, fmt.Errorf("unexpected replay item %q", itemID)
 			}
 			if structured != nil {
-				structured.Rows.Items = append(structured.Rows.Items, json.RawMessage(raw))
+				structured.Rows.Items = append(structured.Rows.Items, raw)
 			} else if err := builder.AppendValidatedJSON(raw); err != nil {
 				return nil, err
 			}

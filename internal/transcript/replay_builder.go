@@ -57,14 +57,14 @@ func NewReplayBuilder(header ReplayHeader, capacity int) (*ReplayBuilder, error)
 // AppendValidatedJSON accepts records whose store has already validated JSON.
 // SQLite enforces json_valid(payload); validating again would allocate an extra
 // byte copy of every provider item before the provider's own decode.
-func (b *ReplayBuilder) AppendValidatedJSON(raw string) error {
+func (b *ReplayBuilder) AppendValidatedJSON(raw []byte) error {
 	if b.header.Format == "none" || (b.header.Format == "opaque" && b.count > 0) {
 		return fmt.Errorf("unexpected replay item")
 	}
 	if b.count > 0 {
 		b.out.WriteByte(',')
 	}
-	b.out.WriteString(raw)
+	b.out.Write(raw)
 	b.count++
 	return nil
 }

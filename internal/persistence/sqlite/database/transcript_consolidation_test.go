@@ -82,9 +82,9 @@ func TestConsolidatedTranscriptMigration(t *testing.T) {
 			}
 			var version int64
 			require.NoError(t, db.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version))
-			require.EqualValues(t, 219, version)
+			require.EqualValues(t, latestMigrationVersion, version)
 			var n int
-			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (220,221)`).Scan(&n))
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id=221`).Scan(&n))
 			require.Zero(t, n)
 			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (217,218) AND is_applied=1`).Scan(&n))
 			require.Equal(t, 2, n, "main's 217/218 must apply after adoption")

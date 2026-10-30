@@ -32,14 +32,81 @@ type DisplayItem struct {
 }
 
 var displayControl = regexp.MustCompile(`(?m)^[\t ]*(\[Thinking\]|\[Using tool: ([^\]\r\n]+)\]|\[Tool (\S+) (done|error)\]|\[Compaction (started|done|failed)(?: \| (\d+))?\])[\t ]*\r?(?:\n|$)`)
-var thinkingClose = regexp.MustCompile(`(?m)^[\t ]*\[/Thinking\][\t ]*\r?(?:\n|$)`)
-var toolClose = regexp.MustCompile(`(?m)^[\t ]*\[/Tool\][\t ]*\r?(?:\n|$)`)
+
+// findCloseLine returns the first match of (?m)^[\t ]*marker[\t ]*\r?(?:\n|$)
+// without running a regexp over the remaining output.
+func findCloseLine(s, marker string) []int {
+	lineStart := 0
+	for from := 0; ; {
+		i := strings.Index(s[from:], marker)
+		if i < 0 {
+			return nil
+		}
+		i += from
+		if k := strings.LastIndexByte(s[from:i], '\n'); k >= 0 {
+			lineStart = from + k + 1
+		}
+		from = i + 1
+		if strings.Trim(s[lineStart:i], "\t ") != "" {
+			continue
+		}
+		end := i + len(marker)
+		for end < len(s) && (s[end] == ' ' || s[end] == '\t') {
+			end++
+		}
+		if end < len(s) && s[end] == '\r' {
+			end++
+		}
+		if end == len(s) {
+			return []int{lineStart, end}
+		}
+		if s[end] == '\n' {
+			return []int{lineStart, end + 1}
+		}
+	}
+}
+
+// findDisplayControls equals displayControl.FindAllStringSubmatchIndex(s, -1).
+// Matches never span lines, so only lines starting with optional blanks and '['
+// are handed to the regexp.
+func findDisplayControls(s string) [][]int {
+	var matches [][]int
+	lineStart := 0
+	for from := 0; from < len(s); {
+		i := strings.IndexByte(s[from:], '[')
+		if i < 0 {
+			break
+		}
+		i += from
+		if k := strings.LastIndexByte(s[from:i], '\n'); k >= 0 {
+			lineStart = from + k + 1
+		}
+		if strings.Trim(s[lineStart:i], "\t ") != "" {
+			from = i + 1
+			continue
+		}
+		lineEnd := len(s)
+		if k := strings.IndexByte(s[i:], '\n'); k >= 0 {
+			lineEnd = i + k + 1
+		}
+		if m := displayControl.FindStringSubmatchIndex(s[lineStart:lineEnd]); m != nil {
+			for j := range m {
+				if m[j] >= 0 {
+					m[j] += lineStart
+				}
+			}
+			matches = append(matches, m)
+		}
+		from, lineStart = lineEnd, lineEnd
+	}
+	return matches
+}
 
 // ParseDisplay converts historical marker output once, during migration or an
 // completed unstructured execution result. Raw streaming stays outside this parser.
 func ParseDisplay(output string) []DisplayItem {
 	output = markers.NormalizeMarkers(output)
-	matches := displayControl.FindAllStringSubmatchIndex(output, -1)
+	matches := findDisplayControls(output)
 	if len(matches) == 0 {
 		if output == "" {
 			return nil
@@ -47,7 +114,7 @@ func ParseDisplay(output string) []DisplayItem {
 		return []DisplayItem{{Type: "text", Text: output, Complete: true}}
 	}
 	protected := markers.MarkdownCodeRanges(output)
-	var items []DisplayItem
+	items := make([]DisplayItem, 0, 2*len(matches)+1)
 	cursor := 0
 	addText := func(text string) {
 		if text != "" {
@@ -70,7 +137,7 @@ func ParseDisplay(output string) []DisplayItem {
 		switch {
 		case get(1) == "[Thinking]":
 			item.Type = "thinking"
-			close := thinkingClose.FindStringIndex(output[end:])
+			close := findCloseLine(output[end:], "[/Thinking]")
 			if close == nil {
 				item.Text = output[end:]
 				item.Complete = false
@@ -91,7 +158,7 @@ func ParseDisplay(output string) []DisplayItem {
 			item.Type = "tool_result"
 			item.Name = get(3)
 			item.Status = get(4)
-			close := toolClose.FindStringIndex(output[end:])
+			close := findCloseLine(output[end:], "[/Tool]")
 			if close == nil {
 				item.Text = output[end:]
 				item.Complete = false

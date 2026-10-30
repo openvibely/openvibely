@@ -33,7 +33,7 @@ func TestReplayCodecPreservesProviderShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, item := range items {
-				if err := builder.AppendValidatedJSON(string(item)); err != nil {
+				if err := builder.AppendValidatedJSON(item); err != nil {
 					t.Fatal(err)
 				}
 			}

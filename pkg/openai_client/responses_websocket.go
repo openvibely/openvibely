@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpclient"
@@ -479,7 +480,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 
 	wirePayload, fullInput, properties := incrementalResponsesWebsocketPayload(payload, state)
 
-	body, err := json.Marshal(wirePayload)
+	body, err := marshalResponsesWebsocketRequest(wirePayload, properties)
 	if err != nil {
 		state.resetConnectionLocked()
 		state.mu.Unlock()
@@ -680,6 +681,87 @@ func incrementalResponsesWebsocketPayload(payload map[string]any, state *Respons
 		wire["previous_response_id"] = state.lastResponseID
 	}
 	return wire, append([]any(nil), fullInput...), properties
+}
+
+// Reuse the already encoded request properties (notably tool schemas). Only
+// input and transport metadata need encoding after incremental selection.
+func marshalResponsesWebsocketRequest(wire map[string]any, properties string) ([]byte, error) {
+	if properties == "" {
+		return marshalResponsesWebsocketPayload(wire)
+	}
+	dynamic := make(map[string]any, 3)
+	for _, key := range []string{"input", "client_metadata", "previous_response_id"} {
+		if value, exists := wire[key]; exists {
+			dynamic[key] = value
+		}
+	}
+	tail, err := marshalResponsesWebsocketPayload(dynamic)
+	if err != nil {
+		return nil, err
+	}
+	body := make([]byte, 0, len(properties)+len(tail))
+	body = append(body, properties[:len(properties)-1]...)
+	if len(properties) > 2 && len(tail) > 2 {
+		body = append(body, ',')
+	}
+	return append(body, tail[1:]...), nil
+}
+
+// marshalResponsesWebsocketPayload writes stored json.RawMessage input items
+// verbatim; encoding/json would reformat and clone every item on each request.
+func marshalResponsesWebsocketPayload(wire map[string]any) ([]byte, error) {
+	input, ok := wire["input"].([]any)
+	if !ok || input == nil {
+		return json.Marshal(wire)
+	}
+	// Decoded map histories are best encoded together, without per-item buffers.
+	hasRaw := false
+	for _, item := range input {
+		if _, ok := item.(json.RawMessage); ok {
+			hasRaw = true
+			break
+		}
+	}
+	if !hasRaw {
+		return json.Marshal(wire)
+	}
+	rest := make(map[string]any, len(wire))
+	for key, value := range wire {
+		if key != "input" {
+			rest[key] = value
+		}
+	}
+	head, err := json.Marshal(rest)
+	if err != nil {
+		return nil, err
+	}
+	size := len(head) + len(`,"input":[]`)
+	for _, item := range input {
+		if raw, ok := item.(json.RawMessage); ok {
+			size += len(raw) + 1
+		}
+	}
+	body := make([]byte, 0, size)
+	body = append(body, head[:len(head)-1]...)
+	if len(rest) > 0 {
+		body = append(body, ',')
+	}
+	body = append(body, `"input":[`...)
+	for i, item := range input {
+		if i > 0 {
+			body = append(body, ',')
+		}
+		if raw, ok := item.(json.RawMessage); ok && len(raw) > 0 && utf8.Valid(raw) && json.Valid(raw) {
+			body = append(body, raw...)
+			continue
+		}
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return nil, err
+		}
+		body = append(body, encoded...)
+	}
+	return append(body, ']', '}'), nil
 }
 
 func hasInputPrefix(input, prefix []any) bool {
