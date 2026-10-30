@@ -1,5 +1,18 @@
 # Archived benchmark evidence
 
+## Anthropic and OpenAI-compatible comparison
+
+[Full report](PROVIDER_RESULTS.md): main `9e702736a` versus task branch `dfe6f4b3f`, three repetitions per scenario. All 48 timing runs passed (1,584 turns), plus four separate diagnostic runs and ten smoke runs. This comparison measures the entire branch, not just the seven optimizations.
+
+- [Download report](/files/1ed65c30ed0059c6cdfdc8489617fd39?project_id=b184292efa07a415fc59967a5fc328d1)
+- [Raw evidence and profiles](/files/def8b7636f4517d5f8113eb37a1f2fd7?project_id=b184292efa07a415fc59967a5fc328d1) (2.19 MiB; requires access to this project)
+
+Archive SHA-256: `c2b119c1175e229e2eebbec31e69d610daa46632ee83002f8421b0f27dd678a8`.
+
+The archive contains timing samples, RSS samples, delivery observations, provider request statistics, acceptance records, logs, diagnostic pprof files, source/binary hashes, exact harness sources, and generated tables. App databases and executables are omitted. Timing and diagnostic directories are separate. Both temporary source checkouts were removed after validation.
+
+## Earlier OpenAI and transcript evidence
+
 All 217 original files under `scripts/replay-memory-bench` at commit `0d7d5157c` were archived before repository cleanup. This includes historical reports, raw JSON, profiles, nested evidence archives, obsolete prototypes, and exact harness sources. Application code is unchanged by cleanup. The original branch history also remains under the local backup refs; cleanup does not garbage-collect Git objects.
 
 The 96,385,755-byte archive is split because chat artifacts have a 25 MiB upload limit. Download all four parts and the checksum file from the originating OpenVibely project (links require access to that instance/project):

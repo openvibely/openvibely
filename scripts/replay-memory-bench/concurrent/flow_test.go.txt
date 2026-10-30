@@ -1,6 +1,6 @@
 package handler
 
-// Loaded through a Go overlay per README. Never part of application builds.
+// Injected into temporary checkouts per README. Never part of application builds.
 import (
 	"context"
 	"encoding/json"
@@ -24,6 +24,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,7 @@ import (
 
 type appFlowManifest struct {
 	Task, OtherTask, Project, Model, Mode string
+	Provider, Transport                   string
 	OutputBytes, ToolBytes, Turns         int
 }
 
@@ -178,6 +180,14 @@ func TestConcurrentFlow(t *testing.T) {
 	old := openaiclient.OpenAIAPIBaseURL
 	openaiclient.OpenAIAPIBaseURL = modelURL + "/v1/"
 	defer func() { openaiclient.OpenAIAPIBaseURL = old }()
+	oldAnthropicHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = modelURL
+	defer func() { anthropicclient.AnthropicAPIHost = oldAnthropicHost }()
+	provider := os.Getenv("OV_FLOW_PROVIDER")
+	if provider == "" {
+		provider = "openai"
+	}
+	require.Contains(t, []string{"openai", "anthropic", "openai-compatible"}, provider)
 	profile := os.Getenv("OV_FLOW_PROFILE")
 	mode := os.Getenv("OV_FLOW_MODE")
 	require.Contains(t, []string{"text-only", "tool-use"}, mode)
@@ -198,12 +208,29 @@ func TestConcurrentFlow(t *testing.T) {
 		toolBytes = 0
 	}
 	agent := models.LLMConfig{Name: "App flow model", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey, APIKey: "local-benchmark-only", MaxTokens: 65536, ContextWindow: contextWindow, ProviderContextWindow: contextWindow, CompactionThreshold: contextWindow * 3 / 4, IsDefault: true}
+	transport := "responses-websocket"
+	switch provider {
+	case "anthropic":
+		agent.Provider, agent.Model = models.ProviderAnthropic, "claude-opus-5"
+		transport = "messages-sse"
+	case "openai-compatible":
+		agent.Provider, agent.Model = models.ProviderOpenAICompatible, "benchmark-compatible"
+		agent.BaseURL = modelURL + "/v1"
+		agent.CustomAuthConfigJSON = `{"allow_private_endpoints":true}`
+		transport = "chat-completions-sse"
+	}
+	// Keep this growing-history comparison out of compaction. Both revisions
+	// receive exactly the same explicit budget; compaction has a separate harness.
+	if provider != "openai" {
+		require.NotEqual(t, "compaction", profile)
+		agent.ContextWindow, agent.ProviderContextWindow, agent.CompactionThreshold = 2000000, 2000000, 1500000
+	}
 	require.NoError(t, stores.LLMConfigs.Create(ctx, &agent))
 	work := filepath.Join(dir, "repo")
 	require.NoError(t, os.MkdirAll(work, 0700))
 	project := models.Project{Name: "App flow", RepoPath: work}
 	require.NoError(t, stores.Projects.Create(ctx, &project))
-	manifest = appFlowManifest{Mode: mode, Project: project.ID, Model: agent.ID, OutputBytes: outputBytes, ToolBytes: toolBytes, Turns: 6}
+	manifest = appFlowManifest{Provider: provider, Transport: transport, Mode: mode, Project: project.ID, Model: agent.ID, OutputBytes: outputBytes, ToolBytes: toolBytes, Turns: 6}
 	other := models.Task{ProjectID: project.ID, Title: "Other thread", Prompt: "Empty comparison thread", Category: models.CategoryCompleted, Status: models.StatusCompleted, AgentID: &agent.ID}
 	require.NoError(t, stores.Tasks.Create(ctx, &other))
 	manifest.OtherTask = other.ID
@@ -409,7 +436,7 @@ func TestConcurrentFlow(t *testing.T) {
 				disk["db"+suffix] = s.Size()
 			}
 		}
-		row := map[string]any{"mode": mode, "profile": profile, "turn": turn, "assistant_target_bytes": outputBytes, "tool_file_target_bytes": toolBytes, "delta_ms": deltaMS, "wave_start_unix_ns": start.UnixNano(), "cpu_ms": cpu1 - cpu0, "elapsed_ms": elapsed, "alloc_bytes": after.TotalAlloc - before.TotalAlloc, "alloc_count": after.Mallocs - before.Mallocs, "free_count": after.Frees - before.Frees, "freed_bytes": (after.TotalAlloc - after.HeapAlloc) - (before.TotalAlloc - before.HeapAlloc), "start_live_objects": before.HeapObjects, "end_live_objects": after.HeapObjects, "start_heap": before.HeapAlloc, "gc_count": after.NumGC - before.NumGC, "gc_pause_ns": after.PauseTotalNs - before.PauseTotalNs, "sampled_peak_heap": peak, "end_heap": after.HeapAlloc, "process_peak_rss": rss, "db_pages_bytes": pages * pageSize, "db_free_bytes": free * pageSize, "files": disk}
+		row := map[string]any{"provider": provider, "mode": mode, "profile": profile, "turn": turn, "assistant_target_bytes": outputBytes, "tool_file_target_bytes": toolBytes, "delta_ms": deltaMS, "wave_start_unix_ns": start.UnixNano(), "cpu_ms": cpu1 - cpu0, "elapsed_ms": elapsed, "alloc_bytes": after.TotalAlloc - before.TotalAlloc, "alloc_count": after.Mallocs - before.Mallocs, "free_count": after.Frees - before.Frees, "freed_bytes": (after.TotalAlloc - after.HeapAlloc) - (before.TotalAlloc - before.HeapAlloc), "start_live_objects": before.HeapObjects, "end_live_objects": after.HeapObjects, "start_heap": before.HeapAlloc, "gc_count": after.NumGC - before.NumGC, "gc_pause_ns": after.PauseTotalNs - before.PauseTotalNs, "sampled_peak_heap": peak, "end_heap": after.HeapAlloc, "process_peak_rss": rss, "db_pages_bytes": pages * pageSize, "db_free_bytes": free * pageSize, "files": disk}
 		rows = append(rows, row)
 		appFlowJSON(t, filepath.Join(dir, "turns.json"), rows)
 		// Assertions and fixture IO are outside the measured turn. The next turn keeps
@@ -449,10 +476,18 @@ func TestConcurrentFlow(t *testing.T) {
 	}
 	require.Equal(t, float64(workers), peer["max_active"], "model streams did not overlap")
 	requests := peer["requests"].([]any)
+	if profile != "compaction" {
+		require.Len(t, requests, workers*manifest.Turns*(1+map[bool]int{true: 1}[withTools]), "unexpected provider retries/rounds")
+	}
 	toolReplies := 0
 	checkpointSeen := false
 	for _, v := range requests {
 		r := v.(map[string]any)
+		require.Equal(t, provider, r["provider"], "wrong provider protocol")
+		require.True(t, r["prior_turn_seen"] == true || r["checkpoint_seen"] == true, "prior conversation missing: %v", r)
+		if profile != "compaction" {
+			require.False(t, r["summary"] == true, "unexpected compaction/summary in concurrent comparison")
+		}
 		if r["tool_result_seen"] == true {
 			toolReplies++
 		}
@@ -461,7 +496,7 @@ func TestConcurrentFlow(t *testing.T) {
 		}
 	}
 	if withTools {
-		require.GreaterOrEqual(t, toolReplies, manifest.Turns, "provider must receive each actual tool result")
+		require.Equal(t, workers*manifest.Turns, toolReplies, "provider must receive each actual tool result")
 	} else {
 		require.Zero(t, toolReplies, "text baseline must not contain tool results")
 	}

@@ -32,18 +32,28 @@ func main() {
 	snapshot := func() any {
 		return map[string]any{"requests": requests, "compactions": compactions, "summaries": summaries, "max_active": maxActive}
 	}
-	generate := func(ctx context.Context, raw []byte, compact bool, emit func(any) error) any {
+	generate := func(ctx context.Context, raw []byte, protocol string, compact bool, emit func(any) error) any {
 		mu.Lock()
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
 		inputItems, _ := body["input"].([]any)
+		if protocol != "openai" {
+			inputItems, _ = body["messages"].([]any)
+		}
+		budget := body["max_output_tokens"]
+		if protocol != "openai" {
+			budget = body["max_tokens"]
+			if budget == nil {
+				budget = body["max_completion_tokens"]
+			}
+		}
 		if previous, _ := body["previous_response_id"].(string); previous != "" {
 			inputItems = append(append([]any{}, contexts[previous]...), inputItems...)
 		}
 		inputJSON, _ := json.Marshal(inputItems)
 		encoded := string(inputJSON)
 		summary := strings.Contains(string(raw), "CONTEXT CHECKPOINT COMPACTION")
-		requests = append(requests, map[string]any{"turn": turn, "with_tools": withTools, "compact": compact, "summary": summary, "context_bytes": len(inputJSON), "request_bytes": len(raw), "prior_turn_seen": turn == 0 || strings.Contains(encoded, fmt.Sprintf("TURN_%d_END", turn-1)), "checkpoint_seen": strings.Contains(encoded, "APPFLOW_COMPACT"), "tool_result_seen": strings.Contains(encoded, fmt.Sprintf("TOOL_%d_END", turn))})
+		requests = append(requests, map[string]any{"provider": protocol, "turn": turn, "with_tools": withTools, "compact": compact, "summary": summary, "context_bytes": len(inputJSON), "request_bytes": len(raw), "prior_turn_seen": turn == 0 || strings.Contains(encoded, fmt.Sprintf("TURN_%d_END", turn-1)), "checkpoint_seen": strings.Contains(encoded, "APPFLOW_COMPACT"), "tool_result_seen": hasToolResult(protocol, inputItems, fmt.Sprintf("TOOL_%d_END", turn))})
 		if compact {
 			compactions++
 			defer mu.Unlock()
@@ -52,7 +62,7 @@ func main() {
 		turn, outputBytes, deltaMS, toolFile, withTools := turn, outputBytes, deltaMS, toolFile, withTools
 		index := len(requests) - 1
 		current := 0
-		if strings.Contains(encoded, fmt.Sprintf("TOOL_%d_END", turn)) {
+		if hasToolResult(protocol, inputItems, fmt.Sprintf("TOOL_%d_END", turn)) {
 			current = 1
 		}
 		if summary {
@@ -85,7 +95,7 @@ func main() {
 			}
 			fmt.Fprintf(&b, "\nTURN_%d_END\n\n[STATUS: COMPLETED]\n", turn)
 			text = b.String()
-			if limit, ok := body["max_output_tokens"].(float64); ok && (len(text)+3)/4 > int(limit) {
+			if limit, ok := budget.(float64); ok && (len(text)+3)/4 > int(limit) {
 				_ = emit(map[string]any{"type": "error", "message": "fixture exceeds requested max_output_tokens"})
 				return nil
 			}
@@ -119,7 +129,7 @@ func main() {
 		mu.Lock()
 		requests[index]["response_text_bytes"] = len(text)
 		requests[index]["estimated_output_tokens"] = (len(text) + 3) / 4
-		requests[index]["requested_output_tokens"] = body["max_output_tokens"]
+		requests[index]["requested_output_tokens"] = budget
 		mu.Unlock()
 		for i, item := range items {
 			if emit(map[string]any{"type": "response.output_item.done", "output_index": i, "item": item}) != nil {
@@ -167,7 +177,7 @@ func main() {
 				if e != nil {
 					return
 				}
-				generate(r.Context(), raw, false, func(v any) error { b, _ := json.Marshal(v); return conn.Write(r.Context(), websocket.MessageText, b) })
+				generate(r.Context(), raw, "openai", false, func(v any) error { b, _ := json.Marshal(v); return conn.Write(r.Context(), websocket.MessageText, b) })
 			}
 		}
 		raw, e := io.ReadAll(r.Body)
@@ -176,11 +186,40 @@ func main() {
 		}
 		if strings.HasSuffix(r.URL.Path, "/compact") {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(generate(r.Context(), raw, true, nil))
+			_ = json.NewEncoder(w).Encode(generate(r.Context(), raw, "openai", true, nil))
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		generate(r.Context(), raw, false, func(v any) error {
+		protocol := "openai"
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			protocol = "anthropic"
+		}
+		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			protocol = "openai-compatible"
+		}
+		if protocol != "openai" {
+			emit := newProtocolEmitter(protocol, raw, func(v any) error {
+				b, err := json.Marshal(v)
+				if err != nil {
+					return err
+				}
+				if protocol == "anthropic" {
+					if _, err = fmt.Fprintf(w, "event: %s\n", v.(map[string]any)["type"]); err != nil {
+						return err
+					}
+				}
+				_, err = fmt.Fprintf(w, "data: %s\n\n", b)
+				w.(http.Flusher).Flush()
+				return err
+			})
+			generate(r.Context(), raw, protocol, false, emit)
+			if protocol == "openai-compatible" {
+				fmt.Fprint(w, "data: [DONE]\n\n")
+				w.(http.Flusher).Flush()
+			}
+			return
+		}
+		generate(r.Context(), raw, "openai", false, func(v any) error {
 			b, _ := json.Marshal(v)
 			_, e := fmt.Fprintf(w, "data: %s\n\n", b)
 			w.(http.Flusher).Flush()
