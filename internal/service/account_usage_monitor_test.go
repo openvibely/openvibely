@@ -54,7 +54,7 @@ func TestAccountMonitorLabels(t *testing.T) {
 			limits := []models.AccountLimitView{{LimitKey: "weekly", Label: "Weekly", UsedPercent: &pct}}
 			resets := map[string]any{"credits": []any{map[string]any{"id": "grant", "status": "available", "remaining_uses": 1, "expires_at": now.Add(time.Hour).Format(time.RFC3339)}}}
 			events := evaluateAccountMonitor(&state, limits, resets, now, label)
-			wantSuffixes := []string{" usage nearing its limit", " received a usage reset", " reset expires soon"}
+			wantSuffixes := []string{" — Weekly: 96% used (nearing limit)", " received a usage reset", " reset expires soon"}
 			if len(events) != len(wantSuffixes) {
 				t.Fatalf("events = %+v", events)
 			}
@@ -62,6 +62,47 @@ func TestAccountMonitorLabels(t *testing.T) {
 				if event.Title != tc.want+wantSuffixes[i] {
 					t.Fatalf("title = %q, want %q", event.Title, tc.want+wantSuffixes[i])
 				}
+			}
+		})
+	}
+}
+
+func TestAccountMonitorReportsActualUsage(t *testing.T) {
+	for _, tc := range []struct {
+		pct        float64
+		percentage string
+		threshold  string
+		reached    bool
+	}{
+		{pct: 79.9},
+		{pct: 80},
+		{pct: 81, percentage: "81%", threshold: ":80"},
+		{pct: 95, percentage: "95%", threshold: ":80"},
+		{pct: 95.1, percentage: "95.1%", threshold: ":95"},
+		{pct: 96, percentage: "96%", threshold: ":95"},
+		{pct: 99.9, percentage: "99.9%", threshold: ":95"},
+		{pct: 100, percentage: "100%", threshold: ":100", reached: true},
+		{pct: 101, percentage: "101%", threshold: ":100", reached: true},
+	} {
+		t.Run(fmt.Sprint(tc.pct), func(t *testing.T) {
+			state := monitorTestState()
+			limits := []models.AccountLimitView{{LimitKey: "weekly", Label: "Weekly", UsedPercent: &tc.pct}}
+			events := evaluateAccountMonitor(&state, limits, nil, time.Now(), "Anthropic (owner@example.com · Claude Max)")
+			if tc.threshold == "" {
+				if len(events) != 0 {
+					t.Fatalf("unexpected event below threshold: %+v", events)
+				}
+				return
+			}
+			if len(events) != 1 {
+				t.Fatalf("want exactly one event, got %+v", events)
+			}
+			event := events[0]
+			if !strings.HasSuffix(event.Key, tc.threshold) || !strings.Contains(event.Title, tc.percentage) || event.Message != "Weekly is "+tc.percentage+" used." {
+				t.Fatalf("wrong threshold or reported usage: %+v", event)
+			}
+			if strings.Contains(event.Title, "limit reached") != tc.reached || strings.Contains(event.Title, "nearing limit") == tc.reached {
+				t.Fatalf("incorrect limit status: %s", event.Title)
 			}
 		})
 	}
@@ -87,9 +128,18 @@ func TestAccountMonitorThresholdWindows(t *testing.T) {
 	if c[0].Key != b[0].Key {
 		t.Fatal("regression must not emit a lower threshold", c)
 	}
+	pct = 100
+	reached := evaluateAccountMonitor(&state, limits, nil, now, "OpenAI")
+	if len(reached) != 1 || reached[0].Key == b[0].Key {
+		t.Fatal("reaching 100% must generate its own alert", reached)
+	}
+	repeated := evaluateAccountMonitor(&state, limits, nil, now, "OpenAI")
+	if len(repeated) != 1 || repeated[0].Key != reached[0].Key {
+		t.Fatal("repeated 100% checks must preserve the deduplication key", repeated)
+	}
 	window = "2028-01-02T00:00:00Z"
 	d := evaluateAccountMonitor(&state, limits, nil, now, "OpenAI")
-	if d[0].Key == a[0].Key {
+	if d[0].Key == reached[0].Key {
 		t.Fatal("new window must alert again")
 	}
 }
@@ -198,9 +248,10 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	defer func() { openaiclient.OpenAIChatGPTAPIBaseURL = old }()
 	usage := NewUsageAnalyticsService(env.Usage, env.LLMConfigs)
 	pct := 96.0
+	windowMinutes := 300
 	reset := time.Now().Add(time.Hour).Format(time.RFC3339)
 	usage.SetAccountUsageFetcher(func(ctx context.Context, c models.LLMConfig) (*models.AccountUsageSnapshot, error) {
-		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, AccountDisplayName: "owner@example.com", PlanType: "ChatGPT Pro", PrimaryLabel: "Session", PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
+		return &models.AccountUsageSnapshot{Provider: "openai", AccountID: c.OAuthAccountID, AgentConfigID: c.ID, AccountDisplayName: "owner@example.com", PlanType: "ChatGPT Pro", PrimaryLabel: "Session", PrimaryWindowMinutes: &windowMinutes, PrimaryUsedPercent: &pct, PrimaryResetsAt: &reset}, nil
 	})
 	broadcaster := events.NewBroadcaster()
 	sub, err := broadcaster.Subscribe()
@@ -220,7 +271,7 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 		if event.AlertSource != "account_usage" || event.ProjectID != projects[0].ID || !strings.HasPrefix(event.AlertURL, "/analytics?") {
 			t.Fatal(event)
 		}
-		wantTitle := "OpenAI (owner@example.com · ChatGPT Pro) usage nearing its limit"
+		wantTitle := "OpenAI (owner@example.com · ChatGPT Pro) — 5-hour session: 96% used (nearing limit)"
 		if event.AlertTitle != wantTitle {
 			t.Fatalf("toast title = %q, want %q", event.AlertTitle, wantTitle)
 		}
@@ -234,6 +285,26 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	select {
 	case event := <-sub:
 		t.Fatal("duplicate event", event)
+	default:
+	}
+	pct = 100
+	if err := NewAccountUsageMonitor(usage, env.Stores.Settings, env.Stores.Projects, alerts).RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sub:
+		if !strings.HasSuffix(event.AlertTitle, "5-hour session: limit reached (100% used)") {
+			t.Fatalf("missing actual limit-reached title: %+v", event)
+		}
+	default:
+		t.Fatal("100% must alert even after the 95% warning")
+	}
+	if err := NewAccountUsageMonitor(usage, env.Stores.Settings, env.Stores.Projects, alerts).RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sub:
+		t.Fatal("duplicate 100% alert", event)
 	default:
 	}
 	if err := env.Stores.Settings.Set(ctx, "account_usage_alerts:"+projects[0].ID, "false"); err != nil {

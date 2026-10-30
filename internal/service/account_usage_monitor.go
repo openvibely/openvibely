@@ -262,23 +262,35 @@ func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountL
 			window = *limit.ResetsAt
 		}
 		cycle := prev.Cycle
-		if window == "" && pct < 80 && prev.Percent >= 80 {
+		if window == "" && pct <= 80 && prev.Percent > 80 {
 			cycle++
 		}
 
 		threshold := 0
-		if pct >= 95 {
+		if pct >= 100 {
+			threshold = 100
+		} else if pct > 95 {
 			threshold = 95
-		} else if pct >= 80 {
+		} else if pct > 80 {
 			threshold = 80
 		}
 		if prev.Window == window && prev.Cycle == cycle && prev.Threshold > threshold {
 			threshold = prev.Threshold
 		}
 		state.Limits[key] = monitoredLimit{Window: window, Cycle: cycle, Percent: pct, Threshold: threshold}
-		if threshold > 0 && pct >= 80 {
+		if threshold > 0 && pct > 80 {
 			eventKey := fmt.Sprintf("limit:%s:%s:%d:%d", key, window, cycle, threshold)
-			events = append(events, accountMonitorEvent{eventKey, label + " usage nearing its limit", fmt.Sprintf("%s is %.0f%% used (crossed %d%%).", limit.Label, pct, threshold), models.SeverityWarning})
+			// Keep the reported percentage, including fractions: 99.9% is not 100%.
+			percentage := strconv.FormatFloat(pct, 'f', -1, 64) + "%"
+			limitName := strings.TrimSpace(limit.Label)
+			if limitName == "" {
+				limitName = "Account"
+			}
+			title := fmt.Sprintf("%s — %s: %s used (nearing limit)", label, limitName, percentage)
+			if pct >= 100 {
+				title = fmt.Sprintf("%s — %s: limit reached (%s used)", label, limitName, percentage)
+			}
+			events = append(events, accountMonitorEvent{eventKey, title, fmt.Sprintf("%s is %s used.", limitName, percentage), models.SeverityWarning})
 		}
 	}
 	credits, ok := resets["credits"].([]any)
