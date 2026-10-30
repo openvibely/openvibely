@@ -171,13 +171,7 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 	}()
 	go func() { defer wg.Done(); resets, resetErr = m.usage.UsageResetCredits(ctx, key) }()
 	wg.Wait()
-	label := "OpenAI"
-	if cfg.Provider == models.ProviderAnthropic {
-		label = "Anthropic"
-	}
-	if cfg.Name != "" {
-		label += " (" + cfg.Name + ")"
-	}
+	label := accountMonitorLabel(group, limits)
 	var rows []models.AccountLimitView
 	if limitErr == nil && limits != nil {
 		for _, a := range limits.AccountLimits {
@@ -216,6 +210,39 @@ func (m *AccountUsageMonitor) checkAccount(ctx context.Context, group []models.L
 		return limitErr
 	}
 	return resetErr
+}
+
+// Use the same successful account view as Analytics, never a model alias.
+// Reset alerts can still be emitted when limits are unavailable; in that case
+// only use a stored identity if the group has a single credential owner.
+func accountMonitorLabel(group []models.LLMConfig, limits *models.AnalyticsUsageAccountLimitsViewModel) string {
+	provider := "OpenAI"
+	if group[0].Provider == models.ProviderAnthropic {
+		provider = "Anthropic"
+	}
+	identity := accountUsageGroupDisplayIdentity(group, nil)
+	plan := ""
+	if limits != nil {
+		for _, account := range limits.AccountLimits {
+			if account.Error != "" {
+				continue
+			}
+			identity = strings.TrimSpace(account.AccountIdentity)
+			plan = strings.TrimSpace(account.PlanType)
+			break
+		}
+	}
+	var details []string
+	if identity != "" && identity != accountUsageProviderFallbackIdentity(group[0].Provider) && identity != "Connected account" {
+		details = append(details, identity)
+	}
+	if plan != "" {
+		details = append(details, plan)
+	}
+	if len(details) > 0 {
+		return provider + " (" + strings.Join(details, " · ") + ")"
+	}
+	return provider
 }
 
 func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountLimitView, resets map[string]any, now time.Time, label string) []accountMonitorEvent {
