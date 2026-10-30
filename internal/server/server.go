@@ -731,6 +731,8 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 	customPersonalityRepo := stores.CustomPersonalities
 
 	settingsRepo := stores.Settings
+	accountUsageMonitor := service.NewAccountUsageMonitor(usageAnalyticsSvc, settingsRepo, projectRepo, alertSvc)
+	oauthRefreshSvc.SetAfterRefresh(accountUsageMonitor.Trigger)
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
 	automationCapabilitySvc.SetLLMConfigRepository(llmConfigRepo)
@@ -1155,6 +1157,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			h.SetProjectFolderPicker(option.ProjectFolderPicker)
 		}
 	}
+	h.SetUsageAnalyticsService(usageAnalyticsSvc)
 	h.SetLiveLimits(cfg.LiveLimits)
 	h.SetChatBroadcaster(chatBroadcaster)
 	h.SetExecutionStreamHub(executionStreamHub)
@@ -1330,6 +1333,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		stopProfiling()
 		srvCancel()
 		oauthRefreshSvc.Stop()
+		accountUsageMonitor.Stop()
 		stopUpdateCoordinatorChecks(updateCoordinator)
 		if hostedPendingStore != nil {
 			hostedPendingStore.Close()

@@ -30,6 +30,7 @@ type OAuthRefreshService struct {
 	identityResolver func(context.Context, string) (AnthropicOAuthIdentity, error)
 	openAIIdentity   OpenAIOAuthIdentityResolver
 	identityTimeout  time.Duration
+	afterRefresh     func(context.Context)
 	interval         time.Duration
 	wg               sync.WaitGroup
 }
@@ -66,6 +67,9 @@ func (s *OAuthRefreshService) SetOpenAIIdentityResolver(resolver OpenAIOAuthIden
 	s.openAIIdentity = resolver
 }
 
+// SetAfterRefresh installs a nonblocking hook invoked after each scheduled credential check.
+func (s *OAuthRefreshService) SetAfterRefresh(hook func(context.Context)) { s.afterRefresh = hook }
+
 func (s *OAuthRefreshService) Start(ctx context.Context) {
 	if s == nil || s.repo == nil || s.manager == nil {
 		return
@@ -96,6 +100,9 @@ func (s *OAuthRefreshService) Stop() {
 func (s *OAuthRefreshService) runAndLog(ctx context.Context) {
 	if err := s.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		applog.Infof("[oauth-refresh] background refresh completed with errors: %v", err)
+	}
+	if ctx.Err() == nil && s.afterRefresh != nil {
+		s.afterRefresh(ctx)
 	}
 }
 

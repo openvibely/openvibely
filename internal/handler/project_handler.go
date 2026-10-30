@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -689,6 +690,7 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 func render(c echo.Context, status int, component templ.Component) error {
 	ctx := c.Request().Context()
 	if h, ok := c.Get("handler").(*Handler); ok {
+		ctx = templateui.WithMessageAuthors(ctx, h.authEnabled())
 		ctx = layout.WithDesktopMode(ctx, h.desktopMode)
 		ctx = layout.WithBuildVersion(ctx, h.buildIdentity.Version)
 		ctx = layout.WithNativeWindow(ctx, h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1")

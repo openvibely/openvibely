@@ -42,6 +42,9 @@ const (
 
 // TaskEvent represents a task state change event
 type TaskEvent struct {
+	AlertSource         string        `json:"alert_source,omitempty"`
+	AlertTitle          string        `json:"alert_title,omitempty"`
+	AlertURL            string        `json:"alert_url,omitempty"`
 	DependencyName      string        `json:"dependency_name,omitempty"`
 	Type                TaskEventType `json:"type"`
 	TaskID              string        `json:"task_id"`
