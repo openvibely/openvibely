@@ -4600,16 +4600,19 @@ templ ChatAutoScrollScript() {
 			if (!(window._thinkingOpenStates instanceof Map)) window._thinkingOpenStates = new Map();
 			if (!window._toolOutputRowStates) window._toolOutputRowStates = {};
             if (!window.syncToolDisclosures && typeof document !== 'undefined' && document.addEventListener) {
-                window.syncToolDisclosures = function() {
+                window.syncToolDisclosures = function(root) {
                     var compact = document.documentElement.getAttribute('data-output-detail') === 'compact';
-                    document.querySelectorAll('[data-tool-disclosure-key]').forEach(function(wrap) {
+                    var scope = root || document;
+                    var tools = Array.from(scope.querySelectorAll('[data-tool-disclosure-key]'));
+                    if (scope.matches && scope.matches('[data-tool-disclosure-key]')) tools.unshift(scope);
+                    tools.forEach(function(wrap) {
                         var state = window._toolOutputRowStates[wrap.dataset.toolDisclosureKey];
                         var expanded = !compact || !!(state && state.expanded);
                         var button = wrap.querySelector('button.stream-tool-summary');
                         button.setAttribute('aria-expanded', String(expanded));
                         button.disabled = !compact;
                         wrap.querySelector('.stream-tool-body').hidden = !expanded;
-                        if (window.refreshVirtualChatRows) window.refreshVirtualChatRows(wrap);
+                        if (!root && window.refreshVirtualChatRows) window.refreshVirtualChatRows(wrap);
                     });
                 };
                 document.addEventListener('openvibely:display-change', function(event) {
