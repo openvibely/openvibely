@@ -80,6 +80,75 @@ func TestBrowserFunctional_AnalyticsProjectSwitchRefreshesTaskListWhileProviderU
 	})
 }
 
+func TestBrowserFunctional_AnalyticsProviderUsageDoesNotBlockTaskListNavigation(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projects := []models.Project{{ID: "a", Name: "Project A"}}
+	analytics := renderAnalyticsProjectSwitchShell(t, projects, &projects[0])
+
+	providerRequestStarted := make(chan struct{}, 32)
+	providerRequestCanceled := make(chan struct{}, 32)
+	navigationRequests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.URL.Path == "/api/analytics/usage" && r.URL.Query().Get("projection") == "account_limits" {
+			providerRequestStarted <- struct{}{}
+			<-r.Context().Done()
+			providerRequestCanceled <- struct{}{}
+			return
+		}
+		if r.URL.Path == "/tasks/sidebar" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, `<a data-task-list-row="task-a" href="/tasks/task-a?from=tasks" hx-get="/tasks/task-a?from=tasks" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true">Task A</a>`)
+			return
+		}
+		if r.URL.Path == "/tasks/task-a" {
+			navigationRequests <- r.Header.Get("HX-Request")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, `<div data-navigation-destination="task-a">Task A detail</div>`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(analytics)
+	}))
+	defer server.Close()
+
+	runComposerFocusCDP(t, chrome, server.URL+"/analytics?project_id=a&view=usage&provider_network=1&provider_count=8", "analytics-provider-usage-task-navigation", func(browser *composerFocusCDP) {
+		browser.waitFor("provider usage cards rendered", `String(document.querySelectorAll('#accountUsageCards > .card').length)`, "8")
+		if got := browser.evaluate(`JSON.stringify({count:window.pendingProviderRequests&&window.pendingProviderRequests.length,signals:window.pendingProviderRequests&&window.pendingProviderRequests.map(function(request){return !!request.signal&&!request.signal.aborted;})})`); got != `{"count":2,"signals":[true,true]}` {
+			t.Fatalf("provider usage concurrency state = %s, want two active requests", got)
+		}
+		browser.waitFor("task list has a clickable task", `String(!!document.querySelector('#task-list-groups [data-task-list-row="task-a"]'))`, "true")
+		for i := 0; i < 2; i++ {
+			select {
+			case <-providerRequestStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("only %d provider usage requests reached the server; expected two active requests", i)
+			}
+		}
+
+		browser.click(`#task-list-groups [data-task-list-row="task-a"]`)
+		select {
+		case header := <-navigationRequests:
+			if header != "true" {
+				t.Fatalf("task detail navigation HX-Request header = %q, want true", header)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("task detail request was blocked while provider usage requests were pending")
+		}
+		browser.waitFor("task detail loads and clears its loading indicator", `String(!!document.querySelector('#main-content [data-navigation-destination="task-a"]') && !document.getElementById('main-content').hasAttribute('data-page-loading'))`, "true")
+		browser.waitFor("all provider requests are aborted on navigation", `String(window.pendingProviderRequests.every(function(request){return request.signal.aborted;}))`, "true")
+		for i := 0; i < 2; i++ {
+			select {
+			case <-providerRequestCanceled:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("only %d provider requests were canceled by task navigation", i)
+			}
+		}
+	})
+}
+
 func TestBrowserFunctional_AnalyticsProviderUsageDoesNotBlockSidebarNavigation(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projects := []models.Project{{ID: "a", Name: "Project A"}}
@@ -123,8 +192,7 @@ func TestBrowserFunctional_AnalyticsProviderUsageDoesNotBlockSidebarNavigation(t
 		case <-time.After(5 * time.Second):
 			t.Fatal("provider usage request did not reach the server")
 		}
-		browser.evaluate(`window.pendingProvider.a.signal.addEventListener('abort',function(){sessionStorage.setItem('provider-aborted','yes');},{once:true});'armed'`)
-		browser.evaluateAwait(`(async function(){await window.openVibelyNavigate('/tasks?project_id=a');return 'navigated';})()`)
+		browser.click(`[data-nav-base="/tasks"]`)
 		browser.waitFor("provider request is cancelled on navigation", `sessionStorage.getItem('provider-aborted')`, "yes")
 		browser.waitFor("sidebar destination loads before provider response", `String(!!document.querySelector('#main-content [data-navigation-destination="tasks"]'))`, "true")
 		if header := <-navigationRequests; header != "true" {
@@ -167,16 +235,31 @@ func renderAnalyticsComponent(project *models.Project) ([]byte, error) {
 const analyticsProjectSwitchFetchFixture = `<script>
 window.Chart=function(ctx,config){this.canvas=ctx.canvas;this.data=config.data||{};this.options=config.options||{};this.update=function(){};this.resize=function(){};this.destroy=function(){};};
 window.pendingProvider={};
+window.pendingProviderRequests=[];
+window.enableProviderNetwork=new URLSearchParams(location.search).get('provider_network')==='1';
 window.providerResponse=function(data){return {ok:true,status:200,json:function(){return Promise.resolve(data);}};};
 window.nativeFetch=window.fetch.bind(window);
 window.fetch=function(url,options){
  var parsed=new URL(url,location.href),path=parsed.pathname,params=parsed.searchParams,project=params.get('project_id')||'a';
  if(path==='/api/analytics/task-run-activity')return Promise.resolve(providerResponse({models:[]}));
- if(path==='/api/analytics/usage'&&params.get('projection')==='accounts')return Promise.resolve(providerResponse({accounts:[{key:project+'-account',provider:'openai'}]}));
+ if(path==='/api/analytics/usage'&&params.get('projection')==='accounts'){
+  var count=Number(new URLSearchParams(location.search).get('provider_count'))||1;
+  var accounts=Array.from({length:count},function(_,index){return {key:project+'-account'+(count===1?'':'-'+index),provider:'openai'};});
+  return Promise.resolve(providerResponse({accounts:accounts}));
+ }
  if(path==='/api/analytics/usage'&&params.get('projection')==='account_limits'){
-  pendingProvider[project]={resolve:function(){},signal:options&&options.signal};
-  if(new URLSearchParams(location.search).get('provider_network')==='1')return nativeFetch(url,options);
-  return new Promise(function(resolve){pendingProvider[project].resolve=resolve;});
+  var request={resolve:function(){},signal:options&&options.signal};
+  pendingProviderRequests.push(request);
+  if(!pendingProvider[project])pendingProvider[project]=request;
+  if(request.signal)request.signal.addEventListener('abort',function(){sessionStorage.setItem('provider-aborted','yes');},{once:true});
+  if(enableProviderNetwork)return nativeFetch(url,options);
+  return new Promise(function(resolve,reject){
+   request.resolve=resolve;
+   if(request.signal){
+    var abort=function(){reject(new DOMException('Provider request aborted','AbortError'));};
+    if(request.signal.aborted)abort();else request.signal.addEventListener('abort',abort,{once:true});
+   }
+  });
  }
  if(path==='/api/analytics/usage')return Promise.resolve(providerResponse({totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]}));
  return Promise.resolve(providerResponse({}));
