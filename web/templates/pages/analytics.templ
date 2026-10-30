@@ -257,7 +257,7 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-usage" data-analytics-section="usage" class="hidden space-y-6 mb-6">
-					<div>@analyticsSectionHeading("Usage", "Provider limits, token usage, cache utilization, and recorded cost.")<p id="usageEvidenceSelection" class="hidden"></p></div>
+					<div>@analyticsSectionHeading("Usage", "Provider limits, token usage, cache utilization, and recorded cost.")<label class="label justify-start gap-2"><input id="accountAlertsEnabled" type="checkbox" class="checkbox checkbox-sm" disabled/><span class="label-text">Account usage alerts for this project</span></label><span id="accountAlertsStatus" class="text-sm" role="status"></span><p id="usageEvidenceSelection" class="hidden"></p></div>
 					<div id="usageSummary" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
 						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization", "Avg. tokens / day"} {
 							@analyticsKPICard(label, "usage")
@@ -1892,6 +1892,42 @@ templ analyticsContent(currentProject *models.Project) {
                                         await refreshResets();
                                     }
 									async function loadUsageAccounts(refreshUsage) {
+                                        const alertsToggle = document.getElementById('accountAlertsEnabled');
+                                        if (!alertsToggle.dataset.initialized) {
+                                            alertsToggle.dataset.initialized = 'true';
+                                            const params = new URLSearchParams();
+                                            params.set('project_id', usageEvidenceParams().get('project_id') || 'default');
+                                            const notificationURL = '/api/analytics/usage/notifications?' + params.toString();
+                                            fetchJSON(notificationURL).then(function(data) {
+                                                alertsToggle.checked = data.enabled;
+                                                alertsToggle.disabled = false;
+                                            }).catch(function(error) {
+                                                if (error.name !== 'AbortError') {
+                                                    delete alertsToggle.dataset.initialized;
+                                                    document.getElementById('accountAlertsStatus').textContent = 'Unable to load notification settings';
+                                                }
+                                            });
+                                            alertsToggle.onchange = async function() {
+                                                alertsToggle.disabled = true;
+                                                try {
+                                                    const response = await fetch(notificationURL, {
+                                                        method: 'POST', signal: eventSignal,
+                                                        headers: {'Content-Type': 'application/json'},
+                                                        body: JSON.stringify({enabled: alertsToggle.checked})
+                                                    });
+                                                    if (!response.ok) throw new Error('Unable to save notification setting');
+                                                    document.getElementById('accountAlertsStatus').textContent = '';
+                                                } catch (error) {
+                                                    if (error.name !== 'AbortError') {
+                                                        alertsToggle.checked = !alertsToggle.checked;
+                                                        document.getElementById('accountAlertsStatus').textContent = error.message;
+                                                    }
+                                                } finally {
+                                                    alertsToggle.disabled = false;
+                                                }
+                                            };
+                                        }
+
 										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
 										try {
 											const params=usageEvidenceParams();params.set('projection','accounts');
@@ -1904,7 +1940,13 @@ templ analyticsContent(currentProject *models.Project) {
 												card.className='card bg-base-100 shadow-sm border border-base-300 h-full'+(accounts.length%2===1&&index===accounts.length-1?' lg:col-span-2':'');
 												card.style.minHeight='12rem';card.setAttribute('aria-busy','true');
 												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
-												target.appendChild(card);return card;
+												card.id='usage-account-'+account.key;
+                                                target.appendChild(card);
+                                                if (new URLSearchParams(window.location.search).get('account_key') === account.key) {
+                                                    card.classList.add('ring-2', 'ring-primary');
+                                                    card.scrollIntoView({block: 'center'});
+                                                }
+                                                return card;
 											});
 											await Promise.allSettled(accounts.map(async function(account,index){
 												const card=cards[index];

@@ -17,13 +17,19 @@ import (
 
 // UsageResetCredits reads provider-owned credits; these are not local token totals.
 func (s *UsageAnalyticsService) UsageResetCredits(ctx context.Context, accountKey string) (map[string]any, error) {
-	return s.usageResetRequest(ctx, accountKey, "", "")
+	value, err := s.sharedAccountRead(ctx, "resets:"+accountKey, func(work context.Context) (any, error) { return s.usageResetRequest(work, accountKey, "", "") })
+	if err != nil {
+		return nil, err
+	}
+	return value.(map[string]any), nil
 }
 
 func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKey, creditID, idempotencyKey string) (map[string]any, error) {
 	if strings.TrimSpace(creditID) == "" || strings.TrimSpace(idempotencyKey) == "" || len(creditID) > 512 || len(idempotencyKey) > 128 {
 		return nil, fmt.Errorf("credit_id and idempotency_key are required and must be bounded")
 	}
+	defer s.accountReads.Forget("resets:" + accountKey)
+	defer s.accountReads.Forget("limits:" + accountKey)
 	return s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
 }
 
@@ -226,4 +232,20 @@ func normalizeAnthropicResetGrants(raw map[string]any, now time.Time) map[string
 		credits = append(credits, map[string]any{"id": id, "title": grant["label"], "status": "available", "expires_at": grant["ends_at"], "remaining_uses": int(left), "clears": grant["clears"], "gives_back_weekly": grant["gives_back_weekly"], "usable": eligible && usable && !paused && !expired && reason == "", "unavailable_reason": reason})
 	}
 	return map[string]any{"available_count": total, "credits": credits, "unavailable_reason": block["ineligible_reason"]}
+}
+
+// Concurrent views and monitoring share reads only while in flight, never a cached
+// result. A departing browser must not cancel a background monitor's shared read.
+func (s *UsageAnalyticsService) sharedAccountRead(ctx context.Context, key string, read func(context.Context) (any, error)) (any, error) {
+	result := s.accountReads.DoChan(key, func() (any, error) {
+		work, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		defer cancel()
+		return read(work)
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-result:
+		return r.Val, r.Err
+	}
 }

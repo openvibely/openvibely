@@ -40,6 +40,7 @@ type AgentStore interface {
 
 // AlertStore persists project alerts and actionable notifications.
 type AlertStore interface {
+	GetByIdempotencyKey(ctx context.Context, projectID, key string) (*models.Alert, error)
 	AlertOwnedByAutomation(ctx context.Context, projectID string, alertID string, bindings []models.AutomationBinding) (bool, error)
 	ClaimApproved(ctx context.Context, projectID string, id string, claimant string, lease time.Duration) (*models.Alert, error)
 	CountPending(ctx context.Context, projectID string) (int, error)

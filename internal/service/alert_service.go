@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -302,5 +303,24 @@ func (s *AlertService) MarkProcessing(ctx context.Context, projectID, id, claima
 		return err
 	}
 	s.publishProjectAlert(projectID, id)
+	return nil
+}
+
+// CreateAccountUsageAlert emits an operational notification once, including on
+// retries after a monitor restart. Monitoring serializes writers with its lease.
+func (s *AlertService) CreateAccountUsageAlert(ctx context.Context, a *models.Alert, link string) error {
+	existing, err := s.alertRepo.GetByIdempotencyKey(ctx, a.ProjectID, a.IdempotencyKey)
+	if err != nil && !errors.Is(err, persistence.ErrAlertNotFound) {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+	if err := s.alertRepo.Create(ctx, a); err != nil {
+		return err
+	}
+	if s.broadcaster != nil {
+		s.broadcaster.Publish(events.TaskEvent{Type: events.AlertCreated, ProjectID: a.ProjectID, AlertID: a.ID, AlertSource: "account_usage", AlertTitle: a.Title, AlertURL: link})
+	}
 	return nil
 }
