@@ -3,9 +3,12 @@
 package testutil
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestGuardBrowserProcessAddsMockKeychainOnlyForChrome(t *testing.T) {
@@ -28,5 +31,37 @@ func TestGuardBrowserProcessAddsMockKeychainOnlyForChrome(t *testing.T) {
 				t.Fatalf("original argument lost: %q", cmd.Args)
 			}
 		})
+	}
+}
+
+func TestStopBrowserProcessGroupWithExistingWait(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "ready")
+	// Leave a child that ignores graceful shutdown in the browser's group.
+	cmd := exec.Command("/bin/sh", "-c", `trap '' TERM; sleep 60 & echo ready > "$1"; wait`, "sh", ready)
+	GuardBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waited := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(waited) }()
+	t.Cleanup(func() { StopBrowserProcessGroupWithWait(cmd, waited) })
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("child did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	StopBrowserProcessGroupWithWait(cmd, waited)
+	select {
+	case <-waited:
+	default:
+		t.Fatal("returned before command Wait completed")
+	}
+	if processGroupHasLiveMembers(cmd.Process.Pid) {
+		t.Fatal("browser children survived cleanup")
 	}
 }
