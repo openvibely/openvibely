@@ -1333,25 +1333,6 @@ func (s *DiscordService) linkAttachmentsToExecution(ctx context.Context, execID 
 	})
 }
 
-func discordImageAttachmentsFromChatAttachments(chatAttachments []models.ChatAttachment) []models.Attachment {
-	if len(chatAttachments) == 0 {
-		return nil
-	}
-	imageAttachments := make([]models.Attachment, 0, len(chatAttachments))
-	for _, att := range chatAttachments {
-		if !isChannelChatImageMediaType(att.MediaType) {
-			continue
-		}
-		imageAttachments = append(imageAttachments, models.Attachment{
-			FileName:  att.FileName,
-			FilePath:  att.FilePath,
-			MediaType: att.MediaType,
-			FileSize:  att.FileSize,
-		})
-	}
-	return imageAttachments
-}
-
 func discordSafeFileName(f discordIncomingAttachment) string {
 	name := strings.TrimSpace(f.FileName)
 	name = filepath.Base(name)

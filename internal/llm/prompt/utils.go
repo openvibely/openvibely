@@ -2,63 +2,13 @@ package prompt
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	"github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
 )
-
-var CodexDefaultModel = catalogDefaultModel()
-
-func catalogDefaultModel() string {
-	spec, ok := models.DefaultModel(models.ProviderOpenAI)
-	if !ok {
-		panic("OpenAI catalog has no default model")
-	}
-	return spec.ID
-}
-
-func CodexModelOrDefault(model string) string {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return CodexDefaultModel
-	}
-	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && len(spec.ReasoningEfforts) > 0 {
-		return model
-	}
-	applog.Infof("[agent-svc] unsupported codex model %q requested, falling back to %q", model, CodexDefaultModel)
-	return CodexDefaultModel
-}
-
-func CodexReasoningEffort(model, configuredEffort string) string {
-	effort := NormalizeReasoningEffortValue(configuredEffort)
-	if effort == "" {
-		effort = NormalizeReasoningEffortValue(os.Getenv("OPENVIBELY_CODEX_REASONING_EFFORT"))
-	}
-	if effort == "" {
-		effort = CodexDefaultReasoningEffort(model)
-	}
-
-	supported := CodexSupportedReasoningEfforts(model)
-	if StringInSlice(effort, supported) {
-		return effort
-	}
-
-	// Fallback preference when selected effort isn't supported by the chosen model.
-	for _, candidate := range []string{"high", "medium", "low", "xhigh"} {
-		if StringInSlice(candidate, supported) {
-			return candidate
-		}
-	}
-	if len(supported) > 0 {
-		return supported[0]
-	}
-	return "high"
-}
 
 func CodexDefaultReasoningEffort(model string) string {
 	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && spec.DefaultReasoningEffort != "" {

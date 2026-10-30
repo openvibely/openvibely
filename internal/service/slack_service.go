@@ -2283,15 +2283,6 @@ func slackIncomingFileMediaType(f slackIncomingFile, fileName string) string {
 	return mediaType
 }
 
-func slackIncomingFilesContainImage(files []slackIncomingFile) bool {
-	for _, f := range files {
-		if isChannelChatImageMediaType(slackIncomingFileMediaType(f, slackSafeFileName(f))) {
-			return true
-		}
-	}
-	return false
-}
-
 func slackIncomingFilesRequireVision(files []slackIncomingFile) bool {
 	for _, f := range files {
 		mediaType := slackIncomingFileMediaType(f, slackSafeFileName(f))
@@ -2299,15 +2290,6 @@ func slackIncomingFilesRequireVision(files []slackIncomingFile) bool {
 			return true
 		}
 		if (mediaType == "" || mediaType == "application/octet-stream") && slackIncomingFileHasDownloadURL(f) {
-			return true
-		}
-	}
-	return false
-}
-
-func slackChatAttachmentsContainImage(chatAttachments []models.ChatAttachment) bool {
-	for _, att := range chatAttachments {
-		if isChannelChatImageMediaType(att.MediaType) {
 			return true
 		}
 	}

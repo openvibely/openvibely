@@ -3932,13 +3932,9 @@ func TestSlackTextAndAttachmentHelpers(t *testing.T) {
 	require.Equal(t, "text/plain", mediaTypeFromSlackFilename("script.go"))
 	require.Equal(t, "application/octet-stream", mediaTypeFromSlackFilename("archive.bin"))
 
-	require.True(t, slackIncomingFilesContainImage([]slackIncomingFile{{Name: "photo.png"}}))
-	require.False(t, slackIncomingFilesContainImage([]slackIncomingFile{{Name: "notes.txt", Mimetype: "text/plain"}}))
 	require.True(t, slackIncomingFilesRequireVision([]slackIncomingFile{{Name: "photo.png"}}))
 	require.True(t, slackIncomingFilesRequireVision([]slackIncomingFile{{Mimetype: "application/octet-stream", URLPrivateDownload: "https://files.slack.com/files-pri/T-F/file"}}))
 	require.False(t, slackIncomingFilesRequireVision([]slackIncomingFile{{Name: "notes.txt", Mimetype: "text/plain"}}))
-	require.True(t, slackChatAttachmentsContainImage([]models.ChatAttachment{{MediaType: "image/png"}}))
-	require.False(t, slackChatAttachmentsContainImage([]models.ChatAttachment{{MediaType: "text/plain"}}))
 
 	history := []models.Execution{{ID: "old", Output: "a"}, {ID: "current", Output: "b"}, {ID: "after", Output: "c"}}
 	filtered := filterSlackChatHistory(history, "current")

@@ -1914,9 +1914,9 @@ func TestDiscordFormattingAndAttachmentHelpers(t *testing.T) {
 	}
 
 	chatAttachments := []models.ChatAttachment{{FileName: "photo.png", FilePath: "/tmp/photo.png", MediaType: "image/png", FileSize: 9}, {FileName: "notes.txt", FilePath: "/tmp/notes.txt", MediaType: "text/plain", FileSize: 5}}
-	images := discordImageAttachmentsFromChatAttachments(chatAttachments)
-	if len(images) != 1 || images[0].FileName != "photo.png" || images[0].MediaType != "image/png" {
-		t.Fatalf("discordImageAttachmentsFromChatAttachments = %#v", images)
+	_, images := discordAttachmentContextAndImages(chatAttachments)
+	if len(images) != 2 || images[0].FileName != "photo.png" || images[0].MediaType != "image/png" || images[1].MediaType != "text/plain" {
+		t.Fatalf("discordAttachmentContextAndImages = %#v", images)
 	}
 	if got := discordSafeFileName(discordIncomingAttachment{ID: "abc", FileName: "../../evil.png"}); got != "evil.png" {
 		t.Fatalf("discordSafeFileName path = %q", got)
