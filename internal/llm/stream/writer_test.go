@@ -370,6 +370,57 @@ func TestStreamingWriter_FlushSucceedsAfterContextCancel(t *testing.T) {
 	}
 }
 
+func TestStreamingWriter_InvalidUTF8KeepsLiveAndStoredOffsetsAligned(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "invalid utf8", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := env.Tasks.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	agent, err := env.LLMConfigs.GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "p"}
+	if err := env.Executions.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	publisher := &recordingExecutionStreamPublisher{}
+	sw := NewWriterWithPublisher(exec.ID, task.ID, env.Executions, ctx, time.Hour, publisher)
+	defer sw.Stop()
+	// Raw tool bytes: Latin-1 and a UTF-8 sequence cut by output truncation.
+	sw.Write([]byte("a\xe9b\xe4\xb8"))
+	sw.flushPeriodicOnce()
+	sw.WriteString("tail")
+	sw.flushPeriodicOnce()
+
+	var deltas []events.ExecutionStreamEvent
+	for _, event := range publisher.events {
+		if event.Type == events.ExecutionStreamDelta {
+			deltas = append(deltas, event)
+		}
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("expected 2 deltas, got %+v", publisher.events)
+	}
+	live := deltas[1].Offset
+	replay, err := env.Executions.ReadOutputAfter(ctx, exec.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.Total != live || replay.Output != sw.String() {
+		t.Fatalf("stored total=%d output=%q, live offset=%d output=%q", replay.Total, replay.Output, live, sw.String())
+	}
+	after, err := env.Executions.ReadOutputAfter(ctx, exec.ID, deltas[0].Offset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Output != "tail" {
+		t.Fatalf("reconnect after first delta replayed %q, want %q", after.Output, "tail")
+	}
+}
+
 func TestStreamingWriter_NewWriterSeedsExistingOutputOnRetry(t *testing.T) {
 	env := teststores.New(t)
 	taskRepo := env.Tasks

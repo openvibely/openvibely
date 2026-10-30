@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
@@ -138,6 +139,12 @@ func pendingOutputDelta(buf *strings.Builder, offset int) string {
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
+	if !utf8.Valid(p) {
+		if _, err := w.WriteString(string(p)); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	}
 	var event *events.ExecutionStreamEvent
 	w.mu.Lock()
 	n, err := w.buf.Write(p)
@@ -167,6 +174,9 @@ func (w *Writer) Write(p []byte) (int, error) {
 // WriteString shares immutable text with subscribers while the builders retain
 // their own appended output. Byte callers keep Write's copying semantics.
 func (w *Writer) WriteString(text string) (int, error) {
+	// Byte offsets published live must equal the stored text, so repair raw
+	// tool bytes before either side counts them.
+	text = strings.ToValidUTF8(text, "\uFFFD")
 	var event *events.ExecutionStreamEvent
 	w.mu.Lock()
 	n, err := w.buf.WriteString(text)
