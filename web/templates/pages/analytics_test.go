@@ -87,6 +87,52 @@ try {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsUsageCardsIdentifyOAuthAccounts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	start := strings.Index(content, "function renderAccountUsageCards(")
+	end := -1
+	if start >= 0 {
+		if offset := strings.Index(content[start:], "function renderRunReliability()"); offset >= 0 {
+			end = start + offset
+		}
+	}
+	if start < 0 || end <= start {
+		t.Fatal("account usage card renderer not found")
+	}
+	if strings.Contains(content, "escapeHTML(account.identity)") {
+		t.Fatal("loading cards should not show an account identity before usage is available")
+	}
+	fixture := `<!doctype html><html><body><main id="result"></main><div id="cards"></div><script>
+function escapeHTML(value){return String(value).replace(/[&<>\"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch];});}
+function formatResetCountdown(){return '';}
+` + content[start:end] + `
+try {
+ const target=document.getElementById('cards');
+ renderAccountUsageCards([
+  {provider:'openai',account_identity:'owner@example.com',limits:[]},
+  {provider:'anthropic',limits:[]},
+  {provider:'anthropic',account_identity:'sibling@example.com',error:'usage unavailable',limits:[{label:'stale weekly limit',used_percent:85}],plan_type:'Stale plan',extra_usage_label:'stale credits',extra_usage_monthly_usd:200,extra_usage_used_usd:80}
+ ],target);
+ const cards=Array.from(target.querySelectorAll('.card-body'));
+ if(cards.length!==3)throw new Error('expected all provider account cards');
+ if(!cards[0].textContent.includes('Account: owner@example.com'))throw new Error('successful usage account email not shown');
+ if(cards[1].textContent.includes('Account:'))throw new Error('missing account identity should not show a generic label');
+ if(cards[2].textContent.includes('Account:'))throw new Error('failed usage should not show a sibling account identity');
+ if(cards[2].textContent.includes('stale weekly limit')||cards[2].textContent.includes('85.0%')||cards[2].textContent.includes('Stale plan')||cards[2].textContent.includes('stale credits')||cards[2].textContent.includes('$200.00')||cards[2].textContent.includes('$80.00'))throw new Error('failed usage should not display cached values');
+ if(!cards[2].textContent.includes('usage unavailable'))throw new Error('failed usage should still show its error');
+ const unsafe=document.createElement('div');
+ renderAccountUsageCards([{provider:'openai',account_identity:'<img src=x onerror=alert(1)>',limits:[]}],unsafe);
+ if(unsafe.querySelector('img')||!unsafe.textContent.includes('<img src=x onerror=alert(1)>'))throw new Error('account identity must be escaped as text');
+ document.getElementById('result').dataset.testResult='pass';
+}catch(e){const result=document.getElementById('result');result.dataset.testResult='fail';result.dataset.testError=e.message;}
+</script></body></html>`
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_CompactModelChartTitles(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
@@ -200,8 +246,8 @@ window.addEventListener('load',async function(){
  function wait(){return new Promise(function(resolve){setTimeout(resolve,20);});}
  function assert(ok,message){if(!ok)throw new Error(message);}
  try {
-  for(var i=0;i<100&&!(pending.a&&pending.b&&pending.c);i++)await wait();
-  assert(pending.a&&pending.b&&pending.c,'all account cards must start loading independently');
+  for(var i=0;i<100&&!pending.c;i++)await wait();
+  assert(pending.a&&pending.b&&pending.c,'all accounts must start without waiting');
   var cards=document.querySelectorAll('#accountUsageCards > .card');
   assert(cards.length===3&&cards[2].textContent.includes('Anthropic'),'Anthropic shell missing');
   assert(Array.from(cards).every(c=>c.textContent.includes('Loading analytics')),'all shells must start loading');
@@ -1664,6 +1710,37 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  assert(!card.textContent.includes('My reset'),'redeemed credit still offered');result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
  });</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_AnalyticsHidesUnavailableResets(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+	history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+	window.Chart=function(){this.destroy=function(){};};
+	let resetsLoaded=false;
+	const response=data=>({ok:true,json:async()=>data});
+	window.fetch=async function(url){
+	 const u=new URL(url,location.href),p=u.searchParams;
+	 if(u.pathname.endsWith('/resets')){resetsLoaded=true;return response({available_count:0,unavailable_reason:'surface',credits:[]});}
+	 if(p.get('projection')==='accounts')return response({accounts:[{key:'claude',provider:'anthropic'}]});
+	 if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
+	 return response({totals:{},usage_rate:[],model_breakdown:[]});
+	};
+	window.addEventListener('load',async()=>{
+	 const result=document.getElementById('reconnect-result');const wait=()=>new Promise(r=>setTimeout(r,20));
+	 try{
+	  const card=document.getElementById('accountUsageCards');
+	  for(let i=0;i<150&&!resetsLoaded;i++)await wait();
+	  await wait();
+	  if(!resetsLoaded)throw Error('usage resets request did not finish');
+	  if(card.textContent.includes('Usage resets')||card.textContent.includes('surface')||card.textContent.includes('Loading usage resets'))throw Error('unavailable reset details were rendered');
+	  result.dataset.testResult='pass';
+	 }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+	});</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
 

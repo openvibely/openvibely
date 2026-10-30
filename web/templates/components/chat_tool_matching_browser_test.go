@@ -306,7 +306,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	if err := startTestBrowserProcess(cmd); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { stopTestBrowserProcess(cmd); _ = cmd.Wait() }()
+	defer stopTestBrowserProcess(cmd)
 	var decoded json.RawMessage
 	select {
 	case reported := <-results:

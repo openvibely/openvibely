@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,38 +156,22 @@ func TestMain(m *testing.M) {
 }
 
 func runNativeWailsHelper() error {
-	windowURL := strings.TrimSpace(os.Getenv("OPENVIBELY_NATIVE_UI_URL"))
-	if windowURL == "" {
+	url := strings.TrimSpace(os.Getenv("OPENVIBELY_NATIVE_UI_URL"))
+	if url == "" {
 		return fmt.Errorf("OPENVIBELY_NATIVE_UI_URL is empty")
 	}
 
-	options := application.Options{
+	app := application.New(application.Options{
 		Name:        "OpenVibely native Chat actions test",
 		Description: "Opt-in native WebKit regression for Chat actions",
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
-	}
-	if os.Getenv("OPENVIBELY_NATIVE_UI_ASSET_PROXY") == "1" {
-		target, err := url.Parse(windowURL)
-		if err != nil {
-			return fmt.Errorf("parse native test asset proxy target: %w", err)
-		}
-		windowURL = strings.TrimSpace(os.Getenv("OPENVIBELY_NATIVE_UI_WINDOW_URL"))
-		if windowURL == "" {
-			return fmt.Errorf("OPENVIBELY_NATIVE_UI_WINDOW_URL is empty")
-		}
-		if !strings.HasPrefix(windowURL, "wails://") {
-			windowURL = "wails://localhost" + "/" + strings.TrimLeft(windowURL, "/")
-		}
-		options.Assets = application.AssetOptions{Handler: httputil.NewSingleHostReverseProxy(target)}
-	}
-
-	app := application.New(options)
+	})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:        "native-chat-actions-test",
 		Title:       "OpenVibely native Chat actions test",
-		URL:         windowURL,
+		URL:         url,
 		Width:       1100,
 		Height:      760,
 		AlwaysOnTop: true,
