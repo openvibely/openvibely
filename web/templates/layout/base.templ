@@ -2933,8 +2933,10 @@ html[data-ov-theme-layer="custom"] .ov-menu { --ov-menu-active: var(--ov-hover-b
 [data-ov-theme-layer="custom"] .ov-tooltip { border-color: var(--ov-subtle-border); }
 [data-ov-theme-layer="custom"] .ov-tooltip kbd { border-color: var(--ov-subtle-border); background: var(--ov-hover-bg); }
 [data-ov-theme-layer="custom"] .ov-mp-star { color: var(--ov-text-muted); }
-[data-ov-theme-layer="custom"] .ov-mp-star[aria-pressed="true"] { color: var(--ov-focus); }
+[data-ov-theme-layer="custom"] .ov-mp-star[aria-pressed="true"] { color: var(--ov-button-bg); }
 html[data-ov-theme-layer="custom"] .ov-mp-effort input[type="range"] { --ov-mp-accent: var(--ov-button-bg); --ov-mp-track: var(--ov-border); accent-color: var(--ov-button-bg); }
+html[data-ov-theme-layer="custom"] .ov-mp-fast-toggle[aria-checked="true"] { background: var(--ov-button-bg); }
+html[data-ov-theme-layer="custom"] .ov-mp-fast-toggle:focus-visible { outline-color: var(--ov-button-bg); }
 html[data-ov-theme-layer="custom"] #desktop-project-titlebar { background-color: var(--ov-kanban-column-bg) !important; color: var(--ov-text); --project-tab-selected: var(--ov-content-bg); --project-tab-contour: var(--ov-subtle-border); }
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"] { color: var(--ov-text-muted) !important; }
 [data-ov-theme-layer="custom"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: var(--ov-text) !important; }
