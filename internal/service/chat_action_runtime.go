@@ -1243,18 +1243,6 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 	return marshalChannelStatusAction(resp)
 }
 
-func channelTargetStatusFromRepoSummary(summary persistence.ChannelTargetProjectSummary) channelTargetStatusActionSummary {
-	return channelTargetStatusActionSummary{
-		OutboundTargetStatusSummary: OutboundTargetStatusSummaryFromRepoSummary(summary),
-	}
-}
-
-func channelSummarizeTargets(targets []models.ChannelTarget) channelTargetStatusActionSummary {
-	return channelTargetStatusActionSummary{
-		OutboundTargetStatusSummary: OutboundTargetStatusSummaryFromTargets(targets),
-	}
-}
-
 func marshalChannelStatusAction(resp channelStatusActionResponse) (string, error) {
 	b, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {

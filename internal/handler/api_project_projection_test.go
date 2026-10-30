@@ -103,7 +103,14 @@ func TestAPIGetProjectsUsesCompactProjectionAndPreservesContract(t *testing.T) {
 		t.Fatal("full project List did not return api-default")
 	}
 
-	expectedBody, err := json.Marshal(map[string]interface{}{"projects": projectResponsesFromFullProjects(full)})
+	var expectedProjects []ProjectResponse
+	for _, project := range full {
+		expectedProjects = append(expectedProjects, ProjectResponse{
+			ID: project.ID, Name: project.Name, Path: project.RepoPath,
+			CreatedAt: project.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		})
+	}
+	expectedBody, err := json.Marshal(map[string]interface{}{"projects": expectedProjects})
 	if err != nil {
 		t.Fatalf("marshal expected response: %v", err)
 	}

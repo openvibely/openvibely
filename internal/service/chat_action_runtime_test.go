@@ -3844,7 +3844,7 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 		{Platform: "slack", TargetKind: "", Name: "", Home: false},
 		{Platform: "", TargetKind: "custom", Name: "mystery", Home: false},
 	}
-	summary := channelSummarizeTargets(targets)
+	summary := OutboundTargetStatusSummaryFromTargets(targets)
 	require.Equal(t, 3, summary.Total)
 	require.True(t, summary.Configured)
 	require.Equal(t, 2, summary.ByPlatform["slack"].Total)
@@ -3853,7 +3853,7 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	require.Equal(t, 2, summary.ByPlatform["slack"].ByKind["channel"])
 	require.Equal(t, 1, summary.ByPlatform["unknown"].ByKind["custom"])
 
-	repoSummary := channelTargetStatusFromRepoSummary(persistence.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
+	repoSummary := OutboundTargetStatusSummaryFromRepoSummary(persistence.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
 	require.Equal(t, 2, repoSummary.Total)
 	require.Equal(t, 2, repoSummary.ByPlatform["email"].ByKind["address"])
 	webhookSummary := summarizeChannelStatusWebhooks([]models.WebhookEndpoint{{Enabled: true}, {Enabled: false}, {Enabled: true}})

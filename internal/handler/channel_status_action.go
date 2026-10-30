@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -296,16 +295,4 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		})
 	}
 	return resp
-}
-
-func outboundTargetsStatusFromRepoSummary(summary persistence.ChannelTargetProjectSummary) outboundTargetsStatusSummary {
-	return outboundTargetsStatusSummary{
-		OutboundTargetStatusSummary: service.OutboundTargetStatusSummaryFromRepoSummary(summary),
-	}
-}
-
-func summarizeOutboundTargets(targets []models.ChannelTarget) outboundTargetsStatusSummary {
-	return outboundTargetsStatusSummary{
-		OutboundTargetStatusSummary: service.OutboundTargetStatusSummaryFromTargets(targets),
-	}
 }

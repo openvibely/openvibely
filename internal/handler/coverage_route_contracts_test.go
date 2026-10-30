@@ -24,9 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAutomationChatActionHelpersFormatPrincipalPlansAndJSON(t *testing.T) {
-	require.Equal(t, "local", automationActionPrincipal(streamingResponseParams{}))
-	require.Equal(t, "slack:user:U123", automationActionPrincipal(streamingResponseParams{PrincipalID: " slack:user:U123 "}))
+func TestAutomationChatActionHelpersFormatPlansAndJSON(t *testing.T) {
 
 	require.Empty(t, automationSavePlanForChat(nil))
 	plan := &models.AutomationSavePlan{

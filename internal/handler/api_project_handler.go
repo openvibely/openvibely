@@ -61,19 +61,6 @@ func projectResponsesFromAPIItems(projects []models.ProjectAPIItem) []ProjectRes
 	return projectResponses
 }
 
-func projectResponsesFromFullProjects(projects []models.Project) []ProjectResponse {
-	var projectResponses []ProjectResponse
-	for _, p := range projects {
-		projectResponses = append(projectResponses, ProjectResponse{
-			ID:        p.ID,
-			Name:      p.Name,
-			Path:      p.RepoPath,
-			CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
-	}
-	return projectResponses
-}
-
 func writeAPIProjectsResponse(c echo.Context, projectResponses []ProjectResponse) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"projects": projectResponses,

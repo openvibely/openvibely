@@ -531,8 +531,8 @@ func TestListChannelsOutboundTargetAggregateSummaryMatchesMaterializedOutput(t *
 		{Platform: "discord", TargetKind: "user"},
 		{Platform: "email", TargetKind: "email", Name: "team"},
 	}
-	materialized := summarizeOutboundTargets(targets)
-	aggregate := outboundTargetsStatusFromRepoSummary(persistence.ChannelTargetProjectSummary{
+	materialized := service.OutboundTargetStatusSummaryFromTargets(targets)
+	aggregate := service.OutboundTargetStatusSummaryFromRepoSummary(persistence.ChannelTargetProjectSummary{
 		Total:      6,
 		Configured: true,
 		ByPlatform: map[string]persistence.ChannelTargetPlatformSummary{

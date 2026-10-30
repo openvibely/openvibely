@@ -119,13 +119,6 @@ func (h *Handler) previewAutomationDescription(ctx context.Context, projectID, d
 	})
 }
 
-func automationActionPrincipal(params streamingResponseParams) string {
-	if strings.TrimSpace(params.PrincipalID) != "" {
-		return strings.TrimSpace(params.PrincipalID)
-	}
-	return "local"
-}
-
 func automationSavePlanForChat(plan *models.AutomationSavePlan) map[string]any {
 	if plan == nil {
 		return map[string]any{}
