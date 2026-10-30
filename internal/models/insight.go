@@ -115,18 +115,6 @@ func (r *InsightReport) SetInsightIDs(ids []string) error {
 	return nil
 }
 
-// ParseStats returns parsed stats
-func (r *InsightReport) ParseStats() (map[string]interface{}, error) {
-	if r.Stats == "" || r.Stats == "{}" {
-		return nil, nil
-	}
-	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(r.Stats), &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 // KnowledgeEntry represents a piece of extracted knowledge from git/task history
 type KnowledgeEntry struct {
 	ID        string    `json:"id"`

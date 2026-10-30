@@ -33,7 +33,7 @@ func TestNewStoresCompletionFinalizesAutomation(t *testing.T) {
 			if viaTask {
 				_, err = stores.Tasks.CompleteExecutionSuccess(ctx, execution.ID, "done", 1, 1)
 			} else {
-				_, err = stores.Executions.(*ExecutionRepo).CompleteSuccessIfNoPendingSteering(ctx, execution.ID, "done", 1, 1)
+				_, err = stores.Executions.(*ExecutionRepo).completeSuccessIfNoPendingSteering(ctx, execution.ID, "done", 1, 1, nil)
 			}
 			require.NoError(t, err)
 			var count int

@@ -149,16 +149,16 @@ func MidTurnSteeringWakeupFromContext(ctx context.Context) <-chan struct{} {
 // recovery, independently of whether any steering input was consumed.
 type responsesRecoveryKey struct{}
 
-func WithResponsesRecovery(ctx context.Context, record func(string)) context.Context {
+func WithResponsesRecovery(ctx context.Context, record func([]any)) context.Context {
 	return context.WithValue(ctx, responsesRecoveryKey{}, record)
 }
 
-func RecordResponsesRecovery(ctx context.Context, transcript string) {
+func RecordResponsesRecovery(ctx context.Context, items []any) {
 	if ctx == nil {
 		return
 	}
-	if record, ok := ctx.Value(responsesRecoveryKey{}).(func(string)); ok && record != nil {
-		record(transcript)
+	if record, ok := ctx.Value(responsesRecoveryKey{}).(func([]any)); ok && record != nil {
+		record(items)
 	}
 }
 

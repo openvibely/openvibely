@@ -2,12 +2,6 @@ package usage
 
 import "github.com/openvibely/openvibely/internal/llm/contracts"
 
-// FromIO builds canonical usage from explicit input/output tokens.
-func FromIO(inputTokens, outputTokens int) contracts.Usage {
-	total := inputTokens + outputTokens
-	return contracts.Usage{InputTokens: inputTokens, OutputTokens: outputTokens, TotalTokens: total}
-}
-
 // FromOpenAI builds canonical usage with OpenAI-specific optional fields.
 func FromOpenAI(inputTokens, outputTokens, cachedInputTokens, reasoningTokens int) contracts.Usage {
 	return FromOpenAIWithTotal(inputTokens, outputTokens, cachedInputTokens, reasoningTokens, 0)

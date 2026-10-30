@@ -27,12 +27,21 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 		converted := false
 		out[i].ReplayMessages = append([]models.ExecutionReplayMessage(nil), out[i].ReplayMessages...)
 		for j, replay := range out[i].ReplayMessages {
+			// Native row histories already declare their format. No conversion is
+			// needed for the same provider; avoid decoding/copying all payloads
+			// merely to discover their format before the client decodes them.
+			if replay.TranscriptJSON == "" && replay.Rows != nil {
+				r := replay.Rows
+				if (r.Format == "envelope" && len(r.Items) > 0 && ((r.ItemsKey == "responses_input" && provider == models.ProviderOpenAI) || (r.ItemsKey == "messages" && provider == models.ProviderAnthropic))) || (r.Format == "array" && provider != models.ProviderAnthropic) {
+					continue
+				}
+			}
 			var envelope struct {
 				Input       []json.RawMessage         `json:"responses_input"`
 				Messages    []anthropicclient.Message `json:"messages"`
 				Environment string                    `json:"anthropic_execution_environment"`
 			}
-			_ = json.Unmarshal([]byte(replay.TranscriptJSON), &envelope)
+			_ = replay.DecodeTranscript(&envelope)
 			var messages []openaiclient.CompletionsHistoryMessage
 			switch {
 			case len(envelope.Input) > 0:
@@ -52,7 +61,7 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				if provider != models.ProviderAnthropic {
 					continue
 				}
-				if json.Unmarshal([]byte(replay.TranscriptJSON), &messages) != nil {
+				if replay.DecodeTranscript(&messages) != nil {
 					continue
 				}
 			}
@@ -75,13 +84,14 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				raw, _ = json.Marshal(messages)
 			}
 			out[i].ReplayMessages[j].TranscriptJSON = string(raw)
+			out[i].ReplayMessages[j].Rows = nil
 			converted = true
 		}
 		if converted && provider == models.ProviderAnthropic {
 			var merged []anthropicclient.Message
 			for _, replay := range out[i].ReplayMessages {
 				var saved struct{ Messages []anthropicclient.Message }
-				if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Messages) > 0 {
+				if replay.DecodeTranscript(&saved) == nil && len(saved.Messages) > 0 {
 					merged = append(merged, saved.Messages...)
 				} else {
 					if replay.UserContent != "" {

@@ -30,7 +30,6 @@ const (
 	chatHistoryLimit          = 50               // Number of recent chat messages to load for conversation context
 	taskThreadHistoryLimit    = 21               // Load at most 20 prior turns plus the current execution for filtering
 	maxFileSize               = 10 << 20         // 10 MB per file
-	maxFilesPerReq            = 10               // Max 10 files per request
 	finalSteeringGracePeriod  = 150 * time.Millisecond
 	finalSteeringPollInterval = 25 * time.Millisecond
 )
@@ -1238,7 +1237,7 @@ func hasNativeSteeringReplay(history []models.Execution) bool {
 			var checkpoint struct {
 				Input []json.RawMessage `json:"responses_input"`
 			}
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &checkpoint) == nil && len(checkpoint.Input) > 0 {
+			if replay.DecodeTranscript(&checkpoint) == nil && len(checkpoint.Input) > 0 {
 				return true
 			}
 		}

@@ -32,10 +32,13 @@ func (f *fixtures) SeedAnalyticsWorkload(ctx context.Context, kind storefixture.
 		INSERT INTO tasks(id,project_id,title,category,status,agent_definition_id,created_at)
 		SELECT printf('analytics-agent-task-%03d',n),'analytics-agents-project',printf('Analytics Agent task %03d',n),'backlog','completed','analytics-agent',CURRENT_TIMESTAMP FROM seq;
 		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<6000)
-		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order,output)
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order)
 		SELECT printf('analytics-agent-exec-%05d',n),printf('analytics-agent-task-%03d',((n-1)%120)+1),
 			CASE WHEN n%5=0 THEN 'failed' ELSE 'completed' END,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,
-			CASE WHEN n<=120 THEN 0 ELSE 1 END,n,zeroblob(65536) FROM seq;
+			CASE WHEN n<=120 THEN 0 ELSE 1 END,n FROM seq;
+		INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id,display_bytes)
+		SELECT id,0,'display','display:000000000000',0,'put',json_object('type','text','text',hex(zeroblob(32768)),'complete',json('true')),'fixture',65536
+		FROM executions WHERE id LIKE 'analytics-agent-exec-%';
 		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<12000)
 		INSERT INTO llm_usage_events(id,provider,project_id,task_id,model,operation,status,total_tokens,cost_usd,occurred_at)
 		SELECT printf('analytics-agent-usage-%05d',n),'test','analytics-agents-project',printf('analytics-agent-task-%03d',((n-1)%120)+1),
@@ -53,10 +56,13 @@ func (f *fixtures) SeedAnalyticsWorkload(ctx context.Context, kind storefixture.
 		INSERT INTO tasks(id,project_id,title,category,status,created_at)
 		SELECT printf('analytics-task-%03d',n),'analytics-large-project',printf('Analytics task %03d',n),'backlog','completed',CURRENT_TIMESTAMP FROM seq;
 		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<1200)
-		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order,output)
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order)
 		SELECT printf('analytics-exec-%05d',n),printf('analytics-task-%03d',((n-1)%60)+1),
 			CASE WHEN n%5=0 THEN 'failed' ELSE 'completed' END,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,
-			CASE WHEN n<=60 THEN 0 ELSE 1 END,n,zeroblob(65536) FROM seq;
+			CASE WHEN n<=60 THEN 0 ELSE 1 END,n FROM seq;
+		INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id,display_bytes)
+		SELECT id,0,'display','display:000000000000',0,'put',json_object('type','text','text',hex(zeroblob(32768)),'complete',json('true')),'fixture',65536
+		FROM executions WHERE id LIKE 'analytics-exec-%';
 		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<6000)
 		INSERT INTO llm_usage_events(id,provider,project_id,task_id,model,operation,status,total_tokens,cost_usd,occurred_at)
 		SELECT printf('analytics-usage-%05d',n),'test','analytics-large-project',printf('analytics-task-%03d',((n-1)%60)+1),
@@ -71,6 +77,9 @@ func (f *fixtures) SeedAnalyticsWorkload(ctx context.Context, kind storefixture.
 	}
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, statement); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE conversation_items SET snapshot_sequence=sequence WHERE mutation_id='fixture' AND snapshot_sequence=0`); err != nil {
 		return "", err
 	}
 	return project, tx.Commit()

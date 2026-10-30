@@ -87,7 +87,9 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	}
 
 	if hiddenRow {
-		samples[len(samples)-1].Output = strings.Repeat("Large **paragraph**.\n\n", 4000) + strings.Repeat("[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n", 30) + "Latest message."
+		// Keep a large offscreen row ahead of enough tool output to exercise
+		// deferred rendering while the reader remains near the response tail.
+		samples[len(samples)-1].Output = strings.Repeat("Large **paragraph**.\n\n", 4000) + strings.Repeat("[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n", 40) + "Latest message."
 	}
 
 	if scrollStability {

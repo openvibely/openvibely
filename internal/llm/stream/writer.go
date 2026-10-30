@@ -1,8 +1,8 @@
 package stream
 
 import (
-	"bytes"
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +23,7 @@ type ExecutionStreamPublisher interface {
 	Publish(event events.ExecutionStreamEvent)
 }
 
-// Writer wraps a bytes.Buffer and periodically flushes accumulated
+// Writer keeps append-only text and periodically flushes accumulated
 // output to the database so the UI can display progress in real time.
 // It runs a background goroutine that flushes on a timer, ensuring output
 // is visible even during long pauses (e.g., while a tool is running).
@@ -31,8 +31,8 @@ type ExecutionStreamPublisher interface {
 // deltas in the visible/persisted stream unless the caller adds rollback/reset
 // behavior before writing retry output.
 type Writer struct {
-	buf                   bytes.Buffer
-	textBuf               bytes.Buffer // text-only content (no thinking blocks, no tool markers)
+	buf                   strings.Builder
+	textBuf               strings.Builder // text-only content (no thinking blocks, no tool markers)
 	mu                    sync.Mutex
 	flushMu               sync.Mutex
 	execID                string
@@ -136,8 +136,10 @@ func (w *Writer) flushPeriodicOnce() {
 	}
 }
 
-func pendingOutputDelta(buf *bytes.Buffer, offset int) string {
-	return string(buf.Bytes()[offset:])
+// Strings returned by a Builder remain immutable across subsequent appends.
+// Never reset/reuse its backing storage while a flush or caller holds a snapshot.
+func pendingOutputDelta(buf *strings.Builder, offset int) string {
+	return buf.String()[offset:]
 }
 
 func (w *Writer) Write(p []byte) (int, error) {
@@ -154,6 +156,30 @@ func (w *Writer) Write(p []byte) (int, error) {
 			ExecID: w.execID,
 			Type:   events.ExecutionStreamDelta,
 			Delta:  string(p[:n]),
+			Offset: w.buf.Len(),
+		}
+	}
+	w.mu.Unlock()
+	if n > 0 {
+		llmcontracts.NotifyActivity(w.ctx)
+	}
+	if event != nil {
+		w.publisher.Publish(*event)
+	}
+	return n, err
+}
+
+// WriteString shares immutable text with subscribers while the builders retain
+// their own appended output. Byte callers keep Write's copying semantics.
+func (w *Writer) WriteString(text string) (int, error) {
+	var event *events.ExecutionStreamEvent
+	w.mu.Lock()
+	n, err := w.buf.WriteString(text)
+	if n > 0 && w.publisher != nil && w.execID != "" {
+		event = &events.ExecutionStreamEvent{
+			ExecID: w.execID,
+			Type:   events.ExecutionStreamDelta,
+			Delta:  text[:n],
 			Offset: w.buf.Len(),
 		}
 	}
@@ -224,7 +250,16 @@ func (w *Writer) String() string {
 
 // WriteText writes to the text-only buffer (for response text, not thinking/tool markers).
 func (w *Writer) WriteText(p []byte) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.textBuf.Write(p)
+}
+
+// WriteTextString appends immutable text without a temporary byte conversion.
+func (w *Writer) WriteTextString(text string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.textBuf.WriteString(text)
 }
 
 // TextString returns only the response text (no thinking blocks, no tool/status markers).

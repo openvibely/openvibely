@@ -72,11 +72,12 @@ func BenchmarkResponsesWebsocketFrameToParser(b *testing.B) {
 }
 
 func runResponsesWebsocketBenchmarkSequence(fixture responsesWebsocketBenchmarkFixture, parser string) error {
+	var decoder responsesWebsocketDecoder
 	var framed bytes.Buffer
 	var outputItems []any
 	responseID := ""
 	for _, data := range fixture.frames {
-		eventType, event, validJSON := decodeResponsesWebsocketEvent(data)
+		eventType, event, validJSON := decoder.decode(data)
 		switch eventType {
 		case "response.output_item.done":
 			if item, ok := event["item"].(map[string]any); ok {

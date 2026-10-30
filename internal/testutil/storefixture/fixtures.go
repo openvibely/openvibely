@@ -10,10 +10,8 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// ExecutionOutputState distinguishes committed transcript text from pending buffered segments.
 type ExecutionOutputState struct {
-	Materialized    string
-	PendingSegments int
+	Materialized string
 }
 
 type SkillEventFilter struct {

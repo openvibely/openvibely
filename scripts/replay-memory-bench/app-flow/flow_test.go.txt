@@ -1,0 +1,285 @@
+package handler
+
+// Installed temporarily in both checkouts per README. Never part of application builds.
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite"
+	"github.com/openvibely/openvibely/internal/persistence/sqlite/database"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/stretchr/testify/require"
+)
+
+type appFlowManifest struct {
+	Task, OtherTask, Project, Model, Mode string
+	OutputBytes, ToolBytes, Turns         int
+}
+
+func appFlowCPU() (float64, int64) {
+	var r syscall.Rusage
+	_ = syscall.Getrusage(syscall.RUSAGE_SELF, &r)
+	return float64(r.Utime.Sec+r.Stime.Sec)*1000 + float64(r.Utime.Usec+r.Stime.Usec)/1000, r.Maxrss
+}
+func appFlowJSON(t *testing.T, path string, value any) {
+	t.Helper()
+	b, e := json.MarshalIndent(value, "", "  ")
+	require.NoError(t, e)
+	require.NoError(t, os.WriteFile(path, b, 0600))
+}
+func TestAppFlow(t *testing.T) {
+	dir := os.Getenv("OV_FLOW_DIR")
+	if dir == "" {
+		t.Skip("opt-in app flow")
+	}
+	ctx := context.Background()
+	conns, err := database.NewReadWrite(filepath.Join(dir, "app.db"))
+	require.NoError(t, err)
+	defer conns.Close()
+	unregister := sqlite.RegisterDedicatedWriter(conns.Reader, conns.Writer)
+	defer unregister()
+	stores := sqlite.NewStores(conns.Reader, events.NewBroadcaster())
+	env := wireTestHandler(t, stores, testHandlerOptions{})
+	env.LLMSvc.SetLLMCaller(nil)
+	hub := events.NewExecutionStreamHub()
+	env.LLMSvc.SetExecutionStreamHub(hub)
+	env.Handler.SetExecutionStreamHub(hub)
+	env.LLMSvc.SetOpenAIAsyncToolCallStore(stores.OpenAIAsyncToolCalls)
+	var manifest appFlowManifest
+	if os.Getenv("OV_FLOW_SERVE") == "1" {
+		raw, e := os.ReadFile(filepath.Join(dir, "manifest.json"))
+		require.NoError(t, e)
+		require.NoError(t, json.Unmarshal(raw, &manifest))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !static.ServeAsset(w, r) {
+				env.Echo.ServeHTTP(w, r)
+			}
+		}))
+		defer server.Close()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "app-url"), []byte(server.URL), 0600))
+		for {
+			if _, e := os.Stat(filepath.Join(dir, "stop-server")); e == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	modelRaw, e := os.ReadFile(filepath.Join(dir, "model-url"))
+	require.NoError(t, e)
+	modelURL := string(modelRaw)
+	old := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = modelURL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = old }()
+	profile := os.Getenv("OV_FLOW_PROFILE")
+	mode := os.Getenv("OV_FLOW_MODE")
+	require.Contains(t, []string{"text-only", "tool-use"}, mode)
+	withTools := mode == "tool-use"
+	outputBytes, toolBytes, contextWindow, deltaMS := 2048, 4096, 272000, 20
+	switch profile {
+	case "medium":
+		outputBytes, toolBytes, deltaMS = 16384, 65536, 5
+	case "large":
+		outputBytes, toolBytes, deltaMS = 49152, 524288, 5
+	case "compaction":
+		outputBytes, toolBytes, contextWindow, deltaMS = 49152, 65536, 64000, 5
+	case "small", "mixed-paced":
+	default:
+		t.Fatalf("unknown profile %q", profile)
+	}
+	if !withTools {
+		toolBytes = 0
+	}
+	agent := models.LLMConfig{Name: "App flow model", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey, APIKey: "local-benchmark-only", MaxTokens: 65536, ContextWindow: contextWindow, ProviderContextWindow: contextWindow, CompactionThreshold: contextWindow * 3 / 4, IsDefault: true}
+	require.NoError(t, stores.LLMConfigs.Create(ctx, &agent))
+	work := filepath.Join(dir, "repo")
+	require.NoError(t, os.MkdirAll(work, 0700))
+	project := models.Project{Name: "App flow", RepoPath: work}
+	require.NoError(t, stores.Projects.Create(ctx, &project))
+	manifest = appFlowManifest{Mode: mode, Project: project.ID, Model: agent.ID, OutputBytes: outputBytes, ToolBytes: toolBytes, Turns: 6}
+	other := models.Task{ProjectID: project.ID, Title: "Other thread", Prompt: "Empty comparison thread", Category: models.CategoryCompleted, Status: models.StatusCompleted, AgentID: &agent.ID}
+	require.NoError(t, stores.Tasks.Create(ctx, &other))
+	manifest.OtherTask = other.ID
+	rows := []map[string]any{}
+	runtime.GC()
+	runtime.GC() // clear startup pools; do NOT force GC between natural turns.
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
+	var basePages, baseSize int64
+	require.NoError(t, conns.Reader.QueryRow("PRAGMA page_count").Scan(&basePages))
+	require.NoError(t, conns.Reader.QueryRow("PRAGMA page_size").Scan(&baseSize))
+	for turn := 0; turn < manifest.Turns; turn++ {
+		if profile == "mixed-paced" {
+			outputBytes = []int{2048, 8192, 16384}[turn%3]
+			toolBytes = []int{4096, 65536, 524288}[turn%3]
+			deltaMS = 80
+		}
+		if !withTools {
+			toolBytes = 0
+		}
+		toolFile := ""
+		if withTools {
+			toolFile = filepath.Join(work, fmt.Sprintf("evidence-%d.txt", turn))
+			var data strings.Builder
+			for n := 0; data.Len() < toolBytes; n++ {
+				fmt.Fprintf(&data, "Record %05d for turn %d: distinct value=%d; inspect source path src/module_%d.go and preserve this evidence.\n", n, turn, n*37+turn, n%109)
+			}
+			fmt.Fprintf(&data, "TOOL_%d_END\n", turn)
+			require.NoError(t, os.WriteFile(toolFile, []byte(data.String()), 0600))
+		}
+		control, _ := json.Marshal(map[string]any{"with_tools": withTools, "turn": turn, "output_bytes": outputBytes, "tool_file": toolFile, "delta_ms": deltaMS})
+		resp, e := http.Post(modelURL+"/control", "application/json", strings.NewReader(string(control)))
+		require.NoError(t, e)
+		resp.Body.Close()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		cpu0, _ := appFlowCPU()
+		start := time.Now()
+		stop := make(chan struct{})
+		peaks := make(chan uint64, 1)
+		go func() {
+			ticker := time.NewTicker(20 * time.Millisecond)
+			defer ticker.Stop()
+			peak := before.HeapAlloc
+			for {
+				select {
+				case <-ticker.C:
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					if m.HeapAlloc > peak {
+						peak = m.HeapAlloc
+					}
+				case <-stop:
+					peaks <- peak
+					return
+				}
+			}
+		}()
+		prompt := fmt.Sprintf("Turn %d: explain the next set of findings and preserve prior conversation context.", turn)
+		if turn == 0 {
+			task := models.Task{ProjectID: project.ID, Title: "Growing app flow", Prompt: prompt, Category: models.CategoryActive, Status: models.StatusPending, AgentID: &agent.ID}
+			require.NoError(t, stores.Tasks.Create(ctx, &task))
+			manifest.Task = task.ID
+			execution, e := env.LLMSvc.ExecuteTaskWithAgent(ctx, task, agent)
+			require.NoError(t, e)
+			require.Equal(t, models.ExecCompleted, execution.Status)
+		} else {
+			form := url.Values{"message": {prompt}, "agent_id": {agent.ID}, "model_selection_managed": {"1"}}
+			req := httptest.NewRequest(http.MethodPost, "/tasks/"+manifest.Task+"/thread?project_id="+project.ID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			env.Echo.ServeHTTP(rec, req)
+			require.Equal(t, 200, rec.Code, rec.Body.String())
+			// Same tracked worker finishes the turn; no repeated history polling in the measured path.
+			deadline := time.Now().Add(2 * time.Minute)
+			for {
+				active := env.Handler.updateWorkTracker.Active()
+				if active.Total() == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("turn timed out")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		elapsed := time.Since(start).Seconds() * 1000
+		cpu1, rss := appFlowCPU()
+		runtime.ReadMemStats(&after)
+		close(stop)
+		peak := <-peaks
+		if after.HeapAlloc > peak {
+			peak = after.HeapAlloc
+		}
+		var count int
+		require.NoError(t, conns.Reader.QueryRow("SELECT count(*) FROM executions WHERE task_id=? AND status='completed'", manifest.Task).Scan(&count))
+		require.Equal(t, turn+1, count)
+		var pages, free, pageSize int64
+		require.NoError(t, conns.Reader.QueryRow("PRAGMA page_count").Scan(&pages))
+		require.NoError(t, conns.Reader.QueryRow("PRAGMA freelist_count").Scan(&free))
+		require.NoError(t, conns.Reader.QueryRow("PRAGMA page_size").Scan(&pageSize))
+		disk := map[string]int64{}
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			if s, e := os.Stat(filepath.Join(dir, "app.db") + suffix); e == nil {
+				disk["db"+suffix] = s.Size()
+			}
+		}
+		row := map[string]any{"mode": mode, "profile": profile, "turn": turn, "assistant_target_bytes": outputBytes, "tool_file_target_bytes": toolBytes, "delta_ms": deltaMS, "cpu_ms": cpu1 - cpu0, "elapsed_ms": elapsed, "alloc_bytes": after.TotalAlloc - before.TotalAlloc, "alloc_count": after.Mallocs - before.Mallocs, "gc_count": after.NumGC - before.NumGC, "gc_pause_ns": after.PauseTotalNs - before.PauseTotalNs, "sampled_peak_heap": peak, "end_heap": after.HeapAlloc, "process_peak_rss": rss, "db_pages_bytes": pages * pageSize, "db_free_bytes": free * pageSize, "files": disk}
+		rows = append(rows, row)
+		appFlowJSON(t, filepath.Join(dir, "turns.json"), rows)
+		// Assertions and fixture IO are outside the measured turn. The next turn keeps
+		// the normal live app state; no deliberate GC/reset between follow-ups.
+	}
+	history, e := stores.Executions.ListByTaskChronological(ctx, manifest.Task)
+	require.NoError(t, e)
+	require.Len(t, history, manifest.Turns)
+	for i, execution := range history {
+		require.Contains(t, execution.Output, fmt.Sprintf("TURN_%d_END", i))
+		if withTools {
+			require.Contains(t, execution.Output, fmt.Sprintf("TOOL_%d_END", i))
+		} else {
+			require.NotContains(t, execution.Output, "TOOL_")
+		}
+		rows[i]["display_bytes"] = len(execution.Output)
+	}
+	history = nil
+	appFlowJSON(t, filepath.Join(dir, "turns.json"), rows)
+	runtime.GC()
+	runtime.GC()
+	var retained runtime.MemStats
+	runtime.ReadMemStats(&retained)
+	appFlowJSON(t, filepath.Join(dir, "heap.json"), map[string]any{"baseline_heap": baseline.HeapAlloc, "retained_heap": retained.HeapAlloc, "initial_db_pages_bytes": basePages * baseSize})
+	runtime.KeepAlive(env)
+	runtime.KeepAlive(hub)
+	appFlowJSON(t, filepath.Join(dir, "manifest.json"), manifest)
+	resp, e := http.Get(modelURL + "/stats")
+	require.NoError(t, e)
+	defer resp.Body.Close()
+	var peer map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&peer))
+	appFlowJSON(t, filepath.Join(dir, "model.json"), peer)
+	if profile == "compaction" {
+		require.Greater(t, peer["compactions"].(float64), float64(0), "context never triggered compaction")
+		// Summary fallback may depend on the profile; native continuation is mandatory.
+	}
+	requests := peer["requests"].([]any)
+	toolReplies := 0
+	checkpointSeen := false
+	for _, v := range requests {
+		r := v.(map[string]any)
+		if r["tool_result_seen"] == true {
+			toolReplies++
+		}
+		if r["checkpoint_seen"] == true {
+			checkpointSeen = true
+		}
+	}
+	if withTools {
+		require.GreaterOrEqual(t, toolReplies, manifest.Turns, "provider must receive each actual tool result")
+	} else {
+		require.Zero(t, toolReplies, "text baseline must not contain tool results")
+	}
+	if profile == "compaction" {
+		require.True(t, checkpointSeen, "native checkpoint not restored")
+	}
+	// Normalize storage only after the natural conversation has finished.
+	_, e = conns.Writer.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	require.NoError(t, e)
+	final, e := os.Stat(filepath.Join(dir, "app.db"))
+	require.NoError(t, e)
+	appFlowJSON(t, filepath.Join(dir, "storage.json"), map[string]any{"checkpointed_db_bytes": final.Size()})
+}

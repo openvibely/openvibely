@@ -8,6 +8,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/transcript"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -15,7 +16,8 @@ import (
 type steeringRecoveryKey struct{}
 type steeringRecovery struct {
 	mu              sync.Mutex
-	transcript      string
+	responses       []any
+	responsesSet    bool
 	commit          func(context.Context, []any) error
 	providerHistory []models.Execution
 }
@@ -30,9 +32,10 @@ func trackSteeringRecovery(req llmcontracts.AgentRequest) llmcontracts.AgentRequ
 		req.Ctx = context.Background()
 	}
 	state := &steeringRecovery{}
-	req.Ctx = llmcontracts.WithResponsesRecovery(req.Ctx, func(raw string) {
+	req.Ctx = llmcontracts.WithResponsesRecovery(req.Ctx, func(items []any) {
 		state.mu.Lock()
-		state.transcript = raw
+		state.responses = items
+		state.responsesSet = true
 		state.mu.Unlock()
 	})
 	if req.Agent.Provider == models.ProviderAnthropic || req.Agent.Provider == models.ProviderOllama || req.Agent.Provider == models.ProviderOpenAICompatible {
@@ -45,17 +48,12 @@ func trackSteeringRecovery(req llmcontracts.AgentRequest) llmcontracts.AgentRequ
 		}
 		var record func(context.Context, []any) error
 		record = func(ctx context.Context, items []any) error {
-			raw, err := json.Marshal(struct {
-				Input []any `json:"responses_input"`
-			}{items})
-			if err != nil {
-				return err
-			}
 			if err := commit(ctx, items); err != nil {
 				return err
 			}
 			state.mu.Lock()
-			state.transcript = string(raw)
+			state.responses = transcript.FreezeItems(items)
+			state.responsesSet = true
 			state.commit = record
 			state.mu.Unlock()
 			return nil
@@ -83,7 +81,8 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 		return req
 	}
 	state.mu.Lock()
-	transcript := state.transcript
+	items := state.responses
+	recorded := state.responsesSet
 	commit := state.commit
 	providerHistory := state.providerHistory
 	state.mu.Unlock()
@@ -96,10 +95,14 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 		req.Ctx = llmcontracts.WithHistoryContinuation(req.Ctx)
 		return req
 	}
-	if transcript == "" {
+	if !recorded {
 		return req
 	}
-	req.ChatHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
+	raw, err := json.Marshal(map[string]any{"responses_input": items})
+	if err != nil {
+		return req
+	}
+	req.ChatHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}}}
 	// The recorded history already includes the prompt and its attachments.
 	req.Message = ""
 	req.Attachments = nil

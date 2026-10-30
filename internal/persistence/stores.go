@@ -298,9 +298,7 @@ type ExecutionReplay struct {
 }
 
 type ExecutionStore interface {
-	// SaveConversationReplay encodes history once, persists metadata, and returns
-	// the encoded snapshot only after a successful write.
-	SaveConversationReplay(ctx context.Context, id string, history any, metadata models.ExecutionReplayMessage) (string, error)
+	ConversationStore
 	ExecutionOutputStore
 	ReadOutputAfter(ctx context.Context, id string, offset int) (*ExecutionReplay, error)
 	GetExecutionTaskID(ctx context.Context, id string) (string, error)
@@ -525,6 +523,7 @@ type ProjectStore interface {
 	ForEachRepoRoot(ctx context.Context, visit func(ProjectRepoRoot)) error
 	GetByID(ctx context.Context, id string) (*models.Project, error)
 	GetDefaultAgentConfigID(ctx context.Context, id string) (*string, error)
+	GetManagedPermissions(ctx context.Context, id string) (models.SkillMemoryPermissions, error)
 	GetIdentityByID(ctx context.Context, id string) (*models.ProjectIdentity, error)
 	List(ctx context.Context) ([]models.Project, error)
 	ListAPIProjects(ctx context.Context) ([]models.ProjectAPIItem, error)

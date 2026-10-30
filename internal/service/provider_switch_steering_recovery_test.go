@@ -78,7 +78,7 @@ func TestProviderSwitchRecoversSteeringAndPreservesReadableTail(t *testing.T) {
 			require.Equal(t, 2, calls)
 			rows, err = stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
 			require.NoError(t, err)
-			require.Equal(t, transcript, rows[exec.ID][0].TranscriptJSON, "recovery never rewrites saved history")
+			require.JSONEq(t, transcript, rows[exec.ID][0].TranscriptJSON, "recovery preserves saved conversation items")
 		})
 	}
 }

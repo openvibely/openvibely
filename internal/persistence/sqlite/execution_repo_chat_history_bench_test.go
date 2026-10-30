@@ -149,11 +149,12 @@ func TestExecutionRepo_IdleFollowupDoesNotRewritePriorExecutions(t *testing.T) {
 	if err := repo.Create(ctx, prior); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE executions SET output = ?, diff_output = ? WHERE id = ?`, prior.Output, prior.DiffOutput, prior.ID); err != nil {
+	if _, err := db.Exec(`UPDATE executions SET diff_output = ? WHERE id = ?`, prior.DiffOutput, prior.ID); err != nil {
 		t.Fatal(err)
 	}
+	seedExecutionDisplay(t, db, prior.ID, prior.Output)
 	// Count physical row updates, not elapsed time: even a metadata-only UPDATE
-	// rewrites the large inline diff/output payload on an old execution.
+	// rewrites the large inline diff payload on an old execution.
 	if _, err := db.Exec(`CREATE TABLE execution_update_audit (execution_id TEXT);
 		CREATE TRIGGER audit_execution_updates AFTER UPDATE ON executions
 		BEGIN INSERT INTO execution_update_audit VALUES (NEW.id); END;`); err != nil {
@@ -190,7 +191,7 @@ func TestExecutionRepo_IdleFollowupDoesNotRewritePriorExecutions(t *testing.T) {
 			t.Fatal(err)
 		}
 		var project, category, output, diff string
-		if err := db.QueryRow(`SELECT task_project_id, task_category, output, diff_output FROM executions WHERE id = ?`, prior.ID).Scan(&project, &category, &output, &diff); err != nil {
+		if err := db.QueryRow(`SELECT task_project_id, task_category, `+displayOutputSQL+`, diff_output FROM executions WHERE id = ?`, prior.ID).Scan(&project, &category, &output, &diff); err != nil {
 			t.Fatal(err)
 		}
 		if project != step.project || category != step.category || output != prior.Output || diff != prior.DiffOutput {
@@ -268,10 +269,11 @@ func BenchmarkExecutionRepoViewTaskThreadPage(b *testing.B) {
 	prompt := strings.Repeat("p", 4*1024)
 	output := strings.Repeat("o", 64*1024)
 	for i := 0; i < 200; i++ {
-		if _, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent, output)
-			VALUES (?, ?, ?, ?, ?)`, fmt.Sprintf("thread-bench-exec-%03d", i), task.ID, models.ExecCompleted, prompt, output); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent)
+			VALUES (?, ?, ?, ?)`, fmt.Sprintf("thread-bench-exec-%03d", i), task.ID, models.ExecCompleted, prompt); err != nil {
 			b.Fatalf("insert execution %d: %v", i, err)
 		}
+		seedExecutionDisplay(b, db, fmt.Sprintf("thread-bench-exec-%03d", i), output)
 	}
 
 	b.Run("current", func(b *testing.B) {
@@ -341,13 +343,12 @@ func seedChatHistoryBenchFixture(tb testing.TB, db *sql.DB, targetOlder bool) {
 	}
 	if _, err := tx.Exec(`
 		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
-		INSERT INTO executions (id, task_id, status, prompt_sent, output, started_at, completed_at, task_project_id, task_category, history_order)
+		INSERT INTO executions (id, task_id, status, prompt_sent, started_at, completed_at, task_project_id, task_category, history_order)
 		SELECT
 			'chat-history-target-exec-' || printf('%05d', n),
 			'chat-history-target-task-' || printf('%05d', n),
 			'completed',
 			'target prompt ' || n,
-			'target output ' || n,
 			datetime(?, '+' || n || ' seconds'),
 			datetime(?, '+' || n || ' seconds'),
 			?,
@@ -374,13 +375,12 @@ func seedChatHistoryBenchFixture(tb testing.TB, db *sql.DB, targetOlder bool) {
 	}
 	if _, err := tx.Exec(`
 		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
-		INSERT INTO executions (id, task_id, status, prompt_sent, output, started_at, completed_at, task_project_id, task_category, history_order)
+		INSERT INTO executions (id, task_id, status, prompt_sent, started_at, completed_at, task_project_id, task_category, history_order)
 		SELECT
 			'chat-history-other-exec-' || printf('%05d', n),
 			'chat-history-other-task-' || printf('%05d', n),
 			CASE WHEN n = ? THEN 'running' ELSE 'completed' END,
 			'other prompt ' || n,
-			'other output ' || n,
 			datetime(?, '+' || n || ' seconds'),
 			datetime(?, '+' || n || ' seconds'),
 			'chat-history-other-project',
@@ -396,12 +396,22 @@ func seedChatHistoryBenchFixture(tb testing.TB, db *sql.DB, targetOlder bool) {
 		tb.Fatalf("insert non-chat task: %v", err)
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO executions (id, task_id, status, prompt_sent, output, started_at, task_project_id, task_category, history_order)
-		VALUES ('chat-history-target-active-exec', 'chat-history-target-active-task', 'completed', 'active prompt', 'active output', datetime(?, '+999999 seconds'), ?, 'active', ?)`, targetBase, chatHistoryBenchTargetProjectID, chatHistoryBenchTargetRows+chatHistoryBenchOtherRows+1); err != nil {
+		INSERT INTO executions (id, task_id, status, prompt_sent, started_at, task_project_id, task_category, history_order)
+		VALUES ('chat-history-target-active-exec', 'chat-history-target-active-task', 'completed', 'active prompt', datetime(?, '+999999 seconds'), ?, 'active', ?)`, targetBase, chatHistoryBenchTargetProjectID, chatHistoryBenchTargetRows+chatHistoryBenchOtherRows+1); err != nil {
 		tb.Fatalf("insert non-chat execution: %v", err)
 	}
 	if _, err := tx.Exec(`UPDATE executions SET status = 'running' WHERE id = 'chat-history-target-exec-50000'`); err != nil {
 		tb.Fatalf("mark latest target running: %v", err)
+	}
+
+	// Keep the same output payloads in the item journal for the indexed-read fixture.
+	if _, err := tx.Exec(`INSERT INTO conversation_items
+		(execution_id, generation, lane, item_id, position, operation, payload, mutation_id)
+		SELECT id, 0, 'display', 'display:000000000000', 0, 'put',
+		json_object('type', 'text', 'text', replace(prompt_sent, 'prompt', 'output'), 'complete', json('true')), 'fixture'
+		FROM executions WHERE id LIKE 'chat-history-%';
+		UPDATE conversation_items SET snapshot_sequence = sequence WHERE mutation_id = 'fixture';`); err != nil {
+		tb.Fatalf("insert display items: %v", err)
 	}
 
 	if err := tx.Commit(); err != nil {

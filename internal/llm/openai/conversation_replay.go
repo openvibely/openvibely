@@ -10,14 +10,16 @@ import (
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/transcript"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
-func (a *Adapter) saveConversation(ctx context.Context, execID string, transcript any) error {
+func (a *Adapter) saveConversation(ctx context.Context, execID string, messages []openaiclient.CompletionsHistoryMessage) error {
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, transcript, models.ExecutionReplayMessage{})
+	recorder := transcript.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
+	err := recorder.Save(context.WithoutCancel(ctx), transcript.ReplayHeader{Format: "array"}, transcript.Values(messages))
 	if err != nil {
 		var encoding *persistence.ReplayEncodingError
 		if errors.As(err, &encoding) {
@@ -28,13 +30,14 @@ func (a *Adapter) saveConversation(ctx context.Context, execID string, transcrip
 	return nil
 }
 
-// responsesHistoryRecorder saves only the current provider conversation.
-func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, []any) error {
+// responsesHistoryChangesRecorder saves explicitly changed provider messages.
+func (a *Adapter) responsesHistoryChangesRecorder(execID string) func(context.Context, []any, int) error {
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	return func(ctx context.Context, items []any) error {
-		raw, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, map[string]any{"responses_input": items}, models.ExecutionReplayMessage{})
+	recorder := transcript.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
+	return func(ctx context.Context, items []any, firstChanged int) error {
+		err := recorder.SaveChanged(context.WithoutCancel(ctx), transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_input", NullItems: items == nil}, items, firstChanged)
 		if err != nil {
 			var encoding *persistence.ReplayEncodingError
 			if errors.As(err, &encoding) {
@@ -42,7 +45,7 @@ func (a *Adapter) responsesHistoryRecorder(execID string) func(context.Context, 
 			}
 			return fmt.Errorf("save OpenAI conversation: %w", err)
 		}
-		llmcontracts.RecordResponsesRecovery(ctx, raw)
+		llmcontracts.RecordResponsesRecovery(ctx, recorder.Recovery())
 		return nil
 	}
 }
@@ -64,13 +67,13 @@ func buildCompletionsHistory(history []models.Execution) []openaiclient.Completi
 			var checkpoint struct {
 				Input []json.RawMessage `json:"responses_input"`
 			}
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &checkpoint) == nil && len(checkpoint.Input) > 0 {
+			if replay.DecodeTranscript(&checkpoint) == nil && len(checkpoint.Input) > 0 {
 				result = responsesCompletionsMessages(checkpoint.Input)
 				restored = true
 				continue
 			}
 			var messages []openaiclient.CompletionsHistoryMessage
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &messages) == nil && len(messages) > 0 {
+			if replay.DecodeTranscript(&messages) == nil && len(messages) > 0 {
 				result = append(result, messages...)
 				restored = true
 			}
@@ -101,8 +104,12 @@ func historyMessageItems(messages []openaiclient.Message) []any {
 }
 
 func completionsReplayInput(raw string) []any {
+	return completionsReplayMessageInput(models.ExecutionReplayMessage{TranscriptJSON: raw})
+}
+
+func completionsReplayMessageInput(replay models.ExecutionReplayMessage) []any {
 	var messages []openaiclient.CompletionsHistoryMessage
-	if json.Unmarshal([]byte(raw), &messages) != nil {
+	if replay.DecodeTranscript(&messages) != nil {
 		return nil
 	}
 	var items []any

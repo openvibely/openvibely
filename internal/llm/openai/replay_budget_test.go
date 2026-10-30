@@ -94,3 +94,14 @@ func TestContinuationBudgetReplacesNativeOnlyForStructuredReplay(t *testing.T) {
 	_, invalid := EstimateContinuationTokens(plain, `invalid JSON`)
 	require.Zero(t, invalid, "the adapter ignores invalid native JSON")
 }
+
+func TestReplayBudgetRowBoundaryMatchesLegacy(t *testing.T) {
+	for _, items := range [][]json.RawMessage{nil, {json.RawMessage(`{"type":"message","role":"user","content":"checkpoint"}`)}} {
+		replay := models.ExecutionReplayMessage{Rows: &models.ReplayRows{Format: "envelope", ItemsKey: "responses_input", NullItems: items == nil, Items: items}}
+		base := models.Execution{PromptSent: "earlier"}
+		rowHistory := []models.Execution{base, {ReplayMessages: []models.ExecutionReplayMessage{replay}}, {PromptSent: "next"}}
+		legacyHistory := []models.Execution{base, {ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: replay.FullTranscriptJSON()}}}, {PromptSent: "next"}}
+		require.Len(t, EffectiveReplayHistory(rowHistory), len(EffectiveReplayHistory(legacyHistory)))
+		require.Equal(t, EstimateHistoryTokens(legacyHistory), EstimateHistoryTokens(rowHistory))
+	}
+}

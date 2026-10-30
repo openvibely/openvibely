@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -989,8 +990,25 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 					if calls == 2 && (got.Message != req.Message || !strings.Contains(historyCompactionSummary(got.ChatHistory), "text summary")) {
 						t.Fatal("continuation lost pending message or summary")
 					}
-				} else if got.NativeCompactionStateJSON != state || len(got.ChatHistory) != 0 || got.ForceNativeCompaction {
-					t.Fatal("reported usage must not double count native checkpoint or trigger compaction")
+				} else {
+					// Item-store reconstruction may reorder JSON object fields; all
+					// values and the ordered message/content arrays must survive.
+					var actual, expected any
+					if err := json.Unmarshal([]byte(got.NativeCompactionStateJSON), &actual); err != nil {
+						t.Fatalf("decode restored native checkpoint: %v", err)
+					}
+					if err := json.Unmarshal([]byte(state), &expected); err != nil {
+						t.Fatalf("decode expected native checkpoint: %v", err)
+					}
+					if !reflect.DeepEqual(actual, expected) {
+						t.Fatal("restoration changed native checkpoint content")
+					}
+					if len(got.ChatHistory) != 0 {
+						t.Fatal("restoration retained history already covered by the native checkpoint")
+					}
+					if got.ForceNativeCompaction || got.Agent.ForceNativeCompaction {
+						t.Fatal("reported usage must not double count native checkpoint or trigger compaction")
+					}
 				}
 				return llmcontracts.AgentResult{Output: "text summary"}, nil
 			})

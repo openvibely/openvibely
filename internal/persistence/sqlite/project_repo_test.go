@@ -700,3 +700,38 @@ func TestProjectRepo_DefaultAgentFKConstraint(t *testing.T) {
 		t.Errorf("expected DefaultAgentConfigID=nil after agent deleted (ON DELETE SET NULL), got %v", got.DefaultAgentConfigID)
 	}
 }
+
+func TestProjectManagedPermissionsProjection(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewProjectRepo(db)
+	p := &models.Project{Name: "permissions projection", Description: strings.Repeat("unused", 10000)}
+	if err := repo.Create(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	for _, grants := range []models.SkillMemoryPermissions{models.NewProjectPermissions(), {}, {ReadSkills: true, AllowGlobalSkillWrites: true}} {
+		p.SkillMemoryPermissions = &grants
+		if err := repo.Update(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		got, err := repo.GetManagedPermissions(ctx, p.ID)
+		if err != nil || got != grants {
+			t.Fatalf("permissions=%+v err=%v want=%+v", got, err, grants)
+		}
+	}
+	got, err := repo.GetManagedPermissions(ctx, "missing")
+	if err != nil || got != (models.SkillMemoryPermissions{}) {
+		t.Fatalf("missing project granted access: %+v %v", got, err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := repo.GetManagedPermissions(cancelled, p.ID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel=%v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE projects SET skill_memory_permissions='invalid' WHERE id=?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if grants, err := repo.GetManagedPermissions(ctx, p.ID); err == nil || grants != (models.SkillMemoryPermissions{}) {
+		t.Fatalf("invalid grants=%+v err=%v", grants, err)
+	}
+}

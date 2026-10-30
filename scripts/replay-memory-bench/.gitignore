@@ -1,0 +1,12 @@
+# Generated measurement evidence belongs outside the source worktree.
+*.json
+*.jsonl
+*.gz
+*.pprof
+*.prof
+*.trace
+*.log
+*.db
+*.db-*
+*.test
+__pycache__/

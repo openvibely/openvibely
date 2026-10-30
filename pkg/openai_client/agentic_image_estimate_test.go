@@ -401,3 +401,51 @@ func legacyAgenticOriginalImageBytes(imageURL string) int {
 	}
 	return approxOpenAIBytesForTokens(patchCount)
 }
+
+// Compare with the previous JSON-based estimator, including unsupported Go
+// values, escapes, invalid UTF-8, and non-finite numbers. Budgeting must not
+// change the request or its compaction threshold just to avoid a scratch copy.
+func TestAgenticTextAndToolSizeMatchesMarshal(t *testing.T) {
+	values := []any{
+		strings.Repeat("large text <>& 世界\n", 4096),
+		string([]byte{0xff, 0xfe, '\n', '"'}), "\u2028\u2029\x00\\",
+		nil, true, int64(math.MinInt64), uint64(math.MaxUint64),
+		float64(1e-7), float64(1e21), float32(1e-7), math.NaN(), math.Inf(1),
+		json.Number("1.25"), json.RawMessage(`{"nested":"value"}`),
+		[]string{"typed", "slice"}, struct{ Text string }{"custom type"},
+		[]any{nil, map[string]any{"nested": "<text>"}},
+	}
+	for _, kind := range []string{"message", "function_call", "function_call_output"} {
+		for index, value := range values {
+			t.Run(fmt.Sprintf("%s/%d", kind, index), func(t *testing.T) {
+				item := map[string]any{"type": kind, "id": "unchanged"}
+				switch kind {
+				case "message":
+					item["content"] = []any{map[string]any{"type": "output_text", "text": value}}
+				case "function_call":
+					item["arguments"] = value
+				case "function_call_output":
+					item["output"] = value
+				}
+				before, wantErr := json.Marshal(item)
+				got, err := marshalAgenticItemWithoutImagePayload(item)
+				if (err != nil) != (wantErr != nil) {
+					t.Fatalf("error = %v, marshal error = %v", err, wantErr)
+				}
+				if wantErr != nil {
+					return
+				}
+				if got != len(before) {
+					t.Fatalf("size = %d, want %d", got, len(before))
+				}
+				if got, want := estimateAgenticResponseItemModelVisibleBytes(item), legacyAgenticVisibleBytesForTest(t, item); got != want {
+					t.Fatalf("visible bytes = %d, want %d", got, want)
+				}
+				after, err := json.Marshal(item)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatal("estimate mutated request")
+				}
+			})
+		}
+	}
+}

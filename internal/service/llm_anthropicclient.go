@@ -9,9 +9,6 @@ import (
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
-const anthropicDirectOutputBudget = 4096
-const anthropicAgenticOutputBudget = 16384
-
 // errMaxTokens is returned when the API response was truncated due to max_tokens.
 var errMaxTokens = fmt.Errorf("response truncated: max_tokens limit reached (output budget exhausted before task completed)")
 

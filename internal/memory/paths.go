@@ -132,15 +132,6 @@ func (r *PathResolver) EnsureProjectDir(projectID string) (string, error) {
 	return dir, nil
 }
 
-// IndexPath returns the absolute path to the project's MEMORIES.md.
-func (r *PathResolver) IndexPath(projectID string) (string, error) {
-	dir, err := r.ProjectDir(projectID)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, IndexFileName), nil
-}
-
 // ResolveSafe joins the per-project directory with rel and verifies that the
 // resulting path stays inside the per-project memory directory. Symlinks that
 // would escape the directory are also rejected.

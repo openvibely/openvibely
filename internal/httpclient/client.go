@@ -2,6 +2,7 @@
 package httpclient
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -163,7 +164,8 @@ func (t *modelTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // WithActivityTimeout provides a resettable inactivity deadline. Activity sets
 // the next deadline; stop releases the timer and cancels the derived context.
-// A nonpositive initial timeout leaves it disarmed until the first activity.
+// A nonpositive timeout (initial or activity) disarms it without cancelling the
+// context. Positive activity rearms it; cancellation or expiry cannot be undone.
 // It is shared by HTTP bodies and WebSocket message reads.
 func WithActivityTimeout(parent context.Context, timeout time.Duration) (context.Context, func(time.Duration), func()) {
 	ctx, cancel := context.WithCancelCause(parent)
@@ -196,8 +198,13 @@ func WithActivityTimeout(parent context.Context, timeout time.Duration) (context
 		mu.Lock()
 		defer mu.Unlock()
 		if !stopped {
-			deadline = time.Now().Add(timeout)
-			timer.Reset(timeout)
+			if timeout <= 0 {
+				deadline = time.Time{}
+				timer.Stop()
+			} else {
+				deadline = time.Now().Add(timeout)
+				timer.Reset(timeout)
+			}
 		}
 	}
 	stop := func() {
@@ -232,20 +239,30 @@ func (b *deadlineBody) Read(p []byte) (int, error) {
 }
 func (b *deadlineBody) Close() error { b.close(); return b.ReadCloser.Close() }
 
-// ReadAllWithActivity reports each successful underlying read, including partial
-// WebSocket messages, so large messages do not trip the inactivity deadline.
-func ReadAllWithActivity(r io.Reader, activity func()) ([]byte, error) {
-	return io.ReadAll(activityReader{r, activity})
-}
-
-type activityReader struct {
-	io.Reader
+// ActivityReader reuses the adapter that reports progress during a message read.
+// It is owned by one response and must not be used concurrently.
+type ActivityReader struct {
+	reader   io.Reader
 	activity func()
 }
 
-func (r activityReader) Read(p []byte) (int, error) {
-	n, err := r.Reader.Read(p)
-	if n > 0 {
+func NewActivityReader(activity func()) *ActivityReader {
+	return &ActivityReader{activity: activity}
+}
+
+// ReadInto resets dst and reads into its reusable storage. The caller must finish
+// using dst.Bytes() before the next call. The source is released on return.
+func (r *ActivityReader) ReadInto(dst *bytes.Buffer, src io.Reader) error {
+	dst.Reset()
+	r.reader = src
+	defer func() { r.reader = nil }()
+	_, err := dst.ReadFrom(r)
+	return err
+}
+
+func (r *ActivityReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 && r.activity != nil {
 		r.activity()
 	}
 	return n, err

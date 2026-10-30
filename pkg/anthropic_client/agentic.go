@@ -143,7 +143,9 @@ type AgenticOptions struct {
 	RecoveryMessages []Message
 	OnReplay         func([]Message)
 	// OnReplaySave saves replay, including native compaction blocks, before tools run.
-	OnReplaySave         func(context.Context, []Message) error
+	OnReplaySave func(context.Context, []Message) error
+	// OnReplayChanged reports the first possibly changed message; successful saves own a frozen snapshot.
+	OnReplayChanged      func(context.Context, []Message, int) error
 	OnCompactionProgress func(llmcontracts.CompactionProgress)
 	OnCompaction         func(summary string) // called when context is compacted
 }
@@ -419,17 +421,6 @@ type serverToolDef struct {
 	Name string `json:"name,omitempty"`
 }
 
-// agenticAPIResponse is the non-streaming API response with tool use support.
-type agenticAPIResponse struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	Role       string         `json:"role"`
-	Model      string         `json:"model"`
-	Content    []agenticBlock `json:"content"`
-	StopReason string         `json:"stop_reason"`
-	Usage      Usage          `json:"usage"`
-}
-
 // SendAgentic sends a message with tool use enabled, executing an agentic loop
 // until the model finishes (stop_reason != "tool_use") or MaxTurns is reached.
 // It uses streaming for each API call and reports progress via callbacks.
@@ -496,6 +487,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	replay := []Message{replayPrompt}
+	firstChanged := 0
+	saveReplay := func(saveCtx context.Context) error {
+		var err error
+		if opts.OnReplayChanged != nil {
+			err = opts.OnReplayChanged(saveCtx, replay, firstChanged)
+		} else if opts.OnReplaySave != nil {
+			err = opts.OnReplaySave(saveCtx, replay)
+		}
+		if err == nil {
+			firstChanged = len(replay)
+		}
+		return err
+	}
 	defer func() {
 		if opts.OnReplay != nil {
 			opts.OnReplay(replay)
@@ -521,10 +525,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 		makeReplayContext := func(text string) Message { return Message{Role: "user", Content: text} }
 		makeWireContext := func(text string) agenticMessage { return agenticMessage{Role: "user", Content: text} }
+		beforeContext := len(replay)
 		replay = managedcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
 		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		replay = attachmentcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
 		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		if len(replay) != beforeContext {
+			firstChanged = min(firstChanged, max(0, beforeContext-1))
+		}
 		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
 		}
@@ -623,8 +631,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			replayBlocks, _ = json.Marshal(blocks)
 		}
 		replay = append(replay, Message{Role: "assistant", ContentBlocks: replayBlocks})
-		if opts.OnReplaySave != nil {
-			if err := opts.OnReplaySave(ctx, replay); err != nil {
+		if opts.OnReplaySave != nil || opts.OnReplayChanged != nil {
+			if err := saveReplay(ctx); err != nil {
 				return nil, err
 			}
 		}
@@ -702,13 +710,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				Content:   content,
 				IsError:   exec.isError,
 			})
-			if opts.OnReplaySave != nil {
+			if opts.OnReplaySave != nil || opts.OnReplayChanged != nil {
 				encoded, _ := json.Marshal(toolResults)
 				if len(replay) == replayResultIndex {
 					replay = append(replay, Message{Role: "user"})
 				}
 				replay[replayResultIndex].ContentBlocks = encoded
-				if err := opts.OnReplaySave(context.WithoutCancel(ctx), replay); err != nil {
+				firstChanged = min(firstChanged, replayResultIndex)
+				if err := saveReplay(context.WithoutCancel(ctx)); err != nil {
 					applog.Infof("[anthropicclient] intermediate tool transcript save failed; continuing with in-memory history: %v", err)
 				}
 			}
@@ -745,6 +754,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			replay = append(replay, Message{Role: "user"})
 		}
 		replay[replayResultIndex].ContentBlocks = replayJSON
+		firstChanged = min(firstChanged, replayResultIndex)
 		// Add tool results as user message.
 		userBlocks := append([]agenticBlock(nil), toolResults...)
 		if opts.OnToolBoundarySteering != nil {

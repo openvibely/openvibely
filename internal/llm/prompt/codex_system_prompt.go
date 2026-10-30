@@ -3,6 +3,7 @@ package prompt
 import (
 	"embed"
 	"strings"
+	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -15,16 +16,30 @@ import (
 //go:embed codex/*.md
 var codexPrompts embed.FS
 
+// Keys come only from the bundled model registry (unknown names use reserve),
+// so this cache cannot grow with arbitrary user-provided model names.
+var adaptedCodexPrompts sync.Map
+var codexToolNames = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "shell")
+
 func CodexSystemPrompt(model string) string {
-	return adaptCodexTools(codexSnapshot(model))
+	profile := codexProfile(model)
+	if cached, ok := adaptedCodexPrompts.Load(profile); ok {
+		return cached.(func() string)()
+	}
+	cached, _ := adaptedCodexPrompts.LoadOrStore(profile, sync.OnceValue(func() string { return adaptCodexTools(codexSnapshot(model)) }))
+	return cached.(func() string)()
 }
 
-func codexSnapshot(model string) string {
+func codexProfile(model string) string {
 	profile := models.PromptProfileCodexReserve
 	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && spec.PromptProfile != "" {
 		profile = spec.PromptProfile
 	}
-	data, err := codexPrompts.ReadFile(string(profile))
+	return string(profile)
+}
+
+func codexSnapshot(model string) string {
+	data, err := codexPrompts.ReadFile(codexProfile(model))
 	if err != nil {
 		panic(err)
 	}
@@ -44,7 +59,7 @@ func adaptCodexTools(base string) string {
 		case strings.Contains(line, "request_user_input_async"):
 			lines[i] = "When clarification is needed, use request_user_input if it is provided. Follow its schema and wait for the user's answer; otherwise ask the user in your response. Never assume an unanswered question grants approval."
 		default:
-			lines[i] = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "shell").Replace(line)
+			lines[i] = codexToolNames.Replace(line)
 		}
 	}
 	return strings.Join(lines, "\n") + "\n\nUse only tools attached to this request, with their actual names and schemas. For file inspection use read_file, list_files, and grep_search when available. Do not assume Codex-specific tools, connectors, or plugin discovery are installed."

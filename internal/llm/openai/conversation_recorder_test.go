@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/openvibely/openvibely/internal/transcript"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,9 +27,9 @@ func TestResponsesRecorderAfterSteeringSavesOnlyCurrentContext(t *testing.T) {
 	require.NoError(t, stores.Executions.ReplaceReasoningReplay(ctx, exec.ID, "", []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[],"responses_compaction_sources":{"old":[]}}`}}))
 	compacted := []any{map[string]any{"type": "compaction", "encrypted_content": "opaque"}}
 	a := New(nil, stores.Executions, nil, nil)
-	require.NoError(t, a.responsesHistoryRecorder(exec.ID)(ctx, compacted))
+	require.NoError(t, a.responsesHistoryChangesRecorder(exec.ID)(ctx, compacted, 0))
 	require.NoError(t, stores.ThreadInputs.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: exec.ID, ResponsesHistory: compacted}))
-	require.NoError(t, a.responsesHistoryRecorder(exec.ID)(ctx, compacted))
+	require.NoError(t, a.responsesHistoryChangesRecorder(exec.ID)(ctx, compacted, 0))
 	rows, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
 	require.NoError(t, err)
 	require.Contains(t, rows[exec.ID][0].TranscriptJSON, "opaque")
@@ -41,13 +42,15 @@ func TestResponsesRecorderAfterSteeringSavesOnlyCurrentContext(t *testing.T) {
 // Embed the interface so only the persistence boundary under test is replaced.
 type recorderStore struct {
 	persistence.ExecutionStore
-	raw    string
-	err    error
-	calls  int
-	ctxErr error
+	raw      string
+	err      error
+	calls    int
+	ctxErr   error
+	heads    map[string]models.ConversationChange
+	sequence int64
 }
 
-func (s *recorderStore) SaveConversationReplay(ctx context.Context, id string, history any, metadata models.ExecutionReplayMessage) (string, error) {
+func (s *recorderStore) saveLegacySnapshot(ctx context.Context, id string, history any, metadata models.ExecutionReplayMessage) (string, error) {
 	raw, err := json.Marshal(history)
 	if err != nil {
 		return "", &persistence.ReplayEncodingError{Err: err}
@@ -84,13 +87,15 @@ func TestResponsesRecorderSerializationCompatibility(t *testing.T) {
 		store := &recorderStore{}
 		adapter := New(nil, store, nil, nil)
 		recovered := ""
-		ctx, cancel := context.WithCancel(llmcontracts.WithResponsesRecovery(context.Background(), func(raw string) {
+		ctx, cancel := context.WithCancel(llmcontracts.WithResponsesRecovery(context.Background(), func(items []any) {
+			rawBytes, _ := json.Marshal(map[string]any{"responses_input": items})
+			raw := string(rawBytes)
 			require.Equal(t, 1, store.calls, "recovery follows persistence")
 			require.Equal(t, raw, store.raw)
 			recovered = raw
 		}))
 		cancel() // Saving must still survive caller cancellation.
-		require.NoError(t, adapter.responsesHistoryRecorder("exec")(ctx, items))
+		require.NoError(t, adapter.responsesHistoryChangesRecorder("exec")(ctx, items, 0))
 		require.NoError(t, store.ctxErr)
 		require.Equal(t, string(legacy), store.raw)
 		require.Equal(t, string(first), recovered)
@@ -112,8 +117,8 @@ func TestResponsesRecorderFailureDoesNotAdvanceRecovery(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &recorderStore{err: tc.err}
 			a := New(nil, store, nil, nil)
-			ctx := llmcontracts.WithResponsesRecovery(context.Background(), func(string) { t.Error("recovery advanced after failure") })
-			err := a.responsesHistoryRecorder("exec")(ctx, tc.items)
+			ctx := llmcontracts.WithResponsesRecovery(context.Background(), func([]any) { t.Error("recovery advanced after failure") })
+			err := a.responsesHistoryChangesRecorder("exec")(ctx, tc.items, 0)
 			require.Error(t, err)
 			if tc.err != nil {
 				require.ErrorIs(t, err, failure)
@@ -122,8 +127,8 @@ func TestResponsesRecorderFailureDoesNotAdvanceRecovery(t *testing.T) {
 			require.Equal(t, tc.calls, store.calls)
 		})
 	}
-	require.Nil(t, New(nil, nil, nil, nil).responsesHistoryRecorder("exec"))
-	require.Nil(t, New(nil, &recorderStore{}, nil, nil).responsesHistoryRecorder(""))
+	require.Nil(t, New(nil, nil, nil, nil).responsesHistoryChangesRecorder("exec"))
+	require.Nil(t, New(nil, &recorderStore{}, nil, nil).responsesHistoryChangesRecorder(""))
 }
 
 func BenchmarkResponsesRecorderSerialization(b *testing.B) {
@@ -137,8 +142,12 @@ func BenchmarkResponsesRecorderSerialization(b *testing.B) {
 			store := &recorderStore{}
 			a := New(nil, store, nil, nil)
 			var recovery string
-			ctx := llmcontracts.WithResponsesRecovery(context.Background(), func(raw string) { recovery = raw })
-			record := a.responsesHistoryRecorder("exec")
+			ctx := llmcontracts.WithResponsesRecovery(context.Background(), func(items []any) {
+				rawBytes, _ := json.Marshal(map[string]any{"responses_input": items})
+				raw := string(rawBytes)
+				recovery = raw
+			})
+			record := a.responsesHistoryChangesRecorder("exec")
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -147,11 +156,11 @@ func BenchmarkResponsesRecorderSerialization(b *testing.B) {
 					if err != nil {
 						b.Fatal(err)
 					}
-					if err = a.saveConversation(ctx, "exec", json.RawMessage(raw)); err != nil {
+					if _, err = store.saveLegacySnapshot(ctx, "exec", json.RawMessage(raw), models.ExecutionReplayMessage{}); err != nil {
 						b.Fatal(err)
 					}
-					llmcontracts.RecordResponsesRecovery(ctx, string(raw))
-				} else if err := record(ctx, items); err != nil {
+					llmcontracts.RecordResponsesRecovery(ctx, items)
+				} else if err := record(ctx, items, 0); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -160,4 +169,42 @@ func BenchmarkResponsesRecorderSerialization(b *testing.B) {
 			}
 		})
 	}
+}
+
+func (s *recorderStore) ReadConversationHeads(context.Context, models.ConversationOwner, models.ConversationLane, int64) ([]models.ConversationChange, error) {
+	var result []models.ConversationChange
+	for _, c := range s.heads {
+		result = append(result, c)
+	}
+	return result, nil
+}
+func (s *recorderStore) ConversationRevision(_ context.Context, _ models.ConversationOwner, _ models.ConversationLane, id string, _ int64) (int64, error) {
+	return s.heads[id].Sequence, nil
+}
+func (s *recorderStore) AppendConversationChanges(ctx context.Context, _ models.ConversationOwner, changes []models.ConversationChange) ([]models.ConversationChange, error) {
+	s.calls++
+	s.ctxErr = ctx.Err()
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.heads == nil {
+		s.heads = make(map[string]models.ConversationChange)
+	}
+	for i := range changes {
+		s.sequence++
+		changes[i].Sequence = s.sequence
+		s.heads[changes[i].ItemID] = changes[i]
+	}
+	var records []models.ConversationChange
+	for _, c := range s.heads {
+		records = append(records, c)
+	}
+	messages, err := transcript.RestoreReplayRecords(records)
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) > 0 {
+		s.raw = messages[0].TranscriptJSON
+	}
+	return changes, nil
 }

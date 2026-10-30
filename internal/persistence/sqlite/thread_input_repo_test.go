@@ -1451,8 +1451,12 @@ func TestExecutionRepo_CreateDirectTaskFollowupReactivatesSwarmChildBeforeRecove
 	agent := createThreadInputLLMConfig(t, ctx, db)
 	execRepo := NewExecutionRepo(db)
 	liveExec := &models.Execution{TaskID: child.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "channel follow-up", IsFollowup: true}
-	if err := execRepo.CreateDirectTaskFollowup(ctx, liveExec); err != nil {
-		t.Fatalf("CreateDirectTaskFollowup: %v", err)
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, liveExec, &models.ThreadInput{AgentConfigID: liveExec.AgentConfigID, Content: liveExec.PromptSent})
+	if err != nil {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: %v", err)
+	}
+	if !started {
+		t.Fatal("expected follow-up to start immediately")
 	}
 
 	recovered, err := execRepo.RecoverStaleRunningTaskExecutions(ctx)

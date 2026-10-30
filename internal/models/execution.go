@@ -15,7 +15,15 @@ const (
 	ExecCancelled ExecutionStatus = "cancelled"
 )
 
+// DisplayTail describes a bounded public view, never provider replay state.
+type DisplayTail struct {
+	Text     string `json:"text"`
+	Before   int64  `json:"before,string"`
+	Revision string `json:"revision"`
+}
+
 type Execution struct {
+	DisplayTail *DisplayTail `json:"-"`
 	// HistoryOrder is the server tie-breaker for equal start times in transcript windows.
 	HistoryOrder int64 `json:"-"`
 
@@ -55,6 +63,7 @@ type TaskExecutionMetrics struct {
 // ExecutionReplayMessage preserves one exact user/assistant exchange made
 // inside an execution that continued after live steering.
 type ExecutionReplayMessage struct {
+	Rows             *ReplayRows `json:"-"`
 	UserContent      string
 	AssistantContent string
 	ReasoningContent string

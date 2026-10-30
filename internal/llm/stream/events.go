@@ -53,33 +53,33 @@ func WriteEvent(writer *Writer, event Event, skipThinking bool) {
 		if event.Text == "" {
 			return
 		}
-		writer.Write([]byte(event.Text))
-		writer.WriteText([]byte(event.Text))
+		writer.WriteString(event.Text)
+		writer.WriteTextString(event.Text)
 	case EventTextOnly:
 		if event.Text == "" {
 			return
 		}
-		writer.WriteText([]byte(event.Text))
+		writer.WriteTextString(event.Text)
 	case EventRawOutput:
 		if event.Text == "" {
 			return
 		}
-		writer.Write([]byte(event.Text))
+		writer.WriteString(event.Text)
 	case EventThinkingOpen:
 		if skipThinking {
 			return
 		}
-		writer.Write([]byte("\n[Thinking]\n"))
+		writer.WriteString("\n[Thinking]\n")
 	case EventThinkingText:
 		if skipThinking || event.Text == "" {
 			return
 		}
-		writer.Write([]byte(event.Text))
+		writer.WriteString(event.Text)
 	case EventThinkingEnd:
 		if skipThinking {
 			return
 		}
-		writer.Write([]byte("\n[/Thinking]\n"))
+		writer.WriteString("\n[/Thinking]\n")
 	case EventToolUse:
 		toolName := sanitizeToolMarkerPart(event.ToolName)
 		if toolName == "" {
@@ -87,16 +87,16 @@ func WriteEvent(writer *Writer, event Event, skipThinking bool) {
 		}
 		secondary := sanitizeToolMarkerPart(event.Secondary)
 		if secondary != "" {
-			writer.Write([]byte(fmt.Sprintf("\n[Using tool: %s | %s]\n", toolName, secondary)))
+			writer.WriteString(fmt.Sprintf("\n[Using tool: %s | %s]\n", toolName, secondary))
 			return
 		}
-		writer.Write([]byte(fmt.Sprintf("\n[Using tool: %s]\n", toolName)))
+		writer.WriteString(fmt.Sprintf("\n[Using tool: %s]\n", toolName))
 	case EventToolResult:
 		status := "done"
 		if event.IsError {
 			status = "error"
 		}
-		writer.Write([]byte(fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", event.ToolName, status, tooloutput.Encode(event.Output))))
+		writer.WriteString(fmt.Sprintf("[Tool %s %s]\n%s\n[/Tool]\n", event.ToolName, status, tooloutput.Encode(event.Output)))
 	case EventSessionID:
 		if event.SessionID != "" {
 			writer.SetSessionID(event.SessionID)

@@ -16,8 +16,11 @@ func BenchmarkModelAnalyticsHistory(b *testing.B) {
 	WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<200)
 	INSERT INTO tasks(id,project_id,title,status) SELECT 't'||x,'bench','Task '||x,'completed' FROM n;
 	WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20)
-	INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,history_order,prompt_sent,output)
-	SELECT t.id||'-'||x,t.id,'m','completed','2026-09-01 10:00:00','2026-09-01 11:00:00',x,hex(zeroblob(4000)),hex(zeroblob(4000)) FROM tasks t CROSS JOIN n;
+	INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,history_order,prompt_sent)
+	SELECT t.id||'-'||x,t.id,'m','completed','2026-09-01 10:00:00','2026-09-01 11:00:00',x,hex(zeroblob(4000)) FROM tasks t CROSS JOIN n;
+	INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id)
+	SELECT id,0,'display','display:000000000000',0,'put',json_object('type','text','text',hex(zeroblob(4000)),'complete',json('true')),'fixture' FROM executions;
+	UPDATE conversation_items SET snapshot_sequence=sequence WHERE mutation_id='fixture';
 	INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,total_tokens,cost_usd)
 	SELECT id,'openai','bench',task_id,id,'m','model',1000,0.01 FROM executions;
 	`)

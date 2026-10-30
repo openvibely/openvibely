@@ -485,7 +485,7 @@ func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
 	require.True(t, hasOlder)
 	require.Equal(t, []string{"exec-024", "exec-023", "exec-022", "exec-021", "exec-020"}, executionIDs(history))
 
-	thread, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, task.ID, "", 5)
+	thread, hasEarlier, err := h.loadTaskExecutionWindow(ctx, task.ID, "", 5)
 	require.NoError(t, err)
 	require.True(t, hasEarlier)
 	require.Equal(t, []string{"exec-020", "exec-021", "exec-022", "exec-023", "exec-024"}, executionIDs(thread))
@@ -495,7 +495,7 @@ func TestHandler_TaskExecutionWindowsPreserveSharedBoundaries(t *testing.T) {
 	require.True(t, hasOlder)
 	require.Equal(t, []string{"exec-019", "exec-018", "exec-017", "exec-016", "exec-015"}, executionIDs(historyOlder))
 
-	threadEarlier, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, task.ID, thread[0].ID, 5)
+	threadEarlier, hasEarlier, err := h.loadTaskExecutionWindow(ctx, task.ID, thread[0].ID, 5)
 	require.NoError(t, err)
 	require.True(t, hasEarlier)
 	require.Equal(t, []string{"exec-015", "exec-016", "exec-017", "exec-018", "exec-019"}, executionIDs(threadEarlier))

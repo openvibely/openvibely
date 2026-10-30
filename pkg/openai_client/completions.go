@@ -25,7 +25,9 @@ import (
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
 	// OnReplay durably saves each assistant response before executing its tools.
-	OnReplay        func(context.Context, []CompletionsHistoryMessage) error
+	OnReplay func(context.Context, []CompletionsHistoryMessage) error
+	// OnReplayChanged synchronously saves a read-only snapshot and its changed suffix.
+	OnReplayChanged func(context.Context, []CompletionsHistoryMessage, int) error
 	Model           string
 	MaxOutputTokens int
 	ContextWindow   int
@@ -250,6 +252,29 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt, ImageContent: promptBlocks}}
 	}
 
+	firstChanged := 0
+	replaySnapshot := func() []CompletionsHistoryMessage {
+		items := currentTranscript
+		if opts.OnReplayChanged == nil {
+			items = cloneCompletionsHistory(items)
+		}
+		snapshot := make([]CompletionsHistoryMessage, 0, len(environmentUpdate)+len(items))
+		snapshot = append(snapshot, environmentUpdate...)
+		return append(snapshot, items...)
+	}
+	saveReplay := func(saveCtx context.Context, snapshot []CompletionsHistoryMessage) error {
+		var err error
+		if opts.OnReplayChanged != nil {
+			err = opts.OnReplayChanged(saveCtx, snapshot, firstChanged)
+		} else if opts.OnReplay != nil {
+			err = opts.OnReplay(saveCtx, snapshot)
+		}
+		if err == nil {
+			firstChanged = len(snapshot)
+		}
+		return err
+	}
+
 	// Publish completed exchanges even when a subsequent request is cancelled.
 	defer func() {
 		c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
@@ -266,10 +291,14 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			return CompletionsHistoryMessage{Role: "user", Content: text}
 		}
 		makeWireContext := func(text string) completionsMessage { return completionsMessage{Role: "user", Content: text} }
+		beforeContext := len(currentTranscript)
 		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
 		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		currentTranscript = attachmentcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
 		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
+		if len(currentTranscript) != beforeContext {
+			firstChanged = min(firstChanged, len(environmentUpdate)+max(0, beforeContext-1))
+		}
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
 		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
@@ -328,8 +357,8 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			ToolCalls:        append([]CompletionsToolCall(nil), turnResult.toolCalls...),
 		})
 
-		if opts.OnReplay != nil {
-			if err := opts.OnReplay(ctx, append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)); err != nil {
+		if opts.OnReplay != nil || opts.OnReplayChanged != nil {
+			if err := saveReplay(ctx, replaySnapshot()); err != nil {
 				return nil, err
 			}
 		}
@@ -414,6 +443,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Content:    truncateToolOutputForModelInput(output, opts.ToolOutputTokenLimit),
 				ToolCallID: tc.ID,
 			})
+			firstChanged = min(firstChanged, len(environmentUpdate)+len(currentTranscript))
 			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{
 				Role:       "tool",
 				Content:    output,
@@ -426,12 +456,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				}
 				imageMessages = append(imageMessages, completionsMessage{Role: "user", Content: content})
 			}
-			if opts.OnReplay != nil {
-				snapshot := append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
+			if opts.OnReplay != nil || opts.OnReplayChanged != nil {
+				snapshot := replaySnapshot()
 				for _, image := range imageMessages {
 					snapshot = append(snapshot, CompletionsHistoryMessage{Role: "user", ImageContent: image.Content.([]map[string]interface{})})
 				}
-				if err := opts.OnReplay(context.WithoutCancel(ctx), snapshot); err != nil {
+				if err := saveReplay(context.WithoutCancel(ctx), snapshot); err != nil {
 					applog.Infof("[openai-completions] intermediate tool transcript save failed; continuing with in-memory history: %v", err)
 				}
 			}

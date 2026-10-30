@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,8 +88,8 @@ func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read durable execution output state: %v", err)
 	}
-	if state.Materialized != "hello world" || state.PendingSegments != 0 {
-		t.Fatalf("final flush should materialize output and clear buffered segments, state=%+v", state)
+	if state.Materialized != "hello world" {
+		t.Fatalf("final flush should keep durable output, state=%+v", state)
 	}
 }
 
@@ -598,5 +599,73 @@ func TestStreamingWriter_DoesNotPublishSeedOrWriteText(t *testing.T) {
 	}
 	if len(publisher.events) != 1 || publisher.events[0].Offset != len("seed plus") {
 		t.Fatalf("expected one appended event with cumulative offset, got %+v", publisher.events)
+	}
+}
+
+// Snapshot strings can outlive a flush and subsequent buffer growth. They must
+// not alias caller-owned input or change while another goroutine appends.
+func TestStreamingWriterSnapshotsStayImmutable(t *testing.T) {
+	repo := &fakeExecutionOutputRepo{output: "seed"}
+	sw := newWriterWithOutputRepo("exec", "task", repo, context.Background(), time.Hour, nil)
+	defer sw.Stop()
+	input := []byte(" 世界")
+	sw.Write(input)
+	sw.WriteText(input)
+	saved, text := sw.String(), sw.TextString()
+	sw.flushPeriodicOnce()
+	for i := range input {
+		input[i] = 'x'
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		part := []byte(strings.Repeat("more", 1024))
+		for range 64 {
+			sw.Write(part)
+			sw.WriteText(part)
+		}
+	}()
+	for range 100 {
+		if saved != "seed 世界" || text != " 世界" {
+			t.Error("snapshot changed")
+		}
+		_ = sw.String()
+		_ = sw.TextString()
+	}
+	<-done
+	sw.Flush()
+	_, writes := repo.snapshot()
+	if writes[0] != " 世界" {
+		t.Fatalf("persisted delta changed: %q", writes[0])
+	}
+	if saved != "seed 世界" || text != " 世界" {
+		t.Fatal("snapshot changed after growth")
+	}
+	if got := sw.String(); got != "seed 世界"+strings.Repeat("more", 1024*64) {
+		t.Fatal("full output changed")
+	}
+}
+
+func TestStreamingWriterStringPublicationSurvivesGrowth(t *testing.T) {
+	publisher := &recordingExecutionStreamPublisher{}
+	sw := NewWriterWithPublisher("exec", "task", nil, context.Background(), time.Hour, publisher)
+	defer sw.Stop()
+	text := "hello 世界"
+	sw.WriteString(text)
+	sw.WriteTextString(text)
+	first := publisher.events[0]
+	for range 20 {
+		sw.WriteString(strings.Repeat("next", 4096))
+	}
+	if first.Delta != text || first.Offset != len(text) || sw.TextString() != text {
+		t.Fatalf("published text/byte offset changed: %+v text=%q", first, sw.TextString())
+	}
+	input := []byte("mutable")
+	sw.Write(input)
+	for i := range input {
+		input[i] = 'x'
+	}
+	if publisher.events[len(publisher.events)-1].Delta != "mutable" {
+		t.Fatal("byte-input event aliases caller buffer")
 	}
 }

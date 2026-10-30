@@ -863,29 +863,24 @@ func scanResponsesStreamLine(data []byte, atEOF bool) (advance int, token []byte
 	return 0, nil, nil
 }
 
-func responsesStreamDataFromLine(rawLine string) (data string, isData bool, err error) {
-	line := strings.TrimSpace(rawLine)
-	if !strings.HasPrefix(line, "data:") {
-		return "", false, nil
+// responsesStreamDataFromLine returns a view into the scanner's current token.
+// Callers must decode it before advancing the scanner.
+func responsesStreamDataFromLine(rawLine []byte) (data []byte, isData bool, err error) {
+	line := bytes.TrimSpace(rawLine)
+	if !bytes.HasPrefix(line, []byte("data:")) {
+		return nil, false, nil
 	}
-
-	dataStart := strings.Index(rawLine, "data:") + len("data:")
-	rawData := rawLine[dataStart:]
-	if strings.HasSuffix(rawData, "\r") {
-		rawData = strings.TrimSuffix(rawData, "\r")
-	}
-	if strings.HasPrefix(rawData, " ") {
-		rawData = strings.TrimPrefix(rawData, " ")
-	}
+	rawData := rawLine[bytes.Index(rawLine, []byte("data:"))+len("data:"):]
+	rawData = bytes.TrimSuffix(rawData, []byte("\r"))
+	rawData = bytes.TrimPrefix(rawData, []byte(" "))
 	if len(rawData) > responsesWebsocketReadLimit {
-		return "", true, errResponsesStreamEventTooLarge
+		return nil, true, errResponsesStreamEventTooLarge
 	}
-
-	return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true, nil
+	return bytes.TrimSpace(line[len("data:"):]), true, nil
 }
 
 func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMarkers bool) (*Response, error) {
-	scanner := newResponsesStreamScanner(body)
+	scanner := newResponsesEventIterator(body)
 
 	var (
 		outputText strings.Builder
@@ -918,37 +913,40 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 		emitter = newOpenAITextStreamEmitter(emit)
 	}
 
+	var header struct {
+		Type string `json:"type"`
+	}
+	var text struct {
+		Delta string `json:"delta"`
+	}
 	for scanner.Scan() {
-		rawLine := scanner.Text()
-		line := strings.TrimSpace(rawLine)
-		if line == "" || strings.HasPrefix(line, "event:") {
-			continue
+		event := scanner.event
+		data := event.data
+		typ := strings.TrimSpace(event.typ)
+		if !event.websocket {
+			header.Type = ""
+			if json.Unmarshal(data, &header) != nil {
+				continue
+			}
+			// Preserve this parser's JSON-type-only behavior for HTTP events.
+			typ = header.Type
 		}
-
-		data, isData, err := responsesStreamDataFromLine(rawLine)
-		if err != nil {
-			return nil, err
-		}
-		if !isData || data == "" || data == "[DONE]" {
-			continue
-		}
-
-		var ev map[string]any
-		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			continue
-		}
-
-		typ := stringFromAny(ev["type"])
-		switch typ {
-		case "response.output_text.delta":
-			delta := stringFromAny(ev["delta"])
-			if delta != "" {
+		if typ == "response.output_text.delta" {
+			text.Delta = ""
+			if json.Unmarshal(data, &text) == nil && text.Delta != "" {
 				if emitter != nil {
-					emitter.Write(delta)
+					emitter.Write(text.Delta)
 				} else {
-					emit(delta)
+					emit(text.Delta)
 				}
 			}
+			continue
+		}
+		ev := decodeResponsesComplexEvent(data)
+		if ev == nil {
+			continue
+		}
+		switch typ {
 		case "response.function_call_arguments.delta", "response.output_item.added":
 			if emitter != nil {
 				emitter.FlushBoundary()

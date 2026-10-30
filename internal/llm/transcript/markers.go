@@ -41,6 +41,11 @@ func NormalizeMarkers(text string) string {
 }
 
 func replaceOutsideMarkdownCode(text string, re *regexp.Regexp, replace func(string) string) string {
+	// Most responses have no legacy markers. Do not parse Markdown or copy
+	// the entire response when there is nothing to normalize.
+	if !re.MatchString(text) {
+		return text
+	}
 	ranges := MarkdownCodeRanges(text)
 	var result strings.Builder
 	previous := 0
@@ -113,10 +118,8 @@ func MarkdownCodeRanges(text string) []MarkdownCodeRange {
 	var fenceChar byte
 	fenceLen := 0
 
-	for _, sourceLine := range MarkdownLineRanges(text) {
-		lineStart := sourceLine.Start
-		lineEnd := sourceLine.End
-		nextLine := sourceLine.Next
+	for lineStart := 0; lineStart <= len(text); {
+		lineEnd, nextLine := markdownLineEnd(text, lineStart)
 		line := text[lineStart:lineEnd]
 
 		if fenceStart >= 0 {
@@ -139,6 +142,7 @@ func MarkdownCodeRanges(text string) []MarkdownCodeRange {
 		if lineEnd == len(text) {
 			break
 		}
+		lineStart = nextLine
 	}
 	if fenceStart >= 0 {
 		ranges = append(ranges, MarkdownCodeRange{Start: fenceStart, End: len(text)})

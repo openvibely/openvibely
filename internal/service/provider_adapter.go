@@ -165,14 +165,13 @@ the next LLM continue without restarting. Return only the summary.`
 const compactedHistorySummaryPrefix = llmprompt.CompactionSummaryPrefix
 
 const (
-	retainedUserMessageTokenBudget       = 20000
-	defaultOpenAICompatibleContextWindow = 128000
-	defaultAnthropicContextWindow        = 200000
-	defaultOpenAIContextWindow           = 200000
-	defaultReservedOutputTokens          = 16384
-	pendingInputSampleBytes              = 1024
-	maxArtifactReadBytes                 = 65536
-	oversizedInputReaderTool             = "read_input_artifact"
+	retainedUserMessageTokenBudget = 20000
+	defaultAnthropicContextWindow  = 200000
+	defaultOpenAIContextWindow     = 200000
+	defaultReservedOutputTokens    = 16384
+	pendingInputSampleBytes        = 1024
+	maxArtifactReadBytes           = 65536
+	oversizedInputReaderTool       = "read_input_artifact"
 )
 
 type requestBudget struct {
@@ -525,7 +524,7 @@ func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment
 func estimateExecutionTokens(exec models.Execution) int {
 	total := estimatedUTF8Tokens(exec.PromptSent) + estimatedUTF8Tokens(exec.Output) + estimatedUTF8Tokens(exec.ErrorMessage) + estimatedUTF8Tokens(exec.ReasoningContent)
 	for _, replay := range exec.ReplayMessages {
-		total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + estimatedUTF8Tokens(replay.TranscriptJSON)
+		total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + estimatedUTF8Tokens(replay.FullTranscriptJSON())
 	}
 	return total
 }
@@ -548,9 +547,9 @@ func estimateHistoryTokens(provider models.LLMProvider, history []models.Executi
 			if provider == models.ProviderAnthropic {
 				imageType = "image"
 			}
-			if replay.TranscriptJSON != "" {
-				if tokens, err := estimateReplayTranscriptImageTokens(replay.TranscriptJSON, imageType, imageTokens); err == nil {
-					total += tokens - estimatedUTF8Tokens(replay.TranscriptJSON)
+			if raw := replay.FullTranscriptJSON(); raw != "" {
+				if tokens, err := estimateReplayTranscriptImageTokens(raw, imageType, imageTokens); err == nil {
+					total += tokens - estimatedUTF8Tokens(raw)
 				}
 			}
 		}
@@ -819,7 +818,7 @@ func estimateRuntimeToolDefinitionTokens(rt *llmcontracts.RuntimeTools) int {
 	}
 	total := 0
 	for _, def := range rt.Definitions {
-		total += estimatedUTF8Tokens(def.Name) + estimatedUTF8Tokens(def.Description) + estimatedUTF8Tokens(string(def.ParameterSchema())) + estimatedUTF8Tokens(string(def.Access))
+		total += estimatedUTF8Tokens(def.Name) + estimatedUTF8Tokens(def.Description) + tokenestimate.FromByteCount(len(def.ParameterSchema())) + estimatedUTF8Tokens(string(def.Access))
 	}
 	return total
 }
@@ -1212,7 +1211,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 				var saved struct {
 					Input []any `json:"responses_input"`
 				}
-				if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Input) > 0 {
+				if replay.DecodeTranscript(&saved) == nil && len(saved.Input) > 0 {
 					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
 					// This snapshot already contains the summary and continuation.
 					// Do not let cross-provider conversion append older UI output.
@@ -1250,7 +1249,16 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 					// history. Other providers save only the continuation after
 					// recovery, which must follow the saved summary.
 					start := i
-					if len(execution.ReplayMessages) == 1 && strings.TrimSpace(execution.ReplayMessages[0].TranscriptJSON) == "[]" {
+					emptyContinuation := false
+					if len(execution.ReplayMessages) == 1 {
+						replay := execution.ReplayMessages[0]
+						if replay.TranscriptJSON == "" && replay.Rows != nil {
+							emptyContinuation = replay.Rows.Format == "array" && !replay.Rows.NullItems && len(replay.Rows.Items) == 0
+						} else {
+							emptyContinuation = strings.TrimSpace(replay.TranscriptJSON) == "[]"
+						}
+					}
+					if emptyContinuation {
 						// Explicitly empty continuation: do not fall back to the
 						// execution's original prompt/output, already summarized.
 						start++
@@ -1566,7 +1574,15 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	replays, err := s.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
+	var replays map[string][]models.ExecutionReplayMessage
+	var err error
+	if reader, ok := s.execRepo.(interface {
+		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+	}); ok {
+		replays, err = reader.ReplayRowsByExecutionIDs(ctx, ids)
+	} else {
+		replays, err = s.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
+	}
 	if err != nil {
 		return req, err
 	}

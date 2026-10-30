@@ -2,11 +2,27 @@ package sqlitefixtures
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"github.com/openvibely/openvibely/internal/testutil/storefixture"
 	"time"
 )
+
+// putTextDisplayOutput stores output as one plain-text display item, which the
+// execution projection renders back byte-for-byte.
+func putTextDisplayOutput(ctx context.Context, tx *sql.Tx, id, output string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_items WHERE execution_id=? AND lane='display'`, id); err != nil || output == "" {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id,display_bytes)
+ VALUES(?1,0,'display','display:000000000000',0,'put',json_object('type','text','text',?2,'complete',json('true')),'fixture',length(CAST(?2 AS BLOB)))`, id, output)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE conversation_items SET snapshot_sequence=sequence WHERE execution_id=? AND lane='display'`, id)
+	return err
+}
 
 func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixture.ExecutionHistoryEntry) error {
 	tx, err := f.db.BeginTx(ctx, nil)
@@ -14,7 +30,7 @@ func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixt
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO executions (id,task_id,agent_config_id,status,prompt_sent,output,error_message,tokens_used,duration_ms,started_at,completed_at) VALUES (?,?,NULLIF(?,''),?,?,?,?,?,?,?,?)`)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO executions (id,task_id,agent_config_id,status,prompt_sent,error_message,tokens_used,duration_ms,started_at,completed_at) VALUES (?,?,NULLIF(?,''),?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -24,7 +40,10 @@ func (f *fixtures) SeedExecutionHistory(ctx context.Context, entries []storefixt
 		if e.CompletedAt != nil {
 			completed = e.CompletedAt.UTC().Format("2006-01-02 15:04:05")
 		}
-		if _, err = stmt.ExecContext(ctx, e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, e.Output, e.ErrorMessage, e.TokensUsed, e.DurationMs, e.StartedAt.UTC().Format("2006-01-02 15:04:05"), completed); err != nil {
+		if _, err = stmt.ExecContext(ctx, e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, e.ErrorMessage, e.TokensUsed, e.DurationMs, e.StartedAt.UTC().Format("2006-01-02 15:04:05"), completed); err != nil {
+			return err
+		}
+		if err = putTextDisplayOutput(ctx, tx, e.ID, e.Output); err != nil {
 			return err
 		}
 	}

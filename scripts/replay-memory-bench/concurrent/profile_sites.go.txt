@@ -1,0 +1,61 @@
+// Diagnostic-only helper. Build in a temporary module with github.com/google/pprof
+// at the version in the repository's go.sum. Never linked into the application.
+package main
+
+import (
+ "encoding/json"
+ "fmt"
+ "os"
+ "sort"
+ "strings"
+
+ "github.com/google/pprof/profile"
+)
+
+type site struct {
+ Stack []string `json:"stack"`
+ AllocObjects int64 `json:"allocated_objects"`
+ AllocBytes int64 `json:"allocated_bytes"`
+ LiveObjects int64 `json:"net_live_objects"`
+ LiveBytes int64 `json:"net_live_bytes"`
+ FreedObjects int64 `json:"reclaimed_objects"`
+ FreedBytes int64 `json:"reclaimed_bytes"`
+}
+
+func load(path string) (*profile.Profile,error) {
+ f,e:=os.Open(path); if e!=nil{return nil,e};defer f.Close()
+ return profile.Parse(f)
+}
+func main() {
+ if len(os.Args)!=3 { panic("usage: profile-sites BEFORE.pprof AFTER.pprof") }
+ sites:=map[string]*site{}
+ for arg,sign:=range []int64{-1,1} {
+  p,e:=load(os.Args[arg+1]);if e!=nil {panic(e)}
+  if p.Period!=1 {panic(fmt.Sprintf("expected full allocation sampling, period=%d",p.Period))}
+  columns:=map[string]int{}
+  for i,t:=range p.SampleType {columns[t.Type]=i}
+  for _,key:=range []string{"alloc_objects","alloc_space","inuse_objects","inuse_space"} {if _,ok:=columns[key];!ok {panic("missing "+key)}}
+  for _,sample:=range p.Sample {
+   var stack []string
+   for _,loc:=range sample.Location {
+    for _,line:=range loc.Line {
+     if line.Function!=nil {stack=append(stack,fmt.Sprintf("%s %s:%d",line.Function.Name,line.Function.Filename,line.Line))}
+    }
+   }
+   key:=strings.Join(stack,"\n")
+   s:=sites[key];if s==nil {s=&site{Stack:stack};sites[key]=s}
+   s.AllocObjects+=sign*sample.Value[columns["alloc_objects"]]
+   s.AllocBytes+=sign*sample.Value[columns["alloc_space"]]
+   s.LiveObjects+=sign*sample.Value[columns["inuse_objects"]]
+   s.LiveBytes+=sign*sample.Value[columns["inuse_space"]]
+  }
+ }
+ var result []*site
+ for _,s:=range sites {
+  s.FreedObjects=s.AllocObjects-s.LiveObjects
+  s.FreedBytes=s.AllocBytes-s.LiveBytes
+  if s.AllocObjects!=0 || s.LiveObjects!=0 || s.AllocBytes!=0 || s.LiveBytes!=0 {result=append(result,s)}
+ }
+ sort.Slice(result,func(i,j int)bool {return result[i].AllocObjects>result[j].AllocObjects})
+ enc:=json.NewEncoder(os.Stdout);enc.SetIndent("","  ");if e:=enc.Encode(result);e!=nil {panic(e)}
+}

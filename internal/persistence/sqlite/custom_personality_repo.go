@@ -110,63 +110,10 @@ func (r *CustomPersonalityRepo) ListRuntimePage(ctx context.Context, limit, offs
 	return personalities, rows.Err()
 }
 
-// ListCardsByKeys returns compact card projections for fixed Personality context,
-// such as preset overrides and the currently selected custom personality. The
-// caller supplies a small key set; full prompts remain available only via GetByKey.
-func (r *CustomPersonalityRepo) ListCardsByKeys(ctx context.Context, keys []string) ([]models.CustomPersonality, error) {
-	normalized := make([]string, 0, len(keys))
-	seen := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		normalized = append(normalized, key)
-	}
-	if len(normalized) == 0 {
-		return []models.CustomPersonality{}, nil
-	}
-	placeholders := make([]string, len(normalized))
-	args := make([]any, 0, len(normalized)+1)
-	args = append(args, customPersonalityPromptPreviewLength)
-	for i, key := range normalized {
-		placeholders[i] = "?"
-		args = append(args, key)
-	}
-	query := `SELECT id, name, key, description, SUBSTR(system_prompt, 1, ?) AS system_prompt_preview, created_at, updated_at
-		FROM custom_personalities WHERE key IN (` + strings.Join(placeholders, ",") + `)
-		ORDER BY name ASC, id ASC`
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list fixed custom personality cards: %w", err)
-	}
-	defer rows.Close()
-
-	personalities := make([]models.CustomPersonality, 0, len(normalized))
-	for rows.Next() {
-		var p models.CustomPersonality
-		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.SystemPromptPreview, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan fixed custom personality card: %w", err)
-		}
-		personalities = append(personalities, p)
-	}
-	return personalities, rows.Err()
-}
-
 // ListPage returns one bounded card projection. Search covers the metadata and
 // prompt preview exposed by the Personality card.
 func (r *CustomPersonalityRepo) ListPage(ctx context.Context, limit, offset int, search string) ([]models.CustomPersonality, error) {
 	return r.listPage(ctx, limit, offset, search, nil)
-}
-
-// ListPageExcludingKeys returns a bounded visible-card page while excluding
-// preset override rows that are rendered in the fixed built-in card section.
-func (r *CustomPersonalityRepo) ListPageExcludingKeys(ctx context.Context, limit, offset int, search string, excludedKeys []string) ([]models.CustomPersonality, error) {
-	return r.listPage(ctx, limit, offset, search, excludedKeys)
 }
 
 func (r *CustomPersonalityRepo) listPage(ctx context.Context, limit, offset int, search string, excludedKeys []string) ([]models.CustomPersonality, error) {

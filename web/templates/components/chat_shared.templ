@@ -2,11 +2,11 @@ package components
 
 import (
 	"fmt"
-	"net/url"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 	templateui "github.com/openvibely/openvibely/web/templates"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -14,7 +14,7 @@ import (
 
 const (
 	chatRevisionOffset64 = uint64(14695981039346656037)
-	chatRevisionPrime64 = uint64(1099511628211)
+	chatRevisionPrime64  = uint64(1099511628211)
 )
 
 func chatRevisionWrite(hash uint64, value string) uint64 {
@@ -128,7 +128,9 @@ func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
 	return "openvibely-chat-message-history"
 }
 func chatAttachmentStateKey(config ChatInputFormConfig) string {
-	if config.DiscardDraftOnLeave { return "" }
+	if config.DiscardDraftOnLeave {
+		return ""
+	}
 	if config.TaskID != "" {
 		return "openvibely-task-thread-attachments-" + config.TaskID
 	}
@@ -199,7 +201,12 @@ templ ChatLoadingDots(size string) {
 }
 
 // ChatBubble renders a static chat message bubble (completed or failed text).
-templ ChatBubble(role, content string) {
+func displayTailCursor(tails []*models.DisplayTail) string {
+ if len(tails)==0 || tails[0]==nil {return ""}
+ return fmt.Sprintf("%d:%s",tails[0].Before,tails[0].Revision)
+}
+
+templ ChatBubble(role, content string, tail ...*models.DisplayTail) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
@@ -208,7 +215,7 @@ templ ChatBubble(role, content string) {
 			if role == "User" {
 				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			} else {
-				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
+				<div class="chat-stream-content" data-output-window={ displayTailCursor(tail) } data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
 			}
 		</div>
 	</div>
@@ -222,14 +229,14 @@ templ ChatTerminalError(errorMsg string) {
 }
 
 // ChatBubbleError renders an assistant error message bubble.
-templ ChatBubbleError(role, errorMsg, output string) {
+templ ChatBubbleError(role, errorMsg, output string, tail ...*models.DisplayTail) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
 		<div class="chat-bubble-inner">
 			if output != "" {
-				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
+				<div class="chat-stream-content" data-output-window={ displayTailCursor(tail) } data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 			}
 			@ChatTerminalError(errorMsg)
 		</div>
@@ -297,7 +304,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 							<div class="mb-3">
 								<a href={ templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)) } target="_blank" class="block" data-image-gallery-item="" data-image-name={ att.FileName }>
 									<img
-										src={ templ.SafeURL(FileURLMode(MessageAttachmentDownloadURL(att, projectID),"thumbnail")) }
+										src={ templ.SafeURL(FileURLMode(MessageAttachmentDownloadURL(att, projectID), "thumbnail")) }
 										alt={ att.FileName }
 										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
 										style="max-height: 400px; object-fit: contain;"
@@ -313,9 +320,8 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 									<span>({ FormatFileSize(att.FileSize) })</span>
 								</div>
 							</div>
-
- } else if FilePreviewKind(att.FileName)=="video" {
- <a href={templ.SafeURL(MessageAttachmentDownloadURL(att,projectID))} data-image-gallery-item="" data-media-kind="video" data-image-name={att.FileName}><video muted preload="metadata" src={templ.SafeURL(MessageAttachmentDownloadURL(att,projectID))} style="max-height:240px;max-width:100%"></video><span>{att.FileName}</span></a>
+						} else if FilePreviewKind(att.FileName)=="video" {
+							<a href={ templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)) } data-image-gallery-item="" data-media-kind="video" data-image-name={ att.FileName }><video muted preload="metadata" src={ templ.SafeURL(MessageAttachmentDownloadURL(att, projectID)) } style="max-height:240px;max-width:100%"></video><span>{ att.FileName }</span></a>
 						} else {
 							<div class="flex items-center gap-2 text-xs opacity-90 mb-1.5">
 								@AttachmentFileIcon(att.FileName, att.MediaType)
@@ -1262,9 +1268,9 @@ templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttac
 		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			if steerEndpoint != "" {
-<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" data-tooltip-disabled aria-label="Convert queued follow-up to steering">Steer</button>
-			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" onclick="window.editPendingThreadInput(this)" data-tooltip-disabled aria-label="Edit message"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3"></path></svg></button>
-            }
+				<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" data-tooltip-disabled aria-label="Convert queued follow-up to steering">Steer</button>
+				<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" onclick="window.editPendingThreadInput(this)" data-tooltip-disabled aria-label="Edit message"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 3.487a2.1 2.1 0 012.97 2.97L7.5 18.789 3 20l1.211-4.5L16.862 3.487zM15 5l3 3"></path></svg></button>
+			}
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" data-tooltip-disabled aria-label="Cancel queued follow-up">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -1367,11 +1373,11 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 	}
 	<!-- Assistant response -->
 	if exec.Status == models.ExecCompleted {
-		@ChatBubble("Assistant", exec.Output)
+		@ChatBubble("Assistant", exec.Output, exec.DisplayTail)
 	} else if exec.Status == models.ExecFailed {
-		@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+		@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output, exec.DisplayTail)
 	} else if exec.Status == models.ExecCancelled {
-		@ChatBubbleError("Assistant", "Cancelled", exec.Output)
+		@ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail)
 	} else if exec.Status == models.ExecRunning {
 		@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
 	}
@@ -1400,7 +1406,12 @@ templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment, projectID string, execution ...models.Execution) {
-	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-4" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running"
+	<div
+		id={ "chat-execution-" + execID }
+		class="chat-execution-pair space-y-4"
+		data-execution-pair="true"
+		data-exec-id={ execID }
+		data-exec-status="running"
 		if len(execution) > 0 {
 			data-started-at={ execution[0].StartedAt.Format(time.RFC3339Nano) }
 			data-history-order={ fmt.Sprint(execution[0].HistoryOrder) }
@@ -1515,7 +1526,6 @@ templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
 templ ChatInputForm(config ChatInputFormConfig) {
 	@templateui.MenuStyles()
 	@templ.Raw("<style>" + conversationModelPickerCSS + "</style><script>" + conversationModelPickerJS + "</script>")
-
 	<div class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2">
 		<form
 			id={ config.FormID }
@@ -1669,7 +1679,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 		</form>
 	</div>
 	<!-- Shared input form scripts: Enter key, file upload, drag-and-drop -->
-		<script type="text/javascript">
+	<script type="text/javascript">
 			// Shared, swap-safe composer focus lifecycle for Chat and task Threads.
 			if (!window._openVibelyComposerFocusReady) {
 				window._openVibelyComposerFocusReady = true;
@@ -3881,59 +3891,94 @@ templ ChatAutoScrollScript() {
 				return stateKey && window._chatTranscriptScrollStates ? window._chatTranscriptScrollStates[stateKey] || null : null;
 			};
 
-			window.observeChatTranscriptLayout = function(options) {
-				options = options || {};
-				var messages = options.messages;
-				if (!messages) return;
-				if (messages._chatTranscriptResizeObserver) messages._chatTranscriptResizeObserver.disconnect();
-				if (messages._chatTranscriptMutationObserver) messages._chatTranscriptMutationObserver.disconnect();
-				var reconcileFrame = null;
-				function currentTracker() {
-					return typeof options.getTracker === 'function' ? options.getTracker() : options.tracker;
-				}
-				function reconcilePinnedLayout() {
-					if (reconcileFrame !== null) return;
-					reconcileFrame = requestAnimationFrame(function() {
-						reconcileFrame = null;
-						if (!messages.isConnected) return;
-						var tracker = currentTracker();
-						if (!tracker || !tracker.shouldAutoScroll()) return;
-						// Mutations can leave the scroll geometry unchanged. Avoid cancelling
-						// an ongoing boundary gesture with a redundant programmatic scroll.
-						var bottom = messages.scrollHeight - messages.clientHeight;
-						if (bottom - messages.scrollTop > 1) messages.scrollTop = bottom;
-						if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
-					});
-				}
-				function observeTranscriptChildren(observer) {
-					messages.querySelectorAll(':scope > [data-execution-pair="true"], :scope > [data-transcript-layout-root="true"]').forEach(function(child) {
-						observer.observe(child);
-					});
-				}
-				if (window.ResizeObserver) {
-					var resizeObserver = new ResizeObserver(reconcilePinnedLayout);
-					resizeObserver.observe(messages);
-					observeTranscriptChildren(resizeObserver);
-					messages._chatTranscriptResizeObserver = resizeObserver;
-				}
+			(function() {
+				if (window.observeChatTranscriptLayout) return;
+				var layouts = new Map();
+				// HTMX, cached navigation, and direct DOM replacements all remove views.
+				// One document observer releases their layout resources in every path.
 				if (window.MutationObserver) {
-					var mutationObserver = new MutationObserver(function() {
-						if (messages._chatTranscriptResizeObserver) observeTranscriptChildren(messages._chatTranscriptResizeObserver);
-						reconcilePinnedLayout();
-					});
-					mutationObserver.observe(messages, { childList: true, subtree: true });
-					messages._chatTranscriptMutationObserver = mutationObserver;
+					new MutationObserver(function(records) {
+						if (!records.some(function(record) { return record.removedNodes.length; })) return;
+						layouts.forEach(function(cleanup, messages) {
+							if (!messages.isConnected) cleanup();
+						});
+					}).observe(document.documentElement, { childList: true, subtree: true });
 				}
-				var tracker = currentTracker();
-				if (tracker) {
-					tracker.onIntentChange = function() {
+				window.observeChatTranscriptLayout = function(options) {
+					options = options || {};
+					var messages = options.messages;
+					if (!messages) return;
+					var previous = layouts.get(messages);
+					if (previous) previous();
+					if (!messages.isConnected) return;
+					var reconcileFrame = null, disposed = false;
+					var resizeObserver = null, mutationObserver = null;
+					var observedChildren = new Set();
+					function currentTracker() {
+						return typeof options.getTracker === 'function' ? options.getTracker() : options.tracker;
+					}
+					function reconcilePinnedLayout() {
+						if (disposed || reconcileFrame !== null) return;
+						reconcileFrame = requestAnimationFrame(function() {
+							reconcileFrame = null;
+							if (!messages.isConnected) return;
+							var tracker = currentTracker();
+							if (!tracker || !tracker.shouldAutoScroll()) return;
+							// Mutations can leave the scroll geometry unchanged. Avoid cancelling
+							// an ongoing boundary gesture with a redundant programmatic scroll.
+							var bottom = messages.scrollHeight - messages.clientHeight;
+							if (bottom - messages.scrollTop > 1) messages.scrollTop = bottom;
+							if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
+						});
+					}
+					function observeTranscriptChildren() {
+						var children = new Set(messages.querySelectorAll(':scope > [data-execution-pair="true"], :scope > [data-transcript-layout-root="true"]'));
+						observedChildren.forEach(function(child) {
+							if (!children.has(child)) resizeObserver.unobserve(child);
+						});
+						children.forEach(function(child) {
+							if (!observedChildren.has(child)) resizeObserver.observe(child);
+						});
+						observedChildren = children;
+					}
+					if (window.ResizeObserver) {
+						resizeObserver = new ResizeObserver(reconcilePinnedLayout);
+						resizeObserver.observe(messages);
+						observeTranscriptChildren();
+						messages._chatTranscriptResizeObserver = resizeObserver;
+					}
+					if (window.MutationObserver) {
+						mutationObserver = new MutationObserver(function() {
+							if (disposed) return;
+							if (resizeObserver) observeTranscriptChildren();
+							reconcilePinnedLayout();
+						});
+						mutationObserver.observe(messages, { childList: true, subtree: true });
+						messages._chatTranscriptMutationObserver = mutationObserver;
+					}
+					var tracker = currentTracker();
+					function saveIntent() {
 						if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
-					};
-				}
-				if (document.fonts && document.fonts.ready) {
-					document.fonts.ready.then(reconcilePinnedLayout, reconcilePinnedLayout);
-				}
-			};
+					}
+					if (tracker) tracker.onIntentChange = saveIntent;
+					function cleanup() {
+						if (disposed) return;
+						disposed = true;
+						if (reconcileFrame !== null) cancelAnimationFrame(reconcileFrame);
+						if (resizeObserver) resizeObserver.disconnect();
+						if (mutationObserver) mutationObserver.disconnect();
+						observedChildren.clear();
+						delete messages._chatTranscriptResizeObserver;
+						delete messages._chatTranscriptMutationObserver;
+						if (tracker && tracker.onIntentChange === saveIntent) tracker.onIntentChange = null;
+						layouts.delete(messages);
+					}
+					layouts.set(messages, cleanup);
+					if (document.fonts && document.fonts.ready) {
+						document.fonts.ready.then(reconcilePinnedLayout, reconcilePinnedLayout);
+					}
+				};
+			})();
 
 
 				function revealPreparedEarlierPairs(container) {
@@ -5370,6 +5415,11 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					function linkToolResults() {
+						// A finalized byte window grows only at its beginning. Anchor IDs
+						// to the unchanged end so prepending cannot rename visible tools.
+						if (container.dataset?.outputWindow || container._outputWindowSeed) {
+							options = Object.assign({}, options, {offset: -textBuffer.length, ordinal: -segments.filter(function(seg) { return seg.type === 'using'; }).length});
+						}
 						return window.linkStreamingToolResults(segments, options);
 					}
 				var preparationPhases = [
@@ -5632,6 +5682,9 @@ templ ChatAutoScrollScript() {
 				function trackScrollPin(el, stateKey) {
 					el.setAttribute('data-scroll-pinned', 'true');
 					el.addEventListener('scroll', function() {
+						// Removing an old virtual row can queue a clamped scroll event.
+						// It must not overwrite the replacement row's saved position.
+						if (!el.isConnected) return;
 						var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
 						el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false');
 						var state = window._toolOutputRowStates[stateKey] || {};
@@ -6503,7 +6556,7 @@ func IsImageMediaType(mediaType string) bool {
 
 // Regex patterns for cleaning transcript control artifacts from display content.
 var (
-	reCompaction = regexp.MustCompile(`(?m)^[\t ]*\[Compaction (?:started|done|failed)(?: \| \d+)?\][\t ]*$`)
+	reCompaction   = regexp.MustCompile(`(?m)^[\t ]*\[Compaction (?:started|done|failed)(?: \| \d+)?\][\t ]*$`)
 	reUsingTool    = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
 	reProposedPlan = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
 	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)

@@ -41,7 +41,7 @@ func benchmarkUpcomingListPendingActiveTasks(b *testing.B, repo *UpcomingRepo, p
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tasks, err := repo.ListPendingActiveTasks(ctx, projectID)
+		tasks, err := repo.ListWaitingActiveTasks(ctx, projectID)
 		if err != nil {
 			b.Fatalf("list pending active tasks: %v", err)
 		}

@@ -179,14 +179,6 @@ func (c *LLMConfig) IsOpenAIAPIKey() bool {
 	return c.Provider == ProviderOpenAI && c.AuthMethod == AuthMethodAPIKey
 }
 
-// GetOllamaBaseURL returns the Ollama base URL, defaulting to localhost:11434.
-func (c *LLMConfig) GetOllamaBaseURL() string {
-	if c.OllamaBaseURL != "" {
-		return c.OllamaBaseURL
-	}
-	return "http://localhost:11434"
-}
-
 // IsOpenAICompatibleAPIKey returns true if this config uses an OpenAI-compatible Chat Completions endpoint.
 func (c *LLMConfig) IsOpenAICompatibleAPIKey() bool {
 	return c.Provider == ProviderOpenAICompatible && c.AuthMethod == AuthMethodAPIKey

@@ -5665,8 +5665,23 @@ func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
 				return "result-" + name, false, nil
 			}
 			failed, recovered := false, false
-			save := func(items any) error {
+			var persisted []json.RawMessage
+			sawSuffix := false
+			save := func(items any, first int) error {
 				data, _ := json.Marshal(items)
+				var current []json.RawMessage
+				if err := json.Unmarshal(data, &current); err != nil {
+					t.Fatal(err)
+				}
+				if first < 0 || first > len(current) || first > len(persisted) {
+					t.Fatalf("invalid boundary %d", first)
+				}
+				for i := 0; i < first; i++ {
+					if string(current[i]) != string(persisted[i]) {
+						t.Fatalf("unreported edit at %d", i)
+					}
+				}
+				sawSuffix = sawSuffix || first > 0
 				if strings.Contains(string(data), "result-first") {
 					if !failed {
 						failed = true
@@ -5676,20 +5691,40 @@ func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
 						recovered = true
 					}
 				}
+				persisted = current
 				return nil
 			}
 			var err error
 			if compatible {
-				_, err = NewWithCompatibleAPIKey("test", server.URL+"/v1", "", "").SendCompletions(context.Background(), "test", &CompletionsOptions{MaxTurns: 2, SkipDefaultTools: true, ExtraTools: tools, ToolExecutor: executor, OnReplay: func(_ context.Context, items []CompletionsHistoryMessage) error { return save(items) }})
+				_, err = NewWithCompatibleAPIKey("test", server.URL+"/v1", "", "").SendCompletions(context.Background(), "test", &CompletionsOptions{MaxTurns: 2, SkipDefaultTools: true, ExtraTools: tools, ToolExecutor: executor, OnReplayChanged: func(_ context.Context, items []CompletionsHistoryMessage, first int) error { return save(items, first) }})
 			} else {
 				old := OpenAIAPIBaseURL
 				OpenAIAPIBaseURL = server.URL + "/"
 				defer func() { OpenAIAPIBaseURL = old }()
-				_, err = newHTTPTestAPIKeyClient("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "gpt-5.3-codex", MaxTurns: 2, SkipDefaultTools: true, ExtraTools: tools, ToolExecutor: executor, OnHistory: func(_ context.Context, items []any) error { return save(items) }})
+				_, err = newHTTPTestAPIKeyClient("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "gpt-5.3-codex", MaxTurns: 2, SkipDefaultTools: true, ExtraTools: tools, ToolExecutor: executor, OnHistoryChanged: func(_ context.Context, items []any, first int) error { return save(items, first) }})
+			}
+			if !sawSuffix {
+				t.Fatal("never saved an explicit suffix")
 			}
 			if err != nil || !failed || !recovered || executed != 2 || requests != 2 {
 				t.Fatalf("err=%v failed=%v recovered=%v tools=%d requests=%d", err, failed, recovered, executed, requests)
 			}
 		})
 	}
+}
+
+func TestParseAgenticStream_TextDeltaFastPathPreservesEventFallback(t *testing.T) {
+	stream := "event: response.output_text.delta\ndata: {\"delta\":\"hello \"}\n\n" + buildSSE([]string{
+		`{"type":"response.output_text.delta","delta":null}`,
+		`{"type":"response.output_text.delta","delta":{"unexpected":true}}`,
+		`{"type":"response.output_text.delta","delta":"世界"}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"c1","name":"read_file","arguments":"{}"}}`,
+		`{"type":"response.completed","response":{"status":"completed","output":[]}}`,
+	})
+	var output strings.Builder
+	result, err := (&Client{}).parseAgenticStreamWithToolCallbacks(strings.NewReader(stream), func(s string) { output.WriteString(s) }, nil, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "hello 世界", output.String())
+	require.Len(t, result.toolCalls, 1)
+	require.Equal(t, "c1", result.toolCalls[0].CallID)
 }

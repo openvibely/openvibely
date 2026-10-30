@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,17 +27,9 @@ func (r *ExecutionRepo) SetAutomationRepo(repo *AutomationRepo) {
 	r.automationRepo = repo
 }
 
-const executionOutputSelect = `COALESCE(executions.output, '') || COALESCE((
-		SELECT group_concat(output, '') FROM (
-			SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
-		)
-	), '')`
+const executionOutputSelect = displayOutputSQL
 
-const executionOutputSelectAlias = `COALESCE(e.output, '') || COALESCE((
-		SELECT group_concat(output, '') FROM (
-			SELECT output FROM execution_output_chunks WHERE execution_id = e.id ORDER BY id
-		)
-	), '')`
+var executionOutputSelectAlias = strings.ReplaceAll(displayOutputSQL, "executions.id", "e.id")
 
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END`
@@ -50,10 +41,10 @@ const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), stat
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, ` + executionOutputSelect + `, '' AS reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at, CASE WHEN task_category = 'chat' THEN history_order ELSE rowid END`
 
-const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, e.reasoning_content, e.error_message,
+var executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, e.reasoning_content, e.error_message,
 			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END`
 
-const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, '' AS reasoning_content, e.error_message,
+var executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, ` + executionOutputSelectAlias + `, '' AS reasoning_content, e.error_message,
 			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at, CASE WHEN e.task_category = 'chat' THEN e.history_order ELSE e.rowid END`
 
 const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
@@ -156,34 +147,6 @@ func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, lim
 		 ORDER BY e.started_at DESC LIMIT ?`, projectID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing project executions: %w", err)
-	}
-	defer rows.Close()
-
-	var execs []models.Execution
-	for rows.Next() {
-		e, err := scanExecutionRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning execution: %w", err)
-		}
-		execs = append(execs, e)
-	}
-	return execs, rows.Err()
-}
-
-// ListByProjectExcludingChat returns recent executions for a project but
-// excludes executions whose owning task is the internal Chat category. This
-// is used by memory consolidation so Chat page prompts and mode-control text
-// never contribute to durable memory; task and task-thread follow-up
-// executions are still included.
-func (r *ExecutionRepo) ListByProjectExcludingChat(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumnsAliasLight+`
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category != 'chat'
-		 ORDER BY e.started_at DESC LIMIT ?`, projectID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("listing project executions excluding chat: %w", err)
 	}
 	defer rows.Close()
 
@@ -436,23 +399,6 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	return started, err
 }
 
-var ErrTaskExecutionAdmissionReserved = errors.New("task execution admission is reserved")
-
-func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.Execution) error {
-	if e == nil {
-		return fmt.Errorf("execution is required")
-	}
-	input := &models.ThreadInput{AgentConfigID: e.AgentConfigID, Content: e.PromptSent}
-	started, err := r.CreateDirectTaskFollowupOrQueue(ctx, e, input)
-	if err != nil {
-		return err
-	}
-	if !started {
-		return ErrTaskExecutionAdmissionReserved
-	}
-	return nil
-}
-
 func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConfigID string) error {
 	_, err := execBoundSQLite(ctx, r.db, `UPDATE executions SET agent_config_id = NULLIF(?, '')
 		WHERE id = ? AND (agent_config_id IS NULL OR agent_config_id = '')`, agentConfigID, id)
@@ -460,73 +406,6 @@ func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConf
 		return fmt.Errorf("updating execution agent config: %w", err)
 	}
 	return nil
-}
-
-func (r *ExecutionRepo) AppendOutput(ctx context.Context, id string, output string) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`INSERT INTO execution_output_chunks (execution_id, output)
-		 SELECT id, ? FROM executions WHERE id = ? AND status = 'running'`, output, id)
-	if err != nil {
-		return fmt.Errorf("appending execution output chunk: %w", err)
-	}
-	return nil
-}
-
-// FinalizeOutput replaces the execution's base output with its complete
-// transcript and removes its persisted stream chunks in one transaction.
-func (r *ExecutionRepo) FinalizeOutput(ctx context.Context, id string, output string) error {
-	return r.replaceRunningOutput(ctx, id, output, "finalizing")
-}
-
-func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
-	return r.replaceRunningOutput(ctx, id, output, "updating")
-}
-
-func (r *ExecutionRepo) replaceRunningOutput(ctx context.Context, id, output, operation string) error {
-	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
-		result, err := tx.ExecContext(ctx,
-			`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
-		if err != nil {
-			return err
-		}
-		changed, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if changed == 0 {
-			return nil
-		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("%s execution output: %w", operation, err)
-	}
-	return nil
-}
-
-func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasoningContent string) error {
-	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id)
-	if err != nil {
-		return fmt.Errorf("updating execution reasoning content: %w", err)
-	}
-	return nil
-}
-
-// SaveConversationReplay owns encoding and persistence for one checkpoint.
-// Returning no snapshot on failure prevents recovery from advancing past storage.
-func (r *ExecutionRepo) SaveConversationReplay(ctx context.Context, id string, history any, metadata models.ExecutionReplayMessage) (string, error) {
-	raw, err := json.Marshal(history)
-	if err != nil {
-		return "", &persistence.ReplayEncodingError{Err: err}
-	}
-	encoded := string(raw)
-	metadata.TranscriptJSON = encoded
-	if err := r.ReplaceReasoningReplay(ctx, id, metadata.ReasoningContent, []models.ExecutionReplayMessage{metadata}); err != nil {
-		return "", err
-	}
-	return encoded, nil
 }
 
 func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasoningContent string, messages []models.ExecutionReplayMessage) error {
@@ -547,54 +426,6 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 		return fmt.Errorf("committing execution replay messages: %w", err)
 	}
 	return nil
-}
-
-func replaceExecutionReplayMessages(ctx context.Context, tx sqlExecutor, id string, messages []models.ExecutionReplayMessage) error {
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
-		return fmt.Errorf("clearing execution replay messages: %w", err)
-	}
-	for sequence, message := range messages {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO execution_replay_messages (
-				execution_id, sequence, user_content, assistant_content, reasoning_content, transcript_json
-			) VALUES (?, ?, ?, ?, ?, ?)`,
-			id, sequence, message.UserContent, message.AssistantContent, message.ReasoningContent, message.TranscriptJSON); err != nil {
-			return fmt.Errorf("inserting execution replay message %d: %w", sequence, err)
-		}
-	}
-	return nil
-}
-
-func (r *ExecutionRepo) ReplayMessagesByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	result := make(map[string][]models.ExecutionReplayMessage)
-	placeholders, args := uniqueExecutionIDArgs(ids)
-	if len(args) == 0 {
-		return result, nil
-	}
-
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT execution_id, user_content, assistant_content, reasoning_content, transcript_json
-		FROM execution_replay_messages
-		WHERE execution_id IN (`+strings.Join(placeholders, ",")+`)
-		ORDER BY execution_id, sequence`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("loading execution replay messages: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id string
-		var message models.ExecutionReplayMessage
-		if err := rows.Scan(&id, &message.UserContent, &message.AssistantContent, &message.ReasoningContent, &message.TranscriptJSON); err != nil {
-			return nil, fmt.Errorf("scanning execution replay message: %w", err)
-		}
-		result[id] = append(result[id], message)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating execution replay messages: %w", err)
-	}
-	return result, nil
 }
 
 func (r *ExecutionRepo) ReasoningContentByIDs(ctx context.Context, ids []string) (map[string]string, error) {
@@ -647,25 +478,16 @@ func uniqueExecutionIDArgs(ids []string) ([]string, []interface{}) {
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {
 	output = llmtranscript.NormalizeMarkers(output)
-	// When output is empty, preserve all partial output already written by the
-	// streaming writer. Chunk rows are folded into executions.output as the
-	// execution becomes terminal so completed and failed readers keep the
-	// existing full-transcript contract.
+	// An empty result preserves the already-persisted structured display items.
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN
-				COALESCE(output, '') || COALESCE((
-					SELECT group_concat(output, '') FROM (
-						SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
-					)
-				), '') ELSE ? END, error_message = ?,
+			`UPDATE executions SET status = ?, error_message = ?,
 			 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
 			 WHERE id = ?`,
-			status, output, output, errMsg, tokensUsed, durationMs, id); err != nil {
+			status, errMsg, tokensUsed, durationMs, id); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
-		return err
+		return finalizeDisplayOutput(ctx, tx, id, output)
 	})
 	if err != nil {
 		return fmt.Errorf("completing execution: %w", err)
@@ -727,21 +549,6 @@ func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context
 		return nil
 	})
 }
-func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (int64, error) {
-	ids, err := r.CancelActiveByTaskReturningIDs(ctx, taskID)
-	if err != nil {
-		return 0, err
-	}
-	return int64(len(ids)), nil
-}
-
-func (r *ExecutionRepo) CancelActiveByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
-	cutoff, err := r.TaskExecutionHistoryCutoff(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	return r.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, taskID, cutoff)
-}
 
 // TaskExecutionHistoryCutoff snapshots execution admission before a cancellation
 // begins. A follow-up inserted afterward has a greater history_order and must
@@ -793,7 +600,7 @@ func (r *ExecutionRepo) CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx co
 
 // SuccessCompletionReadiness reports whether an execution can currently be
 // completed without mutating execution or automation state. The subsequent
-// CompleteSuccessIfNoPendingSteering call remains the atomic authority if
+// completeSuccessIfNoPendingSteering call remains the atomic authority if
 // steering arrives after this check.
 func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id string) (persistence.CompleteSuccessOutcome, error) {
 	var status models.ExecutionStatus
@@ -820,22 +627,13 @@ func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id strin
 	return persistence.CompleteSuccessCompleted, nil
 }
 
-func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (persistence.CompleteSuccessOutcome, error) {
-	return r.completeSuccessIfNoPendingSteering(ctx, id, output, tokensUsed, durationMs, nil)
-}
-
 func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, id, output string, tokensUsed int, durationMs int64, finalizeTask func(sqlExecutor) error) (persistence.CompleteSuccessOutcome, error) {
 	output = llmtranscript.NormalizeMarkers(output)
-	// Preserve streamed chunks when no complete provider output was supplied.
+	// Preserve streamed items when no complete provider output was supplied.
 	var changed int64
 	err := withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
 		result, err := tx.ExecContext(ctx,
-			`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN
-				COALESCE(output, '') || COALESCE((
-					SELECT group_concat(output, '') FROM (
-						SELECT output FROM execution_output_chunks WHERE execution_id = executions.id ORDER BY id
-					)
-				), '') ELSE ? END, error_message = '',
+			`UPDATE executions SET status = ?, error_message = '',
 			 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
 			 WHERE id = ?
 			   AND status = 'running'
@@ -846,7 +644,7 @@ func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, 
 			         AND input_mode = 'steering'
 			         AND input_status = 'pending'
 			   )`,
-			models.ExecCompleted, output, output, tokensUsed, durationMs, id)
+			models.ExecCompleted, tokensUsed, durationMs, id)
 		if err != nil {
 			return err
 		}
@@ -859,8 +657,7 @@ func (r *ExecutionRepo) completeSuccessIfNoPendingSteering(ctx context.Context, 
 				return err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `DELETE FROM execution_output_chunks WHERE execution_id = ?`, id)
-		return err
+		return finalizeDisplayOutput(ctx, tx, id, output)
 	})
 	if err != nil {
 		return "", fmt.Errorf("completing execution: %w", err)
@@ -1153,22 +950,6 @@ func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, l
 	return r.listChatHistoryPage(ctx, projectID, "", limit)
 }
 
-// Checkpoint replay is private persistence data, excluded from public Execution JSON.
-type checkpointExecution struct {
-	models.Execution
-	Replay              []models.ExecutionReplayMessage `json:"replay_messages,omitempty"`
-	RetainedUserMessage json.RawMessage                 `json:"retained_user_message,omitempty"`
-}
-
-func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
-	if r == nil || r.db == nil {
-		return nil
-	}
-	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
-		return upsertChatCompactionCheckpoint(ctx, conn, checkpoint)
-	})
-}
-
 // SaveInTurnCompactionCheckpoint commits the summary and an explicitly empty
 // continuation together. UI output and reasoning are not changed.
 func (r *ExecutionRepo) SaveInTurnCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
@@ -1181,115 +962,6 @@ func (r *ExecutionRepo) SaveInTurnCompactionCheckpoint(ctx context.Context, chec
 		}
 		return replaceExecutionReplayMessages(ctx, tx, checkpoint.SourceExecutionID, []models.ExecutionReplayMessage{{TranscriptJSON: "[]"}})
 	})
-}
-
-func upsertChatCompactionCheckpoint(ctx context.Context, executor sqlExecutor, checkpoint models.ChatCompactionCheckpoint) error {
-	history := make([]checkpointExecution, len(checkpoint.History))
-	for i, execution := range checkpoint.History {
-		history[i] = checkpointExecution{Execution: execution, Replay: execution.ReplayMessages, RetainedUserMessage: execution.RetainedUserMessage}
-	}
-	historyJSON, err := json.Marshal(history)
-	if err != nil {
-		return fmt.Errorf("marshal chat compaction checkpoint: %w", err)
-	}
-	_, err = executor.ExecContext(ctx, `
-		INSERT INTO chat_compaction_checkpoints (
-			scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
-			provider_session_state_json = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
-				THEN chat_compaction_checkpoints.provider_session_state_json ELSE '' END,
-			model_config_id = excluded.model_config_id,
-			compatibility_key = excluded.compatibility_key,
-			source_execution_id = excluded.source_execution_id,
-			history_json = excluded.history_json,
-			summary = excluded.summary,
-			strategy = excluded.strategy,
-			provider_state_json = excluded.provider_state_json,
-			updated_at = datetime('now')`,
-		checkpoint.ScopeType, checkpoint.ScopeID, checkpoint.ModelConfigID, checkpoint.CompatibilityKey, checkpoint.SourceExecutionID, string(historyJSON), checkpoint.Summary, checkpoint.Strategy, checkpoint.ProviderStateJSON)
-	if err != nil {
-		return fmt.Errorf("upserting chat compaction checkpoint: %w", err)
-	}
-	return nil
-}
-
-func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeType, scopeID string) (*models.ChatCompactionCheckpoint, error) {
-	if r == nil || r.db == nil || strings.TrimSpace(scopeType) == "" || strings.TrimSpace(scopeID) == "" {
-		return nil, nil
-	}
-	var checkpoint models.ChatCompactionCheckpoint
-	var historyJSON string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, provider_session_state_json, created_at, updated_at
-		FROM chat_compaction_checkpoints
-		WHERE scope_type = ? AND scope_id = ?`, scopeType, scopeID).
-		Scan(&checkpoint.ScopeType, &checkpoint.ScopeID, &checkpoint.ModelConfigID, &checkpoint.CompatibilityKey, &checkpoint.SourceExecutionID, &historyJSON, &checkpoint.Summary, &checkpoint.Strategy, &checkpoint.ProviderStateJSON, &checkpoint.ProviderSessionStateJSON, &checkpoint.CreatedAt, &checkpoint.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting chat compaction checkpoint: %w", err)
-	}
-	var history []checkpointExecution
-	if err := json.Unmarshal([]byte(historyJSON), &history); err != nil {
-		return nil, fmt.Errorf("unmarshal chat compaction checkpoint: %w", err)
-	}
-	checkpoint.History = make([]models.Execution, len(history))
-	for i, execution := range history {
-		checkpoint.History[i] = execution.Execution
-		checkpoint.History[i].ReplayMessages = execution.Replay
-		checkpoint.History[i].RetainedUserMessage = execution.RetainedUserMessage
-	}
-	return &checkpoint, nil
-}
-
-// UpsertChatProviderSessionState updates provider conversational state without
-// replacing a separately maintained compaction checkpoint for the same scope.
-func (r *ExecutionRepo) UpsertChatProviderSessionState(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
-	if r == nil || r.db == nil {
-		return nil
-	}
-	_, err := execBoundSQLite(ctx, r.db, `
-		INSERT INTO chat_compaction_checkpoints (
-			scope_type, scope_id, model_config_id, compatibility_key, history_json, provider_session_state_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, '[]', ?, datetime('now'), datetime('now'))
-		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
-			source_execution_id = CASE
-				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
-					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
-				THEN chat_compaction_checkpoints.source_execution_id ELSE '' END,
-			history_json = CASE
-				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
-					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
-				THEN chat_compaction_checkpoints.history_json ELSE '[]' END,
-			summary = CASE
-				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
-					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
-				THEN chat_compaction_checkpoints.summary ELSE '' END,
-			strategy = CASE
-				WHEN TRIM(chat_compaction_checkpoints.provider_state_json) = ''
-					OR (chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id))
-				THEN chat_compaction_checkpoints.strategy ELSE '' END,
-			provider_state_json = CASE
-				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
-					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
-				THEN chat_compaction_checkpoints.provider_state_json ELSE '' END,
-			model_config_id = excluded.model_config_id,
-			compatibility_key = excluded.compatibility_key,
-			provider_session_state_json = excluded.provider_session_state_json,
-			updated_at = datetime('now')`,
-		checkpoint.ScopeType, checkpoint.ScopeID, checkpoint.ModelConfigID, checkpoint.CompatibilityKey, checkpoint.ProviderSessionStateJSON)
-	if err != nil {
-		return fmt.Errorf("upserting chat provider session state: %w", err)
-	}
-	return nil
 }
 
 // ListChatHistoryBefore returns the latest chat executions older than beforeExecID,
@@ -1504,25 +1176,19 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 
 func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskID, mergerExecutionID, output, diffOutput string, durationMs int64) error {
 	prompt := "Swarm merger final result from execution " + mergerExecutionID
-	res, err := execBoundSQLite(ctx, r.db,
-		`UPDATE executions
-		 SET output = ?, diff_output = ?, duration_ms = ?, completed_at = datetime('now')
-		 WHERE task_id = ? AND prompt_sent = ? AND status = ?`,
-		output, diffOutput, durationMs, parentTaskID, prompt, models.ExecCompleted)
-	if err != nil {
-		return fmt.Errorf("updating swarm parent result execution: %w", err)
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
-		return nil
-	}
-	_, err = execBoundSQLite(ctx, r.db,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, output, diff_output, duration_ms, completed_at)
-		 VALUES (lower(hex(randomblob(16))), ?, NULL, ?, ?, ?, ?, ?, datetime('now'))`,
-		parentTaskID, models.ExecCompleted, prompt, output, diffOutput, durationMs)
-	if err != nil {
-		return fmt.Errorf("creating swarm parent result execution: %w", err)
-	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx sqlExecutor) error {
+		var id string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM executions WHERE task_id=? AND prompt_sent=? AND status=? ORDER BY rowid DESC LIMIT 1`, parentTaskID, prompt, models.ExecCompleted).Scan(&id)
+		if err == sql.ErrNoRows {
+			err = tx.QueryRowContext(ctx, `INSERT INTO executions(id,task_id,status,prompt_sent,diff_output,duration_ms,completed_at) VALUES(lower(hex(randomblob(16))),?,?,?,?,?,datetime('now')) RETURNING id`, parentTaskID, models.ExecCompleted, prompt, diffOutput, durationMs).Scan(&id)
+		} else if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE executions SET diff_output=?,duration_ms=?,completed_at=datetime('now') WHERE id=?`, diffOutput, durationMs, id)
+		}
+		if err != nil {
+			return err
+		}
+		return replaceDisplayOutput(ctx, tx, id, output)
+	})
 }
 
 // GetLatestNonEmptyDiffOutput returns the diff_output from the most recent execution for
@@ -1964,4 +1630,17 @@ func (r *ExecutionRepo) ListLiveExecutions(ctx context.Context) ([]models.LiveEx
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+// GetDisplayExecution loads a complete public response for UI fragments without
+// loading reasoning_content or diff_output. History paging remains per execution.
+func (r *ExecutionRepo) GetDisplayExecution(ctx context.Context, id string) (*models.Execution, error) {
+	execution, err := scanExecutionRow(r.db.QueryRowContext(ctx, `SELECT `+executionSelectColumnsLight+` FROM executions WHERE id=?`, id))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &execution, nil
 }

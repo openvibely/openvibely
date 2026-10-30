@@ -1086,6 +1086,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Chat
 	e.GET("/chat", h.Chat)
+	e.GET("/chat/output/:id", h.ChatOutputBefore)
 	e.POST("/chat/send", h.ChatSend)
 	e.POST("/chat/stop", h.ChatStop)
 	e.GET("/chat/composer-action", h.ChatComposerAction)

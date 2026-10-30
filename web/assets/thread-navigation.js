@@ -152,7 +152,21 @@
         // lifetimes. Let their normal server/draft restoration handle navigation.
         if (Array.from(main.querySelectorAll('input[type="file"]')).some(input => input.files?.length)) return;
         if (Array.from(main.querySelectorAll('input[name="attachment_session_id"]')).some(input => input.value)) return;
+        window.initChatOutputWindows?.(main);
+        const outputSeeds = new Map();
+        main.querySelectorAll('[data-execution-pair]').forEach(pair => {
+            const seed = pair.querySelector('.chat-stream-content')?._outputWindowSeed;
+            if (seed) outputSeeds.set(pair.dataset.execId, seed);
+        });
         const clone = main.cloneNode(true);
+        clone.querySelectorAll('[data-execution-pair]').forEach(pair => {
+            const seed = outputSeeds.get(pair.dataset.execId);
+            const node = pair.querySelector('.chat-stream-content');
+            if (!seed || !node) return;
+            node.setAttribute('data-raw-content', seed.text);
+            node.setAttribute('data-raw-revision', seed.revision);
+            node.dataset.outputWindow = seed.cursor;
+        });
         // A cached composer is a new DOM instance and needs its own focus attempt.
         clone.querySelectorAll('[data-composer-focus-initialized]').forEach(input => {
             input.removeAttribute('data-composer-focus-initialized');
@@ -160,7 +174,12 @@
         clone.querySelectorAll('#chat-messages, #task-thread-messages').forEach(messages => {
             // Older pages belong to the current reading session, not the shared
             // navigation cache. Rebuild the paging cursor for the retained window.
-            messages.setAttribute('data-window-limit', '5');
+            const pairs = Array.from(messages.querySelectorAll(':scope > [data-execution-pair]'));
+            const first = pairs.findIndex(pair => pair.dataset.execId === messages.dataset.outputCacheFirst);
+            // A byte-bounded initial view can have fewer than five executions.
+            // Browsing older turns must not expand the cached initial window.
+            const count = first >= 0 ? Math.min(5, pairs.length - first) : 5;
+            messages.setAttribute('data-window-limit', String(count));
             if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(messages);
             delete messages.dataset.earlierLoaderBound;
             messages.dataset.earlierRequestLoading = 'false';
@@ -183,7 +202,11 @@
         const retained = new Set(Array.from(clone.querySelectorAll('[data-execution-pair]'), pair => pair.getAttribute('data-exec-id')));
         const virtual = Array.from(main.querySelectorAll('[data-execution-pair]'))
             .filter(pair => retained.has(pair.getAttribute('data-exec-id')))
-            .flatMap(pair => window.captureChatVirtualData?.(pair) || []);
+            .flatMap(pair => {
+                const seed = outputSeeds.get(pair.dataset.execId);
+                const parsed = window.captureChatVirtualData?.(pair) || [];
+                return seed ? parsed.filter(data => data.source === seed.text) : parsed;
+            });
         const sources = [];
         clone.querySelectorAll('[data-execution-pair] [data-raw-content], [data-execution-pair] .chat-bubble-user-msg .whitespace-pre-wrap').forEach(node => {
             // A live response can contain raw-content attributes on its stable

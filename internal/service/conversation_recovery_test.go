@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -21,7 +22,7 @@ func TestOrdinaryTurnRecoveryRetainsCompletedTools(t *testing.T) {
 				case 1:
 					overflow := llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "test", errors.New("context length exceeded"))
 					if provider == models.ProviderOpenAI {
-						llmcontracts.RecordResponsesRecovery(r.Ctx, `{"responses_input":[{"type":"message","role":"user","content":"edit file"},{"type":"function_call","name":"edit_file","call_id":"done","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"ALREADY_EDITED"}]}`)
+						llmcontracts.RecordResponsesRecovery(r.Ctx, recoveryItemsForTest(`{"responses_input":[{"type":"message","role":"user","content":"edit file"},{"type":"function_call","name":"edit_file","call_id":"done","arguments":"{}"},{"type":"function_call_output","call_id":"done","output":"ALREADY_EDITED"}]}`))
 						return llmcontracts.AgentResult{}, overflow
 					}
 					return llmcontracts.AgentResult{}, &openaiclient.ConversationError{Err: overflow, MessagesJSON: `[{"role":"user","content":"edit file"},{"role":"assistant","content":"","tool_calls":[{"id":"done","type":"function","function":{"name":"edit_file","arguments":"{}"}}]},{"role":"tool","tool_call_id":"done","content":"ALREADY_EDITED"}]`}
@@ -30,7 +31,7 @@ func TestOrdinaryTurnRecoveryRetainsCompletedTools(t *testing.T) {
 					require.Contains(t, summaryInputText(r.SummaryInput), "ALREADY_EDITED")
 					require.Contains(t, summaryInputText(r.SummaryInput), "edit_file")
 					// Summarization must not replace the active turn's recovery snapshot.
-					llmcontracts.RecordResponsesRecovery(r.Ctx, `{"responses_input":[{"type":"message","role":"user","content":"BAD_SUMMARY_STATE"}]}`)
+					llmcontracts.RecordResponsesRecovery(r.Ctx, recoveryItemsForTest(`{"responses_input":[{"type":"message","role":"user","content":"BAD_SUMMARY_STATE"}]}`))
 					return llmcontracts.AgentResult{Output: "ALREADY_EDITED; do not repeat the edit"}, nil
 				case 3:
 					require.Empty(t, r.Message)
@@ -48,4 +49,14 @@ func TestOrdinaryTurnRecoveryRetainsCompletedTools(t *testing.T) {
 			require.Equal(t, 3, calls)
 		})
 	}
+}
+
+func recoveryItemsForTest(raw string) []any {
+	var envelope struct {
+		Items []any `json:"responses_input"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		panic(err)
+	}
+	return envelope.Items
 }

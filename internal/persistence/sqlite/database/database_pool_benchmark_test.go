@@ -146,7 +146,7 @@ func benchmarkSQLitePoolWorkloadWithHandles(b *testing.B, dbPath string, readDB,
 						return
 					case <-ticker.C:
 						id := worker % 256
-						if err := executionRepo.UpdateOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload); err != nil {
+						if err := executionRepo.FinalizeOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload); err != nil {
 							streamErrors <- err
 							return
 						}
@@ -258,7 +258,7 @@ func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
 		if _, err := tx.Exec(`INSERT INTO tasks(id, project_id, title, category, status) VALUES (?, 'pool-bench', ?, 'active', 'running')`, streamTaskID, "Stream task "+streamTaskID); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := tx.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent, output) VALUES (?, ?, 'running', 'benchmark prompt', 'initial output')`, execID, streamTaskID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES (?, ?, 'running', 'benchmark prompt')`, execID, streamTaskID); err != nil {
 			b.Fatal(err)
 		}
 		if _, err := tx.Exec(`INSERT INTO automation_invocations(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status) VALUES (?, 'pool-bench', 'pool-automation', 'pool-version', 'pool-trigger', 'task', ?, ?, 'claimed')`, invocationID, taskID, "occurrence-"+taskID); err != nil {
@@ -267,6 +267,12 @@ func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
 		if _, err := tx.Exec(`INSERT INTO automation_dispatch_outbox(id, invocation_id, task_id, status) VALUES (?, ?, ?, 'pending')`, dispatchID, invocationID, taskID); err != nil {
 			b.Fatal(err)
 		}
+	}
+	if _, err := tx.Exec(`INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id)
+		SELECT id,0,'display','display:000000000000',0,'put','{"type":"text","text":"initial output","complete":true}','fixture'
+		FROM executions WHERE id LIKE 'pool-exec-%';
+		UPDATE conversation_items SET snapshot_sequence=sequence WHERE mutation_id='fixture';`); err != nil {
+		b.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
 		b.Fatal(err)
@@ -284,7 +290,7 @@ func runSQLitePoolBenchmarkOperation(writeDB *sql.DB, taskRepo *sqlite.TaskRepo,
 		_, err := executionRepo.ListByTaskChronologicalLimit(context.Background(), fmt.Sprintf("stream-task-%03d", id), 20)
 		return err
 	case "write":
-		return executionRepo.UpdateOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload)
+		return executionRepo.FinalizeOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload)
 	case "mixed":
 		if i%5 != 0 {
 			return runSQLitePoolBenchmarkOperation(writeDB, taskRepo, executionRepo, automationRepo, "read", i, payload)

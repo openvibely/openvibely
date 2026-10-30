@@ -213,10 +213,6 @@ func FilteredSkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string,
 	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, false, includePath)
 }
 
-func resolveSkillsList(globalRoot, projectRoot string, input json.RawMessage) (string, error) {
-	return resolveSkillsListFiltered(globalRoot, projectRoot, input, nil)
-}
-
 func resolveSkillsListFiltered(globalRoot, projectRoot string, input json.RawMessage, includePath func(string) bool) (string, error) {
 	scope := parseScope(input)
 	var out strings.Builder
@@ -252,10 +248,6 @@ func resolveSkillsListFiltered(globalRoot, projectRoot string, input json.RawMes
 		}
 	}
 	return out.String(), nil
-}
-
-func standaloneViewHandlesFromCatalog(scope, globalRoot, projectRoot string) ([]string, error) {
-	return standaloneViewHandlesFromCatalogFiltered(scope, globalRoot, projectRoot, nil)
 }
 
 func standaloneViewHandlesFromCatalogFiltered(scope, globalRoot, projectRoot string, includePath func(string) bool) ([]string, error) {
@@ -616,12 +608,6 @@ var agentView = llmcontracts.RuntimeToolDefinition{
 // InspectSelectedSkillRuntimeTools reads selected metadata without installing or running tools.
 func InspectSelectedSkillRuntimeTools(catalog *Catalog) *llmcontracts.RuntimeTools {
 	return skillRuntimeTools(catalog, "", "", nil, false, false, nil)
-}
-
-// ExecutingSkillRuntimeTools also prepares dependencies when an executing agent
-// explicitly loads an authorized skill from the library.
-func ExecutingSkillRuntimeTools(catalog *Catalog, globalRoot, projectRoot string, inspector AgentInspector) *llmcontracts.RuntimeTools {
-	return skillRuntimeTools(catalog, globalRoot, projectRoot, inspector, true, true, nil)
 }
 
 func prepareSkillView(ctx context.Context, output string) (string, error) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -75,5 +76,32 @@ func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
 				t.Errorf("%s references unavailable %s", model, unavailable)
 			}
 		}
+	}
+}
+
+func TestCodexPromptConcurrentCachePreservesContent(t *testing.T) {
+	models := []string{"gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex", "unknown-one", "unknown-two"}
+	var wg sync.WaitGroup
+	for _, model := range models {
+		want := adaptCodexTools(codexSnapshot(model))
+		for n := 0; n < 10; n++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if got := CodexSystemPrompt(model); got != want {
+					t.Errorf("%s: cached prompt changed", model)
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	count := 0
+	adaptedCodexPrompts.Range(func(key, value any) bool { count++; return true })
+	entries, err := codexPrompts.ReadDir("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count > len(entries) {
+		t.Fatalf("cache has %d entries for %d bundled prompts", count, len(entries))
 	}
 }

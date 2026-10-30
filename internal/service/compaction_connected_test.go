@@ -613,7 +613,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
 		for _, to := range providers {
-			modes := []string{"below_limit", "summary", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source", "partial_summary_source", "partial_steering_summary_source", "failed_summary_source", "failed_steering_summary_source"}
+			modes := []string{"below_limit", "summary", "smaller_target", "summary_source", "inturn_summary_source", "steering_summary_source", "tool_image_source", "partial_summary_source", "partial_steering_summary_source", "failed_summary_source", "failed_steering_summary_source"}
 			if from == models.ProviderOpenAI || from == models.ProviderAnthropic {
 				modes = append(modes, "native_source")
 			}
@@ -775,6 +775,14 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						if sourceSummary && !strings.Contains(text, "SWITCH_SUMMARY") {
 							t.Error("destination lost source summary")
 						}
+						if mode == "smaller_target" {
+							if summaries == 0 || !strings.Contains(text, "SWITCH_SUMMARY") {
+								t.Error("smaller destination was called before saved history was summarized")
+							}
+							if strings.Contains(text, "OLD_RAW_MUST_NOT_RETURN") {
+								t.Error("smaller destination received history already covered by summary")
+							}
+						}
 						if stage == 1 {
 							targetCalls++
 							if !strings.Contains(text, "SWITCH_REQUEST") {
@@ -807,11 +815,19 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						}
 						configIndex++
 						a := models.LLMConfig{Name: fmt.Sprintf("saved model %d", configIndex), Provider: p, Model: model, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", ContextWindow: 200000, BaseURL: server.URL + "/v1", PresetSlug: "vllm"}
+						if mode == "smaller_target" && configIndex == 2 {
+							a.ContextWindow = 64000
+						}
 						require.NoError(t, stores.LLMConfigs.Create(ctx, &a))
 						return a
 					}
 					source, target := config(from), config(to)
 					old := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecCompleted, PromptSent: "HISTORY_EVIDENCE", Output: "RECOVER_ONLY_FROM_DB OLD_RAW_MUST_NOT_RETURN"}
+					if mode == "smaller_target" {
+						// Real stored history, rather than a synthetic usage estimate, must
+						// force pre-turn compaction after switching to the smaller model.
+						old.Output = strings.Repeat("HISTORY_EVIDENCE RECOVER_ONLY_FROM_DB OLD_RAW_MUST_NOT_RETURN\n", 4000)
+					}
 					require.NoError(t, stores.Executions.Create(ctx, &old))
 					require.NoError(t, stores.Executions.Complete(ctx, old.ID, models.ExecCompleted, old.Output, "", 0, 0))
 					first := models.Execution{TaskID: task.ID, AgentConfigID: source.ID, Status: models.ExecRunning, PromptSent: "SOURCE_REQUEST"}
@@ -923,9 +939,25 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						req.ContextTokenEstimate = 190000
 					}
 					fresh := NewLLMService(nil, stores.Executions, nil, nil, nil, stores.Attachments)
+					if mode == "smaller_target" {
+						loaded, loadErr := fresh.loadProviderReplayHistory(req)
+						require.NoError(t, loadErr)
+						loaded.ChatHistory = normalizeProviderReplay(to, loaded.ChatHistory, false)
+						budget := calculateRequestBudget(loaded)
+						require.Greater(t, budget.TotalInputTokens(), budget.SafeInputLimit, "saved history must exceed the new model's input budget")
+						require.Zero(t, summaries, "source history must fit without compaction")
+					}
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
+					if mode == "smaller_target" {
+						checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
+						require.NoError(t, checkpointErr)
+						require.NotNil(t, checkpoint)
+						require.Equal(t, target.ID, checkpoint.ModelConfigID)
+						require.Contains(t, checkpoint.Summary, "SWITCH_SUMMARY")
+						require.Empty(t, checkpoint.ProviderStateJSON)
+					}
 					if from == models.ProviderAnthropic && mode == "native_source" {
 						saved, err := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 						require.NoError(t, err)
@@ -935,7 +967,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					}
 					if sourceSummary {
 						require.Equal(t, 1, summaries, "switch must reuse the source summary")
-					} else if mode == "summary" {
+					} else if mode == "summary" || mode == "smaller_target" {
 						require.Positive(t, summaries)
 					} else {
 						require.Zero(t, summaries)
@@ -963,6 +995,11 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					afterSource, err := stores.Executions.GetByID(ctx, first.ID)
 					require.NoError(t, err)
 					require.Equal(t, savedSource.Output, afterSource.Output, "restoration must not change saved UI output")
+					if mode == "smaller_target" {
+						afterOld, readErr := stores.Executions.GetByID(ctx, old.ID)
+						require.NoError(t, readErr)
+						require.Equal(t, old.Output, afterOld.Output, "compaction must preserve the full conversation for display")
+					}
 				})
 			}
 		}

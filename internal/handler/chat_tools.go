@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -27,21 +26,6 @@ func executeChatTaskEdits(ctx context.Context, requests []service.TaskEditReques
 // Delegates to the shared service.BuildTaskContextString.
 func buildTaskContextString(tasks []models.Task) string {
 	return service.BuildTaskContextString(tasks)
-}
-
-// buildTaskContextWithModels creates a summary of existing tasks including their assigned model.
-func buildTaskContextWithModels(tasks []models.Task, modelMap map[string]models.LLMConfig) string {
-	return service.BuildTaskContextWithModels(tasks, modelMap)
-}
-
-// buildModelContextString creates a summary of available model configs for the chat system prompt.
-func buildModelContextString(configs []models.LLMConfig) string {
-	return service.BuildModelContextString(configs)
-}
-
-// buildScheduleContextString creates a summary of scheduled tasks with schedule details for the chat system prompt.
-func buildScheduleContextString(tasks []models.Task, scheduleMap map[string][]models.Schedule, now time.Time) string {
-	return service.BuildScheduleContextString(tasks, scheduleMap, now)
 }
 
 // executeChatTaskExecutions executes tasks matching typed action requests and returns a summary.

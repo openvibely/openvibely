@@ -120,7 +120,7 @@ func readAgentSkillsSection(root, agentKey, scope string) string {
 // (filteredContent, true) when the file exists and has at least one enabled
 // section; ("", false) otherwise. This is the shared core used by both
 // readSkillsIndexSectionFiltered (available_skills context injection) and
-// resolveSkillsList (skills_list tool output) so that disabled handles are
+// resolveSkillsListFiltered (skills_list tool output) so that disabled handles are
 // absent from every surface the route_task model can inspect.
 func filteredIndexBody(indexPath, skillsDir, agentKey string) (string, bool) {
 	return filteredIndexBodyWithFilter(indexPath, skillsDir, agentKey, nil)

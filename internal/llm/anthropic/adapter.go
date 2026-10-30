@@ -21,6 +21,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/transcript"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/pkg/executionenv"
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
@@ -346,8 +347,8 @@ func anthropicAgentResult(output, textOnly string, usage llmcontracts.Usage, err
 type conversationReplayKey struct{}
 type replaySaverKey struct{}
 
-func replaySaver(ctx context.Context) func(context.Context, []anthropicclient.Message) error {
-	saver, _ := ctx.Value(replaySaverKey{}).(func(context.Context, []anthropicclient.Message) error)
+func replaySaver(ctx context.Context) func(context.Context, []anthropicclient.Message, int) error {
+	saver, _ := ctx.Value(replaySaverKey{}).(func(context.Context, []anthropicclient.Message, int) error)
 	return saver
 }
 
@@ -422,16 +423,20 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		// Store the actual environment for this execution, not the environment
 		// of a future client rebuilding its history.
 		environment := executionenv.Context(workDir)
-		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message) error {
+		recorder := transcript.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID})
+		envJSON, _ := json.Marshal(environment)
+		header := transcript.ReplayHeader{Format: "envelope", ItemsKey: "messages", Envelope: map[string]json.RawMessage{"anthropic_execution_environment": envJSON}, UserContent: req.Message}
+		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message, firstChanged int) error {
 			replayMessages = messages
-			_, err := a.execRepo.SaveConversationReplay(saveCtx, req.ExecID, anthropicEnvironmentReplay{Environment: environment, Messages: messages}, models.ExecutionReplayMessage{UserContent: req.Message})
+			err := recorder.SaveChanged(saveCtx, header, transcript.Values(messages), firstChanged)
 			return err
 		})
 		defer func() {
 			if len(replayMessages) == 0 {
 				replayMessages = []anthropicclient.Message{{Role: "user", Content: req.Message}, {Role: "assistant", Content: result.TextOnlyOutput}}
 			}
-			_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), req.ExecID, anthropicEnvironmentReplay{Environment: environment, Messages: replayMessages}, models.ExecutionReplayMessage{UserContent: req.Message, AssistantContent: result.TextOnlyOutput})
+			header.AssistantContent = result.TextOnlyOutput
+			err := recorder.Save(context.WithoutCancel(ctx), header, transcript.Values(replayMessages))
 			if err != nil {
 				callErr = errors.Join(callErr, fmt.Errorf("persist Anthropic execution environment: %w", err))
 			}
@@ -525,7 +530,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		ToolExecutor:              toolExecutor,
 		ToolFilter:                toolFilter,
 		OnToolBoundarySteering:    llmcontracts.SteeringCallbackFromContext(ctx),
-		OnReplaySave:              replaySaver(ctx),
+		OnReplayChanged:           replaySaver(ctx),
 		OnReplay:                  recordConversationReplay(ctx),
 		RecoveryMessages:          recoveryMessages(ctx),
 		OnCompaction: func(summary string) {
@@ -604,7 +609,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
-		OnReplaySave:           replaySaver(ctx),
+		OnReplayChanged:        replaySaver(ctx),
 		OnReplay:               recordConversationReplay(ctx),
 		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
@@ -710,7 +715,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
-		OnReplaySave:           replaySaver(ctx),
+		OnReplayChanged:        replaySaver(ctx),
 		OnReplay:               recordConversationReplay(ctx),
 		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
@@ -844,10 +849,10 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		var structured []anthropicclient.Message
 		for _, replay := range exec.ReplayMessages {
 			var saved anthropicEnvironmentReplay
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.Messages) > 0 {
+			if replay.DecodeTranscript(&saved) == nil && len(saved.Messages) > 0 {
 				structured = saved.Messages
 			}
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
+			if replay.DecodeTranscript(&saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
 				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
 				lastEnvironment = saved.Environment
 			}

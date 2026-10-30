@@ -147,7 +147,7 @@ func TestCompactionFlowMatrix(t *testing.T) {
 func matrixInturnFailure(req llmcontracts.AgentRequest, cause error) error {
 	switch req.Agent.Provider {
 	case models.ProviderOpenAI:
-		llmcontracts.RecordResponsesRecovery(req.Ctx, `{"responses_input":[{"type":"message","role":"user","content":"CURRENT_REQUEST"},{"type":"function_call","call_id":"write","name":"write_file","arguments":"{}"},{"type":"function_call_output","call_id":"write","output":"TOOL_FINISHED"}]}`)
+		llmcontracts.RecordResponsesRecovery(req.Ctx, recoveryItemsForTest(`{"responses_input":[{"type":"message","role":"user","content":"CURRENT_REQUEST"},{"type":"function_call","call_id":"write","name":"write_file","arguments":"{}"},{"type":"function_call_output","call_id":"write","output":"TOOL_FINISHED"}]}`))
 		return cause
 	case models.ProviderAnthropic:
 		return &anthropicclient.ConversationError{Err: cause, MessagesJSON: `[{"role":"user","content":"CURRENT_REQUEST"},{"role":"assistant","content":[{"type":"tool_use","id":"write","name":"write_file","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"write","content":"TOOL_FINISHED"}]}]`}

@@ -91,13 +91,6 @@ const upcomingBlockedTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
  ORDER BY t.priority DESC, t.display_order ASC, t.updated_at ASC, t.id ASC
  LIMIT ?`
 
-const upcomingPendingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
-	` + upcomingTaskListWithoutScheduleColumns + `
- FROM tasks t
- LEFT JOIN agent_configs ac ON ac.id = t.agent_id
- WHERE t.project_id = ? AND t.category = 'active' AND t.status = 'pending'
- ORDER BY t.priority DESC, t.display_order ASC`
-
 const upcomingScheduledTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
 	` + upcomingTaskListScheduleColumns + `
  FROM tasks t
@@ -133,15 +126,6 @@ func (r *UpcomingRepo) ListBlockedTasks(ctx context.Context, projectID string) (
 	tasks, err := r.listUpcomingTasks(ctx, upcomingBlockedTasksQuery, upcomingTaskPromptPreviewLen, projectID, upcomingBlockedTasksLimit)
 	if err != nil {
 		return nil, fmt.Errorf("listing blocked tasks: %w", err)
-	}
-	return tasks, nil
-}
-
-// ListPendingActiveTasks returns active tasks with pending status.
-func (r *UpcomingRepo) ListPendingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
-	tasks, err := r.listUpcomingTasks(ctx, upcomingPendingActiveTasksQuery, upcomingTaskPromptPreviewLen, projectID)
-	if err != nil {
-		return nil, fmt.Errorf("listing pending active tasks: %w", err)
 	}
 	return tasks, nil
 }
@@ -182,11 +166,7 @@ const historyExecutionLimit = 200
 func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID string, since time.Time) ([]models.HistoryExecution, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status,
-			SUBSTR(COALESCE(e.output, '') || COALESCE((
-				SELECT group_concat(output, '') FROM (
-					SELECT output FROM execution_output_chunks WHERE execution_id = e.id ORDER BY id
-				)
-			), ''), 1, ?),
+			SUBSTR(`+executionOutputSelectAlias+`, 1, ?),
 			SUBSTR(e.error_message, 1, ?),
 			e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
 			t.title as task_title,

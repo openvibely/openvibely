@@ -156,8 +156,8 @@ func newReviewFollowupHistoryFixture(tb testing.TB) *reviewFollowupHistoryFixtur
 	output := strings.Repeat("o", reviewFollowupHistoryOutputBytes)
 	errorMessage := strings.Repeat("review-error-", 64)
 	statement, err := connections.Writer.PrepareContext(ctx, `INSERT INTO executions
-		(id, task_id, status, prompt_sent, output, error_message, starts_new_context, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		(id, task_id, status, prompt_sent, error_message, starts_new_context, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		tb.Fatalf("prepare review follow-up fixture insert: %v", err)
 	}
@@ -175,10 +175,11 @@ func newReviewFollowupHistoryFixture(tb testing.TB) *reviewFollowupHistoryFixtur
 			completedAt = nil
 		}
 		if _, err := statement.ExecContext(ctx,
-			fmt.Sprintf("review-followup-history-%03d", i), task.ID, status, prompt, output, errorMessage, i == 185,
+			fmt.Sprintf("review-followup-history-%03d", i), task.ID, status, prompt, errorMessage, i == 185,
 			baseTime.Add(time.Duration(i)*time.Second), completedAt); err != nil {
 			tb.Fatalf("insert review follow-up execution %d: %v", i, err)
 		}
+		seedExecutionDisplay(tb, connections.Writer, fmt.Sprintf("review-followup-history-%03d", i), output)
 	}
 
 	return &reviewFollowupHistoryFixture{

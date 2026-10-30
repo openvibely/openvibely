@@ -16,6 +16,11 @@ import (
 // non-empty line is accepted. Mentions in prose, malformed or incomplete forms,
 // examples, bullets, quotes, or code fences are not terminal status reports.
 func ExtractMarker(output, prefix string) (string, bool) {
+	// Ordinary completions have no control marker. Avoid building Markdown
+	// line/code ranges unless the requested marker can actually be present.
+	if !strings.Contains(output, prefix) {
+		return "", false
+	}
 	line, _, ok := finalStandaloneLine(output)
 	if !ok || !strings.HasPrefix(line, prefix) {
 		return "", false
@@ -61,6 +66,9 @@ func finalStandaloneLine(output string) (string, int, bool) {
 // it is the final standalone non-empty line. Marker-shaped prose, examples,
 // bullets, quotes, fenced content, and non-final lines remain visible.
 func StripFinalStatusControl(output string) string {
+	if !strings.Contains(output, "[STATUS:") {
+		return output
+	}
 	line, lastNonEmpty, ok := finalStandaloneLine(output)
 	if !ok || !isCanonicalStatusLine(line) {
 		return output

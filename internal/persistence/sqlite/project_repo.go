@@ -205,6 +205,21 @@ func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, 
 	return &p, nil
 }
 
+// GetManagedPermissions reads current grants without loading unrelated project
+// text, paths, defaults, or timestamps. Missing projects remain denied.
+func (r *ProjectRepo) GetManagedPermissions(ctx context.Context, id string) (models.SkillMemoryPermissions, error) {
+	var p models.Project
+	err := r.db.QueryRowContext(ctx, `SELECT skill_memory_permissions FROM projects WHERE id = ?`, id).
+		Scan(projectPermissionScanner{&p})
+	if err == sql.ErrNoRows {
+		return models.SkillMemoryPermissions{}, nil
+	}
+	if err != nil {
+		return models.SkillMemoryPermissions{}, fmt.Errorf("getting project permissions: %w", err)
+	}
+	return p.ManagedPermissions(), nil
+}
+
 // GetDefaultAgentConfigID returns only the project default model ID used by hot
 // task-thread render paths. Full project detail reads should continue using GetByID.
 func (r *ProjectRepo) GetDefaultAgentConfigID(ctx context.Context, id string) (*string, error) {

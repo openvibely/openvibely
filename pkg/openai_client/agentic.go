@@ -52,6 +52,10 @@ Return only the summary text.`
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
+	// responseText is owned by one sampling turn. The parser and failure recovery
+	// share this builder instead of accumulating the same delivered text twice.
+	responseText *strings.Builder
+
 	Model           string
 	MaxOutputTokens int
 	ContextWindow   int
@@ -151,6 +155,8 @@ type AgenticOptions struct {
 	InitialInputCommit func(context.Context, []any) error
 	// OnHistory persists conversation state independently of steering.
 	OnHistory func(context.Context, []any) error
+	// OnHistoryChanged reports the first possibly changed item; the prefix is unchanged.
+	OnHistoryChanged func(context.Context, []any, int) error
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -499,24 +505,42 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	var allText strings.Builder
 	persistSteeringHistory := opts.InitialInputCommit
+	firstChanged := 0
+	persistedGeneration := compactionGeneration
 	persistHistory := func(ctx context.Context, items []any) error {
+		if compactionGeneration != persistedGeneration || firstChanged > len(items) {
+			firstChanged = 0
+		}
 		if persistSteeringHistory != nil {
 			if err := persistSteeringHistory(ctx, items); err != nil {
 				return err
 			}
 		}
-		if opts.OnHistory != nil {
-			return opts.OnHistory(ctx, items)
+		if opts.OnHistoryChanged != nil {
+			if err := opts.OnHistoryChanged(ctx, items, firstChanged); err != nil {
+				return err
+			}
+		} else if opts.OnHistory != nil {
+			if err := opts.OnHistory(ctx, items); err != nil {
+				return err
+			}
 		}
+		firstChanged = len(items)
+		persistedGeneration = compactionGeneration
 		return nil
 	}
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		// Context helpers insert updates without editing existing messages.
+		beforeContext := len(inputItems)
 		inputItems = ensureAttachmentContext(ctx, inputItems)
 		if !opts.OmitExecutionEnvironment {
 			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
 		}
-		if persistSteeringHistory != nil || opts.OnHistory != nil {
+		if len(inputItems) != beforeContext {
+			firstChanged = 0
+		}
+		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
 			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
@@ -543,12 +567,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// fails before it can publish a completed assistant message.
 		var partialText strings.Builder
 		streamOpts := *opts
-		streamOpts.OnText = func(text string) {
-			partialText.WriteString(text)
-			if opts.OnText != nil {
-				opts.OnText(text)
-			}
-		}
+		streamOpts.responseText = &partialText
 
 		turnResult, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 			RetryableError: func(err error) bool {
@@ -629,7 +648,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
 		inputItems = append(inputItems, outputItems...)
-		if persistSteeringHistory != nil || opts.OnHistory != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
 			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
@@ -790,7 +809,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		// Preserve completed tool results even when cancellation or compaction
 		// prevents the next model request from starting.
-		if persistSteeringHistory != nil || opts.OnHistory != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
 			if err := persistHistory(context.WithoutCancel(ctx), inputItems); err != nil {
 				return nil, err
 			}
@@ -838,7 +857,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 		}
 	}
-	if persistSteeringHistory != nil || opts.OnHistory != nil {
+	if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
 		if err := persistHistory(ctx, inputItems); err != nil {
 			return nil, err
 		}
@@ -1202,18 +1221,30 @@ func marshalAgenticItemAndImageAdjustment(item any) (int, int, int, bool, error)
 		return len(serialized), 0, 0, false, err
 	}
 	itemMap, ok := item.(map[string]any)
-	if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(itemMap["type"])), "message") {
+	if !ok {
 		return marshalFallback()
 	}
-	if _, ok := itemMap["content"].([]any); !ok {
+	message := false
+	switch strings.ToLower(strings.TrimSpace(stringFromAny(itemMap["type"]))) {
+	case "message":
+		if _, ok := itemMap["content"].([]any); !ok {
+			return marshalFallback()
+		}
+		message = true
+	case "function_call", "function_call_output":
+		// Arguments and tool output can be large strings too. Count their JSON
+		// size without constructing a serialized copy solely for token budgeting.
+	default:
 		return marshalFallback()
 	}
 
 	serialized, removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, optimized, ok := agenticJSONSizeReplacingImageURLs(item, 0)
-	if !ok || !optimized {
+	if !ok || (optimized && !message) {
 		return marshalFallback()
 	}
-	return serialized + removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, true, nil
+	// A successful count is useful even without an image. Previously ordinary
+	// text was scanned here and then marshaled again, discarding the count.
+	return serialized + removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, optimized, nil
 }
 
 // agenticJSONSizeReplacingImageURLs counts the JSON bytes for decoded Responses
@@ -2762,7 +2793,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 				opts.OnToolResult(name, output, isError)
 			}
 		}
-		result, wsErr := c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
+		result, wsErr := c.parseAgenticStreamCapturingText(body, onText, onThinking, onToolUse, onToolResult, opts.responseText)
 		body.Close()
 		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
@@ -2816,7 +2847,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed))
 	}
 
-	result, err := c.parseAgenticStreamWithToolCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	result, err := c.parseAgenticStreamCapturingText(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult, opts.responseText)
 	if err != nil {
 		return result, httpretry.NewStreamError(err)
 	}
@@ -2829,13 +2860,19 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 }
 
 func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool)) (*agenticTurnResult, error) {
-	scanner := newResponsesStreamScanner(body)
+	return c.parseAgenticStreamCapturingText(body, onText, onThinking, onToolUse, onToolResult, nil)
+}
+
+func (c *Client) parseAgenticStreamCapturingText(body io.Reader, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool), textBuilder *strings.Builder) (*agenticTurnResult, error) {
+	scanner := newResponsesEventIterator(body)
 
 	result := &agenticTurnResult{}
-	var textBuilder strings.Builder
+	if textBuilder == nil {
+		textBuilder = &strings.Builder{}
+	}
+	textStart := textBuilder.Len()
 	var completed map[string]any
 	sawThinking := false
-	currentEventType := ""
 
 	// Track function calls being built incrementally
 	type fnCallState struct {
@@ -2855,38 +2892,35 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 		}
 	})
 
+	var header struct {
+		Type string `json:"type"`
+	}
+	var text struct {
+		Delta string `json:"delta"`
+	}
 	for scanner.Scan() {
-		rawLine := scanner.Text()
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
-			currentEventType = ""
-			continue
-		}
-		if strings.HasPrefix(line, "event:") {
-			currentEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-			continue
-		}
-
-		data, isData, err := responsesStreamDataFromLine(rawLine)
-		if err != nil {
-			return nil, err
-		}
-		if !isData || data == "" || data == "[DONE]" {
-			continue
-		}
-
-		var ev map[string]any
-		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			continue
-		}
-
-		typ := strings.TrimSpace(firstNonEmpty(stringFromAny(ev["type"]), currentEventType))
-		switch typ {
-		case "response.output_text.delta":
-			delta := stringFromAny(ev["delta"])
-			if delta != "" {
-				emitter.Write(delta)
+		event := scanner.event
+		data := event.data
+		typ := strings.TrimSpace(event.typ)
+		if !event.websocket {
+			header.Type = ""
+			if err := json.Unmarshal(data, &header); err != nil {
+				continue
 			}
+			typ = strings.TrimSpace(firstNonEmpty(header.Type, typ))
+		}
+		if typ == "response.output_text.delta" {
+			text.Delta = ""
+			if json.Unmarshal(data, &text) == nil && text.Delta != "" {
+				emitter.Write(text.Delta)
+			}
+			continue
+		}
+		ev := decodeResponsesComplexEvent(data)
+		if ev == nil {
+			continue
+		}
+		switch typ {
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			if onThinking != nil {
 				delta := stringFromAny(ev["delta"])
@@ -3035,7 +3069,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 		}
 	}
 	emitter.Flush()
-	result.text = textBuilder.String()
+	result.text = textBuilder.String()[textStart:]
 	if err := scanner.Err(); err != nil {
 		return result, err
 	}

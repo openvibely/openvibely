@@ -25,7 +25,7 @@ func TestSaveInTurnCompactionCheckpointAtomicReplayRetirement(t *testing.T) {
 	before, err := executions.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
 	require.NoError(t, err)
 	// Fail after the checkpoint upsert and replay delete, during sentinel insertion.
-	_, err = db.Exec(`CREATE TRIGGER fail_replay_insert BEFORE INSERT ON execution_replay_messages BEGIN SELECT RAISE(ABORT, 'injected replay failure'); END`)
+	_, err = db.Exec(`CREATE TRIGGER fail_replay_insert BEFORE INSERT ON conversation_items WHEN NEW.lane IN ('provider', 'metadata') BEGIN SELECT RAISE(ABORT, 'injected replay failure'); END`)
 	require.NoError(t, err)
 	checkpoint.Strategy = "local_summary_inflight"
 	checkpoint.Summary = "new summary"

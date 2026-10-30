@@ -18,7 +18,7 @@ func hasOpaqueCompaction(history []models.Execution) bool {
 			var saved struct {
 				Input []struct{ Type string } `json:"responses_input"`
 			}
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) != nil {
+			if replay.DecodeTranscript(&saved) != nil {
 				continue
 			}
 			for _, item := range saved.Input {
@@ -41,7 +41,7 @@ func portableRecoveryParts(history []models.Execution) (int, []models.Execution)
 			var saved struct {
 				Input []json.RawMessage `json:"responses_input"`
 			}
-			if json.Unmarshal([]byte(history[i].ReplayMessages[j].TranscriptJSON), &saved) != nil {
+			if history[i].ReplayMessages[j].DecodeTranscript(&saved) != nil {
 				continue
 			}
 			for k := len(saved.Input) - 1; k >= 0; k-- {
@@ -190,7 +190,7 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 	for _, exec := range tail {
 		for _, replay := range exec.ReplayMessages {
 			var messages []openaiclient.CompletionsHistoryMessage
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &messages) != nil {
+			if replay.DecodeTranscript(&messages) != nil {
 				continue
 			}
 			for _, m := range messages {

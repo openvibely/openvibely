@@ -620,7 +620,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnHistory:                      a.responsesHistoryRecorder(execID),
+		OnHistoryChanged:               a.responsesHistoryChangesRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -766,7 +766,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnHistory:                      a.responsesHistoryRecorder(execID),
+		OnHistoryChanged:               a.responsesHistoryChangesRecorder(execID),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -1189,10 +1189,10 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 			var saved struct {
 				ResponsesInput []any `json:"responses_input"`
 			}
-			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.ResponsesInput) > 0 {
+			if replay.DecodeTranscript(&saved) == nil && len(saved.ResponsesInput) > 0 {
 				messages = []openaiclient.Message{{ResponsesInputItems: saved.ResponsesInput}}
 				checkpoint = true
-			} else if items := completionsReplayInput(replay.TranscriptJSON); len(items) > 0 {
+			} else if items := completionsReplayMessageInput(replay); len(items) > 0 {
 				// Completions records contain this execution only; preserve the prefix.
 				prefix := historyMessageItems(messages)
 				messages = []openaiclient.Message{{ResponsesInputItems: append(prefix, items...)}}

@@ -498,15 +498,6 @@ func outputContractPromptSpec(contract models.LifecycleOutputContract) string {
 	}
 }
 
-// extractJSONPayload pulls the first JSON value out of a model reply. If the
-// reply is already a JSON object/array, it is returned verbatim. Otherwise the
-// function looks for fenced JSON and then for the first balanced inline JSON
-// object/array. Falling all the way through returns the trimmed reply so the
-// validator can produce the canonical error.
-func extractJSONPayload(reply string) string {
-	return extractJSONPayloadForContract(reply, "")
-}
-
 func extractJSONPayloadForContract(reply string, contract models.LifecycleOutputContract) string {
 	s := strings.TrimSpace(reply)
 	if s == "" {

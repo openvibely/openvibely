@@ -53,11 +53,11 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 				@components.ChatBubble("User", exec.PromptSent)
 			}
 			if exec.Status == models.ExecCompleted {
-				@components.ChatBubble("Assistant", exec.Output)
+				@components.ChatBubble("Assistant", exec.Output, exec.DisplayTail)
 			} else if exec.Status == models.ExecFailed {
-				@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+				@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output, exec.DisplayTail)
 			} else if exec.Status == models.ExecCancelled {
-				@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
+				@components.ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail)
 			} else if exec.Status == models.ExecRunning {
 				@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
 			}
@@ -128,11 +128,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								@components.ChatBubble("User", exec.PromptSent)
 							}
 							if exec.Status == models.ExecCompleted {
-								@components.ChatBubble("Assistant", exec.Output)
+								@components.ChatBubble("Assistant", exec.Output, exec.DisplayTail)
 							} else if exec.Status == models.ExecFailed {
-								@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+								@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output, exec.DisplayTail)
 							} else if exec.Status == models.ExecCancelled {
-								@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
+								@components.ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail)
 							} else if exec.Status == models.ExecRunning {
 								@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
 							}

@@ -70,13 +70,6 @@ type SkillPackageFile struct {
 	Content []byte
 }
 
-// SkillPackage captures normalized package input before it is persisted.
-type SkillPackage struct {
-	Decl         *SkillDeclaration
-	Body         string
-	PackageFiles []SkillPackageFile
-}
-
 // NormalizeStandaloneSkillPackage accepts either full OpenVibely SKILL.md
 // declarations or common standalone skill frontmatter with top-level
 // name/description fields and converts it into the declaration shape rendered by

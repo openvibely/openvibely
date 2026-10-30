@@ -89,11 +89,10 @@ func ensureAttachmentContext(ctx context.Context, items []any) []any {
 		text, _ := m["content"].(string)
 		return role, text
 	}, func(text string) any { return map[string]any{"type": "message", "role": "user", "content": text} })
+	if len(restored) == end-start {
+		return items
+	}
 	out := append([]any(nil), items[:start]...)
 	out = append(out, restored...)
 	return append(out, items[end:]...)
-}
-func ensureCompletionsAttachments(ctx context.Context, items []completionsMessage) []completionsMessage {
-	items = managedcontext.Ensure(ctx, items, func(m completionsMessage) (string, string) { s, _ := m.Content.(string); return m.Role, s }, func(s string) completionsMessage { return completionsMessage{Role: "user", Content: s} })
-	return attachmentcontext.Ensure(ctx, items, func(m completionsMessage) (string, string) { s, _ := m.Content.(string); return m.Role, s }, func(s string) completionsMessage { return completionsMessage{Role: "user", Content: s} })
 }

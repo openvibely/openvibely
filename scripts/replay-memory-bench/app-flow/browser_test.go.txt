@@ -1,0 +1,102 @@
+package pages
+
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/stretchr/testify/require"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+)
+
+// Runs each checkout's real task page, handlers, repository, assets and renderer.
+// The server points at the database produced by that checkout's growing flow.
+func TestAppFlowBrowser(t *testing.T) {
+	dir := os.Getenv("OV_FLOW_DIR")
+	if dir == "" {
+		t.Skip("opt-in app flow browser")
+	}
+	raw, e := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	require.NoError(t, e)
+	var manifest struct {
+		Task, OtherTask, Project string
+		Turns                    int
+	}
+	require.NoError(t, json.Unmarshal(raw, &manifest))
+	raw, e = os.ReadFile(filepath.Join(dir, "app-url"))
+	require.NoError(t, e)
+	base := string(raw)
+	url := base + "/tasks/" + manifest.Task + "?project_id=" + manifest.Project
+	other := "/tasks/" + manifest.OtherTask + "?project_id=" + manifest.Project
+	current := "/tasks/" + manifest.Task + "?project_id=" + manifest.Project
+	runComposerFocusCDP(t, chatNavigationChromePath(t), "about:blank", "app-flow", func(b *composerFocusCDP) {
+		b.call("Performance.enable", nil, nil)
+		taskCPU := func() float64 {
+			var result struct {
+				Metrics []struct {
+					Name  string  `json:"name"`
+					Value float64 `json:"value"`
+				} `json:"metrics"`
+			}
+			b.call("Performance.getMetrics", nil, &result)
+			for _, m := range result.Metrics {
+				if m.Name == "TaskDuration" {
+					return m.Value * 1000
+				}
+			}
+			return 0
+		}
+		readyHeap := func(label, expression string) float64 {
+			peak := float64(0)
+			deadline := time.Now().Add(60 * time.Second)
+			for time.Now().Before(deadline) {
+				ready := b.evaluate(expression)
+				var heap map[string]float64
+				b.call("Runtime.getHeapUsage", nil, &heap)
+				if heap["usedSize"] > peak {
+					peak = heap["usedSize"]
+				}
+				if ready == "true" {
+					return peak
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatalf("%s timed out", label)
+			return peak
+		}
+		cpuStart := taskCPU()
+		b.call("Page.navigate", map[string]any{"url": url}, nil)
+		// Current viewport must be hydrated with Markdown, not merely raw fallback text.
+		ready := `String(!!document.getElementById('task-thread-messages') && document.getElementById('task-thread-messages').dataset.transcriptHydrating!=='true' && !!document.querySelector('.chat-stream-content strong') && !window._chatContentRenderActive && !window._chatContentRenderQueue?.length)`
+		initialPeak := readyHeap("cold thread ready", ready)
+		initialCPU := taskCPU() - cpuStart
+		initial := b.evaluate(`String(performance.now())`)
+		b.waitFor("latest content", fmt.Sprintf(`String(Array.from(document.querySelectorAll('.chat-stream-content')).some(e=>(e.getAttribute('data-raw-content')||'').includes('TURN_%d_END')))`, manifest.Turns-1), "true")
+		var initialHeap map[string]float64
+		b.call("Runtime.getHeapUsage", nil, &initialHeap)
+		sourceBytes := b.evaluate(`String(Array.from(document.querySelectorAll('.chat-stream-content')).reduce((n,e)=>n+new TextEncoder().encode(e.getAttribute('data-raw-content')||'').length,0))`)
+		navigationBytes := b.evaluate(`String(performance.getEntriesByType('navigation')[0].decodedBodySize)`)
+		// Observe a cached preview, not just an unrelated fast network refresh.
+		b.evaluate(fmt.Sprintf(`window.openVibelyNavigate(%q);'away'`, other))
+		b.waitForTimeout("other task", fmt.Sprintf(`String(location.pathname==='/tasks/%s' && !!document.getElementById('task-thread-messages') && document.getElementById('task-thread-messages').dataset.transcriptHydrating!=='true')`, manifest.OtherTask), "true", 30*time.Second)
+		cachedBytes := b.evaluate(`(() => { const strings=new Set();const c=window.openVibelyThreadCache;c.pages.forEach(p=>p.sources.forEach(s=>strings.add(s.text)));c.runs.forEach(r=>strings.add(r.output));return String(Array.from(strings).reduce((n,s)=>n+new TextEncoder().encode(s||'').length,0)); })()`)
+		b.call("HeapProfiler.collectGarbage", nil, nil)
+		var cachedHeap map[string]float64
+		b.call("Runtime.getHeapUsage", nil, &cachedHeap)
+		reopenCPUStart := taskCPU()
+		b.evaluate(fmt.Sprintf(`window._flowStart=performance.now();window._flowCached=false;document.addEventListener('htmx:beforeSwap',e=>{if(e.detail._ovCachedPreview)window._flowCached=true;},true);window.openVibelyNavigate(%q);'back'`, current))
+		reopenPeak := readyHeap("cached task ready", fmt.Sprintf(`String(window._flowCached && location.pathname==='/tasks/%s' && document.getElementById('task-thread-messages')?.dataset.transcriptHydrating!=='true' && !!document.querySelector('.chat-stream-content strong'))`, manifest.Task))
+		reopened := b.evaluate(`String(performance.now()-window._flowStart)`)
+		reopenCPU := taskCPU() - reopenCPUStart
+		var reopenHeap map[string]float64
+		b.call("Runtime.getHeapUsage", nil, &reopenHeap)
+		parse := func(s string) float64 { n, e := strconv.ParseFloat(s, 64); require.NoError(t, e); return n }
+		result := map[string]any{"cold_renderer_cpu_ms": initialCPU, "cached_renderer_cpu_ms": reopenCPU, "cold_sampled_peak_heap_bytes": initialPeak, "cached_sampled_peak_heap_bytes": reopenPeak, "cold_ready_ms": parse(initial), "cached_ready_ms": parse(reopened), "initial_heap_bytes": initialHeap["usedSize"], "cached_retained_heap_bytes": cachedHeap["usedSize"], "reopen_heap_bytes": reopenHeap["usedSize"], "initial_source_bytes": parse(sourceBytes), "navigation_body_bytes": parse(navigationBytes), "cached_unique_source_bytes": parse(cachedBytes), "cached_preview_verified": true}
+		encoded, e := json.MarshalIndent(result, "", "  ")
+		require.NoError(t, e)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "browser.json"), encoded, 0600))
+		fmt.Println("APP_FLOW_BROWSER", string(encoded))
+	})
+}

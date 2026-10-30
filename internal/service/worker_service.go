@@ -1132,14 +1132,6 @@ func (w *WorkerService) RegisterCancelOwned(taskID string, cancel context.Cancel
 	return id
 }
 
-// DeregisterCancel removes the cancel function for a task after it completes.
-func (w *WorkerService) DeregisterCancel(taskID string) {
-	w.cancelMu.Lock()
-	delete(w.cancelFuncs, taskID)
-	delete(w.cancelRegistrationIDs, taskID)
-	w.cancelMu.Unlock()
-}
-
 func (w *WorkerService) DeregisterCancelOwned(taskID string, registrationID uint64) {
 	w.cancelMu.Lock()
 	if currentID, ok := w.cancelRegistrationIDs[taskID]; ok && currentID == registrationID {

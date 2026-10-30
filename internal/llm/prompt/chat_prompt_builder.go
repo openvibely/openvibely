@@ -6,10 +6,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-// TaskFollowupSystemPrompt extends AgentSystemPrompt with task-followup-specific
-// execution constraints. Mutations are available only through request-scoped tools.
-const TaskFollowupSystemPrompt = AgentSystemPrompt + taskFollowupConstraints
-
 const taskFollowupConstraints = `
 # Task Follow-up Constraints
 

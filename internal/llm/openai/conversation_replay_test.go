@@ -56,7 +56,10 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 		for _, cancelled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/cancelled=%v", transport, cancelled), func(t *testing.T) {
 				var recoverySnapshot string
-				ctx := llmcontracts.WithResponsesRecovery(retrytest.Context(), func(raw string) { recoverySnapshot = raw })
+				ctx := llmcontracts.WithResponsesRecovery(retrytest.Context(), func(items []any) {
+					raw, _ := json.Marshal(map[string]any{"responses_input": items})
+					recoverySnapshot = string(raw)
+				})
 				stores := teststores.New(t).Stores
 				task := &models.Task{ProjectID: "default", Title: "Replay", Category: models.CategoryChat, Status: models.StatusCompleted}
 				require.NoError(t, stores.Tasks.Create(ctx, task))

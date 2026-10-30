@@ -290,3 +290,24 @@ func TestPortableAnthropicCheckpoint(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestNativeReplayRowNormalizationMatchesLegacy(t *testing.T) {
+	for _, rows := range []*models.ReplayRows{
+		{Format: "envelope", ItemsKey: "responses_input", Items: []json.RawMessage{json.RawMessage(`{"type":"message","role":"user","content":"context"}`)}},
+		{Format: "envelope", ItemsKey: "messages", Items: []json.RawMessage{json.RawMessage(`{"role":"user","content":"context"}`)}},
+		{Format: "array", Items: []json.RawMessage{json.RawMessage(`{"role":"user","content":"context"}`)}},
+	} {
+		for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+			t.Run(rows.Format+rows.ItemsKey+string(provider), func(t *testing.T) {
+				replay := models.ExecutionReplayMessage{Rows: rows}
+				legacy := models.ExecutionReplayMessage{TranscriptJSON: replay.FullTranscriptJSON()}
+				for _, summary := range []bool{false, true} {
+					a := normalizeProviderReplay(provider, []models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{replay}}}, summary)
+					b := normalizeProviderReplay(provider, []models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{legacy}}}, summary)
+					require.Len(t, a, len(b))
+					require.JSONEq(t, b[0].ReplayMessages[0].FullTranscriptJSON(), a[0].ReplayMessages[0].FullTranscriptJSON())
+				}
+			})
+		}
+	}
+}

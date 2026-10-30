@@ -424,3 +424,24 @@ func TestExecuteTool_UnknownTool(t *testing.T) {
 		t.Errorf("error = %q", err.Error())
 	}
 }
+
+func TestToolEncodingPreservesLiveFiltering(t *testing.T) {
+	defs := DefaultTools()
+	allow := true
+	filter := func(string) bool { return allow }
+	if len(filterToolDefinitions(append([]ToolDefinition(nil), defs...), filter)) == 0 {
+		t.Fatal("allowed tools lost")
+	}
+	allow = false
+	if len(filterToolDefinitions(append([]ToolDefinition(nil), defs...), filter)) != 0 {
+		t.Fatal("permission revocation ignored")
+	}
+	invalid := []ToolDefinition{{Type: "function", Name: "bad", Parameters: json.RawMessage(`{`)}}
+	if _, err := json.Marshal(invalid); err == nil {
+		t.Fatal("invalid advertised schema accepted")
+	}
+	denied := filterToolDefinitions(invalid, func(string) bool { return false })
+	if _, err := json.Marshal(denied); err != nil {
+		t.Fatal("denied schema failed request", err)
+	}
+}

@@ -2734,7 +2734,7 @@ func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T
 	textContent := "Hello, this is a test file."
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte(textContent), 0644))
 
-	textContext, imageAttachments, err := h.processAttachments(ctx, sessionID, exec.ID)
+	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, sessionID, exec.ID)
 	require.NoError(t, err)
 
 	// Text file should be included in text context
@@ -2793,7 +2793,7 @@ func TestProcessAttachments_LargeTextFileNotIncludedInline(t *testing.T) {
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "large.txt"), largeContent, 0644))
 
-	textContext, imageAttachments, err := h.processAttachments(ctx, sessionID, exec.ID)
+	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, sessionID, exec.ID)
 	require.NoError(t, err)
 
 	// Large file should be mentioned but content should NOT be included
@@ -2815,7 +2815,7 @@ func TestProcessAttachments_NoSession(t *testing.T) {
 	defer func() { uploadsDir = oldUploadsDir }()
 
 	ctx := context.Background()
-	textContext, imageAttachments, err := h.processAttachments(ctx, "nonexistent-session", "exec-id")
+	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, "nonexistent-session", "exec-id")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stage=session-source")
 	assert.Empty(t, textContext)
@@ -2862,7 +2862,7 @@ func TestProcessAttachments_MultipleImageTypes(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "icon.gif"), []byte("GIF89a"), 0644))
 	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "banner.webp"), []byte("RIFF"), 0644))
 
-	textContext, imageAttachments, err := h.processAttachments(ctx, sessionID, exec.ID)
+	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, sessionID, exec.ID)
 	require.NoError(t, err)
 
 	// No text context for image-only attachments

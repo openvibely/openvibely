@@ -167,7 +167,7 @@ func TestUpcomingRepo_ListPendingActiveTasks(t *testing.T) {
 		t.Fatalf("creating backlog task: %v", err)
 	}
 
-	results, err := upcomingRepo.ListPendingActiveTasks(context.Background(), project.ID)
+	results, err := upcomingRepo.ListWaitingActiveTasks(context.Background(), project.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestUpcomingRepo_ListPendingActiveTasks_PromptPreviewBounded(t *testing.T) 
 		t.Fatalf("creating task: %v", err)
 	}
 
-	results, err := upcomingRepo.ListPendingActiveTasks(context.Background(), project.ID)
+	results, err := upcomingRepo.ListWaitingActiveTasks(context.Background(), project.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -812,7 +812,7 @@ func TestUpcomingRepo_EmptyProject(t *testing.T) {
 		t.Fatalf("expected 0 running tasks, got %d", len(running))
 	}
 
-	pending, err := upcomingRepo.ListPendingActiveTasks(context.Background(), project.ID)
+	pending, err := upcomingRepo.ListWaitingActiveTasks(context.Background(), project.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

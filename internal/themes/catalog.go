@@ -199,14 +199,6 @@ func OpenVibelyThemes() []Theme {
 	}
 }
 
-func CatalogJSON() string {
-	data, err := json.Marshal(Catalog())
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
 var runtimeCatalog struct {
 	once sync.Once
 	json string

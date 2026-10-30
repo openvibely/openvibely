@@ -65,10 +65,11 @@ func TestExecutionRepo_ListByTaskChronologicalPage(t *testing.T) {
 	}
 	for _, row := range rows {
 		if _, err := db.ExecContext(ctx, `INSERT INTO executions
-			(id, task_id, status, prompt_sent, output, is_followup, started_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, row.prompt, "output "+row.prompt, row.isFollowup, startedAt); err != nil {
+			(id, task_id, status, prompt_sent, is_followup, started_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, row.prompt, row.isFollowup, startedAt); err != nil {
 			t.Fatalf("insert execution %s: %v", row.id, err)
 		}
+		seedExecutionDisplay(t, db, row.id, "output "+row.prompt)
 	}
 
 	total, err := execRepo.CountByTask(ctx, task.ID)
@@ -113,11 +114,12 @@ func TestExecutionRepo_GetTaskExecutionMetrics(t *testing.T) {
 		{id: "exec-newest", startedAt: base.Add(2 * time.Minute), durationMs: 0},
 	}
 	for _, row := range rows {
-		_, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent, output, duration_ms, started_at, completed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, "prompt", "output", row.durationMs, row.startedAt.Format("2006-01-02 15:04:05"), row.startedAt.Add(time.Second).Format("2006-01-02 15:04:05"))
+		_, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent, duration_ms, started_at, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, row.id, task.ID, models.ExecCompleted, "prompt", row.durationMs, row.startedAt.Format("2006-01-02 15:04:05"), row.startedAt.Add(time.Second).Format("2006-01-02 15:04:05"))
 		if err != nil {
 			t.Fatalf("insert execution %s: %v", row.id, err)
 		}
+		seedExecutionDisplay(t, db, row.id, "output")
 	}
 
 	metrics, err := execRepo.GetTaskExecutionMetrics(ctx, task.ID)
@@ -204,8 +206,8 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "output text", "", 100, 500); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
-	if err := execRepo.UpdateReasoningContent(ctx, exec.ID, "private reasoning"); err != nil {
-		t.Fatalf("UpdateReasoningContent: %v", err)
+	if err := execRepo.ReplaceReasoningReplay(ctx, exec.ID, "private reasoning", nil); err != nil {
+		t.Fatalf("ReplaceReasoningReplay: %v", err)
 	}
 
 	// Verify
@@ -378,7 +380,7 @@ func TestExecutionRepo_CompleteFailedPreservesStreamedOutput(t *testing.T) {
 
 	streamed := "[Using tool: bash]\nrunning commands...\n[Thinking] lots of intermediate content"
 	// Simulate streaming writer writing partial output during execution
-	execRepo.UpdateOutput(ctx, exec.ID, streamed)
+	execRepo.FinalizeOutput(ctx, exec.ID, streamed)
 
 	// Verify output was written
 	before, _ := execRepo.GetByID(ctx, exec.ID)
@@ -424,7 +426,7 @@ func TestExecutionRepo_CompleteNonFailedPreservesOutput(t *testing.T) {
 	execRepo.Create(ctx, exec)
 
 	// Simulate streaming writer writing output
-	execRepo.UpdateOutput(ctx, exec.ID, "streamed output content")
+	execRepo.FinalizeOutput(ctx, exec.ID, "streamed output content")
 
 	// Complete with completed status and empty output — should preserve existing output
 	execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "", "", 100, 500)
@@ -456,8 +458,8 @@ func TestExecutionRepo_ListByTask(t *testing.T) {
 		execRepo.Create(ctx, exec)
 		executionIDs = append(executionIDs, exec.ID)
 	}
-	if err := execRepo.UpdateReasoningContent(ctx, executionIDs[0], "large private reasoning"); err != nil {
-		t.Fatalf("UpdateReasoningContent: %v", err)
+	if err := execRepo.ReplaceReasoningReplay(ctx, executionIDs[0], "large private reasoning", nil); err != nil {
+		t.Fatalf("ReplaceReasoningReplay: %v", err)
 	}
 
 	execs, err := execRepo.ListByTask(ctx, task.ID)
@@ -987,70 +989,6 @@ func TestExecutionRepo_MultiTurnOrderingWithReRuns(t *testing.T) {
 	}
 }
 
-// TestExecutionRepo_ListByProjectExcludingChat verifies that memory
-// consolidation's execution snippets exclude Chat-category tasks so chat
-// prompts and orchestration/mode-control text never feed durable memory,
-// while task and task-thread follow-up executions still surface.
-func TestExecutionRepo_ListByProjectExcludingChat(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := NewTaskRepo(db, nil)
-	agentRepo := NewLLMConfigRepo(db)
-	execRepo := NewExecutionRepo(db)
-	ctx := context.Background()
-
-	agent, _ := agentRepo.GetDefault(ctx)
-
-	chatTask := &models.Task{ProjectID: "default", Title: "Chat 12:00:00.000: hi", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "switch to orchestrate mode"}
-	if err := taskRepo.Create(ctx, chatTask); err != nil {
-		t.Fatalf("create chat task: %v", err)
-	}
-	taskTask := &models.Task{ProjectID: "default", Title: "Real task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "implement feature"}
-	if err := taskRepo.Create(ctx, taskTask); err != nil {
-		t.Fatalf("create real task: %v", err)
-	}
-
-	mkExec := func(taskID, prompt string, followup bool) string {
-		exec := &models.Execution{TaskID: taskID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: prompt, IsFollowup: followup}
-		if err := execRepo.Create(ctx, exec); err != nil {
-			t.Fatalf("create exec: %v", err)
-		}
-		if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "out", "", 1, 1); err != nil {
-			t.Fatalf("complete exec: %v", err)
-		}
-		return exec.ID
-	}
-	chatExecID := mkExec(chatTask.ID, "Plan: refactor", false)
-	taskExecID := mkExec(taskTask.ID, "implement feature", false)
-	threadExecID := mkExec(taskTask.ID, "follow-up question", true)
-
-	// Plain ListByProject must include all of them (used by other surfaces).
-	all, err := execRepo.ListByProject(ctx, "default", 100)
-	if err != nil {
-		t.Fatalf("ListByProject: %v", err)
-	}
-	if len(all) != 3 {
-		t.Fatalf("ListByProject expected 3 execs, got %d", len(all))
-	}
-
-	got, err := execRepo.ListByProjectExcludingChat(ctx, "default", 100)
-	if err != nil {
-		t.Fatalf("ListByProjectExcludingChat: %v", err)
-	}
-	ids := map[string]bool{}
-	for _, e := range got {
-		ids[e.ID] = true
-	}
-	if ids[chatExecID] {
-		t.Errorf("chat execution %s must be excluded from memory consolidation source", chatExecID)
-	}
-	if !ids[taskExecID] {
-		t.Errorf("task execution %s must remain in memory consolidation source", taskExecID)
-	}
-	if !ids[threadExecID] {
-		t.Errorf("task-thread follow-up execution %s must remain in memory consolidation source", threadExecID)
-	}
-}
-
 func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -1088,9 +1026,9 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 		t.Fatalf("expected terminal readiness after cancellation, got %s", readiness)
 	}
 
-	outcome, err := execRepo.CompleteSuccessIfNoPendingSteering(ctx, exec.ID, "late success", 1, 20)
+	outcome, err := execRepo.completeSuccessIfNoPendingSteering(ctx, exec.ID, "late success", 1, 20, nil)
 	if err != nil {
-		t.Fatalf("CompleteSuccessIfNoPendingSteering: %v", err)
+		t.Fatalf("testCompleteSuccessIfNoPendingSteering: %v", err)
 	}
 	if outcome != persistence.CompleteSuccessAlreadyTerminal {
 		t.Fatalf("expected already-terminal outcome, got %s", outcome)
@@ -1127,9 +1065,13 @@ func TestExecutionRepo_CancelActiveByTaskCancelsRunningAndQueuedOnly(t *testing.
 		}
 	}
 
-	cancelledIDs, err := execRepo.CancelActiveByTaskReturningIDs(ctx, task.ID)
+	cutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
 	if err != nil {
-		t.Fatalf("CancelActiveByTaskReturningIDs: %v", err)
+		t.Fatal(err)
+	}
+	cancelledIDs, err := execRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, task.ID, cutoff)
+	if err != nil {
+		t.Fatalf("testCancelActiveByTaskReturningIDs: %v", err)
 	}
 	cancelled := map[string]bool{}
 	for _, id := range cancelledIDs {
@@ -1304,10 +1246,11 @@ func TestExecutionRepo_TaskExecutionWindowUsesRowIDForEqualStartTimes(t *testing
 	for i := 0; i < executionCount; i++ {
 		id := fmt.Sprintf("equal-start-%d", i)
 		if _, err := db.ExecContext(ctx, `INSERT INTO executions
-			(id, task_id, status, prompt_sent, output, started_at, completed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, id, task.ID, models.ExecCompleted, id, "output", startedAt, completedAt); err != nil {
+			(id, task_id, status, prompt_sent, started_at, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?)`, id, task.ID, models.ExecCompleted, id, startedAt, completedAt); err != nil {
 			t.Fatalf("insert execution %s: %v", id, err)
 		}
+		seedExecutionDisplay(t, db, id, "output")
 	}
 
 	latest, err := execRepo.ListByTaskChronologicalLimit(ctx, task.ID, 3)
@@ -1374,7 +1317,7 @@ func promptsOf(execs []models.Execution) []string {
 	return out
 }
 
-func TestExecutionRepo_CancelActiveByTaskReturnsCount(t *testing.T) {
+func TestExecutionRepo_CancelActiveByTaskReturnedIDsMatchHistory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	taskRepo := NewTaskRepo(db, nil)
@@ -1394,9 +1337,14 @@ func TestExecutionRepo_CancelActiveByTaskReturnsCount(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	count, err := execRepo.CancelActiveByTask(ctx, task.ID)
+	cutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
 	if err != nil {
-		t.Fatalf("CancelActiveByTask: %v", err)
+		t.Fatal(err)
+	}
+	cancelledIDs, err := execRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, task.ID, cutoff)
+	count := len(cancelledIDs)
+	if err != nil {
+		t.Fatalf("testCancelActiveByTaskReturningIDs: %v", err)
 	}
 	if count != 2 {
 		t.Fatalf("expected 2 active executions cancelled, got %d", count)
@@ -1414,7 +1362,7 @@ func TestExecutionRepo_CancelActiveByTaskReturnsCount(t *testing.T) {
 	}
 }
 
-func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *testing.T) {
+func TestExecutionRepo_StreamOutputItemsRemainVisibleAfterCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	taskRepo := NewTaskRepo(db, nil)
@@ -1453,16 +1401,13 @@ func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *t
 		t.Fatalf("task thread output = %+v, want one execution with assembled chunks", page)
 	}
 
-	var baseOutput string
-	var chunkCount int
-	if err := db.QueryRowContext(ctx, `SELECT output FROM executions WHERE id = ?`, exec.ID).Scan(&baseOutput); err != nil {
-		t.Fatalf("read unmaterialized output: %v", err)
+	owner := models.ConversationOwner{ExecutionID: exec.ID}
+	items, err := execRepo.ReadConversationPage(ctx, owner, models.ConversationDisplay, 0, -1, "", 5)
+	if err != nil {
+		t.Fatalf("read streamed display items: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = ?`, exec.ID).Scan(&chunkCount); err != nil {
-		t.Fatalf("count output chunks: %v", err)
-	}
-	if baseOutput != "" || chunkCount != 2 {
-		t.Fatalf("periodic writes should remain separate chunks, base=%q chunk_count=%d", baseOutput, chunkCount)
+	if len(items.Items) != 1 || !strings.Contains(string(items.Items[0].Payload), `"first second"`) {
+		t.Fatalf("periodic writes should extend one text item, got %+v", items.Items)
 	}
 
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", "provider failed", 0, 10); err != nil {
@@ -1475,14 +1420,12 @@ func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *t
 	if stored.Output != "first second" {
 		t.Fatalf("completed output = %q, want %q", stored.Output, "first second")
 	}
-	if err := db.QueryRowContext(ctx, `SELECT output FROM executions WHERE id = ?`, exec.ID).Scan(&baseOutput); err != nil {
-		t.Fatalf("read flattened output: %v", err)
+	completedItems, err := execRepo.ReadConversationPage(ctx, owner, models.ConversationDisplay, 0, -1, "", 5)
+	if err != nil {
+		t.Fatalf("read completed display items: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = ?`, exec.ID).Scan(&chunkCount); err != nil {
-		t.Fatalf("count flattened output chunks: %v", err)
-	}
-	if baseOutput != "first second" || chunkCount != 0 {
-		t.Fatalf("completion should flatten and clear chunks, base=%q chunk_count=%d", baseOutput, chunkCount)
+	if len(completedItems.Items) != len(items.Items) || !strings.Contains(string(completedItems.Items[0].Payload), `"text":"first second"`) || !strings.Contains(string(completedItems.Items[0].Payload), `"complete":true`) {
+		t.Fatalf("completion must finalize the durable stream without losing text: before=%+v after=%+v", items, completedItems)
 	}
 
 	successExec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "successful streamed output"}
@@ -1495,7 +1438,7 @@ func TestExecutionRepo_StreamOutputChunksAreVisibleAndFlattenedOnCompletion(t *t
 	if err := execRepo.AppendOutput(ctx, successExec.ID, "transcript"); err != nil {
 		t.Fatalf("append final successful output chunk: %v", err)
 	}
-	outcome, err := execRepo.CompleteSuccessIfNoPendingSteering(ctx, successExec.ID, "", 1, 2)
+	outcome, err := execRepo.completeSuccessIfNoPendingSteering(ctx, successExec.ID, "", 1, 2, nil)
 	if err != nil {
 		t.Fatalf("complete successful streamed execution: %v", err)
 	}
@@ -1567,5 +1510,13 @@ func TestExecutionRepo_LiveSnapshotOrderMatchesHistory(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Raw SQL fixtures use this before starting readers or concurrent writers.
+func seedExecutionDisplay(tb testing.TB, db sqlExecutor, id, output string) {
+	tb.Helper()
+	if err := replaceDisplayOutput(context.Background(), db, id, output); err != nil {
+		tb.Fatalf("seed display for %s: %v", id, err)
 	}
 }

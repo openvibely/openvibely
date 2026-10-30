@@ -19,13 +19,6 @@ const (
 	// OpenAI Responses API web search tool type.
 	// Sent as {"type": "web_search"} in the tools array.
 	OpenAIWebSearchToolType = "web_search"
-	// Legacy OpenAI web search tool type accepted by older integrations.
-	OpenAILegacyWebSearchToolType = "web_search_preview"
-
-	// Anthropic server tool names (versioned per API contract).
-	AnthropicWebSearchToolName      = "web_search_20260209"
-	AnthropicWebSearchToolNameOlder = "web_search_20250305"
-	AnthropicWebFetchToolName       = "web_fetch_20260209"
 )
 
 // --- Canonical tool names for allowlist mapping ---

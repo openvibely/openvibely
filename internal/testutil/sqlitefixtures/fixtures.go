@@ -66,12 +66,14 @@ func (f *fixtures) PauseScheduleAfterEnable(ctx context.Context, id string) erro
 }
 
 func (f *fixtures) ExecutionOutputState(ctx context.Context, id string) (storefixture.ExecutionOutputState, error) {
-	var state storefixture.ExecutionOutputState
-	err := f.db.QueryRowContext(ctx, `SELECT output, (SELECT COUNT(*) FROM execution_output_chunks WHERE execution_id = executions.id) FROM executions WHERE id = ?`, id).Scan(&state.Materialized, &state.PendingSegments)
-	if err == sql.ErrNoRows {
-		err = persistence.ErrNotFound
+	exec, err := sqlite.NewExecutionRepo(f.db).GetByID(ctx, id)
+	if err != nil {
+		return storefixture.ExecutionOutputState{}, err
 	}
-	return state, err
+	if exec == nil {
+		return storefixture.ExecutionOutputState{}, persistence.ErrNotFound
+	}
+	return storefixture.ExecutionOutputState{Materialized: exec.Output}, nil
 }
 
 func (f *fixtures) SetLegacyAgentName(ctx context.Context, id, name string) error {
@@ -201,8 +203,25 @@ func (f *fixtures) SeedOverflowSchedule(ctx context.Context, id, taskID string, 
 }
 
 func (f *fixtures) WriteExecutionSnapshotBaseline(ctx context.Context, id, output string) error {
-	_, err := f.db.ExecContext(ctx, `UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
-	return err
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var running bool
+	if err = tx.QueryRowContext(ctx, `SELECT status='running' FROM executions WHERE id=?`, id).Scan(&running); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if !running {
+		return nil
+	}
+	if err = putTextDisplayOutput(ctx, tx, id, output); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (f *fixtures) LatestExecution(ctx context.Context) (*models.Execution, error) {
@@ -256,7 +275,7 @@ func (f *fixtures) SetLifecycleExecutionIdentity(ctx context.Context, oldID, id 
 }
 
 func (f *fixtures) FailExecutionReplayWrites(ctx context.Context) error {
-	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_replay_insert BEFORE INSERT ON execution_replay_messages BEGIN SELECT RAISE(FAIL, 'injected replay failure'); END`)
+	_, err := f.db.ExecContext(ctx, `CREATE TRIGGER fail_replay_insert BEFORE INSERT ON conversation_items WHEN NEW.lane IN ('provider', 'metadata') BEGIN SELECT RAISE(FAIL, 'injected replay failure'); END`)
 	return err
 }
 func (f *fixtures) FailSteeringPreparation(ctx context.Context) error {

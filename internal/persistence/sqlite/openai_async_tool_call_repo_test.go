@@ -52,9 +52,13 @@ func TestExecutionCancellationCancelsOpenAIAsyncToolCalls(t *testing.T) {
 	if err := execRepo.Complete(ctx, execCompleteID, models.ExecCancelled, "", "cancelled by test", 0, 0); err != nil {
 		t.Fatalf("Complete cancelled: %v", err)
 	}
-	cancelledIDs, err := execRepo.CancelActiveByTaskReturningIDs(ctx, taskID)
+	cutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, taskID)
 	if err != nil {
-		t.Fatalf("CancelActiveByTaskReturningIDs: %v", err)
+		t.Fatal(err)
+	}
+	cancelledIDs, err := execRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, taskID, cutoff)
+	if err != nil {
+		t.Fatalf("testCancelActiveByTaskReturningIDs: %v", err)
 	}
 	if len(cancelledIDs) != 1 || cancelledIDs[0] != execSweepID {
 		t.Fatalf("cancelledIDs = %#v", cancelledIDs)

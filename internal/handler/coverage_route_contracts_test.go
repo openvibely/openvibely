@@ -1095,8 +1095,8 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	require.NoError(t, err)
 
 	agentDefs := tc.handler.listAgentDefinitions(ctx)
-	selected := selectableTaskAgentDefinitions(agentDefs)
-	require.Len(t, selected, 3)
+	otherSelected := selectableTaskAgentDefinitionsForProject(agentDefs, otherProject.ID)
+	require.ElementsMatch(t, []string{agents[0].ID, agents[2].ID}, agentIDs(otherSelected))
 	forProject := selectableTaskAgentDefinitionsForProject(agentDefs, project.ID)
 	require.Len(t, forProject, 2)
 	currentOther := agents[2].ID

@@ -20,6 +20,7 @@ import (
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	conversation "github.com/openvibely/openvibely/internal/transcript"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
@@ -57,6 +58,10 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	}
 	if strings.TrimSpace(req.Agent.BaseURL) == "" {
 		return llmcontracts.AgentResult{}, fmt.Errorf("OpenAI-compatible base URL not configured for model %q", req.Agent.Name)
+	}
+
+	if a.execRepo != nil && req.ExecID != "" {
+		ctx = context.WithValue(ctx, conversationRecorderKey{}, conversation.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}))
 	}
 
 	switch req.Operation {
@@ -325,7 +330,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
-		OnReplay:                 a.replaySaver(req.ExecID),
+		OnReplayChanged:          a.replayChangesSaver(ctx, req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
@@ -384,7 +389,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
-		OnReplay:                 a.replaySaver(req.ExecID),
+		OnReplayChanged:          a.replayChangesSaver(ctx, req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                    strings.TrimSpace(req.Agent.Model),
@@ -447,7 +452,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
-		OnReplay:               a.replaySaver(req.ExecID),
+		OnReplayChanged:        a.replayChangesSaver(ctx, req.ExecID),
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:    llmcontracts.HistoryContinuationFromContext(ctx),
 		Model:                  strings.TrimSpace(req.Agent.Model),
@@ -514,7 +519,7 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 			reasoning.WriteString(message.ReasoningContent)
 		}
 	}
-	_, err := a.execRepo.SaveConversationReplay(context.WithoutCancel(ctx), execID, transcript, models.ExecutionReplayMessage{ReasoningContent: reasoning.String()})
+	err := a.conversationRecorder(ctx, execID).Save(context.WithoutCancel(ctx), conversation.ReplayHeader{Format: "array", ReasoningContent: reasoning.String()}, conversation.Values(transcript))
 	if err != nil {
 		var encoding *persistence.ReplayEncodingError
 		if errors.As(err, &encoding) {
@@ -722,7 +727,8 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Completio
 		replay := exec.ReplayMessages
 		if len(replay) > 0 {
 			for _, turn := range replay {
-				if transcript, ok := decodeReplayTranscript(turn.TranscriptJSON); ok {
+				var transcript []openaiclient.CompletionsHistoryMessage
+				if err := turn.DecodeTranscript(&transcript); err == nil && len(transcript) > 0 {
 					for _, message := range transcript {
 						messages = append(messages, message)
 					}
@@ -760,17 +766,6 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Completio
 // SummaryHistory uses the same structured replay as a continuing conversation.
 func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistoryMessage {
 	return buildClientHistory(history)
-}
-
-func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessage, bool) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, false
-	}
-	var messages []openaiclient.CompletionsHistoryMessage
-	if err := json.Unmarshal([]byte(raw), &messages); err != nil || len(messages) == 0 {
-		return nil, false
-	}
-	return messages, true
 }
 
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
@@ -907,8 +902,9 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 	}
 }
 
-func (a *Adapter) replaySaver(execID string) func(context.Context, []openaiclient.CompletionsHistoryMessage) error {
-	return func(ctx context.Context, transcript []openaiclient.CompletionsHistoryMessage) error {
+func (a *Adapter) replayChangesSaver(ctx context.Context, execID string) func(context.Context, []openaiclient.CompletionsHistoryMessage, int) error {
+	recorder := a.conversationRecorder(ctx, execID)
+	return func(ctx context.Context, transcript []openaiclient.CompletionsHistoryMessage, firstChanged int) error {
 		if a.execRepo == nil || execID == "" {
 			return nil
 		}
@@ -918,7 +914,19 @@ func (a *Adapter) replaySaver(execID string) func(context.Context, []openaiclien
 				reasoning.WriteString(m.ReasoningContent)
 			}
 		}
-		_, err := a.execRepo.SaveConversationReplay(ctx, execID, transcript, models.ExecutionReplayMessage{ReasoningContent: reasoning.String()})
+		err := recorder.SaveChanged(ctx, conversation.ReplayHeader{Format: "array", ReasoningContent: reasoning.String()}, conversation.Values(transcript), firstChanged)
 		return err
 	}
+}
+
+type conversationRecorderKey struct{}
+
+func (a *Adapter) conversationRecorder(ctx context.Context, execID string) *conversation.Recorder {
+	if recorder, ok := ctx.Value(conversationRecorderKey{}).(*conversation.Recorder); ok {
+		return recorder
+	}
+	if a.execRepo == nil || execID == "" {
+		return nil
+	}
+	return conversation.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
 }

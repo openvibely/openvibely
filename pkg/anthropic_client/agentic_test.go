@@ -3137,11 +3137,26 @@ func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
 	defer func() { AnthropicAPIHost = old }()
 	executed := 0
 	failed, recovered := false, false
+	var persisted []json.RawMessage
+	sawSuffix := false
 	_, err := NewWithAPIKey("test").SendAgentic(context.Background(), "test", &AgenticOptions{Model: "claude-sonnet-4-6", MaxTurns: 2, SkipDefaultTools: true, ExtraTools: []ToolDefinition{{Name: "first", InputSchema: json.RawMessage(`{"type":"object"}`)}, {Name: "second", InputSchema: json.RawMessage(`{"type":"object"}`)}}, ToolExecutor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
 		executed++
 		return "result-" + name, false, nil
-	}, OnReplaySave: func(_ context.Context, items []Message) error {
+	}, OnReplayChanged: func(_ context.Context, items []Message, first int) error {
 		data, _ := json.Marshal(items)
+		var current []json.RawMessage
+		if err := json.Unmarshal(data, &current); err != nil {
+			t.Fatal(err)
+		}
+		if first < 0 || first > len(current) || first > len(persisted) {
+			t.Fatalf("invalid boundary %d", first)
+		}
+		for i := 0; i < first; i++ {
+			if string(current[i]) != string(persisted[i]) {
+				t.Fatalf("unreported edit at %d", i)
+			}
+		}
+		sawSuffix = sawSuffix || first > 0
 		if strings.Contains(string(data), "result-first") {
 			if !failed {
 				failed = true
@@ -3151,8 +3166,12 @@ func TestIntermediateTranscriptSaveFailureRecovers(t *testing.T) {
 				recovered = true
 			}
 		}
+		persisted = current
 		return nil
 	}})
+	if !sawSuffix {
+		t.Fatal("never saved an explicit suffix")
+	}
 	if err != nil || !failed || !recovered || executed != 2 || requests != 2 {
 		t.Fatalf("err=%v failed=%v recovered=%v tools=%d requests=%d", err, failed, recovered, executed, requests)
 	}

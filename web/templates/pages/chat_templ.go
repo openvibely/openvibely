@@ -192,17 +192,17 @@ func ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[str
 				}
 			}
 			if exec.Status == models.ExecCompleted {
-				templ_7745c5c3_Err = components.ChatBubble("Assistant", exec.Output).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.ChatBubble("Assistant", exec.Output, exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else if exec.Status == models.ExecFailed {
-				templ_7745c5c3_Err = components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output, exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else if exec.Status == models.ExecCancelled {
-				templ_7745c5c3_Err = components.ChatBubbleError("Assistant", "Cancelled", exec.Output).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -433,17 +433,17 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 					}
 				}
 				if exec.Status == models.ExecCompleted {
-					templ_7745c5c3_Err = components.ChatBubble("Assistant", exec.Output).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = components.ChatBubble("Assistant", exec.Output, exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else if exec.Status == models.ExecFailed {
-					templ_7745c5c3_Err = components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output, exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else if exec.Status == models.ExecCancelled {
-					templ_7745c5c3_Err = components.ChatBubbleError("Assistant", "Cancelled", exec.Output).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = components.ChatBubbleError("Assistant", "Cancelled", exec.Output, exec.DisplayTail).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

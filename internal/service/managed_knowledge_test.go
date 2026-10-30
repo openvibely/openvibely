@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/pkg/agenttools"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
@@ -562,4 +563,51 @@ func TestManagedKnowledgeRevocationAndRestorationPreservesResults(t *testing.T) 
 	filtered := *rt
 	filtered.Filter = func(string) (bool, bool) { return false, true }
 	require.Empty(t, managedcontext.Text(llmcontracts.WithRuntimeTools(turn, &filtered)))
+}
+
+// Count the reads on the live authorization boundary, not unrelated setup IO.
+type permissionReadCounter struct {
+	persistence.ProjectStore
+	reads int
+}
+
+func (r *permissionReadCounter) GetManagedPermissions(ctx context.Context, id string) (models.SkillMemoryPermissions, error) {
+	r.reads++
+	return r.ProjectStore.GetManagedPermissions(ctx, id)
+}
+
+func TestManagedToolGuardSkipsIrrelevantReadsButKeepsLiveRevocation(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	project := createChatMemoryProject(t, ctx, stores.Projects)
+	repo := &permissionReadCounter{ProjectStore: stores.Projects}
+	task := models.Task{ProjectID: project.ID}
+	rt := guardManagedTools(ctx, nil, repo, task, false, nil)
+	for _, name := range []string{"shell", "read_file", "list_files", "agent_view", "agent_list"} {
+		_, excluded := rt.Filter(name)
+		require.False(t, excluded, name)
+	}
+	require.Zero(t, repo.reads)
+	for _, enabled := range []bool{true, false, true} {
+		project.SkillMemoryPermissions = &models.SkillMemoryPermissions{ReadSkills: enabled, ReadMemories: enabled}
+		require.NoError(t, stores.Projects.Update(ctx, project))
+		before := repo.reads
+		_, excluded := rt.Filter("skill_view")
+		require.Equal(t, !enabled, excluded)
+		require.Equal(t, before+1, repo.reads)
+		_, handled, denied, err := rt.Executor(ctx, "skill_view", json.RawMessage(`{}`))
+		require.NoError(t, err)
+		require.Equal(t, !enabled, handled)
+		require.Equal(t, !enabled, denied)
+		require.Equal(t, before+2, repo.reads)
+	}
+	// File tools for a memory curator still depend on live project permissions.
+	curator := &models.Agent{Enabled: true, SystemKind: models.AgentSystemKindMemoryCurator}
+	rt = guardManagedTools(ctx, nil, repo, task, false, curator)
+	project.SkillMemoryPermissions.ReadMemories = false
+	require.NoError(t, stores.Projects.Update(ctx, project))
+	before := repo.reads
+	_, excluded := rt.Filter("read_file")
+	require.True(t, excluded)
+	require.Equal(t, before+1, repo.reads)
 }

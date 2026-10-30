@@ -153,9 +153,10 @@ func TestActivityTimeoutResetsOnPartialReads(t *testing.T) {
 		ctx, touch, stop := WithActivityTimeout(context.Background(), ModelIdleTimeout)
 		defer stop()
 		body := &slowBody{ctx, 4 * time.Minute, 4}
-		data, err := ReadAllWithActivity(body, func() { touch(ModelIdleTimeout) })
-		if err != nil || len(data) != 4 {
-			t.Fatalf("bytes=%d err=%v", len(data), err)
+		var data bytes.Buffer
+		err := NewActivityReader(func() { touch(ModelIdleTimeout) }).ReadInto(&data, body)
+		if err != nil || data.Len() != 4 {
+			t.Fatalf("bytes=%d err=%v", data.Len(), err)
 		}
 	})
 }
@@ -472,4 +473,65 @@ func TestUploadDoesNotRequireBodyReadProgress(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestActivityTimeoutPauseResumeAndExpiry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, activity, stop := WithActivityTimeout(context.Background(), time.Second)
+		defer stop()
+		time.Sleep(500 * time.Millisecond)
+		activity(0) // Consumer backpressure must not count as provider inactivity.
+		time.Sleep(time.Hour)
+		if err := context.Cause(ctx); err != nil {
+			t.Fatalf("paused deadline fired: %v", err)
+		}
+		activity(time.Second)
+		time.Sleep(500 * time.Millisecond)
+		activity(time.Second) // Partial frame activity extends the deadline.
+		time.Sleep(750 * time.Millisecond)
+		if err := context.Cause(ctx); err != nil {
+			t.Fatalf("extended deadline fired early: %v", err)
+		}
+		time.Sleep(250 * time.Millisecond)
+		synctest.Wait()
+		if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			t.Fatalf("idle reader did not time out: %v", context.Cause(ctx))
+		}
+		activity(0)
+		activity(time.Hour)
+		stop()
+		if !errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			t.Fatalf("expiry was overwritten: %v", context.Cause(ctx))
+		}
+	})
+}
+
+func TestActivityTimeoutPausedParentCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent, cancel := context.WithCancelCause(context.Background())
+		ctx, activity, stop := WithActivityTimeout(parent, 0)
+		defer stop()
+		cause := errors.New("execution stopped")
+		cancel(cause)
+		activity(time.Second)
+		time.Sleep(2 * time.Second)
+		if context.Cause(ctx) != cause {
+			t.Fatalf("lost parent cancellation: %v", context.Cause(ctx))
+		}
+	})
+}
+
+func TestActivityReaderReplacesPreviousFrame(t *testing.T) {
+	var buf bytes.Buffer
+	reads := 0
+	reader := NewActivityReader(func() { reads++ })
+	for _, text := range []string{strings.Repeat("large frame", 20000), "短い", "", "last frame"} {
+		reads = 0
+		if err := reader.ReadInto(&buf, strings.NewReader(text)); err != nil {
+			t.Fatal(err)
+		}
+		if buf.String() != text || (len(text) > 0 && reads == 0) {
+			t.Fatalf("frame mismatch: bytes=%d want=%d reads=%d", buf.Len(), len(text), reads)
+		}
+	}
 }

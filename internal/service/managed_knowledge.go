@@ -32,11 +32,11 @@ func projectManagedPermissions(ctx context.Context, repo persistence.ProjectStor
 	if repo == nil || id == "" {
 		return (&models.Project{}).ManagedPermissions()
 	}
-	project, err := repo.GetByID(ctx, id)
+	permissions, err := repo.GetManagedPermissions(ctx, id)
 	if err != nil {
 		return models.SkillMemoryPermissions{}
 	}
-	return project.ManagedPermissions()
+	return permissions
 }
 
 const skillReadingInstructions = `Choose relevant skills using the user's request and conversation. An available entry is not an instruction to load it. Reuse loaded instructions still in context; use skill_view when needed instructions are missing, including after compaction.`
@@ -138,33 +138,37 @@ func guardManagedTools(ctx context.Context, rt *llmcontracts.RuntimeTools, repo 
 	}
 	allowed := func(callCtx context.Context, name string) bool {
 		agent := currentAgent(callCtx)
-		p := projectManagedPermissions(callCtx, repo, task.ProjectID)
-		if task.AgentDefinitionID != nil && (agent == nil || !agent.Enabled || agent.ArchivedAt != nil || agent.ProjectID != "" && agent.ProjectID != task.ProjectID) {
-			p = models.SkillMemoryPermissions{}
+		// Read live permissions only for decisions that actually depend on them.
+		// Do not cache across calls: grants/revocations can change within a turn.
+		permissions := func() models.SkillMemoryPermissions {
+			if task.AgentDefinitionID != nil && (agent == nil || !agent.Enabled || agent.ArchivedAt != nil || agent.ProjectID != "" && agent.ProjectID != task.ProjectID) {
+				return models.SkillMemoryPermissions{}
+			}
+			return projectManagedPermissions(callCtx, repo, task.ProjectID)
 		}
 
 		switch strings.ToLower(strings.TrimSpace(name)) {
 		case "skill_view", "skills_list":
-			return p.ReadSkills
+			return permissions().ReadSkills
 		case "agent_view", "agent_list":
 			// Library maintenance inspection includes attached skill instructions.
-			return agent == nil || agent.SystemKind != models.AgentSystemKindSkillCurator || p.ReadSkills
+			return agent == nil || agent.SystemKind != models.AgentSystemKindSkillCurator || permissions().ReadSkills
 		case "memory_view":
-			return p.ReadMemories && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_view"))
+			return permissions().ReadMemories && (agent == nil || agentExplicitlyAllowsTool(agent, "memory_view"))
 		case "memory_save", "memory_delete":
-			return !chat && p.WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, name))
+			return !chat && permissions().WriteMemories && (agent == nil || agentExplicitlyAllowsTool(agent, name))
 		case "skill_manage", "agent_skill_manage":
 			maintenance := !chat && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
-			return !chat && p.WriteSkills && (maintenance || projectSkillRoot(callCtx, repo, task.ProjectID) != "" && (agent == nil || agentExplicitlyAllowsTool(agent, name)))
+			return !chat && permissions().WriteSkills && (maintenance || projectSkillRoot(callCtx, repo, task.ProjectID) != "" && (agent == nil || agentExplicitlyAllowsTool(agent, name)))
 		case "skill_import", "agent_import":
-			return !chat && p.WriteSkills && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
+			return !chat && permissions().WriteSkills && agent != nil && agent.SystemKind == models.AgentSystemKindSkillCurator && task.Category == models.CategoryScheduled && !lifecycleTurnFromContext(ctx).TaskThreadTurn
 		}
 		if agent != nil && agent.SystemKind == models.AgentSystemKindMemoryCurator {
 			switch name {
 			case "read_file", "list_files", "grep_search":
-				return p.ReadMemories
+				return permissions().ReadMemories
 			case "write_file", "edit_file", "delete_file":
-				return !chat && p.WriteMemories
+				return !chat && permissions().WriteMemories
 			}
 		}
 		return true

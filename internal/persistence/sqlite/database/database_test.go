@@ -45,6 +45,7 @@ func TestTaskDeletionLargeHistoryCascadesAndAllowsUnrelatedQuery(t *testing.T) {
 	for table, want := range map[string]int{
 		"tasks":                      1,
 		"executions":                 0,
+		"conversation_items":         0,
 		"lifecycle_executions":       0,
 		"lifecycle_execution_events": 0,
 		"schedules":                  0,
@@ -55,6 +56,7 @@ func TestTaskDeletionLargeHistoryCascadesAndAllowsUnrelatedQuery(t *testing.T) {
 		var got int
 		query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s`, table, map[string]string{
 			"tasks": "id IN ('delete-parent', 'delete-child')", "executions": "task_id = 'delete-parent'",
+			"conversation_items":         "execution_id LIKE 'delete-exec-%'",
 			"lifecycle_executions":       "task_id = 'delete-parent'",
 			"lifecycle_execution_events": "lifecycle_execution_id LIKE 'delete-lifecycle-%'",
 			"schedules":                  "task_id = 'delete-parent'", "task_goals": "task_id = 'delete-parent'",
@@ -95,8 +97,12 @@ func seedTaskDeletionLargeHistory(tb testing.TB, db *sql.DB) {
 		INSERT INTO tasks(id, project_id, title, category, status, parent_task_id, swarm_role)
 			VALUES ('delete-child', 'delete-project', 'Delete child', 'backlog', 'completed', 'delete-parent', 'worker');
 		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 2000)
-			INSERT INTO executions(id, task_id, status, prompt_sent, output)
-			SELECT printf('delete-exec-%06d', x), 'delete-parent', 'completed', 'prompt', 'output' FROM n;
+			INSERT INTO executions(id, task_id, status, prompt_sent)
+			SELECT printf('delete-exec-%06d', x), 'delete-parent', 'completed', 'prompt' FROM n;
+		INSERT INTO conversation_items(execution_id, generation, lane, item_id, position, operation, payload, mutation_id)
+			SELECT id, 0, 'display', 'display:000000000000', 0, 'put', '{"type":"text","text":"output","complete":true}', 'fixture'
+			FROM executions WHERE task_id = 'delete-parent';
+		UPDATE conversation_items SET snapshot_sequence = sequence WHERE mutation_id = 'fixture';
 		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 2000)
 			INSERT INTO lifecycle_executions(id, task_id, task_run_id, when_slot, status)
 			SELECT printf('delete-lifecycle-%06d', x), 'delete-parent', printf('delete-exec-%06d', x), 'route_task', 'completed' FROM n;

@@ -5,6 +5,7 @@ import (
 	"context"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,25 +212,35 @@ func benchmarkSmallWriteAlongside(ctx context.Context, repo persistence.Executio
 
 func measureSnapshotAllocations(chunks [][]byte, appendDeltas bool) uint64 {
 	var output bytes.Buffer
+	var appendOutput strings.Builder
 	total := 0
 	for _, chunk := range chunks {
 		total += len(chunk)
 	}
-	output.Grow(total)
+	if appendDeltas {
+		appendOutput.Grow(total)
+	} else {
+		output.Grow(total)
+	}
 	snapshots := make([]string, len(chunks)+1)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	offset := 0
 	for i, chunk := range chunks {
-		_, _ = output.Write(chunk)
 		if appendDeltas {
-			snapshots[i] = pendingOutputDelta(&output, offset)
-			offset = output.Len()
+			appendOutput.Write(chunk)
+			snapshots[i] = pendingOutputDelta(&appendOutput, offset)
+			offset = appendOutput.Len()
 		} else {
+			output.Write(chunk)
 			snapshots[i] = output.String()
 		}
 	}
-	snapshots[len(chunks)] = output.String() // final full transcript materialization
+	if appendDeltas {
+		snapshots[len(chunks)] = appendOutput.String()
+	} else {
+		snapshots[len(chunks)] = output.String()
+	}
 	runtime.ReadMemStats(&after)
 	runtime.KeepAlive(snapshots)
 	return after.TotalAlloc - before.TotalAlloc

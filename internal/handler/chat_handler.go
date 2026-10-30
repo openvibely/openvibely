@@ -60,7 +60,7 @@ func (h *Handler) Chat(c echo.Context) error {
 	}
 
 	if targetID := strings.TrimSpace(c.QueryParam("approval_execution_id")); targetID != "" && beforeExecID == "" {
-		target, targetErr := h.execRepo.GetByID(c.Request().Context(), targetID)
+		target, targetErr := h.loadDisplayExecution(c.Request().Context(), targetID)
 		if targetErr == nil && target != nil {
 			owner, ownerErr := h.taskRepo.GetByID(c.Request().Context(), target.TaskID)
 			if ownerErr == nil && owner != nil && owner.ProjectID == currentProjectID && owner.Category == models.CategoryChat {
@@ -140,6 +140,11 @@ func executionIDs(executions []models.Execution) []string {
 }
 
 func (h *Handler) loadChatExecutionWindow(ctx context.Context, projectID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+	if store, ok := h.execRepo.(interface {
+		ListDisplayExecutions(context.Context, string, string, string, int, int) ([]models.Execution, bool, error)
+	}); ok {
+		return store.ListDisplayExecutions(ctx, projectID, "", beforeExecID, limit, 1024*1024)
+	}
 	queryLimit := limit + 1
 	var rows []models.Execution
 	var err error
@@ -616,15 +621,6 @@ func buildChatAttachmentModelContext(files []chatAttachmentModelContextFile, opt
 	return llmprompt.BuildAttachmentInstructions(references), attachments, nil
 }
 
-// processAttachments moves uploaded files from pending directory to execution directory,
-// creates database records, and returns text context and image attachments separately.
-// Image files are returned as models.Attachment for multimodal API handling instead of
-// being injected as raw bytes into the text prompt (which would cause "prompt too long" errors).
-func (h *Handler) processAttachments(ctx context.Context, sessionID, execID string) (string, []models.Attachment, error) {
-	textContext, imageAttachments, _, err := h.processAttachmentsWithReturn(ctx, sessionID, execID)
-	return textContext, imageAttachments, err
-}
-
 // messageAttachmentOwner resolves where an execution's message attachments are
 // stored from the persisted task category: Chat-page conversations use
 // chat_attachments; task threads use task_attachments with execution_id.
@@ -668,8 +664,8 @@ func (h *Handler) listMessageAttachments(ctx context.Context, execID string) ([]
 	return out, nil
 }
 
-// processAttachmentsWithReturn is like processAttachments but also returns the
-// published per-message attachment records for display.
+// processAttachmentsWithReturn publishes uploads and returns text, images, and
+// per-message attachment records for display.
 func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, execID string) (string, []models.Attachment, []models.ChatAttachment, error) {
 	text, images, records, finish, err := h.stageMessageAttachments(ctx, sessionID, execID)
 	if err == nil {
@@ -1117,4 +1113,18 @@ func (h *Handler) previewSteeringAttachments(sessionID, executionID string, prov
 		}
 	}
 	return llmprompt.BuildAttachmentInstructions(references), attachments, nil
+}
+
+func (h *Handler) loadDisplayExecution(ctx context.Context, id string) (*models.Execution, error) {
+	if store, ok := h.execRepo.(interface {
+		GetDisplayExecutionTail(context.Context, string) (*models.Execution, error)
+	}); ok {
+		return store.GetDisplayExecutionTail(ctx, id)
+	}
+	if store, ok := h.execRepo.(interface {
+		GetDisplayExecution(context.Context, string) (*models.Execution, error)
+	}); ok {
+		return store.GetDisplayExecution(ctx, id)
+	}
+	return h.execRepo.GetByID(ctx, id)
 }

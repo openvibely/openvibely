@@ -425,7 +425,11 @@
         const list = ensureList(messages);
         const width = messages.clientWidth;
         const restore = saveAnchor(list);
-        const old = new Map(Array.from(owner.querySelectorAll('[data-chat-lazy-row]'), el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
+        // Prepending a byte window shifts row indexes. Reusing those nodes would
+        // apply one tool's DOM/scroll state to another; new nodes recover state
+        // by stable tool ID. Ordinary refreshes retain their existing reuse path.
+        const shiftedWindow = owner._outputWindowSeed && owner._chatVirtualData?.source !== data.source;
+        const old = new Map(shiftedWindow ? [] : Array.from(owner.querySelectorAll('[data-chat-lazy-row]'), el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
         const fragment = document.createDocumentFragment();
         owner._chatVirtualData = data;
         owner.setAttribute('data-chat-virtual-owner', 'true');

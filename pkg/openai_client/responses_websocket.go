@@ -515,65 +515,75 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		return nil, fmt.Errorf("%w: send request: %w", errResponsesWebsocketTransport, writeErr)
 	}
 
-	reader, writer := io.Pipe()
+	stream := newResponsesEventStream()
 	go func() {
 		defer func() {
 			state.mu.Unlock()
-			_ = writer.Close()
+			close(stream.events)
 		}()
 		var outputItems []any
 		responseID := ""
 		receivedFrame := false
-		forwardEventData := func(data []byte, validJSON bool) bool {
-			invalidJSON, err := forwardResponsesWebsocketEvent(writer, data, validJSON)
-			if err != nil {
-				state.resetConnectionLocked()
-				if invalidJSON {
-					writer.CloseWithError(fmt.Errorf("invalid Responses websocket JSON event: %w", err))
-				}
-				return false
-			}
-			return true
-		}
 		recordCompletedResponse := func(id string) {
 			state.lastProperties = properties
 			state.lastBaseline = append(append([]any(nil), fullInput...), outputItems...)
 			state.lastResponseID = id
 		}
+		// One watchdog and scratch buffer per response, not per text delta.
+		// Pause the watchdog while forwarding to the consumer: application
+		// backpressure is not provider inactivity.
+		readCtx, activity, stop := httpclient.WithActivityTimeout(ctx, 0)
+		defer stop()
+		// Own cancellation for the entire response. Passing a cancellable
+		// context to Reader registers callbacks for every frame header/payload.
+		// Closing the socket interrupts either read without those registrations.
+		finishInterrupt := interruptResponsesWebsocketRead(readCtx, conn)
+		defer func() {
+			// Join an interrupt before releasing state.mu: a callback from this
+			// response must never close a connection reused by the next one.
+			if finishInterrupt() {
+				state.resetConnectionLocked()
+			}
+		}()
+		readIOCtx := context.WithoutCancel(readCtx)
+		touch := func() { activity(httpclient.ModelIdleTimeout) }
+		var frame bytes.Buffer
+		frameReader := httpclient.NewActivityReader(touch)
+		var decoder responsesWebsocketDecoder
 		for {
-			readCtx, activity, stop := httpclient.WithActivityTimeout(ctx, httpclient.ModelIdleTimeout)
-			messageType, reader, readErr := conn.Reader(readCtx)
-			var data []byte
+			touch()
+			messageType, reader, readErr := conn.Reader(readIOCtx)
 			if readErr == nil {
-				data, readErr = httpclient.ReadAllWithActivity(reader, func() { activity(httpclient.ModelIdleTimeout) })
+				readErr = frameReader.ReadInto(&frame, reader)
 			}
 			if readErr != nil && context.Cause(readCtx) != nil {
 				readErr = context.Cause(readCtx)
 			}
-			stop()
+			activity(0)
+			data := frame.Bytes()
 			if readErr != nil {
 				state.resetConnectionLocked()
 				kind := errResponsesWebsocketTransport
 				if reusedConnection && !receivedFrame {
 					kind = errResponsesWebsocketStale
 				}
-				writer.CloseWithError(fmt.Errorf("%w: read response: %w", kind, readErr))
+				stream.err = fmt.Errorf("%w: read response: %w", kind, readErr)
 				return
 			}
 			receivedFrame = true
 			if messageType != websocket.MessageText {
 				state.resetConnectionLocked()
-				writer.CloseWithError(fmt.Errorf("%w: unexpected binary frame", errResponsesWebsocketTransport))
+				stream.err = fmt.Errorf("%w: unexpected binary frame", errResponsesWebsocketTransport)
 				return
 			}
-			eventType, event, validJSON := decodeResponsesWebsocketEvent(data)
+			eventType, event, validJSON := decoder.decode(data)
 			if eventType == "error" {
 				providerErr := responsesStreamTerminalError(eventType, event)
 				var apiErr *APIError
 				if errors.As(providerErr, &apiErr) && (apiErr.Code == "previous_response_not_found" || apiErr.Code == "websocket_connection_limit_reached") {
 					// Reconnect and replay the full transcript, without disabling WebSocket.
 					state.resetConnectionLocked()
-					writer.CloseWithError(fmt.Errorf("%w: %w", errResponsesWebsocketStale, providerErr))
+					stream.err = fmt.Errorf("%w: %w", errResponsesWebsocketStale, providerErr)
 					return
 				}
 			}
@@ -582,8 +592,20 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 					outputItems = append(outputItems, item)
 				}
 			}
-			if !forwardEventData(data, validJSON) {
+			if !validJSON {
+				state.resetConnectionLocked()
+				var validation any
+				stream.err = fmt.Errorf("invalid Responses websocket JSON event: %w", json.Unmarshal(data, &validation))
 				return
+			}
+			if err := stream.send(responsesEvent{data: data, typ: eventType, websocket: true}); err != nil {
+				state.resetConnectionLocked()
+				return
+			}
+			// Large item/completion events must not pin oversized scratch space
+			// for the remainder of a long response. Decoded items own their data.
+			if frame.Cap() > 64<<10 {
+				frame = bytes.Buffer{}
 			}
 			if isTerminalResponsesWebsocketEvent(eventType) {
 				if eventType == "response.completed" {
@@ -594,27 +616,55 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			}
 		}
 	}()
-	return reader, nil
+	return stream, nil
 }
 
-func decodeResponsesWebsocketEvent(data []byte) (eventType string, event map[string]any, validJSON bool) {
-	var envelope struct {
-		Type string `json:"type"`
+// interruptResponsesWebsocketRead installs one socket interrupt per response.
+// The returned function unregisters it or waits for it to finish, and reports
+// whether it ran. Call it while still owning the connection, before cancelling
+// the watchdog during normal cleanup or making the socket reusable.
+func interruptResponsesWebsocketRead(ctx context.Context, conn *websocket.Conn) func() bool {
+	finished := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		defer close(finished)
+		_ = conn.CloseNow()
+	})
+	return func() bool {
+		if stop() {
+			return false
+		}
+		<-finished
+		return true
 	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
+}
+
+type responsesWebsocketDecoder struct {
+	Type string `json:"type"`
+}
+
+func (d *responsesWebsocketDecoder) decode(data []byte) (eventType string, event map[string]any, validJSON bool) {
+	d.Type = ""
+	if err := json.Unmarshal(data, d); err != nil {
 		// Preserve forwarding behavior for valid JSON values that are not event
 		// objects, while letting the framing path report malformed JSON below.
 		return "", nil, json.Valid(data)
 	}
 
-	eventType = envelope.Type
+	eventType = d.Type
 	switch eventType {
 	case "error", "response.output_item.done", "response.completed":
-		if err := json.Unmarshal(data, &event); err != nil {
-			return eventType, nil, true
-		}
+		event = decodeResponsesComplexEvent(data)
 	}
 	return eventType, event, true
+}
+
+// Keep the generic decode slot out of the ordinary text-event path.
+func decodeResponsesComplexEvent(data []byte) map[string]any {
+	var event map[string]any
+	if json.Unmarshal(data, &event) != nil {
+		return nil
+	}
+	return event
 }
 
 func forwardResponsesWebsocketEvent(writer io.Writer, data []byte, validJSON bool) (invalidJSON bool, err error) {

@@ -26,7 +26,11 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	before := calculateRequestBudget(req)
 	loaded, err := svc.loadProviderReplayHistory(req)
 	require.NoError(t, err)
-	require.Equal(t, replay, loaded.ChatHistory[0].ReplayMessages)
+	require.Len(t, loaded.ChatHistory[0].ReplayMessages, 1)
+	require.NotNil(t, loaded.ChatHistory[0].ReplayMessages[0].Rows)
+	require.JSONEq(t, replay[0].TranscriptJSON, loaded.ChatHistory[0].ReplayMessages[0].FullTranscriptJSON())
+	require.Equal(t, replay[0].UserContent, loaded.ChatHistory[0].ReplayMessages[0].UserContent)
+	require.Equal(t, replay[0].AssistantContent, loaded.ChatHistory[0].ReplayMessages[0].AssistantContent)
 	require.Greater(t, calculateRequestBudget(loaded).HistoryTokens, before.HistoryTokens+40000)
 	require.Nil(t, req.ChatHistory[0].ReplayMessages, "loading must not mutate caller history")
 	summaryCalls := 0
@@ -55,7 +59,8 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 		req.Agent.Provider = provider
 		loaded, err := svc.loadProviderReplayHistory(req)
 		require.NoError(t, err)
-		require.Equal(t, imageReplay, loaded.ChatHistory[0].ReplayMessages)
+		require.Len(t, loaded.ChatHistory[0].ReplayMessages, 1)
+		require.JSONEq(t, imageReplay[0].TranscriptJSON, loaded.ChatHistory[0].ReplayMessages[0].FullTranscriptJSON())
 		require.Equal(t, "saved reasoning", loaded.ChatHistory[0].ReasoningContent)
 		for _, execution := range buildCompactedReplacementHistory(loaded.ChatHistory, "summary") {
 			require.Empty(t, execution.ReplayMessages, "text compaction must discard media replay")
@@ -93,7 +98,11 @@ func TestAnthropicEnvironmentReplayLoadedBeforeBudget(t *testing.T) {
 	req := llmcontracts.AgentRequest{Ctx: ctx, Agent: models.LLMConfig{Provider: models.ProviderAnthropic}, ChatHistory: []models.Execution{{ID: "environment", PromptSent: "question"}}}
 	loaded, err := svc.loadProviderReplayHistory(req)
 	require.NoError(t, err)
-	require.Equal(t, replay, loaded.ChatHistory[0].ReplayMessages)
+	require.Len(t, loaded.ChatHistory[0].ReplayMessages, 1)
+	require.NotNil(t, loaded.ChatHistory[0].ReplayMessages[0].Rows)
+	require.JSONEq(t, replay[0].TranscriptJSON, loaded.ChatHistory[0].ReplayMessages[0].FullTranscriptJSON())
+	require.Equal(t, replay[0].UserContent, loaded.ChatHistory[0].ReplayMessages[0].UserContent)
+	require.Equal(t, replay[0].AssistantContent, loaded.ChatHistory[0].ReplayMessages[0].AssistantContent)
 	require.Nil(t, req.ChatHistory[0].ReplayMessages)
 	// Explicitly trimmed replay must not be reloaded.
 	req.ChatHistory[0].ReplayMessages = []models.ExecutionReplayMessage{}

@@ -88,13 +88,14 @@ func (s *LLMService) completeInstallationTranscript(req contracts.AgentRequest) 
 	matched := false
 	var pendingAnswer error
 	for i := range source.ReplayMessages {
-		raw, found, e := completeSkillToolTranscript(source.ReplayMessages[i].TranscriptJSON, answer.QuestionID, answer.Arguments, answer.Output, answer.IsError, answer.ToolCallID)
+		raw, found, e := completeSkillToolTranscript(source.ReplayMessages[i].FullTranscriptJSON(), answer.QuestionID, answer.Arguments, answer.Output, answer.IsError, answer.ToolCallID)
 		if e != nil && !found {
 			return req, e
 		}
 		if found {
 			pendingAnswer = e
 			source.ReplayMessages[i].TranscriptJSON = raw
+			source.ReplayMessages[i].Rows = nil
 			matched = true
 			break
 		}

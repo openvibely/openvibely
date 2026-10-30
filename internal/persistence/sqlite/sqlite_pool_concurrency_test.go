@@ -302,7 +302,7 @@ func lockedWriterRepositoryOperations() []struct {
 		{
 			name: "execution output flush",
 			run: func(ctx context.Context, db *sql.DB) error {
-				return NewExecutionRepo(db).UpdateOutput(ctx, "locked-execution", "output")
+				return NewExecutionRepo(db).FinalizeOutput(ctx, "locked-execution", "output")
 			},
 		},
 		{
@@ -616,20 +616,30 @@ func TestExecutionRepoPeriodicOutputCannotOverwriteTerminalOutput(t *testing.T) 
 	if _, err := db.Exec(`
 		INSERT INTO projects(id, name) VALUES ('stream-project', 'Stream project');
 		INSERT INTO tasks(id, project_id, title, category, status) VALUES ('stream-task', 'stream-project', 'Stream task', 'active', 'running');
-		INSERT INTO executions(id, task_id, status, output) VALUES ('stream-execution', 'stream-task', 'running', 'partial');
-		UPDATE executions SET status='completed', output='final' WHERE id='stream-execution';
+		INSERT INTO executions(id, task_id, status) VALUES ('stream-execution', 'stream-task', 'running');
 	`); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewExecutionRepo(db).UpdateOutput(context.Background(), "stream-execution", "stale periodic output"); err != nil {
+	ctx := context.Background()
+	repo := NewExecutionRepo(db)
+	if err := repo.AppendOutput(ctx, "stream-execution", "partial"); err != nil {
 		t.Fatal(err)
 	}
-	var output string
-	if err := db.QueryRow(`SELECT output FROM executions WHERE id='stream-execution'`).Scan(&output); err != nil {
+	if err := repo.Complete(ctx, "stream-execution", models.ExecCompleted, "final", "", 0, 0); err != nil {
 		t.Fatal(err)
 	}
-	if output != "final" {
-		t.Fatalf("terminal output = %q, want final", output)
+	if err := repo.FinalizeOutput(ctx, "stream-execution", "stale periodic output"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AppendOutput(ctx, "stream-execution", "late streamed output"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetByID(ctx, "stream-execution")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Output != "final" {
+		t.Fatalf("terminal output = %q, want final", stored.Output)
 	}
 }
 
