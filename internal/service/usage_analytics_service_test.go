@@ -26,6 +26,58 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestUsageAccountInventoryShowsProviderIdentityAndSafeFallback(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	openAI := &models.LLMConfig{
+		Name: "OpenAI model alias", Provider: models.ProviderOpenAI, Model: "test",
+		AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "openai-access-secret",
+		OAuthRefreshToken: "openai-refresh-secret", OAuthAccountID: "openai-account-id",
+	}
+	if err := env.LLMConfigs.Create(ctx, openAI); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := env.LLMConfigs.UpdateLinkedOAuthConnectionProfileIfRevision(ctx, openAI.ID, openAI.OAuthConnectionID, openAI.OAuthConfigRevision, openAI.Provider, openAI.OAuthAccountID, "owner@example.com", "verified-principal")
+	if err != nil || !updated {
+		t.Fatalf("store verified OpenAI profile: updated=%v err=%v", updated, err)
+	}
+	anthropic := &models.LLMConfig{
+		Name: "Anthropic model alias", Provider: models.ProviderAnthropic, Model: "test",
+		AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "anthropic-access-secret",
+		OAuthRefreshToken: "anthropic-refresh-secret", OAuthAccountID: "anthropic-account-id",
+	}
+	if err := env.LLMConfigs.Create(ctx, anthropic); err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err := NewUsageAnalyticsService(env.Usage, env.LLMConfigs).ListUsageAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 2 {
+		t.Fatalf("account descriptors = %+v, want one per provider", accounts)
+	}
+	identities := map[string]string{}
+	for _, account := range accounts {
+		identities[account.Provider] = account.Identity
+	}
+	if identities["openai"] != "owner@example.com" {
+		t.Fatalf("OpenAI account identity = %q, want verified email", identities["openai"])
+	}
+	if identities["anthropic"] == "" || identities["anthropic"] == "anthropic-account-id" {
+		t.Fatalf("Anthropic fallback identity should be a useful display label, got %q", identities["anthropic"])
+	}
+	encoded, err := json.Marshal(accounts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"openai-access-secret", "openai-refresh-secret", "anthropic-access-secret", "anthropic-refresh-secret", "openai-account-id", "anthropic-account-id", openAI.ID, anthropic.ID} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("account inventory exposed private OAuth data %q: %s", secret, encoded)
+		}
+	}
+}
+
 func TestUsageAnalyticsService_AccountInventoryAndScopedLimits(t *testing.T) {
 	env := teststores.New(t)
 	ctx := context.Background()
@@ -842,7 +894,10 @@ func TestUsageAnalyticsService_DedupesAnthropicAccountLimitsByOAuthProfile(t *te
 		t.Fatalf("unexpected Anthropic profile metadata: %+v", view.AccountLimits[0])
 	}
 	if view.AccountLimits[0].StatusLabel != "" || view.AccountLimits[0].BillingLabel != "" || view.AccountLimits[0].AccountDetail != "" {
-		t.Fatalf("Anthropic public card should not expose status, billing, or email/detail: %+v", view.AccountLimits[0])
+		t.Fatalf("Anthropic public card should not expose status, billing, or raw email/detail: %+v", view.AccountLimits[0])
+	}
+	if view.AccountLimits[0].AccountIdentity != "james@example.com" {
+		t.Fatalf("Anthropic account card should identify the OAuth account by email: %+v", view.AccountLimits[0])
 	}
 	if !usageFloatPtrClose(view.AccountLimits[0].ExtraUsageMonthlyUSD, 200) || !usageFloatPtrClose(view.AccountLimits[0].ExtraUsageUsedUSD, 0) {
 		t.Fatalf("unexpected extra usage dollars: %+v", view.AccountLimits[0])
@@ -2441,6 +2496,20 @@ func usageFloatPtrClose(value *float64, want float64) bool {
 	return value != nil && math.Abs(*value-want) < 0.000001
 }
 
+func TestAnthropicAccountViewPrefersCachedEmailForIdentity(t *testing.T) {
+	account := accountViewFromSnapshot(models.AccountUsageSnapshot{
+		Provider:           "anthropic",
+		AccountDisplayName: "Claude User",
+		AccountDetail:      "owner@example.com",
+	})
+	if account.AccountIdentity != "owner@example.com" {
+		t.Fatalf("cached Anthropic account identity = %q, want email", account.AccountIdentity)
+	}
+	if account.AccountDetail != "" {
+		t.Fatalf("raw Anthropic account detail should remain private: %+v", account)
+	}
+}
+
 func TestNormalizeAnthropicOAuthProfileSubscriptionMetadata(t *testing.T) {
 	profile := normalizeAnthropicOAuthProfile(map[string]any{
 		"account": map[string]any{
@@ -2468,8 +2537,8 @@ func TestNormalizeAnthropicOAuthProfileSubscriptionMetadata(t *testing.T) {
 	if profile.PlanLabel != "Claude Max (5x)" || profile.BillingLabel != "Contract subscription" || profile.StatusLabel != "Pending" || profile.ExtraUsageLabel != "Usage credits enabled" {
 		t.Fatalf("unexpected metadata: %+v", profile)
 	}
-	if profile.Detail != "user@example.com" {
-		t.Fatalf("detail = %q", profile.Detail)
+	if profile.Detail != "user@example.com" || profile.DisplayName != "user@example.com" {
+		t.Fatalf("identity should prefer profile email, display=%q detail=%q", profile.DisplayName, profile.Detail)
 	}
 
 	fallback := normalizeAnthropicOAuthProfile(map[string]any{
@@ -2485,6 +2554,9 @@ func TestNormalizeAnthropicOAuthProfileSubscriptionMetadata(t *testing.T) {
 	})
 	if organizationOnly.AccountID != "organization:org-only" || organizationOnly.PrincipalHash != "" {
 		t.Fatalf("organization-only profile produced credential-interchange evidence: %+v", organizationOnly)
+	}
+	if organizationOnly.DisplayName != "Organization member" {
+		t.Fatalf("profile without email should use the provider display name as identity, got %q", organizationOnly.DisplayName)
 	}
 }
 

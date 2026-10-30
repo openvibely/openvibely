@@ -87,6 +87,45 @@ try {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsUsageCardsIdentifyOAuthAccounts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	start := strings.Index(content, "function renderAccountUsageCards(")
+	end := -1
+	if start >= 0 {
+		if offset := strings.Index(content[start:], "function renderRunReliability()"); offset >= 0 {
+			end = start + offset
+		}
+	}
+	if start < 0 || end <= start {
+		t.Fatal("account usage card renderer not found")
+	}
+	fixture := `<!doctype html><html><body><main id="result"></main><div id="cards"></div><script>
+function escapeHTML(value){return String(value).replace(/[&<>\"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch];});}
+function formatResetCountdown(){return '';}
+` + content[start:end] + `
+try {
+ const target=document.getElementById('cards');
+ renderAccountUsageCards([
+  {provider:'openai',account_identity:'owner@example.com',limits:[]},
+  {provider:'anthropic',limits:[]}
+ ],target,'claude-fallback@example.com');
+ const cards=Array.from(target.querySelectorAll('.card-body'));
+ if(cards.length!==2)throw new Error('expected both provider account cards');
+ if(!cards[0].textContent.includes('Account: owner@example.com'))throw new Error('OpenAI account email not shown');
+ if(!cards[1].textContent.includes('Account: claude-fallback@example.com'))throw new Error('Anthropic identity fallback not shown');
+ const unsafe=document.createElement('div');
+ renderAccountUsageCards([{provider:'openai',account_identity:'<img src=x onerror=alert(1)>',limits:[]}],unsafe);
+ if(unsafe.querySelector('img')||!unsafe.textContent.includes('<img src=x onerror=alert(1)>'))throw new Error('account identity must be escaped as text');
+ document.getElementById('result').dataset.testResult='pass';
+}catch(e){const result=document.getElementById('result');result.dataset.testResult='fail';result.dataset.testError=e.message;}
+</script></body></html>`
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_CompactModelChartTitles(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
