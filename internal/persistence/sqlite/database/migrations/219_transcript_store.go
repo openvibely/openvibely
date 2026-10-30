@@ -13,7 +13,7 @@ import (
 )
 
 func init() {
-	goose.AddNamedMigrationContext("217_conversation_items.go", upConversationItems217, downConversationItems217)
+	goose.AddNamedMigrationContext("219_transcript_store.go", upTranscriptStore219, downTranscriptStore219)
 }
 
 const conversationItemsSchema217 = `
