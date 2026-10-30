@@ -1,5 +1,17 @@
 # Archived benchmark evidence
 
+## Anthropic retained replay fix
+
+Previous task branch `df2b9bf49` versus the same branch with corrected text-only output, native-history display omission and single replay decoding. This is not main versus branch. Twelve timing runs (396 turns), two separate heap diagnostic runs and two smoke scenarios passed.
+
+- [Repository report](ANTHROPIC_RETENTION_RESULTS.md)
+- [Download report](/files/47d07a3506044e88735bc465adf33b38?project_id=b184292efa07a415fc59967a5fc328d1)
+- [Raw measurements, profiles, regression evidence and source patch](/files/aa9ae81840654748f364a760d667029a?project_id=b184292efa07a415fc59967a5fc328d1) (1,109,185 bytes)
+
+Archive SHA-256: `2c9a7827e2631dbf1e4092d1b5f33638c8e4d6df6402920caa0d146abf06f6f3`.
+
+The archive preserves the failed baseline regression and the initial fixture/timeout attempts as well as final passing tests. Timing and diagnostic results are separate. Existing stored headers are not rewritten. Temporary source worktrees were removed after checking their production sources against the measured patch.
+
 ## Phase-aligned memory investigation and estimator follow-up
 
 Main `9e702736a` versus branch `659c90e24` phase discovery is separate from the final optimization comparison: previous branch `659c90e24` versus its estimator-only patch. Twelve final timing runs passed (396 turns). The Anthropic persistence candidate was rejected and reverted.

@@ -52,3 +52,5 @@ For the full large-workload comparison, use `--profiles large --modes text-only,
 Integrity gates check exact request counts (no hidden retry or extra tool round), prior-turn context, protocol identity, actual tool-result messages, complete stored answers, persistence/live events, and overlapping streams. The mock understands each provider's real tool-call/result schema; it does not route these providers through the OpenAI Responses client.
 
 Phase investigation and the tested estimator optimization: [memory follow-up report](../PROVIDER_MEMORY_FOLLOWUP.md).
+
+Anthropic ownership tracing and repeated retention-fix measurements: [retention results](../ANTHROPIC_RETENTION_RESULTS.md).

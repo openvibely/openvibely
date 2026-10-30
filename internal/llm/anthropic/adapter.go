@@ -453,8 +453,8 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		return anthropicAgentResult(output, textOnly, usage, err), err
 	case llmcontracts.OperationStreaming:
 		if req.Followup || req.ChatHistory != nil || req.ChatMode == models.ChatModeOrchestrate || req.ChatMode == models.ChatModePlan {
-			output, usage, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
-			return anthropicAgentResult(output, output, usage, err), err
+			output, textOnly, usage, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
+			return anthropicAgentResult(output, textOnly, usage, err), err
 		}
 		output, textOnly, usage, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
 		return anthropicAgentResult(output, textOnly, usage, err), err
@@ -563,13 +563,13 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 }
 
 // callChatStreaming calls the Anthropic API with streaming for chat/followup.
-func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, agentSkipDefaults bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, agentSkipDefaults bool) (string, string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	applog.Infof("[anthropic] callChatStreaming model=%s max_tokens=%d history=%d exec=%s isTaskFollowup=%v workDir=%s attachments=%d", agent.Model, maxTokens, len(chatHistory), execID, isTaskFollowup, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
-		return "", llmusage.FromTotal(0), err
+		return "", "", llmusage.FromTotal(0), err
 	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
@@ -579,7 +579,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
-		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
+		return "", "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
@@ -649,12 +649,13 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	if err != nil {
 		sw.Flush()
 		applog.Infof("[anthropic] callChatStreaming error: %v", err)
-		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
+		return "", "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic chat streaming call: %w", err)
 	}
 
 	sw.Flush()
 
 	output := sw.String()
+	textOnly := sw.TextString()
 	usage := anthropicContextUsage(resp)
 	if compactionSummary != "" || usage.NativeCompactionStateJSON != "" {
 		usage.ProviderIDs = map[string]string{"native_compaction_strategy": "anthropic_context_management"}
@@ -664,12 +665,12 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	}
 	applog.Infof("[anthropic] callChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
-		return output, usage, errMaxTokens
+		return output, textOnly, usage, errMaxTokens
 	}
 	if resp.StopReason == "refusal" {
-		return output, usage, errRefusal
+		return output, textOnly, usage, errRefusal
 	}
-	return output, usage, nil
+	return output, textOnly, usage, nil
 }
 
 // callStreaming calls the Anthropic API with streaming.
@@ -852,10 +853,13 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 		var structured []anthropicclient.Message
 		for _, replay := range exec.ReplayMessages {
 			var saved anthropicEnvironmentReplay
-			if replay.DecodeTranscript(&saved) == nil && len(saved.Messages) > 0 {
+			if replay.DecodeTranscript(&saved) != nil {
+				continue
+			}
+			if len(saved.Messages) > 0 {
 				structured = saved.Messages
 			}
-			if replay.DecodeTranscript(&saved) == nil && strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
+			if strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
 				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
 				lastEnvironment = saved.Environment
 			}

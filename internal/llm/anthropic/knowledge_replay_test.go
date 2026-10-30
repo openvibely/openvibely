@@ -112,7 +112,7 @@ func TestKnowledgeReplayAfterCancellationAndCompaction(t *testing.T) {
 			fmt.Fprintf(w, "data: %s\n\n", block)
 			stop = "tool_use"
 		} else {
-			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"Done\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Done\"}}\n\n")
 		}
 		fmt.Fprintf(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":%q},\"usage\":{\"output_tokens\":3}}\n\ndata: {\"type\":\"message_stop\"}\n\n", stop)
 		step++
@@ -144,6 +144,15 @@ func TestKnowledgeReplayAfterCancellationAndCompaction(t *testing.T) {
 		}
 		saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
 		require.NoError(t, err)
+		if phase == 1 {
+			// The visible transcript and native replay keep the tool result, but
+			// assistant fallback metadata must not retain a second tool transcript.
+			require.Contains(t, result.Output, "[Using tool:")
+			require.Equal(t, "Done", result.TextOnlyOutput)
+			require.Len(t, saved[execution.ID], 1)
+			require.Equal(t, "Done", saved[execution.ID][0].AssistantContent)
+			require.Contains(t, saved[execution.ID][0].FullTranscriptJSON(), "tool_result")
+		}
 		execution.ReplayMessages = saved[execution.ID]
 		execution.Output = result.Output
 		history = append(history, *execution)
