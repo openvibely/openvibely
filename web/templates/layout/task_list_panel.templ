@@ -253,7 +253,10 @@ templ TaskListPanel(currentProjectID string) {
 				syncToggle();
 			}
 			function openSearch(open) {
-                if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) window.taskWorkspace.openThread();
+                if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) {
+                    window.taskWorkspace.openThread();
+                    open = true;
+                }
 				searchBox.hidden = !open;
 				var btn = document.getElementById('task-list-search-toggle');
 				if (btn) btn.setAttribute('aria-expanded', String(open));
