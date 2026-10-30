@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -101,4 +102,31 @@ func (s *UsageAnalyticsService) fetchLiveAccountGroup(ctx context.Context, confi
 		}
 	}
 	return snapshots, failures
+}
+
+// BuildLiveAnalyticsUsage combines recorded application usage with current
+// provider limits. No saved account-limit responses are used as a fallback.
+func (s *UsageAnalyticsService) BuildLiveAnalyticsUsage(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+	if s == nil || s.usageRepo == nil {
+		return nil, fmt.Errorf("usage analytics service is not configured")
+	}
+	view := &models.AnalyticsUsageViewModel{}
+	if err := s.populateLocalUsageMetrics(ctx, filter, view); err != nil {
+		return nil, err
+	}
+	latest, err := s.usageRepo.GetLatestUsageEventTime(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	view.LastUpdatedAt = latest
+	accounts, err := s.BuildLiveAnalyticsAccountLimits(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	view.AccountLimits = accounts.AccountLimits
+	view.Errors = accounts.Errors
+	if accounts.LastUpdatedAt != nil && (view.LastUpdatedAt == nil || accounts.LastUpdatedAt.After(*view.LastUpdatedAt)) {
+		view.LastUpdatedAt = accounts.LastUpdatedAt
+	}
+	return view, nil
 }
