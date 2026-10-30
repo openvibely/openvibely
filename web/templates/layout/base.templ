@@ -4492,6 +4492,20 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					placeholder.style.marginBottom = getComputedStyle(card).marginBottom;
 					card.parentNode.insertBefore(placeholder, card);
 					const originalStyle = card.getAttribute('style');
+					// Theme surface rules may be scoped to the board or calendar. Freeze
+					// their resolved appearance before leaving those ancestors; cleanup
+					// restores the exact inline style so theme changes still apply later.
+					const appearance = getComputedStyle(card);
+					const appearanceProperties = [
+						'background-color', 'background-image', 'color', 'box-shadow',
+						'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'
+					];
+					const appearanceValues = appearanceProperties.map(function(property) {
+						return appearance.getPropertyValue(property);
+					});
+					appearanceProperties.forEach(function(property, index) {
+						card.style.setProperty(property, appearanceValues[index], 'important');
+					});
 					card.style.position = 'fixed';
 					card.style.left = rect.left + 'px';
 					card.style.top = rect.top + 'px';
