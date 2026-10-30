@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"sort"
 	"strconv"
@@ -117,6 +118,68 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 type UsageAccountDescriptor struct {
 	Key      string `json:"key"`
 	Provider string `json:"provider"`
+	Identity string `json:"identity,omitempty"`
+}
+
+func accountUsageProviderFallbackIdentity(provider models.LLMProvider) string {
+	switch provider {
+	case models.ProviderOpenAI:
+		return "OpenAI account"
+	case models.ProviderAnthropic:
+		return "Anthropic account"
+	default:
+		return "Connected account"
+	}
+}
+
+func accountUsageDisplayIdentity(cfg models.LLMConfig) string {
+	if identity := strings.TrimSpace(cfg.OAuthProviderDisplayName); identity != "" {
+		return preferredAccountIdentity(identity)
+	}
+	return accountUsageProviderFallbackIdentity(cfg.Provider)
+}
+
+func accountUsageGroupDisplayIdentity(group []models.LLMConfig, labelsByConnectionID map[string]string) string {
+	if len(group) == 0 {
+		return "Connected account"
+	}
+	credentialOwners := make(map[string]struct{}, len(group))
+	for _, cfg := range group {
+		credentialOwners[accountUsageCredentialOwnerKeyForConfig(cfg)] = struct{}{}
+	}
+	if len(credentialOwners) > 1 {
+		// The group may represent an organization with multiple user sign-ins.
+		// Until one connection supplies the usage snapshot, don't borrow a sibling's email.
+		return accountUsageProviderFallbackIdentity(group[0].Provider)
+	}
+	cfg := group[0]
+	if identity := strings.TrimSpace(labelsByConnectionID[cfg.OAuthConnectionID]); identity != "" {
+		return preferredAccountIdentity(identity)
+	}
+	return accountUsageDisplayIdentity(cfg)
+}
+
+func preferredAccountIdentity(candidates ...string) string {
+	fallback := ""
+	for _, candidate := range candidates {
+		identity := strings.TrimSpace(candidate)
+		if identity == "" {
+			continue
+		}
+		if runes := []rune(identity); len(runes) > 256 {
+			identity = string(runes[:256])
+		}
+		if fallback == "" {
+			fallback = identity
+		}
+		if address, err := mail.ParseAddress(identity); err == nil && address.Address == identity && strings.Contains(address.Address, "@") {
+			return identity
+		}
+	}
+	if fallback == "" {
+		return "Connected account"
+	}
+	return fallback
 }
 
 func usageAccountGroupKey(configs []models.LLMConfig) string {
@@ -138,9 +201,21 @@ func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageA
 	if err != nil {
 		return nil, err
 	}
+	connections, err := s.llmConfigRepo.ListOAuthConnections(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	labelsByConnectionID := make(map[string]string, len(connections))
+	for _, connection := range connections {
+		labelsByConnectionID[connection.ID] = connection.Name
+	}
 	for _, provider := range []string{"openai", "anthropic"} {
 		for _, group := range accountUsageGroups(configs, provider) {
-			result = append(result, UsageAccountDescriptor{Key: usageAccountGroupKey(group), Provider: provider})
+			result = append(result, UsageAccountDescriptor{
+				Key:      usageAccountGroupKey(group),
+				Provider: provider,
+				Identity: accountUsageGroupDisplayIdentity(group, labelsByConnectionID),
+			})
 		}
 	}
 	return result, nil
@@ -935,29 +1010,23 @@ func latestAccountSnapshotForConfig(ctx context.Context, usageRepo persistence.U
 
 func (s *UsageAnalyticsService) oauthAccountPlaceholders(configs []models.LLMConfig, provider string) []models.AccountUsageView {
 	var accounts []models.AccountUsageView
-	seenAccounts := map[string]bool{}
-	for _, cfg := range configs {
-		if cfg.AuthMethod != models.AuthMethodOAuth || cfg.OAuthAccessToken == "" {
+	for _, providerName := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic)} {
+		if provider != "" && provider != providerName {
 			continue
 		}
-		if cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderOpenAI {
-			continue
+		for _, group := range accountUsageGroups(configs, providerName) {
+			if len(group) == 0 {
+				continue
+			}
+			cfg := group[0]
+			accounts = append(accounts, models.AccountUsageView{
+				Provider:        string(cfg.Provider),
+				AccountIdentity: accountUsageGroupDisplayIdentity(group, nil),
+				AccountID:       accountIDForConfig(cfg), AgentConfigID: cfg.ID,
+				Limits: []models.AccountLimitView{},
+				Error:  "live account usage unavailable; reconnect OAuth or retry refresh",
+			})
 		}
-		if provider != "" && string(cfg.Provider) != provider {
-			continue
-		}
-		key := accountUsageKeyForConfig(cfg)
-		if seenAccounts[key] {
-			continue
-		}
-		seenAccounts[key] = true
-		accounts = append(accounts, models.AccountUsageView{
-			Provider:      string(cfg.Provider),
-			AccountID:     accountIDForConfig(cfg),
-			AgentConfigID: cfg.ID,
-			Limits:        []models.AccountLimitView{},
-			Error:         "live account usage unavailable; reconnect OAuth or retry refresh",
-		})
 	}
 	return accounts
 }
@@ -1075,6 +1144,7 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 		snapshot = sanitizeSnapshotAccountDisplay(snapshot, configsByID)
 		snapshot.AgentConfigID = cfg.ID
 		view := accountViewFromSnapshot(snapshot)
+		view.AccountIdentity = preferredAccountIdentity(view.AccountIdentity, accountUsageDisplayIdentity(cfg))
 		key := accountUsageKeyForConfig(cfg)
 		if i, ok := index[key]; ok {
 			existing[i] = preferAccountUsageView(existing[i], view)
@@ -1141,6 +1211,9 @@ func preferAccountUsageView(existing, next models.AccountUsageView) models.Accou
 }
 
 func mergeAccountUsageViewMetadata(existing, next models.AccountUsageView) models.AccountUsageView {
+	if existing.AccountIdentity == "" && next.AccountIdentity != "" {
+		existing.AccountIdentity = next.AccountIdentity
+	}
 	if existing.AccountID == "" && next.AccountID != "" {
 		existing.AccountID = next.AccountID
 	}
@@ -1280,6 +1353,22 @@ func sanitizeSnapshotAccountDisplay(snapshot models.AccountUsageSnapshot, config
 	return snapshot
 }
 
+func accountSnapshotIdentity(snapshot models.AccountUsageSnapshot) string {
+	if models.LLMProvider(strings.ToLower(strings.TrimSpace(snapshot.Provider))) == models.ProviderAnthropic {
+		// Anthropic profile details contain the account email when provided, with
+		// display name/name as the provider's documented fallback. Keep it in the
+		// dedicated identity field while the broader detail field stays private.
+		if strings.TrimSpace(snapshot.AccountDetail) == "" && strings.TrimSpace(snapshot.AccountDisplayName) == "" {
+			return ""
+		}
+		return preferredAccountIdentity(snapshot.AccountDetail, snapshot.AccountDisplayName)
+	}
+	if strings.TrimSpace(snapshot.AccountDisplayName) == "" {
+		return ""
+	}
+	return preferredAccountIdentity(snapshot.AccountDisplayName)
+}
+
 func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.AccountUsageView {
 	snapshot = repairAccountSnapshotFromRawJSON(snapshot)
 	errorMessage := ""
@@ -1315,6 +1404,7 @@ func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.Accoun
 	limits := composeAccountLimits(primaryLimit, secondaryLimit, extraLimits)
 	view := models.AccountUsageView{
 		Provider:             snapshot.Provider,
+		AccountIdentity:      accountSnapshotIdentity(snapshot),
 		AccountID:            snapshot.AccountID,
 		AgentConfigID:        snapshot.AgentConfigID,
 		PlanType:             snapshot.PlanType,
@@ -1499,7 +1589,7 @@ func normalizeAnthropicOAuthProfile(raw map[string]any) anthropicOAuthProfile {
 	org, _ := rawMap(firstPresent(raw, "organization", "org"))
 	account, _ := rawMap(firstPresent(raw, "account", "user"))
 	profile := anthropicOAuthProfile{
-		DisplayName: strings.TrimSpace(firstNonEmptyUsageString(stringValue(account["display_name"]), stringValue(account["name"]))),
+		DisplayName: strings.TrimSpace(firstNonEmptyUsageString(stringValue(account["email"]), stringValue(account["display_name"]), stringValue(account["name"]))),
 		Detail:      strings.TrimSpace(firstNonEmptyUsageString(stringValue(account["email"]), stringValue(account["display_name"]), stringValue(account["name"]))),
 	}
 	orgID := firstNonEmptyUsageString(stringValue(firstPresent(org, "uuid", "id")))
