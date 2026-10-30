@@ -546,3 +546,29 @@ func TestOrganizationInvitationRateLimitsStayOnForm(t *testing.T) {
 		})
 	}
 }
+
+func TestOrganizationInvitationStatus(t *testing.T) {
+	const now int64 = 1700000000
+	for _, tt := range []struct {
+		status     string
+		invitation models.OrgInvitation
+		canRevoke  bool
+	}{
+		{"Pending", models.OrgInvitation{ExpiresAt: now + 1}, true},
+		{"Expired", models.OrgInvitation{ExpiresAt: now}, false},
+		{"Expired", models.OrgInvitation{ExpiresAt: now - 1}, false},
+		{"Accepted", models.OrgInvitation{ExpiresAt: now - 1, Used: true}, false},
+		{"Revoked", models.OrgInvitation{ExpiresAt: now - 1, Revoked: true}, false},
+	} {
+		t.Run(tt.status, func(t *testing.T) {
+			tt.invitation.ID = "test-invite"
+			var body strings.Builder
+			require.NoError(t, organizationTemplate.Execute(&body, organizationPageData{
+				Org: &models.Organization{Name: "Test"}, Admin: true, Local: true, Now: now,
+				Principal: models.Principal{Role: "owner"}, Invitations: []models.OrgInvitation{tt.invitation},
+			}))
+			require.Contains(t, body.String(), "<td> "+tt.status+"</td>")
+			require.Equal(t, tt.canRevoke, strings.Contains(body.String(), "/organization/invitations/test-invite/revoke"))
+		})
+	}
+}

@@ -190,6 +190,7 @@ type organizationPageData struct {
 	Joining     bool
 	SignedIn    bool
 	LastOwnerID string
+	Now         int64
 }
 
 var organizationTemplate = template.Must(template.New("organization").Parse(`{{if .Joining}}<!doctype html>
@@ -254,7 +255,7 @@ var organizationTemplate = template.Must(template.New("organization").Parse(`{{i
 {{if .Admin}}<section class="card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0"><div class="card-body min-w-0"><h2 class="card-title text-lg">Invitations</h2>
 {{if .Local}}<p class="text-sm opacity-60 mb-4">Links expire in seven days and work once. Anyone with the link can join.</p><form method="post" action="/organization/invitations" hx-post="/organization/invitations" hx-target="#main-content" class="flex flex-wrap items-center gap-2 mb-4"><select name="role" aria-label="Invitation role" class="select select-bordered select-sm"><option value="member">Member</option>{{if eq .Principal.Role "owner"}}<option value="admin">Admin</option>{{end}}</select><button class="btn btn-primary btn-sm" type="submit">Create invite link</button></form>
 {{if .InviteURL}}<div id="organization-invite-link" class="chat-markdown mb-4"><p class="text-sm mb-2">Share this link (shown only once)</p><pre class="relative"><code>{{.InviteURL}}</code></pre></div>{{end}}
-<div class="overflow-x-auto w-full"><table class="table table-sm w-full"><thead><tr><th>Role</th><th>Status</th><th class="text-right">Actions</th></tr></thead><tbody>{{range .Invitations}}<tr><td>{{.Role}}</td><td> {{if .Used}}Accepted{{else if .Revoked}}Revoked{{else}}Pending{{end}}</td><td class="text-right">{{if and (not .Used) (not .Revoked)}}<form method="post" action="/organization/invitations/{{.ID}}/revoke" hx-post="/organization/invitations/{{.ID}}/revoke" hx-target="#main-content"><button class="btn btn-sm" type="submit" {{if and (ne $.Principal.Role "owner") (ne .CreatedBy $.Principal.UserID)}}disabled title="Only the invitation creator or an owner can revoke this invitation"{{end}}>Revoke</button></form>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="text-sm opacity-60 py-6 text-center">No invitations yet.</td></tr>{{end}}</tbody></table></div>
+<div class="overflow-x-auto w-full"><table class="table table-sm w-full"><thead><tr><th>Role</th><th>Status</th><th class="text-right">Actions</th></tr></thead><tbody>{{range .Invitations}}<tr><td>{{.Role}}</td><td> {{if .Used}}Accepted{{else if .Revoked}}Revoked{{else if le .ExpiresAt $.Now}}Expired{{else}}Pending{{end}}</td><td class="text-right">{{if and (not .Used) (not .Revoked) (gt .ExpiresAt $.Now)}}<form method="post" action="/organization/invitations/{{.ID}}/revoke" hx-post="/organization/invitations/{{.ID}}/revoke" hx-target="#main-content"><button class="btn btn-sm" type="submit" {{if and (ne $.Principal.Role "owner") (ne .CreatedBy $.Principal.UserID)}}disabled title="Only the invitation creator or an owner can revoke this invitation"{{end}}>Revoke</button></form>{{end}}</td></tr>{{else}}<tr><td colspan="3" class="text-sm opacity-60 py-6 text-center">No invitations yet.</td></tr>{{end}}</tbody></table></div>
 {{else}}<p>{{if .AuthOff}}Enable local authentication to create invitations.{{else}}Hosted invitations are managed through workspace settings when hosted teams support is available.{{end}}</p>{{end}}
 </div></section>{{end}}{{end}}
 {{if .Joining}}</main></body></html>{{else}}</div>{{end}}`))
@@ -264,6 +265,7 @@ func (h *Handler) renderOrganization(c echo.Context, data organizationPageData) 
 	// Preserve the origin on HTTP form submissions without exposing the
 	// invitation token in a Referer URL. no-referrer can produce Origin: null.
 	c.Response().Header().Set("Referrer-Policy", "strict-origin")
+	data.Now = time.Now().Unix()
 	data.CSS = static.URL("app.css")
 	data.Utilities = static.URL("app-utilities.css")
 	var b bytes.Buffer
