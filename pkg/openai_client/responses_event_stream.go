@@ -16,16 +16,14 @@ type responsesEvent struct {
 
 // responsesEventStream transfers whole WebSocket events with backpressure.
 // The acknowledgement prevents reuse of the producer's frame buffer while the
-// parser is inspecting it. Read is a compatibility adapter for byte consumers;
-// the agentic parser consumes events directly and never adds SSE framing.
+// parser is inspecting it. Both parsers consume events directly without SSE framing.
 type responsesEventStream struct {
-	events        chan responsesEvent
-	ack           chan struct{}
-	closed        chan struct{}
-	once          sync.Once
-	pending       bool
-	err           error // producer-owned until events closes
-	compatibility bytes.Buffer
+	events  chan responsesEvent
+	ack     chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+	pending bool
+	err     error // producer-owned until events closes
 }
 
 func newResponsesEventStream() *responsesEventStream {
@@ -71,22 +69,6 @@ func (s *responsesEventStream) next() (responsesEvent, error) {
 	}
 }
 
-func (s *responsesEventStream) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	for s.compatibility.Len() == 0 {
-		event, err := s.next()
-		if err != nil {
-			return 0, err
-		}
-		if _, err = forwardResponsesWebsocketEvent(&s.compatibility, event.data, true); err != nil {
-			return 0, err
-		}
-	}
-	return s.compatibility.Read(p)
-}
-
 func (s *responsesEventStream) Close() error {
 	s.once.Do(func() { close(s.closed) })
 	return nil
@@ -95,15 +77,24 @@ func (s *responsesEventStream) Close() error {
 // responsesEventIterator strips framing only for actual HTTP/SSE input.
 // WebSocket events bypass both the line scanner and the synthetic SSE wrapper.
 type responsesEventIterator struct {
+	close     func() error
 	nextEvent func() (responsesEvent, error)
 	event     responsesEvent
 	err       error
 }
 
-func newResponsesEventIterator(body io.Reader) *responsesEventIterator {
-	if stream, ok := body.(*responsesEventStream); ok {
-		return &responsesEventIterator{nextEvent: stream.next}
+func newResponsesWebsocketEventIterator(stream *responsesEventStream) *responsesEventIterator {
+	return &responsesEventIterator{nextEvent: stream.next, close: stream.Close}
+}
+
+func (s *responsesEventIterator) Close() error {
+	if s.close != nil {
+		return s.close()
 	}
+	return nil
+}
+
+func newResponsesEventIterator(body io.Reader) *responsesEventIterator {
 	scanner := newResponsesStreamScanner(body)
 	currentType := ""
 	return &responsesEventIterator{nextEvent: func() (responsesEvent, error) {

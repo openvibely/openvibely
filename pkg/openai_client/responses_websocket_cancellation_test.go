@@ -64,7 +64,7 @@ func TestResponsesWebsocketCancellationInterruptsHeaderAndPayload(t *testing.T) 
 			}
 			defer body.Close()
 			result := make(chan error, 1)
-			go func() { _, err := io.ReadAll(body); result <- err }()
+			go func() { _, err := drainResponsesTestEvents(body); result <- err }()
 			<-ready
 			cause := errors.New("cancel active response")
 			cancel(cause)
@@ -179,7 +179,7 @@ func TestResponsesWebsocketOldCancellationCannotInterruptReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = io.ReadAll(body)
+	_, err = drainResponsesTestEvents(body)
 	body.Close()
 	if err != nil {
 		t.Fatal(err)
@@ -196,11 +196,20 @@ func TestResponsesWebsocketOldCancellationCannotInterruptReuse(t *testing.T) {
 	}
 	cancelFirst()
 	release()
-	data, err := io.ReadAll(body)
+	data, err := drainResponsesTestEvents(body)
 	if err != nil || !strings.Contains(string(data), "response_1") {
 		t.Fatalf("reuse read=%s err=%v", data, err)
 	}
 	if connections.Load() != 1 {
 		t.Fatalf("connections=%d, want one reused connection", connections.Load())
 	}
+}
+
+// Drain to EOF so transport cleanup has completed before testing socket reuse.
+func drainResponsesTestEvents(events *responsesEventIterator) (string, error) {
+	var result strings.Builder
+	for events.Scan() {
+		result.Write(events.event.data)
+	}
+	return result.String(), events.Err()
 }

@@ -987,9 +987,8 @@ func TestResponsesLiteClosingStreamBeforeTerminalResetsConnection(t *testing.T) 
 	if err != nil {
 		t.Fatalf("open stream: %v", err)
 	}
-	buffer := make([]byte, 256)
-	if _, err := body.Read(buffer); err != nil {
-		t.Fatalf("read first event: %v", err)
+	if !body.Scan() || body.event.typ != "response.created" {
+		t.Fatalf("first event type=%q error=%v", body.event.typ, body.Err())
 	}
 	_ = body.Close()
 	close(continueServer)

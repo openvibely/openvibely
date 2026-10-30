@@ -603,7 +603,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 			policy.AllowReplay = true
 			policy.RetryableError = isRetryableResponsesTransportError
 			result, err := httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (*Response, bool, error) {
-				openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+				openStream := func(useWebsocket bool) (*responsesEventIterator, error) {
 					if useWebsocket {
 						return c.openResponsesWebsocketStream(streamCtx, wsPayload, isChatGPTOAuth, responsesWebsocketStreamOptions{Model: opts.Model})
 					}
@@ -625,7 +625,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 						opts.OnDelta(text)
 					}
 				}
-				result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+				result, wsErr := parseStreamingEvents(body, onDelta, opts.SuppressToolMarkers)
 				body.Close()
 				if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(streamCtx, wsErr) {
 					c.responsesTransportState.disableWebsocket()
@@ -880,8 +880,10 @@ func responsesStreamDataFromLine(rawLine []byte) (data []byte, isData bool, err 
 }
 
 func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMarkers bool) (*Response, error) {
-	scanner := newResponsesEventIterator(body)
+	return parseStreamingEvents(newResponsesEventIterator(body), onDelta, suppressToolMarkers)
+}
 
+func parseStreamingEvents(scanner *responsesEventIterator, onDelta func(string), suppressToolMarkers bool) (*Response, error) {
 	var (
 		outputText strings.Builder
 		completed  map[string]any

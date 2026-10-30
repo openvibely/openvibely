@@ -3,7 +3,6 @@ package openaiclient
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -56,18 +55,18 @@ func TestResponsesDirectEventsMatchSSE(t *testing.T) {
 				text, thinking []string
 				tools          []string
 			}
-			parse := func(body io.Reader) observed {
+			parse := func(events *responsesEventIterator) observed {
 				var o observed
 				c := NewWithAPIKey("test")
-				result, err := c.parseAgenticStreamWithToolCallbacks(body, func(s string) { o.text = append(o.text, s) }, func(s string) { o.thinking = append(o.thinking, s) }, func(n string, a json.RawMessage) { o.tools = append(o.tools, n+string(a)) }, nil)
+				result, err := c.parseAgenticEventsCapturingText(events, func(s string) { o.text = append(o.text, s) }, func(s string) { o.thinking = append(o.thinking, s) }, func(n string, a json.RawMessage) { o.tools = append(o.tools, n+string(a)) }, nil, nil)
 				o.result = result
 				if err != nil {
 					o.err = err.Error()
 				}
 				return o
 			}
-			expected := parse(strings.NewReader(sse.String()))
-			actual := parse(stream)
+			expected := parse(newResponsesEventIterator(strings.NewReader(sse.String())))
+			actual := parse(newResponsesWebsocketEventIterator(stream))
 			stream.Close()
 			<-finished
 			if !reflect.DeepEqual(actual, expected) {
@@ -75,9 +74,6 @@ func TestResponsesDirectEventsMatchSSE(t *testing.T) {
 			}
 			if strings.Join(actual.text, "") != "hello 👋\nworld" && actual.err == "" {
 				t.Fatal("text lost")
-			}
-			if stream.compatibility.Len() != 0 {
-				t.Fatal("direct parser unexpectedly used SSE framing")
 			}
 		})
 	}
@@ -143,7 +139,7 @@ func TestResponsesDirectSimpleClientMatchesSSE(t *testing.T) {
 		fmt.Fprintf(&sse, "data: %s\n\n", frame)
 	}
 	expected, e1 := parseStreamingResponse(strings.NewReader(sse.String()), func(s string) { expectedText.WriteString(s) }, true)
-	actual, e2 := parseStreamingResponse(stream, func(s string) { actualText.WriteString(s) }, true)
+	actual, e2 := parseStreamingEvents(newResponsesWebsocketEventIterator(stream), func(s string) { actualText.WriteString(s) }, true)
 	stream.Close()
 	<-done
 	if e1 != nil || e2 != nil || !reflect.DeepEqual(expected, actual) || expectedText.String() != actualText.String() || actualText.String() != "hello 👋\nworld" {
@@ -177,4 +173,33 @@ data: {"type":"response.completed","response":{"id":"r","output":[]}}
 	if result.text != "next" {
 		t.Fatal("returned text changed after append")
 	}
+}
+
+// responsesFixtureEvents uses the production decoder and acknowledged event
+// handoff. Close joins the producer so tests and benchmarks cannot leak work.
+func responsesFixtureEvents(frames [][]byte) *responsesEventIterator {
+	stream := newResponsesEventStream()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(stream.events)
+		var decoder responsesWebsocketDecoder
+		for _, frame := range frames {
+			typ, _, valid := decoder.decode(frame)
+			if !valid {
+				stream.err = fmt.Errorf("invalid fixture event: %s", frame)
+				return
+			}
+			if stream.send(responsesEvent{data: frame, typ: typ, websocket: true}) != nil {
+				return
+			}
+		}
+	}()
+	events := newResponsesWebsocketEventIterator(stream)
+	events.close = func() error {
+		err := stream.Close()
+		<-done
+		return err
+	}
+	return events
 }

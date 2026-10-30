@@ -133,11 +133,6 @@ func responsesLiteDefaultReasoningEffort(model string) string {
 	return "medium"
 }
 
-func (s *ResponsesTransportState) lastAstraReasoningEffort(model string) string {
-	_, configured, _ := s.astraReasoningState(model)
-	return configured
-}
-
 func (s *ResponsesTransportState) astraReasoningState(model string) (string, string, []astraConfigurationUpdate) {
 	if s == nil || !isGPT6WorkflowModel(model) {
 		return "", "", nil
@@ -198,19 +193,6 @@ func (s *ResponsesTransportState) restoreAstraReasoningStateJSON(model, raw stri
 	s.astraConfiguredEffort = configuredEffort
 	s.astraConfigUpdates = updates
 	return nil
-}
-
-func (s *ResponsesTransportState) setAstraReasoningEffort(model, effort string) {
-	if s == nil || !isGPT6WorkflowModel(model) {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	effort = strings.TrimSpace(effort)
-	if s.astraRequestEffort == "" {
-		s.astraRequestEffort = effort
-	}
-	s.astraConfiguredEffort = effort
 }
 
 func (s *ResponsesTransportState) commitAstraReasoningEffort(model, effort string, userHistoryIndex int, changed, compacted bool) {
@@ -413,7 +395,7 @@ type responsesWebsocketStreamOptions struct {
 	Model string
 }
 
-func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool, opts responsesWebsocketStreamOptions) (io.ReadCloser, error) {
+func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool, opts responsesWebsocketStreamOptions) (*responsesEventIterator, error) {
 	state := c.responsesTransportState
 	state.mu.Lock()
 	endpoint, err := c.responsesWebsocketEndpoint(isChatGPTOAuth)
@@ -616,7 +598,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			}
 		}
 	}()
-	return stream, nil
+	return newResponsesWebsocketEventIterator(stream), nil
 }
 
 // interruptResponsesWebsocketRead installs one socket interrupt per response.
@@ -667,20 +649,6 @@ func decodeResponsesComplexEvent(data []byte) map[string]any {
 	return event
 }
 
-func forwardResponsesWebsocketEvent(writer io.Writer, data []byte, validJSON bool) (invalidJSON bool, err error) {
-	// SSE parsers consume one data line. Compact multiline provider events, but
-	// leave already single-line frames in their original representation.
-	if !validJSON || bytes.IndexAny(data, "\r\n") >= 0 {
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, data); err != nil {
-			return true, err
-		}
-		data = compact.Bytes()
-	}
-	_, err = fmt.Fprintf(writer, "data: %s\n\n", data)
-	return false, err
-}
-
 func responseIDFromEvent(event map[string]any) string {
 	if event == nil {
 		return ""
@@ -726,7 +694,7 @@ func hasInputPrefix(input, prefix []any) bool {
 	return true
 }
 
-func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth, responsesLite bool) (io.ReadCloser, error) {
+func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth, responsesLite bool) (*responsesEventIterator, error) {
 	payload := make(map[string]any, len(websocketPayload))
 	for key, value := range websocketPayload {
 		payload[key] = value
@@ -764,7 +732,9 @@ func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload m
 		errBody, _ := io.ReadAll(resp.Body)
 		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody)))
 	}
-	return resp.Body, nil
+	events := newResponsesEventIterator(resp.Body)
+	events.close = resp.Body.Close
+	return events, nil
 }
 
 func isTerminalResponsesWebsocketEvent(eventType string) bool {

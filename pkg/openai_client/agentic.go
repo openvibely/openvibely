@@ -2757,7 +2757,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		if useResponsesLite {
 			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		}
-		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+		openStream := func(useWebsocket bool) (*responsesEventIterator, error) {
 			if useWebsocket {
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
 				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
@@ -2793,7 +2793,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 				opts.OnToolResult(name, output, isError)
 			}
 		}
-		result, wsErr := c.parseAgenticStreamCapturingText(body, onText, onThinking, onToolUse, onToolResult, opts.responseText)
+		result, wsErr := c.parseAgenticEventsCapturingText(body, onText, onThinking, onToolUse, onToolResult, opts.responseText)
 		body.Close()
 		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
@@ -2864,8 +2864,10 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 }
 
 func (c *Client) parseAgenticStreamCapturingText(body io.Reader, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool), textBuilder *strings.Builder) (*agenticTurnResult, error) {
-	scanner := newResponsesEventIterator(body)
+	return c.parseAgenticEventsCapturingText(newResponsesEventIterator(body), onText, onThinking, onToolUse, onToolResult, textBuilder)
+}
 
+func (c *Client) parseAgenticEventsCapturingText(scanner *responsesEventIterator, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool), textBuilder *strings.Builder) (*agenticTurnResult, error) {
 	result := &agenticTurnResult{}
 	if textBuilder == nil {
 		textBuilder = &strings.Builder{}

@@ -1,7 +1,6 @@
 package openaiclient
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -43,8 +42,9 @@ func responsesWebsocketBenchmarkFixtures() []responsesWebsocketBenchmarkFixture 
 }
 
 // BenchmarkResponsesWebsocketFrameToParser measures the network-free WebSocket
-// frame decoding/framing and downstream parser path. The fixtures are fixed so
-// before/after runs measure identical event sequences.
+// frame decoder, acknowledged event handoff, and direct parser path. It does not
+// include network reads or HTTP/SSE framing. Fixtures retain the same events, but
+// historical synthetic-SSE measurements exercise a different path.
 func BenchmarkResponsesWebsocketFrameToParser(b *testing.B) {
 	for _, fixture := range responsesWebsocketBenchmarkFixtures() {
 		for _, parser := range []string{"standard", "agentic"} {
@@ -72,38 +72,31 @@ func BenchmarkResponsesWebsocketFrameToParser(b *testing.B) {
 }
 
 func runResponsesWebsocketBenchmarkSequence(fixture responsesWebsocketBenchmarkFixture, parser string) error {
-	var decoder responsesWebsocketDecoder
-	var framed bytes.Buffer
-	var outputItems []any
-	responseID := ""
-	for _, data := range fixture.frames {
-		eventType, event, validJSON := decoder.decode(data)
-		switch eventType {
-		case "response.output_item.done":
-			if item, ok := event["item"].(map[string]any); ok {
-				outputItems = append(outputItems, item)
-			}
-		case "response.completed":
-			responseID = responseIDFromEvent(event)
-		}
-		if _, err := forwardResponsesWebsocketEvent(&framed, data, validJSON); err != nil {
-			return err
-		}
-	}
-	if responseID != "resp_bench" {
-		return fmt.Errorf("completion response ID = %q, want resp_bench", responseID)
-	}
-	if fixture.name == "mixed" && len(outputItems) != 1 {
-		return fmt.Errorf("captured output item count = %d, want one", len(outputItems))
-	}
+	events := responsesFixtureEvents(fixture.frames)
+	defer events.Close()
 	switch parser {
 	case "standard":
-		_, err := parseStreamingResponse(&framed, nil, true)
-		return err
+		result, err := parseStreamingEvents(events, nil, true)
+		if err != nil {
+			return err
+		}
+		if result.InputTokens != 128 || result.OutputTokens != 256 || result.Text == "" {
+			return fmt.Errorf("incomplete standard result: %+v", result)
+		}
+		return nil
 	case "agentic":
 		client := &Client{}
-		_, err := client.parseAgenticStreamWithToolCallbacks(&framed, nil, nil, nil, nil)
-		return err
+		result, err := client.parseAgenticEventsCapturingText(events, nil, nil, nil, nil, nil)
+		if err != nil {
+			return err
+		}
+		if result.responseID != "resp_bench" || result.inputTokens != 128 || result.outputTokens != 256 || result.text == "" {
+			return fmt.Errorf("incomplete agentic result: %+v", result)
+		}
+		if fixture.name == "mixed" && len(result.outputItems) != 1 {
+			return fmt.Errorf("captured output item count = %d, want one", len(result.outputItems))
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown Responses benchmark parser %q", parser)
 	}

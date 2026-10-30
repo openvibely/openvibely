@@ -1,7 +1,6 @@
 package openaiclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,8 +14,8 @@ import (
 	"github.com/coder/websocket"
 )
 
-// Provider error frames are pretty-printed JSON. Forwarding one as "data: %s"
-// without compacting it loses the envelope in the downstream line-based parser.
+// Pretty-printed WebSocket events must reach both parsers intact, including
+// provider errors, without relying on SSE line framing.
 func TestResponsesWebsocketMultilineEvents(t *testing.T) {
 	for _, agentic := range []bool{false, true} {
 		for _, failure := range []bool{false, true} {
@@ -99,7 +98,7 @@ func TestResponsesWebsocketMultilineEvents(t *testing.T) {
 	}
 }
 
-func TestResponsesWebsocketLightweightDecodeAndFraming(t *testing.T) {
+func TestResponsesWebsocketLightweightDecode(t *testing.T) {
 	var decoder responsesWebsocketDecoder
 	cases := []struct {
 		name         string
@@ -135,14 +134,6 @@ func TestResponsesWebsocketLightweightDecodeAndFraming(t *testing.T) {
 			if (event != nil) != tc.wantMetadata {
 				t.Fatalf("decoded metadata presence=%t, want %t", event != nil, tc.wantMetadata)
 			}
-			var framed bytes.Buffer
-			invalidJSON, err := forwardResponsesWebsocketEvent(&framed, tc.frame, validJSON)
-			if err != nil || invalidJSON {
-				t.Fatalf("forward event invalid=%t error=%v", invalidJSON, err)
-			}
-			if got, want := framed.String(), "data: "+string(tc.frame)+"\n\n"; got != want {
-				t.Fatalf("framed event = %q, want unchanged single-line frame %q", got, want)
-			}
 		})
 	}
 
@@ -151,53 +142,32 @@ func TestResponsesWebsocketLightweightDecodeAndFraming(t *testing.T) {
 	if !validJSON || eventType != "error" || event == nil {
 		t.Fatalf("multiline event decode = (%q, %#v, %t)", eventType, event, validJSON)
 	}
-	var framed bytes.Buffer
-	invalidJSON, err := forwardResponsesWebsocketEvent(&framed, multiline, validJSON)
-	if err != nil || invalidJSON {
-		t.Fatalf("forward multiline event invalid=%t error=%v", invalidJSON, err)
-	}
-	if got, want := framed.String(), "data: {\"type\":\"error\",\"error\":{\"message\":\"provider failure\"}}\n\n"; got != want {
-		t.Fatalf("framed multiline event = %q, want compacted event %q", got, want)
-	}
-
 	malformed := []byte(`{"type":"response.completed"`)
 	_, _, validJSON = decoder.decode(malformed)
 	if validJSON {
 		t.Fatal("malformed event was marked valid")
 	}
-	invalidJSON, err = forwardResponsesWebsocketEvent(&framed, malformed, validJSON)
-	if err == nil || !invalidJSON {
-		t.Fatalf("malformed event forward invalid=%t error=%v, want invalid JSON error", invalidJSON, err)
-	}
 }
 
-func TestResponsesWebsocketFramingPreservesManyDeltaOrder(t *testing.T) {
-	var decoder responsesWebsocketDecoder
+func TestResponsesWebsocketDirectEventsPreserveManyDeltaOrder(t *testing.T) {
 	const deltaCount = 2048
-	var framed bytes.Buffer
+	frames := make([][]byte, 0, deltaCount+1)
 	var expected strings.Builder
 	for i := 0; i < deltaCount; i++ {
 		delta := fmt.Sprintf("%04d,", i)
 		expected.WriteString(delta)
-		frame := []byte(fmt.Sprintf(`{"type":"response.output_text.delta","delta":%q}`, delta))
-		eventType, _, validJSON := decoder.decode(frame)
-		if eventType != "response.output_text.delta" || !validJSON {
-			t.Fatalf("delta %d decoded as type=%q valid=%t", i, eventType, validJSON)
-		}
-		if _, err := forwardResponsesWebsocketEvent(&framed, frame, validJSON); err != nil {
-			t.Fatalf("forward delta %d: %v", i, err)
-		}
+		frames = append(frames, []byte(fmt.Sprintf(`{"type":"response.output_text.delta","delta":%q}`, delta)))
 	}
-	completion := []byte(`{"type":"response.completed","response":{"id":"resp_many","status":"completed","model":"gpt-5.6-luna","output":[]}}`)
-	_, _, validJSON := decoder.decode(completion)
-	if _, err := forwardResponsesWebsocketEvent(&framed, completion, validJSON); err != nil {
-		t.Fatalf("forward completion: %v", err)
-	}
+	frames = append(frames, []byte(`{"type":"response.completed","response":{"id":"resp_many","status":"completed","model":"gpt-5.6-luna","output":[]}}`))
+
 	want := expected.String()
-	stream := framed.String()
+	standardEvents := responsesFixtureEvents(frames)
+	defer standardEvents.Close()
+	agenticEvents := responsesFixtureEvents(frames)
+	defer agenticEvents.Close()
 
 	var standardDeltas strings.Builder
-	standard, err := parseStreamingResponse(strings.NewReader(stream), func(delta string) { _, _ = standardDeltas.WriteString(delta) }, true)
+	standard, err := parseStreamingEvents(standardEvents, func(delta string) { _, _ = standardDeltas.WriteString(delta) }, true)
 	if err != nil {
 		t.Fatalf("standard parser: %v", err)
 	}
@@ -206,7 +176,7 @@ func TestResponsesWebsocketFramingPreservesManyDeltaOrder(t *testing.T) {
 	}
 
 	var agenticDeltas strings.Builder
-	agentic, err := (&Client{}).parseAgenticStreamWithToolCallbacks(strings.NewReader(stream), func(delta string) { _, _ = agenticDeltas.WriteString(delta) }, nil, nil, nil)
+	agentic, err := (&Client{}).parseAgenticEventsCapturingText(agenticEvents, func(delta string) { _, _ = agenticDeltas.WriteString(delta) }, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("agentic parser: %v", err)
 	}
@@ -262,7 +232,7 @@ func TestResponsesWebsocketReusesReaderWithoutCorruptingSavedItems(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := client.parseAgenticStreamWithToolCallbacks(body, nil, nil, nil, nil)
+		result, err := client.parseAgenticEventsCapturingText(body, nil, nil, nil, nil, nil)
 		body.Close()
 		if err != nil || result.text != "after saved item: 世界!" {
 			t.Fatalf("stream result=%v err=%v", result, err)
