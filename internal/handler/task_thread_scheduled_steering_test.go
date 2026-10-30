@@ -400,13 +400,11 @@ func runHandlerChromeFixture(t *testing.T, chrome, targetURL, name string, virtu
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	if err := cmd.Start(); err != nil {
+	if err := startHandlerBrowserProcess(cmd); err != nil {
 		_ = stdoutFile.Close()
 		_ = stderrFile.Close()
 		t.Fatalf("start Chrome %s fixture: %v", name, err)
 	}
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- cmd.Wait() }()
 
 	deadline := time.Now().Add(timeout)
 	var result string
@@ -419,17 +417,7 @@ func runHandlerChromeFixture(t *testing.T, chrome, targetURL, name string, virtu
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	// --dump-dom writes its result immediately before Chrome exits. Give the
-	// browser a chance to shut down its profile-writing children naturally so
-	// TempDir cleanup cannot race a late Default-directory write.
-	select {
-	case <-waitDone:
-	case <-time.After(2 * time.Second):
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		<-waitDone
-	}
+	stopHandlerBrowserProcess(cmd)
 	_ = stdoutFile.Close()
 	_ = stderrFile.Close()
 
