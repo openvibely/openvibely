@@ -35,3 +35,40 @@ func TestBrowserFunctional_CompactToolOutput(t *testing.T) {
  return {};
  `)
 }
+
+func TestBrowserFunctional_CompactToolOutputRemount(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='task-thread-messages';messages.style.height='160px';messages.style.overflowAnchor='none';
+ document.getElementById('pair').dataset.execStatus='completed';
+ messages.setAttribute('data-transcript-hydrating','true');
+ const setMode=mode=>{document.documentElement.setAttribute('data-output-detail',mode);document.dispatchEvent(new CustomEvent('openvibely:display-change',{detail:{name:'output',value:mode}}));};
+ const models=Array.from({length:30},()=>({kind:'using',segments:[]}));
+ let firstRenderCount=0;
+ setMode('full');
+ await installChatVirtualRows(stream,{models},async(node,model,index)=>{
+  if(index!==0){node.style.height='200px';node.textContent='Other output '+index;return;}
+  firstRenderCount++;node._chatToolStateKey='remount-tool';
+  await renderStreamingContent(node,'[Using tool: bash]\n[Tool bash done]\nTool contents\n[/Tool]',false,{virtualRow:true});
+ });
+ await restoreChatTranscriptScroll({messages,defaultPinned:false});
+ async function scrollTo(top){messages.scrollTop=top;messages.dispatchEvent(new Event('scroll'));await paint();await paint();}
+ await scrollTo(0);
+ const row=stream._chatVirtualRows[0];
+ assert(row.ready && row.node.isConnected,'first tool must be mounted');
+ const body=row.node.querySelector('.stream-tool-body');
+ const initialRenderCount=firstRenderCount;
+ assert(body.getBoundingClientRect().height>0,'Full starts expanded');
+ await scrollTo(messages.scrollHeight);
+ assert(!row.node.isConnected,'real virtualization must detach row');
+ setMode('compact');
+ await scrollTo(0);
+ assert(row.node.isConnected && firstRenderCount===initialRenderCount,'retained row must remount without rerender');
+ assert(body.getBoundingClientRect().height===0 && row.node.querySelector('button').getAttribute('aria-expanded')==='false','remounted row must use Compact');
+ await scrollTo(messages.scrollHeight);setMode('full');await scrollTo(0);
+ assert(body.getBoundingClientRect().height>0 && row.node.querySelector('button').disabled,'remounted Full must restore details and disable disclosure');
+ setMode('compact');row.node.querySelector('button').click();
+ await scrollTo(messages.scrollHeight);setMode('full');setMode('compact');await scrollTo(0);
+ assert(body.getBoundingClientRect().height>0 && row.node.querySelector('button').getAttribute('aria-expanded')==='true','manual Compact expansion must survive remount');
+ return {};
+ `)
+}
