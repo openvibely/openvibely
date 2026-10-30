@@ -10,10 +10,10 @@ import (
 )
 
 // BuildLiveAnalyticsAccountLimits renders provider responses without reading or
-// writing snapshot history. Stored reporting and monitor refreshes use a separate path.
+// writing snapshot history. Cards, reporting, and monitoring share this live path.
 func (s *UsageAnalyticsService) BuildLiveAnalyticsAccountLimits(ctx context.Context, filter persistence.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
 	// Keep provider work attached to the browser request so navigation cancels it.
-	view, configs, failures, err := s.buildAnalyticsAccountLimitBaseUsing(ctx, filter, s.fetchLiveAccountUsage)
+	view, configs, failures, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -28,9 +28,9 @@ func (s *UsageAnalyticsService) BuildLiveAnalyticsAccountLimits(ctx context.Cont
 	return &models.AnalyticsUsageAccountLimitsViewModel{AccountLimits: view.AccountLimits, LastUpdatedAt: view.LastUpdatedAt, Errors: view.Errors}, nil
 }
 
-func (s *UsageAnalyticsService) fetchLiveAccountUsage(ctx context.Context, configs []models.LLMConfig, provider string, _ bool) ([]models.AccountUsageSnapshot, map[string]string) {
+func (s *UsageAnalyticsService) fetchLiveAccountUsage(ctx context.Context, configs []models.LLMConfig, provider string) ([]models.AccountUsageResult, map[string]string) {
 	type result struct {
-		snapshots []models.AccountUsageSnapshot
+		snapshots []models.AccountUsageResult
 		errors    map[string]string
 	}
 	var pending []chan result
@@ -47,7 +47,7 @@ func (s *UsageAnalyticsService) fetchLiveAccountUsage(ctx context.Context, confi
 			}(group, name)
 		}
 	}
-	var snapshots []models.AccountUsageSnapshot
+	var snapshots []models.AccountUsageResult
 	failures := map[string]string{}
 	for _, ch := range pending {
 		result := <-ch
@@ -59,10 +59,10 @@ func (s *UsageAnalyticsService) fetchLiveAccountUsage(ctx context.Context, confi
 	return snapshots, failures
 }
 
-func (s *UsageAnalyticsService) fetchLiveAccountGroup(ctx context.Context, configs []models.LLMConfig, provider string) ([]models.AccountUsageSnapshot, map[string]string) {
+func (s *UsageAnalyticsService) fetchLiveAccountGroup(ctx context.Context, configs []models.LLMConfig, provider string) ([]models.AccountUsageResult, map[string]string) {
 	credentials := newAccountUsageCredentials(configs, provider)
 	failures := map[string]string{}
-	var snapshots []models.AccountUsageSnapshot
+	var snapshots []models.AccountUsageResult
 	for {
 		cfg, ok := credentials.next()
 		if !ok {

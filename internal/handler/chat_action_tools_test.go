@@ -1859,7 +1859,7 @@ func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Empty Project")
 	calls := 0
-	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageResult, error) {
 		calls++
 		return nil, fmt.Errorf("usage unavailable")
 	})
@@ -1953,15 +1953,15 @@ func TestViewUsageAnalyticsRuntimeTool_MultipleModelsProviderFilterAndCostAvaila
 }
 
 func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing.T) {
-	h, _, llmConfigRepo, env := setupTestHandlerWithStores(t)
+	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Account Project")
 	calls := 0
-	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageResult, error) {
 		calls++
 		fresh := 92.0
 		window := 300
-		return &models.AccountUsageSnapshot{PlanType: "ChatGPT Pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &fresh, PrimaryWindowMinutes: &window, RawJSON: `{"authorization":"Bearer raw-secret"}`}, nil
+		return &models.AccountUsageResult{PlanType: "ChatGPT Pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &fresh, PrimaryWindowMinutes: &window, RawJSON: `{"authorization":"Bearer raw-secret"}`}, nil
 	})
 	cfg := &models.LLMConfig{
 		Name:              "OpenAI OAuth Account",
@@ -1973,22 +1973,6 @@ func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing
 		OAuthAccountID:    "acct-secret-id",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, cfg))
-	used := 91.0
-	window := 300
-	reset := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
-	require.NoError(t, env.Fixtures.SeedAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
-		Provider:             "openai",
-		AccountID:            cfg.OAuthAccountID,
-		AgentConfigID:        cfg.ID,
-		PlanType:             "ChatGPT Pro",
-		PrimaryLabel:         "5-hour session",
-		PrimaryUsedPercent:   &used,
-		PrimaryWindowMinutes: &window,
-		PrimaryResetsAt:      &reset,
-		RawJSON:              `{"account_id":"raw-provider-account","authorization":"Bearer raw-secret"}`,
-		FetchedAt:            time.Now().UTC(),
-	}))
-
 	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_usage_analytics"]
 	out, err := handler(ctx, json.RawMessage(`{"range":"all","provider":"openai"}`))
 	require.NoError(t, err)
