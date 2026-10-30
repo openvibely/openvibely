@@ -184,6 +184,7 @@ templ TaskListPanel(currentProjectID string) {
                 inSettings = settings;
                 inContextSidebar = active;
                 root.classList.toggle('appearance-settings', active);
+                if (window.syncTaskListToggle) window.syncTaskListToggle();
                 document.getElementById('task-list-panel').setAttribute('aria-label', reviewing ? 'Changed files' : active ? 'Settings' : 'Tasks');
                 if (!active) return;
                 var projectID = new URLSearchParams(location.search).get('project_id') || (document.getElementById('project-selector') || {}).value || '';
@@ -251,6 +252,7 @@ templ TaskListPanel(currentProjectID string) {
 				btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 				btn.setAttribute('aria-label', (collapsed ? 'Expand' : 'Collapse') + ' task list');
 			}
+			window.syncTaskListToggle = syncToggle;
 			function setCollapsed(collapsed) {
                 if (root.classList.contains("appearance-settings") && !root.classList.contains("changes-explorer-active")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
