@@ -1713,6 +1713,37 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsHidesUnavailableResets(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+	history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+	window.Chart=function(){this.destroy=function(){};};
+	let resetsLoaded=false;
+	const response=data=>({ok:true,json:async()=>data});
+	window.fetch=async function(url){
+	 const u=new URL(url,location.href),p=u.searchParams;
+	 if(u.pathname.endsWith('/resets')){resetsLoaded=true;return response({available_count:0,unavailable_reason:'surface',credits:[]});}
+	 if(p.get('projection')==='accounts')return response({accounts:[{key:'claude',provider:'anthropic'}]});
+	 if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
+	 return response({totals:{},usage_rate:[],model_breakdown:[]});
+	};
+	window.addEventListener('load',async()=>{
+	 const result=document.getElementById('reconnect-result');const wait=()=>new Promise(r=>setTimeout(r,20));
+	 try{
+	  const card=document.getElementById('accountUsageCards');
+	  for(let i=0;i<150&&!resetsLoaded;i++)await wait();
+	  await wait();
+	  if(!resetsLoaded)throw Error('usage resets request did not finish');
+	  if(card.textContent.includes('Usage resets')||card.textContent.includes('surface')||card.textContent.includes('Loading usage resets'))throw Error('unavailable reset details were rendered');
+	  result.dataset.testResult='pass';
+	 }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+	});</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestBrowserFunctional_AnalyticsAnthropicResets(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
