@@ -64,13 +64,22 @@ func StopBrowserProcessGroup(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	pgid := cmd.Process.Pid
 	waited := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
 		close(waited)
 	}()
 
+	StopBrowserProcessGroupWithWait(cmd, waited)
+}
+
+// StopBrowserProcessGroupWithWait stops the entire browser group when the caller
+// already owns cmd.Wait. waited must close after that single Wait call returns.
+func StopBrowserProcessGroupWithWait(cmd *exec.Cmd, waited <-chan struct{}) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	pgid := cmd.Process.Pid
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	if !waitForProcessGroup(pgid, 2*time.Second) {
 		// SIGKILL cannot interrupt a thread blocked in a filesystem call, so during
