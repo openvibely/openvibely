@@ -1928,7 +1928,7 @@ templ analyticsContent(currentProject *models.Project) {
 													renderAccountUsageCards(data.account_limits||[],temporary);
 													const bodies=temporary.querySelectorAll('.card-body');
 													if(bodies.length){card.replaceChildren(...bodies);await loadResetCredits(card,account);}
-													else card.querySelector('p').textContent='No live limit snapshot yet';
+													else card.querySelector('p').textContent='Usage unavailable';
 												} catch(e) {
 													if(e.name==='AbortError'||generation!==dataGeneration)return;
 													card.querySelector('p').textContent='Provider limits unavailable';

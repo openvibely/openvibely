@@ -89,7 +89,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for supporting usage evidence")
 	}
 	if analyticsUsageProjection(c) == "account_limits" {
-		view, err := h.usageAnalyticsSvc.BuildAnalyticsAccountLimits(c.Request().Context(), filter)
+		view, err := h.usageAnalyticsSvc.BuildLiveAnalyticsAccountLimits(c.Request().Context(), filter)
 		if err != nil {
 			applog.Infof("[handler] GetAnalyticsUsage account_limits error: %v", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
