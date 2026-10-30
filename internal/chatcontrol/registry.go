@@ -2210,7 +2210,7 @@ var registry = []ActionDef{
 	// --- Analytics domain (read-only from chat) ---
 	{
 		Name:         "view_usage_analytics",
-		Description:  "Return compact prompt-safe current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and stored account-limit summaries. Uses locally stored Analytics data only and does not refresh provider account usage.",
+		Description:  "Return compact prompt-safe current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and current provider account limits. Uses local records for model usage and fetches account limits live; reports unavailable limits on provider failure.",
 		Domain:       DomainAnalytics,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

@@ -1858,6 +1858,11 @@ func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.
 	h, _, llmConfigRepo, _ := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Empty Project")
+	calls := 0
+	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		calls++
+		return nil, fmt.Errorf("usage unavailable")
+	})
 	require.NoError(t, llmConfigRepo.Create(ctx, &models.LLMConfig{
 		Name:             "OpenAI OAuth Empty",
 		Provider:         models.ProviderOpenAI,
@@ -1880,8 +1885,10 @@ func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.
 	require.Equal(t, 0, got.Totals.CallCount)
 	require.Equal(t, 0, got.Totals.TotalTokens)
 	require.Equal(t, "no_usage", got.CostAvailability)
-	require.True(t, got.LocalOnly)
+	require.False(t, got.LocalOnly)
 	require.False(t, got.ProviderRefreshed)
+	require.Equal(t, 1, calls)
+	require.Contains(t, out, "Usage unavailable")
 	require.NotContains(t, out, "oauth-token-that-must-not-be-used")
 	require.NotContains(t, out, "acct-secret-empty")
 
@@ -1949,6 +1956,13 @@ func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing
 	h, _, llmConfigRepo, env := setupTestHandlerWithStores(t)
 	ctx := context.Background()
 	project := createProject(t, h, "Usage Account Project")
+	calls := 0
+	h.usageAnalyticsSvc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		calls++
+		fresh := 92.0
+		window := 300
+		return &models.AccountUsageSnapshot{PlanType: "ChatGPT Pro", PrimaryLabel: "5-hour session", PrimaryUsedPercent: &fresh, PrimaryWindowMinutes: &window, RawJSON: `{"authorization":"Bearer raw-secret"}`}, nil
+	})
 	cfg := &models.LLMConfig{
 		Name:              "OpenAI OAuth Account",
 		Provider:          models.ProviderOpenAI,
@@ -1986,6 +2000,11 @@ func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing
 	require.Len(t, got.AccountLimits[0].Limits, 1)
 	require.Equal(t, "5-hour session", got.AccountLimits[0].Limits[0].Label)
 	require.Equal(t, "warning", got.AccountLimits[0].Limits[0].Status)
+	require.Equal(t, 1, calls)
+	require.True(t, got.ProviderRefreshed)
+	require.NotNil(t, got.AccountLimits[0].Limits[0].UsedPercent)
+	require.Equal(t, 92.0, *got.AccountLimits[0].Limits[0].UsedPercent)
+	require.Contains(t, out, `"account_limit_source":"live_provider"`)
 	for _, secret := range []string{cfg.ID, cfg.OAuthAccountID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, "raw-provider-account", "Bearer raw-secret"} {
 		require.NotContains(t, out, secret)
 	}
