@@ -4,20 +4,12 @@ import "github.com/openvibely/openvibely/web/templates/components"
 
 templ automationNodePanelHeader(readOnly bool) {
  @automationInspectorEditors(readOnly)
-	<div class="flex shrink-0 items-center justify-between gap-3 border-b border-base-300 px-6 py-4">
-		<div>
-			<h2 class="font-semibold">Node details</h2>
-			<p class="text-xs text-base-content/60">
-				if readOnly {
-					Read-only preview
-				} else {
-					Changes are included when you save this automation.
-				}
-			</p>
-		</div>
-		<button type="button" class="btn btn-ghost btn-sm btn-square" data-automation-node-close aria-label="Close node details">×</button>
-	</div>
-    @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{"details", "Details"}, {"schedule", "Schedule"}, {"connections", "Connections"}})
+ <div class="flex shrink-0 items-start">
+  <div class="min-w-0 flex-1">
+   @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{"details", "Details"}, {"schedule", "Schedule"}, {"connections", "Connections"}})
+  </div>
+  <button type="button" class="btn btn-ghost btn-sm btn-square mt-2 mr-2" data-automation-node-close aria-label="Close node details">×</button>
+ </div>
 
 }
 

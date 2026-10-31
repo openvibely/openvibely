@@ -941,7 +941,7 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProjec
 		<div class="space-y-4" data-automation-live-node-details>
 			for _, node := range graph.Nodes {
 				<section data-automation-live-node-detail={ node.NodeKey } hidden>
-					<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.NodeKey } · { node.Role }</p></div><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.NodeType) }</span></div>
+
                     if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
                         <a class="btn btn-outline btn-sm mb-4" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-node-task>Open task</a>
                     }
@@ -993,11 +993,9 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 			<div class="space-y-4" data-automation-node-details>
 				for _, node := range page.Result.Candidate.Nodes {
 					<section data-automation-node-detail={ node.Key } hidden>
-						<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p>
-							if notice := maintainedVisionSourceNotice(page.Result, node.Key); notice != "" {
-								<p class="mt-1 text-xs text-base-content/70" data-automation-vision-source={ node.Key }>{ notice }</p>
-							}
-						</div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key } aria-label={ "Delete node " + node.Name }><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div></div>
+                        if notice := maintainedVisionSourceNotice(page.Result, node.Key); notice != "" {
+                            <p class="mb-3 text-xs text-base-content/70" data-automation-vision-source={ node.Key }>{ notice }</p>
+                        }
 						<label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
 							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label>
@@ -2079,7 +2077,6 @@ yamlViewport.scrollTop = 0;
                             if (property === 'name') {
                                 node.name = value;
                                 var group = nodeGroup(key); if (group) { group.querySelector('strong').textContent = value; group.setAttribute('aria-label', value + ', use Enter to open details or arrow keys to move'); }
-                                section.querySelector('h3').textContent = value;
                             } else {
                                 node.config = node.config || {};
                                 if (property === 'priority' || property === 'repeat_interval') value = field.value !== '' && Number.isFinite(Number(value)) ? Number(value) : value;
