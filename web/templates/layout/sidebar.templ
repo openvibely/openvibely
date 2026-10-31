@@ -653,6 +653,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								event.preventDefault();
 								return;
 							}
+							if (window.isSettingsWorkspaceURL && window.isSettingsWorkspaceURL(elt.getAttribute('href') || navBase)) return;
 							// Abort in-flight polling to prevent morph from blocking navigation
 							window._sidebarNavigating = true;
 							var mainContent = document.getElementById('main-content');
@@ -690,7 +691,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						if (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();
 						if (!window._sidebarNavigating) return;
 						if (!target) return;
-						if (target.id === 'main-content') {
+						if (target.id === 'main-content' || target.id === 'settings-content') {
 							// This is the sidebar navigation swap — allow it and clear flag
 							window._sidebarNavigating = false;
 							clearTimeout(window._sidebarNavTimeout);

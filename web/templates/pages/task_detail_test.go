@@ -165,8 +165,8 @@ func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
 	}
 
 	html := buf.String()
-	if !strings.Contains(html, "history.pushState") {
-		t.Fatal("workspace transitions must push same-document history")
+	if !strings.Contains(html, "window.workspaceNavigation.commit") {
+		t.Fatal("workspace transitions must use the shared history controller")
 	}
 	if !strings.Contains(html, `data-openvibely-page-title="Investigate &lt;title&gt; &amp; history - OpenVibely"`) {
 		t.Fatalf("task detail fragment missing escaped authoritative title marker: %s", html)
