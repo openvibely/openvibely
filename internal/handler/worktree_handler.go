@@ -70,16 +70,16 @@ func (h *Handler) taskCardMergeEligibilityForProjectWithLocks(ctx context.Contex
 		}
 		return state, false, reason
 	}
-	eligible, reason := taskCardMergeModeEligibility(task, state, mergeType)
+	eligible, reason := taskCardMergeModeEligibility(ctx, task, state, mergeType)
 	return state, eligible, reason
 }
 
-func taskCardMergeModeEligibility(task *models.Task, state taskMergeActionState, mergeType string) (bool, string) {
+func taskCardMergeModeEligibility(ctx context.Context, task *models.Task, state taskMergeActionState, mergeType string) (bool, string) {
 	if mergeType == "rebase" && !state.RebaseAvailable {
 		return false, "Rebase is not available for the current branch state."
 	}
 	if mergeType == "ff" && task.WorktreePath != "" {
-		status, err := service.GitStatusPorcelain(context.Background(), task.WorktreePath)
+		status, err := service.GitStatusPorcelain(ctx, task.WorktreePath)
 		if err != nil || strings.TrimSpace(status) != "" {
 			return false, "Fast-forward requires a clean task worktree."
 		}
@@ -150,7 +150,7 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	}
 	fastForwardEligible := false
 	if eligible {
-		fastForwardEligible, _ = taskCardMergeModeEligibility(task, state, "ff")
+		fastForwardEligible, _ = taskCardMergeModeEligibility(c.Request().Context(), task, state, "ff")
 	}
 	prEligible, _ := h.taskCardPullRequestEligibility(task, project)
 	return render(c, http.StatusOK, components.TaskCardMergeSubmenus(task, projectID, components.TaskCardMergeMenuState{
@@ -212,7 +212,7 @@ type taskBranchMutationOptions struct {
 	taskID         string
 	projectID      string
 	fromTaskCard   bool
-	operationCheck func(*models.Task, *models.Project, bool) (bool, string)
+	operationCheck func(context.Context, *models.Task, *models.Project, bool) (bool, string)
 	leaseReason    func(*taskBranchMutationPreflight) string
 }
 
@@ -280,7 +280,7 @@ func (h *Handler) refreshTaskBranchMutation(ctx context.Context, preflight *task
 		return
 	}
 	if options.operationCheck != nil {
-		preflight.operationEligible, preflight.operationReason = options.operationCheck(preflight.task, preflight.project, preflight.branchAlreadyMerged)
+		preflight.operationEligible, preflight.operationReason = options.operationCheck(ctx, preflight.task, preflight.project, preflight.branchAlreadyMerged)
 	}
 }
 
@@ -327,15 +327,15 @@ func (h *Handler) mergeTaskBranchOptions(taskID, projectID string, fromTaskCard 
 		taskID:       taskID,
 		projectID:    projectID,
 		fromTaskCard: fromTaskCard,
-		operationCheck: func(task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
+		operationCheck: func(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
 			if !fromTaskCard {
 				return true, ""
 			}
 			state := taskMergeActionState{
 				BranchAlreadyMerged: branchAlreadyMerged,
-				RebaseAvailable:     h.taskRebaseAvailable(task, project, branchAlreadyMerged),
+				RebaseAvailable:     h.taskRebaseAvailable(ctx, task, project, branchAlreadyMerged),
 			}
-			return taskCardMergeModeEligibility(task, state, mergeType)
+			return taskCardMergeModeEligibility(ctx, task, state, mergeType)
 		},
 		leaseReason: func(preflight *taskBranchMutationPreflight) string {
 			if !preflight.eligibility.MergeAvailable {
@@ -361,8 +361,8 @@ func (h *Handler) rebaseTaskBranchOptions(taskID, projectID string, fromTaskCard
 		taskID:       taskID,
 		projectID:    projectID,
 		fromTaskCard: fromTaskCard,
-		operationCheck: func(task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
-			if h.taskRebaseAvailable(task, project, branchAlreadyMerged) {
+		operationCheck: func(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
+			if h.taskRebaseAvailable(ctx, task, project, branchAlreadyMerged) {
 				return true, ""
 			}
 			if fromTaskCard {
