@@ -51,17 +51,6 @@ type DiffLine struct {
 	NewNum  int
 }
 
-const (
-	// Diff rendering load limits.
-	maxDiffFiles              = 300
-	maxLoadableTotalDiffLines = 20000
-	maxLoadableTotalDiffChars = 1 * 1024 * 1024
-	maxLoadableFileDiffLines  = 20000
-	maxLoadableFileDiffChars  = 500 * 1024
-	autoLoadFileDiffLines     = 400
-	autoLoadFileDiffChars     = 20 * 1024
-)
-
 func normalizeDiffViewMode(view string) string {
 	if strings.TrimSpace(view) == "split" {
 		return "split"
@@ -86,17 +75,12 @@ func diffViewContentClass(mode string, activeView string) string {
 }
 
 
-// DiffFileRenderMeta controls how a file should render under diff limits.
+// DiffFileRenderMeta identifies one file in the diff file index.
 type DiffFileRenderMeta struct {
-	Index           int
-	Revision string
- CodeRevision string
-	File            DiffFile
-	LineCount       int
-	CharCount       int
-	AutoLoad        bool
-	CanLoadOnDemand bool
-	BlockedReason   string
+	Index        int
+	Revision     string
+	CodeRevision string
+	File         DiffFile
 }
 
 // ParseDiffOutput parses unified diff output into structured DiffFile data.
@@ -563,22 +547,14 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
         <div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
             if taskID == "" {
                 for _, m := range metas {
-                    if m.AutoLoad {
-                        @inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
-                    } else {
-                        @deferredDiffFileWithReview(m, taskID, "inline", true)
-                    }
+                    @inlineDiffFileWithReview(m.File, m.Index, true, taskID, buildCommentMap(reviewComments))
                 }
             }
         </div>
         <div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
             if taskID == "" {
                 for _, m := range metas {
-                    if m.AutoLoad {
-                        @splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
-                    } else {
-                        @deferredDiffFileWithReview(m, taskID, "split", true)
-                    }
+                    @splitDiffFileWithReview(m.File, m.Index, true, taskID, buildCommentMap(reviewComments))
                 }
             }
         </div>
@@ -668,20 +644,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
                 }
                 if (window._refreshDiffPerformance) window._refreshDiffPerformance();
             }
-
-            function expandAndScrollDiffFile(idx) {
-				var chevron = document.getElementById('diff-chevron-' + idx);
-				var isExpanded = diffFileStateBucket()[idx] !== false;
-				if (!isExpanded) {
-					toggleDiffFile(idx);
-				}
-				setTimeout(function() {
-					var split = document.getElementById('diff-content-split');
-                    var prefix = split && !split.classList.contains('hidden') ? 'diff-file-split-' : 'diff-file-';
-                    var el = document.getElementById(prefix + idx);
-					if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-				}, 50);
-			}
 
 			// Restore persisted expand/collapse state after initial render and after
 			// HTMX swaps. Deferred file-card swaps render expanded by default, so the
@@ -2025,14 +1987,6 @@ func diffFileDisplayPath(f DiffFile) string {
 	return f.Path
 }
 
-func diffFileName(path string) string {
-	parts := strings.Split(path, "/")
-	if len(parts) > 2 {
-		return ".../" + strings.Join(parts[len(parts)-2:], "/")
-	}
-	return path
-}
-
 type diffStatCount struct {
 	Adds int
 	Dels int
@@ -2069,78 +2023,7 @@ func fileCountSuffix(n int) string {
 	return "s"
 }
 
-func diffFileMetrics(f DiffFile) (int, int) {
-	totalLines := 0
-	totalChars := 0
-	for _, h := range f.Hunks {
-		totalChars += len(h.Header)
-		for _, l := range h.Lines {
-			totalLines++
-			totalChars += len(l.Content)
-		}
-	}
-	return totalLines, totalChars
-}
-
-func buildDiffRenderMetas(files []DiffFile) []DiffFileRenderMeta {
-	metas := make([]DiffFileRenderMeta, 0, minInt(len(files), maxDiffFiles))
-	cumulativeLines := 0
-	cumulativeChars := 0
-
-	for i, f := range files {
-		if i >= maxDiffFiles {
-			break
-		}
-
-		lineCount, charCount := diffFileMetrics(f)
-		meta := buildDiffRenderMeta(f, i, lineCount, charCount, cumulativeLines, cumulativeChars)
-		if meta.AutoLoad || meta.CanLoadOnDemand {
-			cumulativeLines += lineCount
-			cumulativeChars += charCount
-		}
-
-		metas = append(metas, meta)
-	}
-
-	return metas
-}
-
-func buildDiffRenderMeta(f DiffFile, index int, lineCount int, charCount int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
-	meta := DiffFileRenderMeta{
-		Index:     index,
-		File:      f,
-		LineCount: lineCount,
-		CharCount: charCount,
-	}
-
-	switch {
-	case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
-		meta.BlockedReason = fmt.Sprintf(
-			"This file exceeds single-file limit (%d lines or %s raw diff).",
-			maxLoadableFileDiffLines,
-			formatByteSize(maxLoadableFileDiffChars),
-		)
-	case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
-		meta.BlockedReason = fmt.Sprintf(
-			"Total diff load limit reached (%d lines or %s raw diff).",
-			maxLoadableTotalDiffLines,
-			formatByteSize(maxLoadableTotalDiffChars),
-		)
-	default:
-		if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
-			meta.AutoLoad = true
-		} else {
-			meta.CanLoadOnDemand = true
-		}
-	}
-
-	return meta
-}
-
-// DiffRenderMetaByIndex extracts render metadata for one diff file without
-// parsing every later file in the diff output. It preserves the same per-file
-// and cumulative load-limit decisions as buildDiffRenderMetas for the requested
-// index by scanning previous file blocks only for their rendered line metrics.
+// DiffRenderMetaByIndex parses only the requested file block of a diff.
 func DiffRenderMetaByIndex(diffOutput string, fileIndex int) (DiffFileRenderMeta, bool) {
 	meta, _, ok := diffRenderMetaByIndexWithParsedBytes(diffOutput, fileIndex)
 	return meta, ok
@@ -2151,8 +2034,6 @@ func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (Dif
 		return DiffFileRenderMeta{}, 0, false
 	}
 
-	cumulativeLines := 0
-	cumulativeChars := 0
 	currentIndex := -1
 	blockStart := -1
 	parsedBytes := 0
@@ -2173,12 +2054,7 @@ func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (Dif
 			if currentIndex >= 0 {
 				blockEnd := lineStart
 				if currentIndex == fileIndex {
-					return diffRenderMetaFromBlock(diffOutput[blockStart:blockEnd], fileIndex, cumulativeLines, cumulativeChars), blockEnd, true
-				}
-				lines, chars := diffBlockMetrics(diffOutput[blockStart:blockEnd])
-				if previousDiffFileCountsTowardTotal(lines, chars, cumulativeLines, cumulativeChars) {
-					cumulativeLines += lines
-					cumulativeChars += chars
+					return diffRenderMetaFromBlock(diffOutput[blockStart:blockEnd], fileIndex), blockEnd, true
 				}
 			}
 			currentIndex++
@@ -2193,7 +2069,7 @@ func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (Dif
 
 	if currentIndex == fileIndex && blockStart >= 0 {
 		parsedBytes = len(diffOutput)
-		return diffRenderMetaFromBlock(diffOutput[blockStart:], fileIndex, cumulativeLines, cumulativeChars), parsedBytes, true
+		return diffRenderMetaFromBlock(diffOutput[blockStart:], fileIndex), parsedBytes, true
 	}
 	if blockStart >= 0 {
 		parsedBytes = len(diffOutput)
@@ -2201,186 +2077,12 @@ func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (Dif
 	return DiffFileRenderMeta{}, parsedBytes, false
 }
 
-func diffRenderMetaFromBlock(block string, fileIndex int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+func diffRenderMetaFromBlock(block string, fileIndex int) DiffFileRenderMeta {
 	files := ParseDiffOutput(block)
 	if len(files) == 0 {
 		return DiffFileRenderMeta{}
 	}
-	lineCount, charCount := diffFileMetrics(files[0])
-	return buildDiffRenderMeta(files[0], fileIndex, lineCount, charCount, cumulativeLines, cumulativeChars)
-}
-
-func previousDiffFileCountsTowardTotal(lineCount int, charCount int, cumulativeLines int, cumulativeChars int) bool {
-	if lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars {
-		return false
-	}
-	if cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars {
-		return false
-	}
-	return true
-}
-
-func diffBlockMetrics(block string) (int, int) {
-	lineCount := 0
-	charCount := 0
-	inHunk := false
-	for lineStart := 0; lineStart <= len(block); {
-		if lineStart == len(block) {
-			break
-		}
-		lineEnd := strings.IndexByte(block[lineStart:], '\n')
-		nextLineStart := len(block)
-		line := block[lineStart:]
-		if lineEnd >= 0 {
-			nextLineStart = lineStart + lineEnd + 1
-			line = block[lineStart : lineStart+lineEnd]
-		}
-
-		switch {
-		case strings.HasPrefix(line, "@@"):
-			inHunk = true
-			charCount += len(line)
-		case line == `\ No newline at end of file`:
-		case inHunk && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") || line == ""):
-			lineCount++
-			if line == "" {
-				break
-			}
-			charCount += len(line) - 1
-		case !inHunk && diffLineWouldSynthesizeHunk(line):
-			inHunk = true
-			lineCount++
-			charCount += len(line) - 1
-		}
-
-		if nextLineStart == len(block) {
-			break
-		}
-		lineStart = nextLineStart
-	}
-	return lineCount, charCount
-}
-
-func diffLineWouldSynthesizeHunk(line string) bool {
-	if line == "" || strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
-		return false
-	}
-	if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "new file") || strings.HasPrefix(line, "deleted file") || strings.HasPrefix(line, "old mode") || strings.HasPrefix(line, "new mode") || strings.HasPrefix(line, "Binary files") || strings.HasPrefix(line, "# Untracked") || strings.HasPrefix(line, "# + ") {
-		return false
-	}
-	return strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ")
-}
-
-func diffFileCardID(idx int, view string) string {
-	if view == "split" {
-		return fmt.Sprintf("diff-file-split-%d", idx)
-	}
-	return fmt.Sprintf("diff-file-%d", idx)
-}
-
-func diffFileCardTargetSelector(idx int, view string) string {
-	return "#" + diffFileCardID(idx, view)
-}
-
-templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view string, reviewMode bool) {
-	<div
-		id={ diffFileCardID(meta.Index, view) }
-		class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2"
-        data-file-revision={ meta.Revision }
-		if meta.AutoLoad && taskID != "" {
-			data-diff-lazy-url={ diffLazyURL(meta, taskID, view, reviewMode) }
-			data-diff-file-path={ meta.File.Path }
-		}
-	>
-		@diffFileHeader(meta.File, meta.Index, true, view == "split")
-		<div
-			if view == "split" {
-				id={ fmt.Sprintf("diff-body-split-%d", meta.Index) }
-			} else {
-				id={ fmt.Sprintf("diff-body-%d", meta.Index) }
-			}
-			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
-		>
-			<div class="p-6 bg-base-100 text-center">
-				if meta.AutoLoad && taskID != "" {
-					<div role="status" data-diff-load-status class="text-sm opacity-60">Diff loads when visible.</div>
-					<button type="button" class="btn btn-sm btn-ghost hidden" data-diff-retry onclick="retryLazyDiffFile(this)">Retry loading diff</button>
-				} else if meta.CanLoadOnDemand {
-					<div class="text-sm font-medium mb-1">Large file diff not shown by default</div>
-					<div class="text-xs opacity-60 mb-4">
-						Auto-load is limited to { fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)) } per file.
-					</div>
-					<button
-						class="btn btn-sm btn-primary"
-						hx-get={ fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode) }
-						hx-target={ diffFileCardTargetSelector(meta.Index, view) }
-						hx-swap="outerHTML"
-					>
-						Load diff
-					</button>
-				} else {
-					<div class="text-sm font-medium mb-1">Diff not available</div>
-					<div class="text-xs opacity-60">{ meta.BlockedReason }</div>
-				}
-			</div>
-		</div>
-	</div>
-}
-
-templ LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
-	if meta, exists := DiffRenderMetaByIndex(diffOutput, fileIndex); exists {
-		@LoadDiffFileCardMeta(meta, true, view, taskID, reviewComments, reviewMode)
-	} else {
-		@LoadDiffFileCardMeta(DiffFileRenderMeta{}, false, view, taskID, reviewComments, reviewMode)
-	}
-}
-
-templ LoadDiffFileCardMeta(meta DiffFileRenderMeta, exists bool, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
-	if !exists {
-		<div class="alert alert-warning">
-			<span>Unable to load diff file.</span>
-		</div>
-	} else if !isDiffRenderMetaLoadable(meta) {
-		<div class="alert alert-warning">
-			<span>{ meta.BlockedReason }</span>
-		</div>
-	} else if view == "split" {
-		if reviewMode {
-			@splitDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments))
-		} else {
-			@splitDiffFile(meta.File, meta.Index, true)
-		}
-	} else {
-		if reviewMode {
-			@inlineDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments))
-		} else {
-			@inlineDiffFile(meta.File, meta.Index, true)
-		}
-	}
-}
-
-func getDiffRenderMetaByIndex(files []DiffFile, fileIndex int) (DiffFileRenderMeta, bool) {
-	metas := buildDiffRenderMetas(files)
-	for _, meta := range metas {
-		if meta.Index == fileIndex {
-			return meta, true
-		}
-	}
-	return DiffFileRenderMeta{}, false
-}
-
-func diffFileMetaExists(diffOutput string, fileIndex int) bool {
-	_, ok := DiffRenderMetaByIndex(diffOutput, fileIndex)
-	return ok
-}
-
-func diffRenderMetaByIndexOrZero(diffOutput string, fileIndex int) DiffFileRenderMeta {
-	meta, _ := DiffRenderMetaByIndex(diffOutput, fileIndex)
-	return meta
-}
-
-func isDiffRenderMetaLoadable(meta DiffFileRenderMeta) bool {
-	return meta.AutoLoad || meta.CanLoadOnDemand
+	return DiffFileRenderMeta{Index: fileIndex, File: files[0]}
 }
 
 func diffViewerStateKey(metas []DiffFileRenderMeta, taskID string) string {
@@ -2402,28 +2104,6 @@ func diffViewerStateKey(metas []DiffFileRenderMeta, taskID string) string {
 		b.WriteString(m.File.Path)
 	}
 	return b.String()
-}
-
-func formatByteSize(bytes int) string {
-	if bytes < 1024 {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	if bytes < 1024*1024 {
-		return fmt.Sprintf("%d KB", bytes/1024)
-	}
-	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
-}
-
-func minInt(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// shouldDefaultExpand returns true so all diff files are expanded by default.
-func shouldDefaultExpand(fileCount int) bool {
-	return true
 }
 
 // A server revision detects edits even when file bodies are not mounted yet.

@@ -209,11 +209,11 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 				case <-time.After(time.Second):
 				}
 			}
-			if err := LoadDiffFileCard(diff.String(), index, view, "lazy-task", comments, true).Render(r.Context(), w); err != nil {
+			if err := DiffChunk(ParseDiffOutput(diff.String())[index], index, view, "lazy-task", comments, true, 0, 1, DiffCodeRevision(ParseDiffOutput(diff.String())[index])).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		default:
-			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script>`+fmt.Sprintf(`<script>window._diffFileState={};window._diffFileState[%q]={1:false,2:false};</script>`, diffViewerStateKey(buildDiffRenderMetas(ParseDiffOutput(diff.String())), "lazy-task"))+runner+`<style>svg{width:16px;height:16px}.diff-file-header{display:flex;align-items:center}#main-content{height:600px;overflow:auto}.hidden{display:none}.diff-file-body{overflow:hidden}.diff-file-header{position:sticky;top:0}td{height:20px}</style></head><body><main id="fixture-root" data-test-result="pending"></main><div id="main-content">`+markup.String()+`</div></body></html>`)
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script>`+fmt.Sprintf(`<script>window._diffFileState={};window._diffFileState[%q]={1:false,2:false};</script>`, diffViewerStateKey(progressiveDiffMetas(ParseDiffOutput(diff.String()), nil), "lazy-task"))+runner+`<style>svg{width:16px;height:16px}.diff-file-header{display:flex;align-items:center}#main-content{height:600px;overflow:auto}.hidden{display:none}.diff-file-body{overflow:hidden}.diff-file-header{position:sticky;top:0}td{height:20px}</style></head><body><main id="fixture-root" data-test-result="pending"></main><div id="main-content">`+markup.String()+`</div></body></html>`)
 		}
 	}))
 	defer server.Close()

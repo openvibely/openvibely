@@ -83,7 +83,7 @@ diff --git a/b.txt b/b.txt
 		t.Fatalf("update diff output: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&review=true", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -111,7 +111,7 @@ diff --git a/b.txt b/b.txt
 		path   string
 		status int
 	}{{"b.txt", http.StatusOK}, {"a.txt", http.StatusConflict}, {"removed.txt", http.StatusConflict}} {
-		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=true&file_path="+url.QueryEscape(identity.path), nil)
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&review=true&file_path="+url.QueryEscape(identity.path), nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("taskId")
@@ -129,6 +129,7 @@ diff --git a/b.txt b/b.txt
 		status int
 	}{
 		{"chunk=0", http.StatusOK},
+		{"chunk=", http.StatusBadRequest},
 		{"chunk=-1", http.StatusBadRequest},
 		{"chunk=999", http.StatusBadRequest},
 		{"chunk=0&revision=stale", http.StatusConflict},
@@ -151,7 +152,7 @@ diff --git a/b.txt b/b.txt
 		}
 	}
 
-	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=false", nil)
+	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&review=false", nil)
 	noReviewRec := httptest.NewRecorder()
 	noReviewContext := e.NewContext(noReviewReq, noReviewRec)
 	noReviewContext.SetParamNames("taskId")
@@ -281,7 +282,7 @@ func TestHandler_GetTaskChangesFile_RecoversLiveWorktreeLineage(t *testing.T) {
 		t.Fatalf("store stale execution diff: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&view=inline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=0&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -369,7 +370,7 @@ func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testin
 	// Tracked git diff files are ordered before synthetic untracked files, so the
 	// second lazy card should resolve only the untracked file and not the tracked
 	// file's body.
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=split", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -453,7 +454,7 @@ func TestHandler_GetTaskChangesFile_FallsBackToPreservedDiffWhenNonActiveBranchA
 		t.Fatalf("expected already-merged live targeted diff to be empty before fallback, ok=%v diff:\n%s", ok, diff)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&view=inline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=0&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
