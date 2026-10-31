@@ -119,7 +119,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function apply() {
 						var prefs = {};
 						try { prefs = { output: localStorage.getItem('openvibely.outputDetail'), surfaces: localStorage.getItem('openvibely.surfaceStyle'), layout: localStorage.getItem('openvibely.layout'), thread: localStorage.getItem('openvibely.threadWidth'), bubbles: localStorage.getItem('openvibely.assistantBubbles'), columns: localStorage.getItem('openvibely.boardColumns'), step: localStorage.getItem('openvibely.surfaceStep'), tabs: localStorage.getItem('openvibely.tabStyle') }; } catch (_) {}
-						root.setAttribute('data-output-detail', prefs.output === 'compact' ? 'compact' : 'full');
+						root.setAttribute('data-output-detail', prefs.output === 'full' ? 'full' : 'compact');
 						root.setAttribute('data-surface-style', prefs.surfaces === 'layered' ? 'layered' : 'default');
 						root.setAttribute('data-layout', prefs.layout === 'unified' ? 'unified' : 'floating');
 						root.setAttribute('data-surface-step', prefs.step === 'on' ? 'on' : 'off');
@@ -134,7 +134,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					apply();
 					var displayPrefs = {
-                        output: { key: 'openvibely.outputDetail', attr: 'data-output-detail', values: ['full', 'compact'] },
+                        output: { key: 'openvibely.outputDetail', attr: 'data-output-detail', values: ['compact', 'full'] },
  surfaces: { key: 'openvibely.surfaceStyle', attr: 'data-surface-style', values: ['default', 'layered'] },
 						layout: { key: 'openvibely.layout', attr: 'data-layout', values: ['floating', 'unified'] },
 						thread: { key: 'openvibely.threadWidth', attr: 'data-thread-width', values: ['focused', 'full'] },
