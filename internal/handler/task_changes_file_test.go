@@ -449,7 +449,7 @@ func TestHandler_GetTaskChangesFile_FallsBackToPreservedDiffWhenNonActiveBranchA
 	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, preservedDiff); err != nil {
 		t.Fatalf("store preserved execution diff: %v", err)
 	}
-	if diff, ok := service.GetWorktreeDiffFileWithUncommitted(repoDir, worktreeBranch, "main", worktreePath, 0); ok || strings.TrimSpace(diff) != "" {
+	if diff, ok := service.GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, worktreeBranch, "main", worktreePath, 0); ok || strings.TrimSpace(diff) != "" {
 		t.Fatalf("expected already-merged live targeted diff to be empty before fallback, ok=%v diff:\n%s", ok, diff)
 	}
 

@@ -1374,11 +1374,7 @@ func expectedTaskBranchName(task *models.Task) string {
 	return fmt.Sprintf("task/%s-%s", task.ID[:8], slug)
 }
 
-func gitRefExists(repoDir, ref string) bool {
-	return gitRefExistsContext(context.Background(), repoDir, ref)
-}
-
-func gitRefExistsContext(ctx context.Context, repoDir, ref string) bool {
+func gitRefExists(ctx context.Context, repoDir, ref string) bool {
 	if repoDir == "" || ref == "" {
 		return false
 	}
@@ -1388,11 +1384,7 @@ func gitRefExistsContext(ctx context.Context, repoDir, ref string) bool {
 	return cmd.Run() == nil
 }
 
-func gitBranchHasCommitsBeyondTarget(repoDir, targetRef, branchRef string) bool {
-	return gitBranchHasCommitsBeyondTargetContext(context.Background(), repoDir, targetRef, branchRef)
-}
-
-func gitBranchHasCommitsBeyondTargetContext(ctx context.Context, repoDir, targetRef, branchRef string) bool {
+func gitBranchHasCommitsBeyondTarget(ctx context.Context, repoDir, targetRef, branchRef string) bool {
 	if repoDir == "" || targetRef == "" || branchRef == "" {
 		return false
 	}
@@ -1406,11 +1398,7 @@ func gitBranchHasCommitsBeyondTargetContext(ctx context.Context, repoDir, target
 	return strings.TrimSpace(string(out)) != "0"
 }
 
-func worktreeCurrentBranch(worktreePath string) string {
-	return worktreeCurrentBranchContext(context.Background(), worktreePath)
-}
-
-func worktreeCurrentBranchContext(ctx context.Context, worktreePath string) string {
+func worktreeCurrentBranch(ctx context.Context, worktreePath string) string {
 	if worktreePath == "" {
 		return ""
 	}
@@ -1453,7 +1441,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 		// lineage can replace the stored branch while retaining/replacing the path;
 		// using the stale DB branch makes headers, file stats, and lazy file indices
 		// disagree with the live target-to-working-tree diff.
-		if currentBranch := worktreeCurrentBranchContext(ctx, worktreePath); currentBranch != "" && currentBranch != worktreeBranch {
+		if currentBranch := worktreeCurrentBranch(ctx, worktreePath); currentBranch != "" && currentBranch != worktreeBranch {
 			if worktreeBranch != "" {
 				applog.Infof("[task-changes] recovering task=%s worktree branch metadata stored=%s current=%s", task.ID, worktreeBranch, currentBranch)
 			}
@@ -1462,7 +1450,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	}
 	if worktreeBranch == "" {
 		candidate := expectedTaskBranchName(task)
-		if gitRefExistsContext(ctx, project.RepoPath, candidate) {
+		if gitRefExists(ctx, project.RepoPath, candidate) {
 			worktreeBranch = candidate
 		}
 	}
@@ -1488,7 +1476,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 		return changed
 	}
 
-	if task.MergeStatus == models.MergeStatusMerged && gitBranchHasCommitsBeyondTargetContext(ctx, project.RepoPath, targetBranch, task.WorktreeBranch) {
+	if task.MergeStatus == models.MergeStatusMerged && gitBranchHasCommitsBeyondTarget(ctx, project.RepoPath, targetBranch, task.WorktreeBranch) {
 		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
 			applog.Infof("[handler] recoverTaskWorktreeState: failed to reset stale merge_status for task %s: %v", task.ID, err)
 		} else {
@@ -1513,7 +1501,7 @@ func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *model
 	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false
 	}
-	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
+	if status, err := service.GitStatusPorcelain(context.Background(), task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
 		return false
 	}
 	targetBranch := task.MergeTargetBranch
@@ -1526,11 +1514,7 @@ func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *model
 	return service.IsBranchDivergedFromTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
-func taskBranchAlreadyMergedForProject(task *models.Task, project *models.Project) bool {
-	return taskBranchAlreadyMergedForProjectContext(context.Background(), task, project)
-}
-
-func taskBranchAlreadyMergedForProjectContext(ctx context.Context, task *models.Task, project *models.Project) bool {
+func taskBranchAlreadyMergedForProject(ctx context.Context, task *models.Task, project *models.Project) bool {
 	if task == nil || task.WorktreeBranch == "" || project == nil || project.RepoPath == "" {
 		return false
 	}
@@ -1538,7 +1522,7 @@ func taskBranchAlreadyMergedForProjectContext(ctx context.Context, task *models.
 		return false
 	}
 	if task.WorktreePath != "" {
-		if statusOut, statusErr := service.GitStatusPorcelainContext(ctx, task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
+		if statusOut, statusErr := service.GitStatusPorcelain(ctx, task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
 			return false
 		}
 	}
@@ -1550,7 +1534,7 @@ func taskBranchAlreadyMergedForProjectContext(ctx context.Context, task *models.
 	if targetBranch == "" {
 		return false
 	}
-	return service.IsBranchTipMergedIntoContext(ctx, project.RepoPath, task.WorktreeBranch, targetBranch)
+	return service.IsBranchTipMergedInto(ctx, project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
 func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
@@ -1562,7 +1546,7 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 		return false
 	}
 	h.recoverTaskWorktreeState(ctx, task, project)
-	return taskBranchAlreadyMergedForProjectContext(ctx, task, project)
+	return taskBranchAlreadyMergedForProject(ctx, task, project)
 }
 
 type taskMergeActionState struct {
@@ -1585,7 +1569,7 @@ func (h *Handler) resolveTaskMergeActionStateForProjectWithLocks(ctx context.Con
 		return state
 	}
 	state.UseWorktreeContent = true
-	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(task, project)
+	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(ctx, task, project)
 	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(task, project, state.BranchAlreadyMerged, worktreeLocks)
 	return state
 }
@@ -1668,11 +1652,11 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
 		return result
 	}
-	if task.WorktreeBranch == "" || !gitRefExists(project.RepoPath, task.WorktreeBranch) {
+	if task.WorktreeBranch == "" || !gitRefExists(ctx, project.RepoPath, task.WorktreeBranch) {
 		result.Reason = "task branch does not exist"
 		return result
 	}
-	if targetBranch == "" || !gitRefExists(project.RepoPath, targetBranch) {
+	if targetBranch == "" || !gitRefExists(ctx, project.RepoPath, targetBranch) {
 		result.Reason = "target branch does not exist"
 		return result
 	}
@@ -1811,9 +1795,9 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 	var diffOutput string
 	var ok bool
 	if useLiveUncommitted {
-		diffOutput, ok = service.GetWorktreeDiffFileWithUncommittedContext(ctx, project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(ctx, project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
 	} else {
-		diffOutput, ok = service.GetWorktreeDiffFileWithUncommittedContext(ctx, project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(ctx, project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
 	}
 	if ctx.Err() != nil {
 		return components.DiffFileRenderMeta{}, false

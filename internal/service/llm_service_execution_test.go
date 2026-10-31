@@ -3172,7 +3172,7 @@ func TestLLMService_ExecuteTask_StartupConflictContinuesWithRecoveryContext(t *t
 			t.Fatalf("expected recovery instructions to contain %q, got %q", want, request.ProjectInstructions)
 		}
 	}
-	status, err := GitStatusPorcelain(wtPath)
+	status, err := GitStatusPorcelain(context.Background(), wtPath)
 	if err != nil {
 		t.Fatalf("git status: %v", err)
 	}
