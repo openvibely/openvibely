@@ -13,7 +13,7 @@ templ diffFileIndexScript() {
   }
   window._diffFileIndex = function(viewer) {
    if (!viewer._fileIndex) viewer._fileIndex = Array.from(viewer.querySelectorAll('[data-diff-explorer-files] [data-diff-index]')).map(function(node) {
-    return {index:Number(node.dataset.diffIndex), path:node.dataset.diffPath, revision:node.dataset.fileRevision,
+    return {index:Number(node.dataset.diffIndex), path:node.dataset.diffPath, revision:node.dataset.fileRevision, codeRevision:node.dataset.codeRevision,
       adds:node.dataset.diffAdds, dels:node.dataset.diffDels};
    });
    return viewer._fileIndex;
@@ -36,7 +36,7 @@ templ diffFileIndexScript() {
     slot.className = 'diff-file-slot bg-base-200 rounded-lg px-4 py-2 cursor-pointer';
     slot.dataset.diffFilePath = file.path;
     slot.dataset.fileRevision = file.revision;
-    slot.dataset.diffLazyUrl = '/tasks/' + encodeURIComponent(viewer.dataset.taskId) + '/changes/file?file_index=' + file.index + '&view=' + (split?'split':'inline') + '&review=true&chunk=0&revision=' + encodeURIComponent(file.revision);
+    slot.dataset.diffLazyUrl = '/tasks/' + encodeURIComponent(viewer.dataset.taskId) + '/changes/file?file_index=' + file.index + '&view=' + (split?'split':'inline') + '&review=true&chunk=0&revision=' + encodeURIComponent(file.codeRevision);
     slot.dataset.diffAdds = file.adds; slot.dataset.diffDels = file.dels;
     slot.textContent = file.path;
     slot.setAttribute('role','button'); slot.tabIndex = 0;

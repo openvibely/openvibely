@@ -1927,15 +1927,11 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 			if !exists {
 				return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
 			}
-			var comments []models.ReviewComment
-			if reviewMode {
-				comments = h.loadTaskReviewComments(ctx, taskID)
-			}
-			revision := components.DiffFileRevision(meta.File, comments)
+			revision := components.DiffCodeRevision(meta.File)
 			if expectedRevision != "" && expectedRevision != revision {
 				return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
 			}
-			return prepareDiffChunks(meta, comments, revision), nil
+			return prepareDiffChunks(meta, revision), nil
 		})
 		if err != nil {
 			return err
@@ -1953,7 +1949,12 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		if chunk >= len(chunks) {
 			return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
 		}
-		return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, prepared.comments, reviewMode, chunk, len(chunks), prepared.revision))
+		// Code snapshots are cached; annotations are always read fresh.
+		var comments []models.ReviewComment
+		if reviewMode {
+			comments = h.loadTaskReviewComments(ctx, taskID)
+		}
+		return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, comments, reviewMode, chunk, len(chunks), prepared.revision))
 	}
 	var reviewComments []models.ReviewComment
 	if reviewMode {

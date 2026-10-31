@@ -137,3 +137,28 @@ func TestDiffChunkContainingLine(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffCodeRevisionExcludesReviewAnnotations(t *testing.T) {
+	file := ParseDiffOutput("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+code\n")[0]
+	before := progressiveDiffMetas([]DiffFile{file}, nil)[0]
+	for _, text := range []string{"new comment", "edited comment"} {
+		after := progressiveDiffMetas([]DiffFile{file}, []models.ReviewComment{{FilePath: "a", CommentText: text}})[0]
+		if before.CodeRevision != after.CodeRevision {
+			t.Fatal("review changed chunk identity")
+		}
+		if before.Revision == after.Revision {
+			t.Fatal("review no longer invalidates displayed card")
+		}
+		var output bytes.Buffer
+		if err := diffViewerWithReviewContent([]DiffFileRenderMeta{after}, "task", nil, "inline", "viewer-revision").Render(context.Background(), &output); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(output.String(), `data-code-revision="`+before.CodeRevision+`"`) {
+			t.Fatal("file index omitted code identity")
+		}
+	}
+	file.Hunks[0].Lines[0].Content = "different code"
+	if DiffCodeRevision(file) == before.CodeRevision {
+		t.Fatal("code changes must invalidate chunks")
+	}
+}

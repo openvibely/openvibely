@@ -10,6 +10,11 @@ import (
 
 const diffChunkRows = 200
 
+// DiffCodeRevision identifies only code; review mutations cannot invalidate chunk URLs.
+func DiffCodeRevision(file DiffFile) string {
+	return DiffFileRevision(file, nil)
+}
+
 // File revisions include review annotations so unchanged cards can survive refreshes.
 func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
 	relevant := make([]models.ReviewComment, 0)
@@ -29,7 +34,7 @@ func progressiveDiffMetas(files []DiffFile, comments []models.ReviewComment) []D
 	result := make([]DiffFileRenderMeta, 0, len(files))
 	for index, file := range files {
 		lines, chars := diffFileMetrics(file)
-		result = append(result, DiffFileRenderMeta{Index: index, File: file, LineCount: lines, CharCount: chars, AutoLoad: true, Revision: DiffFileRevision(file, comments)})
+		result = append(result, DiffFileRenderMeta{Index: index, File: file, LineCount: lines, CharCount: chars, AutoLoad: true, Revision: DiffFileRevision(file, comments), CodeRevision: DiffCodeRevision(file)})
 	}
 	return result
 }

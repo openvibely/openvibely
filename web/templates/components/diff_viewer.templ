@@ -90,6 +90,7 @@ func diffViewContentClass(mode string, activeView string) string {
 type DiffFileRenderMeta struct {
 	Index           int
 	Revision string
+ CodeRevision string
 	File            DiffFile
 	LineCount       int
 	CharCount       int
@@ -578,7 +579,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 		</div>
         <div hidden data-diff-explorer-files>
             for _, m := range metas {
-                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path } data-file-revision={ m.Revision } data-diff-adds={ fmt.Sprint(diffStatCounts(m.File).Adds) } data-diff-dels={ fmt.Sprint(diffStatCounts(m.File).Dels) }></span>
+                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path } data-file-revision={ m.Revision } data-code-revision={ m.CodeRevision } data-diff-adds={ fmt.Sprint(diffStatCounts(m.File).Adds) } data-diff-dels={ fmt.Sprint(diffStatCounts(m.File).Dels) }></span>
             }
         </div>
         <!-- File cards are fetched only for the visible layout and viewport. -->

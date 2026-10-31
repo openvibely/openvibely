@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 func TestBrowserFunctional_ProgressiveDiffChunks(t *testing.T) {
@@ -33,8 +35,12 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 		diff = "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -1,30000 +0,0 @@\n" + strings.Repeat("-old\n", 30000)
 	}
 	file := ParseDiffOutput(diff)[0]
+	var comments []models.ReviewComment
+	if kind == "" {
+		comments = []models.ReviewComment{{ID: "existing", FilePath: "big.txt", LineNumber: 2001, LineType: "new", CommentText: "existing review"}}
+	}
 	var markup bytes.Buffer
-	if err := DiffViewerWithReview(diff, "chunk-task", nil).Render(context.Background(), &markup); err != nil {
+	if err := DiffViewerWithReview(diff, "chunk-task", comments).Render(context.Background(), &markup); err != nil {
 		t.Fatal(err)
 	}
 	result := make(chan string, 1)
@@ -133,6 +139,10 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 			w.Header().Set("Content-Type", "text/javascript")
 			w.Write(htmx204)
 		case "/tasks/chunk-task/changes/file":
+			if r.URL.Query().Get("revision") != DiffCodeRevision(file) {
+				http.Error(w, "stale code revision", 409)
+				return
+			}
 			chunk, _ := strconv.Atoi(r.URL.Query().Get("chunk"))
 			view := r.URL.Query().Get("view")
 			chunks := DiffFileChunks(file, view)
@@ -150,7 +160,7 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 				http.Error(w, "invalid", 400)
 				return
 			}
-			if err := DiffChunk(chunks[chunk], 0, view, "chunk-task", nil, true, chunk, len(chunks), DiffFileRevision(file, nil)).Render(r.Context(), w); err != nil {
+			if err := DiffChunk(chunks[chunk], 0, view, "chunk-task", comments, true, chunk, len(chunks), DiffCodeRevision(file)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		default:
