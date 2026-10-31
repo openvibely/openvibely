@@ -75,9 +75,9 @@ templ ThemesContent(catalog []themes.Theme) {
 		</style>
 		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
-				@displayToggle("surfaces", "Surfaces", "default", "Default", "layered", "Layered")
-				@displayToggle("layout", "Task list", "floating", "Floating", "unified", "Unified")
-				@displayToggle("tabs", "Project tabs", "detached", "Detached", "attached", "Attached")
+				@displayToggle("surfaces", "Surfaces", "Choose the background colors used for the outer frame, page and cards.", "default", "Default", "layered", "Layered")
+				@displayToggle("layout", "Task list", "Float the task list beside the page with a gap, or join them into one surface.", "floating", "Floating", "unified", "Unified")
+				@displayToggle("tabs", "Project tabs", "Keep project tabs separate from the page, or connect the active tab to it.", "detached", "Detached", "attached", "Attached")
 			</div>
 			<h3 class="text-sm font-medium mt-6 mb-2">Task board columns</h3>
 			<p class="text-xs opacity-60 mb-2">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
@@ -90,10 +90,10 @@ templ ThemesContent(catalog []themes.Theme) {
 		</section>
 		<section data-display-prefs data-settings-section="chat" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl">
-				@displayToggle("output", "Tool output", "full", "Full", "compact", "Compact")
-				@displayToggle("thread", "Width", "full", "Full width", "focused", "Focused")
-				@displayToggle("bubbles", "Assistant bubbles", "off", "Off", "on", "On")
-				@displayToggle("step", "Bubble and composer color step", "off", "Off", "on", "On")
+				@displayToggle("output", "Tool output", "Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.", "full", "Full", "compact", "Compact")
+				@displayToggle("thread", "Width", "Use the available width for conversations, or center them in a narrower column for easier reading.", "full", "Full width", "focused", "Focused")
+				@displayToggle("bubbles", "Assistant bubbles", "Show assistant messages directly on the page, or give them a filled bubble background.", "off", "Off", "on", "On")
+				@displayToggle("step", "Bubble and composer color step", "Lift chat bubbles and the composer one shade above cards.", "off", "Off", "on", "On")
 			</div>
 		</section>
 		<section data-settings-section="themes">
@@ -298,15 +298,10 @@ func previewSyntaxStyle(theme themes.Theme, key string) string {
 	return "color:" + previewColor(theme, "syntax", key, previewColor(theme, "syntax", "foreground", "#d4d4d4"))
 }
 
-templ displayToggle(pref, label, firstValue, firstLabel, secondValue, secondLabel string) {
+templ displayToggle(pref, label, description, firstValue, firstLabel, secondValue, secondLabel string) {
 	<fieldset>
 		<legend class="text-sm font-medium mb-2">{ label }</legend>
-		if pref == "output" {
-            <p class="text-xs opacity-60 mb-2">Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.</p>
-        }
-		if pref == "step" {
-			<p class="text-xs opacity-60 mb-2">Lift chat bubbles and the composer one shade above cards.</p>
-		}
+		<p class="text-xs opacity-60 mb-2">{ description }</p>
 		<div class="grid grid-cols-2 gap-3">
 			for _, opt := range [][2]string{{firstValue, firstLabel}, {secondValue, secondLabel}} {
 				<button type="button" class="display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" data-display-pref={ pref } data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">
