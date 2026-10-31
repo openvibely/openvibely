@@ -33,6 +33,12 @@ func TestBrowserFunctional_DiffChunkRetryAfterEviction(t *testing.T) {
 	}
 }
 
+func TestBrowserFunctional_DiffChunkLateReviewResponse(t *testing.T) {
+	for _, kind := range []string{"late-inline", "late-split"} {
+		t.Run(kind, func(t *testing.T) { runProgressiveDiffBrowser(t, kind) })
+	}
+}
+
 func runProgressiveDiffBrowser(t *testing.T, kind string) {
 	chrome := testChromePath(t)
 	diff := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,30000 @@\n" + strings.Repeat("+line\n", 30000)
@@ -45,6 +51,11 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 	var comments []models.ReviewComment
 	if kind == "" {
 		comments = []models.ReviewComment{{ID: "existing", FilePath: "big.txt", LineNumber: 2001, LineType: "new", CommentText: "existing review"}}
+	}
+	if strings.HasPrefix(kind, "late-") {
+		for i := 10; i <= 12; i++ {
+			comments = append(comments, models.ReviewComment{ID: fmt.Sprint(i), FilePath: "big.txt", LineNumber: i*200 + 1, LineType: "new", CommentText: "original review"})
+		}
 	}
 	var markup bytes.Buffer
 	if err := DiffViewerWithReview(diff, "chunk-task", comments).Render(context.Background(), &markup); err != nil {
@@ -186,6 +197,46 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
  }
  await wait(()=>chunk.querySelector('tr[data-new-line="2001"]'));
  assert(!chunk.dataset.diffLoadFailed,'successful reload retained failure flag');
+ fetch('/result?status=pass');
+ } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
+ });</script>`
+	}
+	if strings.HasPrefix(kind, "late-") {
+		script = `<script>
+ window.addEventListener('load',async()=>{
+ const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn);};
+ const assert=(v,m)=>{if(!v)throw Error(m);};
+ try {
+ const mode='` + strings.TrimPrefix(kind, "late-") + `';
+ await wait(()=>document.querySelector('#diff-content-inline [data-chunk-index="0"] tr.diff-review-line'));
+ if(mode==='split') switchDiffView('split',false);
+ const panel=document.querySelector('#diff-content-'+mode);
+ await wait(()=>panel.querySelector('[data-chunk-index="0"] tr.diff-review-line'));
+ const originalFetch=window.fetch;
+ let pendingChunk,releaseResponse;
+ window.fetch=function(url,opts){
+  if(Number(new URL(url,location.href).searchParams.get('chunk'))===pendingChunk) {
+   return originalFetch(url,opts).then(response=>new Promise(resolve=>{releaseResponse=()=>resolve(response);}));
+  }
+  return originalFetch(url,opts);
+ };
+ let comments=[10,11,12].map(i=>({id:String(i),line:i*200+1,text:'original review'}));
+ const list=()=>comments.map(c=>'<div class="review-comment-item" data-comment-id="'+c.id+'" data-file-path="big.txt" data-line-number="'+c.line+'" data-line-type="new"><p>'+c.text+'</p></div>').join('');
+ for(let index=10;index<=12;index++){
+  pendingChunk=index;releaseResponse=null;
+  const chunk=panel.querySelector('[data-chunk-index="'+index+'"]');chunk.scrollIntoView();
+  await wait(()=>releaseResponse);
+  if(index===10) comments=comments.filter(c=>c.id!=='10');
+  if(index===11) comments.find(c=>c.id==='11').text='edited review';
+  if(index===12) comments.push({id:'added',line:2401,text:'added review'});
+  syncReviewCommentsFromListHtml(list());
+  releaseResponse();
+  await wait(()=>chunk.querySelector('tr[data-new-line="'+(index*200+1)+'"]'));
+  const rows=chunk.querySelectorAll('tr.review-inline-comment');
+  assert(rows.length===index-10,'late response restored incorrect comments for '+index);
+  if(index===11) assert(rows[0].querySelector('.review-comment-text').textContent==='edited review','late response undid comment edit');
+  if(index===12) assert(chunk.querySelector('[data-comment-id="added"]'),'late response lost added comment');
+ }
  fetch('/result?status=pass');
  } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
  });</script>`
