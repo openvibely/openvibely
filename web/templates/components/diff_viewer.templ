@@ -1108,17 +1108,25 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					grouped[key].push(comment);
 				});
 
-				viewer.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {
-					formRow.remove();
+				// Detached chunks are outside querySelectorAll(viewer), but are
+				// restored verbatim when scrolling or switching layouts.
+				var roots = [viewer];
+				viewer.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
+					if (chunk._saved) roots.push(chunk._saved);
 				});
-				viewer.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {
-					commentRow.remove();
-				});
-				viewer.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {
-					lineRow.classList.remove('diff-review-line-open');
-					var key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);
-					(grouped[key] || []).forEach(function(comment) {
-						insertInlineCommentRow(lineRow, comment);
+				roots.forEach(function(root) {
+					root.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {
+						formRow.remove();
+					});
+					root.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {
+						commentRow.remove();
+					});
+					root.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {
+						lineRow.classList.remove('diff-review-line-open');
+						var key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);
+						(grouped[key] || []).forEach(function(comment) {
+							insertInlineCommentRow(lineRow, comment);
+						});
 					});
 				});
 

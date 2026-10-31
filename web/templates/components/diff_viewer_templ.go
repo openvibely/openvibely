@@ -1048,7 +1048,7 @@ func diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, revi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<script>\n\n\t\t\tfunction toggleDiffFile(idx, deferRefresh) {\n\t\t\t\tvar inlineBody = document.getElementById('diff-body-' + idx);\n\t\t\t\tvar splitBody = document.getElementById('diff-body-split-' + idx);\n\t\t\t\tvar chevron = document.getElementById('diff-chevron-' + idx);\n\t\t\t\tvar chevronSplit = document.getElementById('diff-chevron-split-' + idx);\n\n\t\t\t\tvar isExpanded = diffFileStateBucket()[idx] !== false;\n\t\t\t\tvar newState = !isExpanded;\n\n\t\t\t\t// When collapsing a card whose sticky header is currently\n\t\t\t\t// pinned to the top of the scroll container, the body shrinks\n\t\t\t\t// while the page stays scrolled, and the sticky header's\n\t\t\t\t// containing-block constraint drags the header off-screen.\n\t\t\t\t// Pre-scroll the page so the card's top aligns with the\n\t\t\t\t// scroller top before the body animates; the header then\n\t\t\t\t// stays put while the body collapses in place.\n\t\t\t\tif (!newState) {\n\t\t\t\t\tvar card = null;\n\t\t\t\t\t[\n\t\t\t\t\t\tdocument.getElementById('diff-file-' + idx),\n\t\t\t\t\t\tdocument.getElementById('diff-file-split-' + idx)\n\t\t\t\t\t].some(function(candidate) {\n\t\t\t\t\t\tif (!candidate || candidate.getClientRects().length === 0) return false;\n\t\t\t\t\t\tcard = candidate;\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t});\n\t\t\t\t\tvar scroller = document.getElementById('main-content');\n\t\t\t\t\tif (card && scroller) {\n\t\t\t\t\t\tvar cardTop = card.getBoundingClientRect().top;\n\t\t\t\t\t\tvar scrollerTop = scroller.getBoundingClientRect().top;\n\t\t\t\t\t\tif (cardTop < scrollerTop) {\n\t\t\t\t\t\t\tscroller.scrollTop -= (scrollerTop - cardTop);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (inlineBody) {\n\t\t\t\t\tif (newState) {\n\t\t\t\t\t\tinlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';\n\t\t\t\t\t\tsetTimeout(function() { inlineBody.style.maxHeight = ''; }, 300);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tinlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';\n\t\t\t\t\t\tinlineBody.offsetHeight;\n\t\t\t\t\t\tinlineBody.style.maxHeight = '0';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (splitBody) {\n\t\t\t\t\tif (newState) {\n\t\t\t\t\t\tsplitBody.style.maxHeight = splitBody.scrollHeight + 'px';\n\t\t\t\t\t\tsetTimeout(function() { splitBody.style.maxHeight = ''; }, 300);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tsplitBody.style.maxHeight = splitBody.scrollHeight + 'px';\n\t\t\t\t\t\tsplitBody.offsetHeight;\n\t\t\t\t\t\tsplitBody.style.maxHeight = '0';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (chevron) chevron.classList.toggle('rotate-90', newState);\n\t\t\t\tif (chevronSplit) chevronSplit.classList.toggle('rotate-90', newState);\n\n\t\t\t\tdocument.querySelectorAll('[data-diff-toggle=\"' + idx + '\"]').forEach(function(el) {\n\t\t\t\t\tif (newState) el.removeAttribute('data-collapsed');\n\t\t\t\t\telse el.setAttribute('data-collapsed', '1');\n\t\t\t\t});\n\n\t\t\t\tif (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; delete card._diffReadingAnchor; } });\n                diffFileStateBucket()[idx] = newState;\n                if (window._setDiffSlotState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(slot) { window._setDiffSlotState(slot,newState); });\n                if (!deferRefresh && window._refreshDiffPerformance) window._refreshDiffPerformance();\n\t\t\t}\n\n\t\t\tfunction toggleAllDiffFiles(expand) {\n                var viewer = document.getElementById('diff-viewer');\n                if (!viewer) return;\n                var count = parseInt(viewer.dataset.fileCount || '0');\n                for (var i=0; i<count; i++) {\n                    if ((diffFileStateBucket()[i] !== false) !== expand) toggleDiffFile(i,true);\n                }\n                if (window._refreshDiffPerformance) window._refreshDiffPerformance();\n            }\n\n            function expandAndScrollDiffFile(idx) {\n\t\t\t\tvar chevron = document.getElementById('diff-chevron-' + idx);\n\t\t\t\tvar isExpanded = diffFileStateBucket()[idx] !== false;\n\t\t\t\tif (!isExpanded) {\n\t\t\t\t\ttoggleDiffFile(idx);\n\t\t\t\t}\n\t\t\t\tsetTimeout(function() {\n\t\t\t\t\tvar split = document.getElementById('diff-content-split');\n                    var prefix = split && !split.classList.contains('hidden') ? 'diff-file-split-' : 'diff-file-';\n                    var el = document.getElementById(prefix + idx);\n\t\t\t\t\tif (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});\n\t\t\t\t}, 50);\n\t\t\t}\n\n\t\t\t// Restore persisted expand/collapse state after initial render and after\n\t\t\t// HTMX swaps. Deferred file-card swaps render expanded by default, so the\n\t\t\t// saved state must be re-applied to the body, chevrons, and header shape.\n\t\t\twindow._restoreDiffFileState = window._restoreDiffFileState || function() {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer || !window._diffFileState) return;\n\t\t\t\tvar state = diffFileStateBucket();\n\t\t\t\tvar count = parseInt(viewer.dataset.fileCount || '0');\n\t\t\t\tfor (var i = 0; i < count; i++) {\n\t\t\t\t\tif (state.hasOwnProperty(i)) {\n\t\t\t\t\t\tvar savedExpanded = state[i];\n                        if (window._setDiffSlotState) [document.getElementById('diff-file-' + i), document.getElementById('diff-file-split-' + i)].forEach(function(slot) { window._setDiffSlotState(slot,savedExpanded); });\n\t\t\t\t\t\tvar bodies = [\n\t\t\t\t\t\t\tdocument.getElementById('diff-body-' + i),\n\t\t\t\t\t\t\tdocument.getElementById('diff-body-split-' + i)\n\t\t\t\t\t\t];\n\t\t\t\t\t\tvar chevrons = [\n\t\t\t\t\t\t\tdocument.getElementById('diff-chevron-' + i),\n\t\t\t\t\t\t\tdocument.getElementById('diff-chevron-split-' + i)\n\t\t\t\t\t\t];\n\t\t\t\t\t\tbodies.forEach(function(body) {\n\t\t\t\t\t\t\tif (!body) return;\n\t\t\t\t\t\t\tbody.style.transition = 'none';\n\t\t\t\t\t\t\tbody.style.maxHeight = savedExpanded ? '' : '0';\n\t\t\t\t\t\t\tbody.offsetHeight;\n\t\t\t\t\t\t\tbody.style.transition = '';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tchevrons.forEach(function(c) {\n\t\t\t\t\t\t\tif (!c) return;\n\t\t\t\t\t\t\tvar previousTransition = c.style.transition;\n\t\t\t\t\t\t\tc.style.transition = 'none';\n\t\t\t\t\t\t\tc.classList.toggle('rotate-90', savedExpanded);\n\t\t\t\t\t\t\tc.style.transition = previousTransition;\n\t\t\t\t\t\t});\n\t\t\t\t\t\tdocument.querySelectorAll('[data-diff-toggle=\"' + i + '\"]').forEach(function(el) {\n\t\t\t\t\t\t\tif (savedExpanded) el.removeAttribute('data-collapsed');\n\t\t\t\t\t\t\telse el.setAttribute('data-collapsed', '1');\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t};\n\t\t\twindow._restoreDiffFileState();\n\t\t\tif (!window._diffFileStateRestoreRegistered) {\n\t\t\t\twindow._diffFileStateRestoreRegistered = true;\n\t\t\t\t['htmx:afterSwap', 'htmx:afterSettle'].forEach(function(eventName) {\n\t\t\t\t\tdocument.body.addEventListener(eventName, window._restoreDiffFileState);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction copyDiffFilePath(ev, button) {\n\t\t\t\tif (ev) {\n\t\t\t\t\tev.preventDefault();\n\t\t\t\t\tev.stopPropagation();\n\t\t\t\t}\n\t\t\t\tvar text = button && button.dataset ? button.dataset.copyPath : '';\n\t\t\t\tif (!text) {\n\t\t\t\t\tif (window.showToast) window.showToast('No file path to copy', 'failed');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\tfunction setCopiedState() {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\tvar originalHTML = button.innerHTML;\n\t\t\t\t\tbutton.classList.add('btn-success');\n\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg>';\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tbutton.classList.remove('btn-success');\n\t\t\t\t\t\tbutton.innerHTML = originalHTML;\n\t\t\t\t\t}, 1200);\n\t\t\t\t}\n\n\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\tsetCopiedState();\n\t\t\t\t}\n\n\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\tif (window.showToast) window.showToast('Failed to copy file path', 'failed');\n\t\t\t\t}\n\n\t\t\t\tfunction fallbackCopy() {\n\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\ttextarea.select();\n\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\ttry {\n\t\t\t\t\t\tif (document.execCommand('copy')) onCopySuccess();\n\t\t\t\t\t\telse onCopyFailure();\n\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t} finally {\n\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(fallbackCopy);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tfallbackCopy();\n\t\t\t}\n\n\t\t\tfunction persistDiffViewPreference(mode) {\n\t\t\t\ttry {\n\t\t\t\t\tfetch('/ui/preferences', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: { 'Content-Type': 'application/json' },\n\t\t\t\t\t\tbody: JSON.stringify({ diff_view: mode }),\n\t\t\t\t\t\tkeepalive: true\n\t\t\t\t\t}).catch(function() {});\n\t\t\t\t} catch (_) {}\n\t\t\t}\n\n\t\t\tfunction switchDiffView(mode, persist) {\n\t\t\t\tvar inlineEl = document.getElementById('diff-content-inline');\n\t\t\t\tvar splitEl = document.getElementById('diff-content-split');\n\t\t\t\tvar btnInline = document.getElementById('diff-btn-inline');\n\t\t\t\tvar btnSplit = document.getElementById('diff-btn-split');\n\t\t\t\tif (!inlineEl || !splitEl || !btnInline || !btnSplit) return;\n\n\t\t\t\tvar scroll = window._captureDiffScroll ? window._captureDiffScroll() : null;\n                if (mode === 'split') {\n\t\t\t\t\tinlineEl.classList.add('hidden');\n\t\t\t\t\tsplitEl.classList.remove('hidden');\n\t\t\t\t\tbtnSplit.classList.add('btn-active');\n\t\t\t\t\tbtnInline.classList.remove('btn-active');\n\t\t\t\t} else {\n\t\t\t\t\tsplitEl.classList.add('hidden');\n\t\t\t\t\tinlineEl.classList.remove('hidden');\n\t\t\t\t\tbtnInline.classList.add('btn-active');\n\t\t\t\t\tbtnSplit.classList.remove('btn-active');\n\t\t\t\t}\n\t\t\t\tif (window._refreshDiffPerformance) window._refreshDiffPerformance();\n\t\t\t\tif (window._restoreDiffScroll) window._restoreDiffScroll(scroll, true);\n                if (persist !== false) {\n\t\t\t\t\tpersistDiffViewPreference(mode === 'split' ? 'split' : 'inline');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t// Inline comment functions — always active, no review mode toggle needed\n\t\t\tfunction closeReviewForm(formRow) {\n\t\t\t\tif (!formRow) return;\n\t\t\t\tvar lineRow = findLineRowForComment(formRow);\n\t\t\t\tif (lineRow) lineRow.classList.remove('diff-review-line-open');\n\t\t\t\tif (formRow.dataset.mode === 'edit') {\n\t\t\t\t\tfindInlineCommentRows(lineRow).forEach(function(commentRow) {\n\t\t\t\t\t\tcommentRow.style.display = '';\n\t\t\t\t\t});\n\t\t\t\t\tformRow.replaceWith(buildInlineCommentRow({\n\t\t\t\t\t\tid: formRow.dataset.commentId || '',\n\t\t\t\t\t\tfilePath: formRow.dataset.filePath || '',\n\t\t\t\t\t\tlineNum: formRow.dataset.lineNum || '',\n\t\t\t\t\t\tlineType: formRow.dataset.lineType || '',\n\t\t\t\t\t\tcommentText: formRow.dataset.originalText || ''\n\t\t\t\t\t}, formRow.dataset.reviewLayout || 'inline'));\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tformRow.remove();\n\t\t\t}\n\n\t\t\tfunction closeOpenReviewForms(exceptForm) {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\t\t\t\tviewer.querySelectorAll('.review-comment-form').forEach(function(formRow) {\n\t\t\t\t\tif (formRow !== exceptForm) {\n\t\t\t\t\t\tcloseReviewForm(formRow);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction reviewFormInnerHtml(submitLabel) {\n\t\t\t\treturn '<div class=\"review-comment-shell rounded-lg border border-base-300 bg-base-100 p-3\">' +\n\t\t\t\t\t'<textarea class=\"review-comment-textarea block w-full font-sans bg-transparent text-base-content placeholder:text-base-content/50\" placeholder=\"Add review comment...\" rows=\"2\" autofocus style=\"resize: none;\"></textarea>' +\n\t\t\t\t\t'<div class=\"review-comment-actions mt-3 flex items-center justify-end gap-2\">' +\n\t\t\t\t\t'<button type=\"button\" class=\"btn btn-sm btn-ghost review-cancel-btn\">Cancel</button>' +\n\t\t\t\t\t'<button type=\"button\" class=\"btn btn-sm btn-success review-submit-btn\">' + escapeHtml(submitLabel || 'Comment') + '</button>' +\n\t\t\t\t\t'</div>' +\n\t\t\t\t\t'</div>';\n\t\t\t}\n\n\t\t\tfunction buildReviewFormRow(options) {\n\t\t\t\tvar formRow = document.createElement('tr');\n\t\t\t\tformRow.className = 'review-comment-form';\n\t\t\t\tformRow.dataset.mode = options.mode || 'new';\n\t\t\t\tformRow.dataset.commentId = options.commentId || '';\n\t\t\t\tformRow.dataset.filePath = options.filePath || '';\n\t\t\t\tformRow.dataset.lineNum = options.lineNum || '';\n\t\t\t\tformRow.dataset.lineType = options.lineType || '';\n\t\t\t\tformRow.dataset.reviewLayout = options.layout || 'inline';\n\t\t\t\tformRow.dataset.originalText = options.originalText || '';\n\t\t\t\tif ((options.layout || 'inline') === 'split') {\n\t\t\t\t\tformRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-content px-3 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-2 bg-base-200\">' + reviewFormInnerHtml(options.submitLabel) + '</td>';\n\t\t\t\t} else {\n\t\t\t\t\tformRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-2 bg-base-200\">' + reviewFormInnerHtml(options.submitLabel) + '</td>';\n\t\t\t\t}\n\t\t\t\tvar textarea = formRow.querySelector('textarea');\n\t\t\t\ttextarea.value = options.initialText || '';\n\t\t\t\ttextarea.addEventListener('keydown', function(e) {\n\t\t\t\t\tif (e.key === 'Escape') {\n\t\t\t\t\t\tcloseReviewForm(formRow);\n\t\t\t\t\t} else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tif (formRow.dataset.mode === 'edit') {\n\t\t\t\t\t\t\tupdateReviewComment(formRow);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tsubmitReviewComment(options.taskId, options.filePath, options.lineNum, options.lineType, textarea.value, formRow);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tformRow.querySelector('.review-submit-btn').addEventListener('click', function() {\n\t\t\t\t\tif (formRow.dataset.mode === 'edit') {\n\t\t\t\t\t\tupdateReviewComment(formRow);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tsubmitReviewComment(options.taskId, options.filePath, options.lineNum, options.lineType, textarea.value, formRow);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tformRow.querySelector('.review-cancel-btn').addEventListener('click', function() {\n\t\t\t\t\tcloseReviewForm(formRow);\n\t\t\t\t});\n\t\t\t\treturn formRow;\n\t\t\t}\n\n\t\t\tfunction openInlineCommentForm(row) {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\n\t\t\t\tvar filePath = row.dataset.filePath;\n\t\t\t\tvar lineNum = row.dataset.lineNum;\n\t\t\t\tvar lineType = row.dataset.lineType;\n\t\t\t\tvar taskId = viewer.dataset.taskId;\n\n\t\t\t\tif (!filePath || !lineNum || !taskId) return;\n\t\t\t\tvar existingForm = row.nextElementSibling;\n\t\t\t\tif (existingForm && existingForm.classList.contains('review-comment-form')) {\n\t\t\t\t\tcloseReviewForm(existingForm);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tcloseOpenReviewForms();\n\t\t\t\tvar formRow = buildReviewFormRow({\n\t\t\t\t\tmode: 'new',\n\t\t\t\t\tlayout: row.dataset.reviewLayout || 'inline',\n\t\t\t\t\ttaskId: taskId,\n\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\tlineNum: lineNum,\n\t\t\t\t\tlineType: lineType,\n\t\t\t\t\tsubmitLabel: 'Comment'\n\t\t\t\t});\n\t\t\t\trow.parentNode.insertBefore(formRow, row.nextSibling);\n\t\t\t\trow.classList.add('diff-review-line-open');\n\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\tvar textarea = formRow.querySelector('.review-comment-textarea');\n\t\t\t\t\tif (!textarea) return;\n\t\t\t\t\ttextarea.focus();\n\t\t\t\t\ttextarea.setSelectionRange(textarea.value.length, textarea.value.length);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction handleAddCommentClick(ev) {\n\t\t\t\tev.stopPropagation();\n\t\t\t\tvar btn = ev.target.closest('.diff-add-comment-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tvar row = btn.closest('tr.diff-review-line');\n\t\t\t\tif (!row) return;\n\t\t\t\tif (!row.dataset.lineNum || row.dataset.lineNum === '0') return;\n\t\t\t\topenInlineCommentForm(row);\n\t\t\t}\n\n\t\t\tfunction cancelReview() {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\t\t\t\tvar taskId = viewer.dataset.taskId;\n\t\t\t\tif (!taskId) return;\n\n\t\t\t\t// Delete all comments for this task via the API, then reload the page\n\t\t\t\tfetch('/tasks/' + taskId + '/reviews', { method: 'GET' })\n\t\t\t\t\t.then(function() {\n\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction escapeHtml(value) {\n\t\t\t\treturn String(value || '')\n\t\t\t\t\t.replace(/&/g, '&amp;')\n\t\t\t\t\t.replace(/</g, '&lt;')\n\t\t\t\t\t.replace(/>/g, '&gt;')\n\t\t\t\t\t.replace(/\\\"/g, '&quot;')\n\t\t\t\t\t.replace(/'/g, '&#39;');\n\t\t\t}\n\n\t\t\tfunction findLineRowForComment(commentRow) {\n\t\t\t\tvar cursor = commentRow ? commentRow.previousElementSibling : null;\n\t\t\t\twhile (cursor) {\n\t\t\t\t\tif (cursor.classList && cursor.classList.contains('diff-review-line')) {\n\t\t\t\t\t\treturn cursor;\n\t\t\t\t\t}\n\t\t\t\t\tcursor = cursor.previousElementSibling;\n\t\t\t\t}\n\t\t\t\treturn null;\n\t\t\t}\n\n\t\t\tfunction findInlineCommentRows(lineRow) {\n\t\t\t\tvar rows = [];\n\t\t\t\tif (!lineRow) return rows;\n\t\t\t\tvar filePath = lineRow.dataset.filePath || '';\n\t\t\t\tvar lineNum = lineRow.dataset.lineNum || '';\n\t\t\t\tvar lineType = lineRow.dataset.lineType || '';\n\t\t\t\tvar cursor = lineRow.nextElementSibling;\n\t\t\t\twhile (cursor) {\n\t\t\t\t\tif (cursor.classList && cursor.classList.contains('diff-review-line')) {\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t\tif (cursor.classList && cursor.classList.contains('review-inline-comment')) {\n\t\t\t\t\t\tif (cursor.dataset.filePath === filePath && cursor.dataset.lineNum === lineNum && cursor.dataset.lineType === lineType) {\n\t\t\t\t\t\t\trows.push(cursor);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tcursor = cursor.nextElementSibling;\n\t\t\t\t}\n\t\t\t\treturn rows;\n\t\t\t}\n\n\t\t\tfunction extractCreatedComment(html, filePath, lineNum, lineType, fallbackText) {\n\t\t\t\tvar temp = document.createElement('div');\n\t\t\t\ttemp.innerHTML = html;\n\t\t\t\tvar items = temp.querySelectorAll('.review-comment-item');\n\t\t\t\tvar match = null;\n\t\t\t\titems.forEach(function(item) {\n\t\t\t\t\tif (item.dataset.filePath === filePath && item.dataset.lineNumber === String(lineNum) && item.dataset.lineType === lineType) {\n\t\t\t\t\t\tmatch = item;\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tif (!match) {\n\t\t\t\t\treturn {\n\t\t\t\t\t\tid: '',\n\t\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\t\tlineNum: String(lineNum),\n\t\t\t\t\t\tlineType: lineType,\n\t\t\t\t\t\tcommentText: fallbackText\n\t\t\t\t\t};\n\t\t\t\t}\n\t\t\t\tvar textEl = match.querySelector('p');\n\t\t\t\treturn {\n\t\t\t\t\tid: match.dataset.commentId || '',\n\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\tlineNum: String(lineNum),\n\t\t\t\t\tlineType: lineType,\n\t\t\t\t\tcommentText: textEl ? textEl.textContent : fallbackText\n\t\t\t\t};\n\t\t\t}\n\n\t\t\tfunction parseReviewCommentsFromListHtml(html) {\n\t\t\t\tvar temp = document.createElement('div');\n\t\t\t\ttemp.innerHTML = html;\n\t\t\t\tvar comments = [];\n\t\t\t\ttemp.querySelectorAll('.review-comment-item').forEach(function(item) {\n\t\t\t\t\tvar textEl = item.querySelector('p');\n\t\t\t\t\tcomments.push({\n\t\t\t\t\t\tid: item.dataset.commentId || '',\n\t\t\t\t\t\tfilePath: item.dataset.filePath || '',\n\t\t\t\t\t\tlineNum: item.dataset.lineNumber || '',\n\t\t\t\t\t\tlineType: item.dataset.lineType || 'new',\n\t\t\t\t\t\tcommentText: textEl ? textEl.textContent : ''\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\treturn comments;\n\t\t\t}\n\n\t\t\tfunction reviewCommentLineKey(filePath, lineNum, lineType) {\n\t\t\t\treturn String(filePath || '') + '::' + String(lineNum || '') + '::' + String(lineType || 'new');\n\t\t\t}\n\n\t\t\tfunction setReviewToolbarEnabled(hasComments) {\n\t\t\t\tvar toolbar = document.getElementById('review-toolbar');\n\t\t\t\tif (!toolbar) return;\n\t\t\t\tvar submitBtn = toolbar.querySelector('button[hx-post]');\n\t\t\t\tif (!submitBtn) return;\n\t\t\t\tif (hasComments) {\n\t\t\t\t\tsubmitBtn.removeAttribute('disabled');\n\t\t\t\t} else {\n\t\t\t\t\tsubmitBtn.setAttribute('disabled', 'disabled');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction syncReviewCommentsFromListHtml(html) {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\t\t\t\tvar comments = parseReviewCommentsFromListHtml(html);\n\t\t\t\tvar grouped = {};\n\t\t\t\tcomments.forEach(function(comment) {\n\t\t\t\t\tvar key = reviewCommentLineKey(comment.filePath, comment.lineNum, comment.lineType);\n\t\t\t\t\tif (!grouped[key]) grouped[key] = [];\n\t\t\t\t\tgrouped[key].push(comment);\n\t\t\t\t});\n\n\t\t\t\tviewer.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {\n\t\t\t\t\tformRow.remove();\n\t\t\t\t});\n\t\t\t\tviewer.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {\n\t\t\t\t\tcommentRow.remove();\n\t\t\t\t});\n\t\t\t\tviewer.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {\n\t\t\t\t\tlineRow.classList.remove('diff-review-line-open');\n\t\t\t\t\tvar key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);\n\t\t\t\t\t(grouped[key] || []).forEach(function(comment) {\n\t\t\t\t\t\tinsertInlineCommentRow(lineRow, comment);\n\t\t\t\t\t});\n\t\t\t\t});\n\n\t\t\t\tsetReviewToolbarEnabled(comments.length > 0);\n\t\t\t}\n\n\t\t\tfunction refreshReviewComments(taskId) {\n\t\t\t\tif (!taskId) return Promise.resolve();\n\t\t\t\treturn fetch('/tasks/' + taskId + '/reviews', {\n\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to load review comments');\n\t\t\t\t\treturn resp.text();\n\t\t\t\t})\n\t\t\t\t.then(function(html) {\n\t\t\t\t\tsyncReviewCommentsFromListHtml(html);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderInlineCommentBox(comment) {\n\t\t\t\tvar text = escapeHtml(comment.commentText || '');\n\t\t\t\treturn '<div class=\"review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text\" data-comment-id=\"' + escapeHtml(comment.id || '') + '\" onclick=\"startEditReviewComment(event)\">' +\n\t\t\t\t\t'<span class=\"review-inline-comment-bar\"></span>' +\n\t\t\t\t\t'<button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs review-delete-btn\" onclick=\"deleteReviewComment(event)\" aria-label=\"Delete review comment\">' +\n\t\t\t\t\t\t'<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg>' +\n\t\t\t\t\t'</button>' +\n\t\t\t\t\t'<p class=\"review-comment-text whitespace-pre-wrap break-words\">' + text + '</p>' +\n\t\t\t\t\t'</div>';\n\t\t\t}\n\n\t\t\tfunction buildInlineCommentRow(comment, layout) {\n\t\t\t\tvar commentRow = document.createElement('tr');\n\t\t\t\tcommentRow.className = 'review-inline-comment';\n\t\t\t\tcommentRow.dataset.commentId = comment.id || '';\n\t\t\t\tcommentRow.dataset.filePath = comment.filePath || '';\n\t\t\t\tcommentRow.dataset.lineNum = comment.lineNum || '';\n\t\t\t\tcommentRow.dataset.lineType = comment.lineType || '';\n\t\t\t\tcommentRow.dataset.reviewLayout = layout || 'inline';\n\t\t\t\tif ((layout || 'inline') === 'split') {\n\t\t\t\t\tcommentRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-content px-3 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-0 bg-warning/15 align-top\">' + renderInlineCommentBox(comment) + '</td>';\n\t\t\t\t} else {\n\t\t\t\t\tcommentRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-0 bg-warning/15 align-top\">' + renderInlineCommentBox(comment) + '</td>';\n\t\t\t\t}\n\t\t\t\treturn commentRow;\n\t\t\t}\n\t\n\t\t\tfunction insertInlineCommentRow(lineRow, comment) {\n\t\t\t\tif (!lineRow) return;\n\t\t\t\tvar layout = (lineRow.dataset && lineRow.dataset.reviewLayout) ? lineRow.dataset.reviewLayout : 'inline';\n\t\t\t\tvar commentRow = buildInlineCommentRow({\n\t\t\t\t\tid: comment.id || '',\n\t\t\t\t\tfilePath: lineRow.dataset.filePath || comment.filePath || '',\n\t\t\t\t\tlineNum: lineRow.dataset.lineNum || comment.lineNum || '',\n\t\t\t\t\tlineType: lineRow.dataset.lineType || comment.lineType || '',\n\t\t\t\t\tcommentText: comment.commentText || ''\n\t\t\t\t}, layout);\n\t\t\t\tvar insertionPoint = lineRow;\n\t\t\t\twhile (insertionPoint.nextElementSibling && insertionPoint.nextElementSibling.classList && insertionPoint.nextElementSibling.classList.contains('review-inline-comment')) {\n\t\t\t\t\tinsertionPoint = insertionPoint.nextElementSibling;\n\t\t\t\t}\n\t\t\t\tlineRow.parentNode.insertBefore(commentRow, insertionPoint.nextElementSibling);\n\t\t\t}\n\n\t\t\tfunction startEditReviewComment(ev) {\n\t\t\t\tvar target = ev.target;\n\t\t\t\tif (target && target.closest && target.closest('.review-delete-btn')) {\n\t\t\t\t\tev.stopPropagation();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tev.stopPropagation();\n\t\t\t\tvar row = ev.target.closest('tr.review-inline-comment');\n\t\t\t\tif (!row) return;\n\t\t\t\tcloseOpenReviewForms();\n\t\t\t\tvar lineRow = findLineRowForComment(row);\n\t\t\t\tif (!lineRow) return;\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer || !viewer.dataset) return;\n\t\t\t\tvar textEl = row.querySelector('.review-comment-text');\n\t\t\t\tvar currentText = textEl ? textEl.textContent : '';\n\t\t\t\tfindInlineCommentRows(lineRow).forEach(function(commentRow) {\n\t\t\t\t\tcommentRow.style.display = 'none';\n\t\t\t\t});\n\t\t\t\tvar formRow = buildReviewFormRow({\n\t\t\t\t\tmode: 'edit',\n\t\t\t\t\tlayout: row.dataset.reviewLayout || 'inline',\n\t\t\t\t\ttaskId: viewer.dataset.taskId || '',\n\t\t\t\t\tcommentId: row.dataset.commentId || '',\n\t\t\t\t\tfilePath: row.dataset.filePath || '',\n\t\t\t\t\tlineNum: row.dataset.lineNum || '',\n\t\t\t\t\tlineType: row.dataset.lineType || '',\n\t\t\t\t\tinitialText: currentText,\n\t\t\t\t\toriginalText: currentText,\n\t\t\t\t\tsubmitLabel: 'Update'\n\t\t\t\t});\n\t\t\t\trow.replaceWith(formRow);\n\t\t\t\tlineRow.classList.add('diff-review-line-open');\n\t\t\t}\n\n\t\t\tfunction reviewMutationURL(commentId) {\n                var detail = document.getElementById('task-detail-content');\n                var projectId = detail && detail.dataset ? detail.dataset.projectId : '';\n                if (!projectId) projectId = new URLSearchParams(window.location.search).get('project_id') || '';\n                return '/reviews/' + encodeURIComponent(commentId) + (projectId ? '?project_id=' + encodeURIComponent(projectId) : '');\n            }\n\n            function updateReviewComment(formRow) {\n\t\t\t\tif (!formRow) return;\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tvar taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';\n\t\t\t\tvar commentId = formRow.dataset.commentId;\n\t\t\t\tif (!commentId) return;\n\t\t\t\tvar textarea = formRow.querySelector('textarea');\n\t\t\t\tif (!textarea) return;\n\t\t\t\tvar text = textarea.value.trim();\n\t\t\t\tif (!text) return;\n\t\t\t\tvar formData = new URLSearchParams();\n\t\t\t\tformData.append('comment_text', text);\n\t\t\t\tfetch(reviewMutationURL(commentId), {\n\t\t\t\t\tmethod: 'PATCH',\n\t\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },\n\t\t\t\t\tbody: formData.toString()\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to save comment');\n\t\t\t\t\tvar lineRow = findLineRowForComment(formRow);\n\t\t\t\t\tvar existingRows = findInlineCommentRows(lineRow);\n\t\t\t\t\tif (existingRows.length > 0) {\n\t\t\t\t\t\texistingRows.forEach(function(commentRow) {\n\t\t\t\t\t\t\tcommentRow.style.display = '';\n\t\t\t\t\t\t\tif (commentRow.dataset.commentId === commentId) {\n\t\t\t\t\t\t\t\tvar textNode = commentRow.querySelector('.review-comment-text');\n\t\t\t\t\t\t\t\tif (textNode) textNode.textContent = text;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t\tformRow.remove();\n\t\t\t\t\t} else {\n\t\t\t\t\t\tformRow.replaceWith(buildInlineCommentRow({\n\t\t\t\t\t\t\tid: commentId,\n\t\t\t\t\t\t\tfilePath: formRow.dataset.filePath || '',\n\t\t\t\t\t\t\tlineNum: formRow.dataset.lineNum || '',\n\t\t\t\t\t\t\tlineType: formRow.dataset.lineType || '',\n\t\t\t\t\t\t\tcommentText: text\n\t\t\t\t\t\t}, formRow.dataset.reviewLayout || 'inline'));\n\t\t\t\t\t}\n\t\t\t\t\tif (lineRow) lineRow.classList.remove('diff-review-line-open');\n\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\trefreshReviewComments(taskId).catch(function(err) {\n\t\t\t\t\t\t\tconsole.error(err);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t})\n\t\t\t\t.catch(function(err) {\n\t\t\t\t\tconsole.error(err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction deleteReviewComment(ev) {\n\t\t\t\tev.stopPropagation();\n\t\t\t\tvar row = ev.target.closest('tr.review-inline-comment, tr.review-comment-form');\n\t\t\t\tif (!row) return;\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tvar taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';\n\t\t\t\tvar commentId = row.dataset.commentId;\n\t\t\t\tif (!commentId) return;\n\t\t\t\tvar lineRow = findLineRowForComment(row);\n\t\t\t\tfetch(reviewMutationURL(commentId), {\n\t\t\t\t\tmethod: 'DELETE',\n\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to delete comment');\n\t\t\t\t\trow.remove();\n\t\t\t\t\tif (lineRow) lineRow.classList.remove('diff-review-line-open');\n\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\trefreshReviewComments(taskId).catch(function(err) {\n\t\t\t\t\t\t\tconsole.error(err);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t})\n\t\t\t\t.catch(function(err) {\n\t\t\t\t\tconsole.error(err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction submitReviewComment(taskId, filePath, lineNum, lineType, text, formRow) {\n\t\t\t\tif (!text.trim()) return;\n\n\t\t\t\tvar formData = new URLSearchParams();\n\t\t\t\tformData.append('file_path', filePath);\n\t\t\t\tformData.append('line_number', lineNum);\n\t\t\t\tformData.append('line_type', lineType);\n\t\t\t\tformData.append('comment_text', text);\n\n\t\t\t\tfetch('/tasks/' + taskId + '/reviews', {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },\n\t\t\t\t\tbody: formData.toString()\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to add review comment');\n\t\t\t\t\treturn resp.text();\n\t\t\t\t})\n\t\t\t\t.then(function(html) {\n\t\t\t\t\tvar row = findLineRowForComment(formRow);\n\t\t\t\t\tvar comment = extractCreatedComment(html, filePath, lineNum, lineType, text);\n\t\t\t\t\tvar layout = formRow.dataset.reviewLayout || (row && row.dataset ? row.dataset.reviewLayout : '') || 'inline';\n\t\t\t\t\tif (formRow && formRow.parentNode) {\n\t\t\t\t\t\tformRow.replaceWith(buildInlineCommentRow({\n\t\t\t\t\t\t\tid: comment.id || '',\n\t\t\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\t\t\tlineNum: String(lineNum),\n\t\t\t\t\t\t\tlineType: lineType,\n\t\t\t\t\t\t\tcommentText: comment.commentText || text\n\t\t\t\t\t\t}, layout));\n\t\t\t\t\t}\n\t\t\t\t\tif (row) row.classList.remove('diff-review-line-open');\n\t\t\t\t\trefreshReviewComments(taskId).catch(function(err) {\n\t\t\t\t\t\tconsole.error(err);\n\t\t\t\t\t});\n\t\t\t\t})\n\t\t\t\t.catch(function(err) {\n\t\t\t\t\tconsole.error(err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<script>\n\n\t\t\tfunction toggleDiffFile(idx, deferRefresh) {\n\t\t\t\tvar inlineBody = document.getElementById('diff-body-' + idx);\n\t\t\t\tvar splitBody = document.getElementById('diff-body-split-' + idx);\n\t\t\t\tvar chevron = document.getElementById('diff-chevron-' + idx);\n\t\t\t\tvar chevronSplit = document.getElementById('diff-chevron-split-' + idx);\n\n\t\t\t\tvar isExpanded = diffFileStateBucket()[idx] !== false;\n\t\t\t\tvar newState = !isExpanded;\n\n\t\t\t\t// When collapsing a card whose sticky header is currently\n\t\t\t\t// pinned to the top of the scroll container, the body shrinks\n\t\t\t\t// while the page stays scrolled, and the sticky header's\n\t\t\t\t// containing-block constraint drags the header off-screen.\n\t\t\t\t// Pre-scroll the page so the card's top aligns with the\n\t\t\t\t// scroller top before the body animates; the header then\n\t\t\t\t// stays put while the body collapses in place.\n\t\t\t\tif (!newState) {\n\t\t\t\t\tvar card = null;\n\t\t\t\t\t[\n\t\t\t\t\t\tdocument.getElementById('diff-file-' + idx),\n\t\t\t\t\t\tdocument.getElementById('diff-file-split-' + idx)\n\t\t\t\t\t].some(function(candidate) {\n\t\t\t\t\t\tif (!candidate || candidate.getClientRects().length === 0) return false;\n\t\t\t\t\t\tcard = candidate;\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t});\n\t\t\t\t\tvar scroller = document.getElementById('main-content');\n\t\t\t\t\tif (card && scroller) {\n\t\t\t\t\t\tvar cardTop = card.getBoundingClientRect().top;\n\t\t\t\t\t\tvar scrollerTop = scroller.getBoundingClientRect().top;\n\t\t\t\t\t\tif (cardTop < scrollerTop) {\n\t\t\t\t\t\t\tscroller.scrollTop -= (scrollerTop - cardTop);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (inlineBody) {\n\t\t\t\t\tif (newState) {\n\t\t\t\t\t\tinlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';\n\t\t\t\t\t\tsetTimeout(function() { inlineBody.style.maxHeight = ''; }, 300);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tinlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';\n\t\t\t\t\t\tinlineBody.offsetHeight;\n\t\t\t\t\t\tinlineBody.style.maxHeight = '0';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (splitBody) {\n\t\t\t\t\tif (newState) {\n\t\t\t\t\t\tsplitBody.style.maxHeight = splitBody.scrollHeight + 'px';\n\t\t\t\t\t\tsetTimeout(function() { splitBody.style.maxHeight = ''; }, 300);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tsplitBody.style.maxHeight = splitBody.scrollHeight + 'px';\n\t\t\t\t\t\tsplitBody.offsetHeight;\n\t\t\t\t\t\tsplitBody.style.maxHeight = '0';\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (chevron) chevron.classList.toggle('rotate-90', newState);\n\t\t\t\tif (chevronSplit) chevronSplit.classList.toggle('rotate-90', newState);\n\n\t\t\t\tdocument.querySelectorAll('[data-diff-toggle=\"' + idx + '\"]').forEach(function(el) {\n\t\t\t\t\tif (newState) el.removeAttribute('data-collapsed');\n\t\t\t\t\telse el.setAttribute('data-collapsed', '1');\n\t\t\t\t});\n\n\t\t\t\tif (!newState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(card) { if (card) { card.style.minHeight = ''; delete card._diffScrollAnchor; delete card._diffReadingAnchor; } });\n                diffFileStateBucket()[idx] = newState;\n                if (window._setDiffSlotState) [document.getElementById('diff-file-' + idx), document.getElementById('diff-file-split-' + idx)].forEach(function(slot) { window._setDiffSlotState(slot,newState); });\n                if (!deferRefresh && window._refreshDiffPerformance) window._refreshDiffPerformance();\n\t\t\t}\n\n\t\t\tfunction toggleAllDiffFiles(expand) {\n                var viewer = document.getElementById('diff-viewer');\n                if (!viewer) return;\n                var count = parseInt(viewer.dataset.fileCount || '0');\n                for (var i=0; i<count; i++) {\n                    if ((diffFileStateBucket()[i] !== false) !== expand) toggleDiffFile(i,true);\n                }\n                if (window._refreshDiffPerformance) window._refreshDiffPerformance();\n            }\n\n            function expandAndScrollDiffFile(idx) {\n\t\t\t\tvar chevron = document.getElementById('diff-chevron-' + idx);\n\t\t\t\tvar isExpanded = diffFileStateBucket()[idx] !== false;\n\t\t\t\tif (!isExpanded) {\n\t\t\t\t\ttoggleDiffFile(idx);\n\t\t\t\t}\n\t\t\t\tsetTimeout(function() {\n\t\t\t\t\tvar split = document.getElementById('diff-content-split');\n                    var prefix = split && !split.classList.contains('hidden') ? 'diff-file-split-' : 'diff-file-';\n                    var el = document.getElementById(prefix + idx);\n\t\t\t\t\tif (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});\n\t\t\t\t}, 50);\n\t\t\t}\n\n\t\t\t// Restore persisted expand/collapse state after initial render and after\n\t\t\t// HTMX swaps. Deferred file-card swaps render expanded by default, so the\n\t\t\t// saved state must be re-applied to the body, chevrons, and header shape.\n\t\t\twindow._restoreDiffFileState = window._restoreDiffFileState || function() {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer || !window._diffFileState) return;\n\t\t\t\tvar state = diffFileStateBucket();\n\t\t\t\tvar count = parseInt(viewer.dataset.fileCount || '0');\n\t\t\t\tfor (var i = 0; i < count; i++) {\n\t\t\t\t\tif (state.hasOwnProperty(i)) {\n\t\t\t\t\t\tvar savedExpanded = state[i];\n                        if (window._setDiffSlotState) [document.getElementById('diff-file-' + i), document.getElementById('diff-file-split-' + i)].forEach(function(slot) { window._setDiffSlotState(slot,savedExpanded); });\n\t\t\t\t\t\tvar bodies = [\n\t\t\t\t\t\t\tdocument.getElementById('diff-body-' + i),\n\t\t\t\t\t\t\tdocument.getElementById('diff-body-split-' + i)\n\t\t\t\t\t\t];\n\t\t\t\t\t\tvar chevrons = [\n\t\t\t\t\t\t\tdocument.getElementById('diff-chevron-' + i),\n\t\t\t\t\t\t\tdocument.getElementById('diff-chevron-split-' + i)\n\t\t\t\t\t\t];\n\t\t\t\t\t\tbodies.forEach(function(body) {\n\t\t\t\t\t\t\tif (!body) return;\n\t\t\t\t\t\t\tbody.style.transition = 'none';\n\t\t\t\t\t\t\tbody.style.maxHeight = savedExpanded ? '' : '0';\n\t\t\t\t\t\t\tbody.offsetHeight;\n\t\t\t\t\t\t\tbody.style.transition = '';\n\t\t\t\t\t\t});\n\t\t\t\t\t\tchevrons.forEach(function(c) {\n\t\t\t\t\t\t\tif (!c) return;\n\t\t\t\t\t\t\tvar previousTransition = c.style.transition;\n\t\t\t\t\t\t\tc.style.transition = 'none';\n\t\t\t\t\t\t\tc.classList.toggle('rotate-90', savedExpanded);\n\t\t\t\t\t\t\tc.style.transition = previousTransition;\n\t\t\t\t\t\t});\n\t\t\t\t\t\tdocument.querySelectorAll('[data-diff-toggle=\"' + i + '\"]').forEach(function(el) {\n\t\t\t\t\t\t\tif (savedExpanded) el.removeAttribute('data-collapsed');\n\t\t\t\t\t\t\telse el.setAttribute('data-collapsed', '1');\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t};\n\t\t\twindow._restoreDiffFileState();\n\t\t\tif (!window._diffFileStateRestoreRegistered) {\n\t\t\t\twindow._diffFileStateRestoreRegistered = true;\n\t\t\t\t['htmx:afterSwap', 'htmx:afterSettle'].forEach(function(eventName) {\n\t\t\t\t\tdocument.body.addEventListener(eventName, window._restoreDiffFileState);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction copyDiffFilePath(ev, button) {\n\t\t\t\tif (ev) {\n\t\t\t\t\tev.preventDefault();\n\t\t\t\t\tev.stopPropagation();\n\t\t\t\t}\n\t\t\t\tvar text = button && button.dataset ? button.dataset.copyPath : '';\n\t\t\t\tif (!text) {\n\t\t\t\t\tif (window.showToast) window.showToast('No file path to copy', 'failed');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\tfunction setCopiedState() {\n\t\t\t\t\tif (!button) return;\n\t\t\t\t\tvar originalHTML = button.innerHTML;\n\t\t\t\t\tbutton.classList.add('btn-success');\n\t\t\t\t\tbutton.innerHTML = '<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg>';\n\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\tbutton.classList.remove('btn-success');\n\t\t\t\t\t\tbutton.innerHTML = originalHTML;\n\t\t\t\t\t}, 1200);\n\t\t\t\t}\n\n\t\t\t\tfunction onCopySuccess() {\n\t\t\t\t\tsetCopiedState();\n\t\t\t\t}\n\n\t\t\t\tfunction onCopyFailure() {\n\t\t\t\t\tif (window.showToast) window.showToast('Failed to copy file path', 'failed');\n\t\t\t\t}\n\n\t\t\t\tfunction fallbackCopy() {\n\t\t\t\t\tvar textarea = document.createElement('textarea');\n\t\t\t\t\ttextarea.value = text;\n\t\t\t\t\ttextarea.setAttribute('readonly', '');\n\t\t\t\t\ttextarea.style.position = 'fixed';\n\t\t\t\t\ttextarea.style.opacity = '0';\n\t\t\t\t\tdocument.body.appendChild(textarea);\n\t\t\t\t\ttextarea.select();\n\t\t\t\t\ttextarea.setSelectionRange(0, textarea.value.length);\n\t\t\t\t\ttry {\n\t\t\t\t\t\tif (document.execCommand('copy')) onCopySuccess();\n\t\t\t\t\t\telse onCopyFailure();\n\t\t\t\t\t} catch (e) {\n\t\t\t\t\t\tonCopyFailure();\n\t\t\t\t\t} finally {\n\t\t\t\t\t\tdocument.body.removeChild(textarea);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tif (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {\n\t\t\t\t\tnavigator.clipboard.writeText(text).then(onCopySuccess).catch(fallbackCopy);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tfallbackCopy();\n\t\t\t}\n\n\t\t\tfunction persistDiffViewPreference(mode) {\n\t\t\t\ttry {\n\t\t\t\t\tfetch('/ui/preferences', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: { 'Content-Type': 'application/json' },\n\t\t\t\t\t\tbody: JSON.stringify({ diff_view: mode }),\n\t\t\t\t\t\tkeepalive: true\n\t\t\t\t\t}).catch(function() {});\n\t\t\t\t} catch (_) {}\n\t\t\t}\n\n\t\t\tfunction switchDiffView(mode, persist) {\n\t\t\t\tvar inlineEl = document.getElementById('diff-content-inline');\n\t\t\t\tvar splitEl = document.getElementById('diff-content-split');\n\t\t\t\tvar btnInline = document.getElementById('diff-btn-inline');\n\t\t\t\tvar btnSplit = document.getElementById('diff-btn-split');\n\t\t\t\tif (!inlineEl || !splitEl || !btnInline || !btnSplit) return;\n\n\t\t\t\tvar scroll = window._captureDiffScroll ? window._captureDiffScroll() : null;\n                if (mode === 'split') {\n\t\t\t\t\tinlineEl.classList.add('hidden');\n\t\t\t\t\tsplitEl.classList.remove('hidden');\n\t\t\t\t\tbtnSplit.classList.add('btn-active');\n\t\t\t\t\tbtnInline.classList.remove('btn-active');\n\t\t\t\t} else {\n\t\t\t\t\tsplitEl.classList.add('hidden');\n\t\t\t\t\tinlineEl.classList.remove('hidden');\n\t\t\t\t\tbtnInline.classList.add('btn-active');\n\t\t\t\t\tbtnSplit.classList.remove('btn-active');\n\t\t\t\t}\n\t\t\t\tif (window._refreshDiffPerformance) window._refreshDiffPerformance();\n\t\t\t\tif (window._restoreDiffScroll) window._restoreDiffScroll(scroll, true);\n                if (persist !== false) {\n\t\t\t\t\tpersistDiffViewPreference(mode === 'split' ? 'split' : 'inline');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t// Inline comment functions — always active, no review mode toggle needed\n\t\t\tfunction closeReviewForm(formRow) {\n\t\t\t\tif (!formRow) return;\n\t\t\t\tvar lineRow = findLineRowForComment(formRow);\n\t\t\t\tif (lineRow) lineRow.classList.remove('diff-review-line-open');\n\t\t\t\tif (formRow.dataset.mode === 'edit') {\n\t\t\t\t\tfindInlineCommentRows(lineRow).forEach(function(commentRow) {\n\t\t\t\t\t\tcommentRow.style.display = '';\n\t\t\t\t\t});\n\t\t\t\t\tformRow.replaceWith(buildInlineCommentRow({\n\t\t\t\t\t\tid: formRow.dataset.commentId || '',\n\t\t\t\t\t\tfilePath: formRow.dataset.filePath || '',\n\t\t\t\t\t\tlineNum: formRow.dataset.lineNum || '',\n\t\t\t\t\t\tlineType: formRow.dataset.lineType || '',\n\t\t\t\t\t\tcommentText: formRow.dataset.originalText || ''\n\t\t\t\t\t}, formRow.dataset.reviewLayout || 'inline'));\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tformRow.remove();\n\t\t\t}\n\n\t\t\tfunction closeOpenReviewForms(exceptForm) {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\t\t\t\tviewer.querySelectorAll('.review-comment-form').forEach(function(formRow) {\n\t\t\t\t\tif (formRow !== exceptForm) {\n\t\t\t\t\t\tcloseReviewForm(formRow);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction reviewFormInnerHtml(submitLabel) {\n\t\t\t\treturn '<div class=\"review-comment-shell rounded-lg border border-base-300 bg-base-100 p-3\">' +\n\t\t\t\t\t'<textarea class=\"review-comment-textarea block w-full font-sans bg-transparent text-base-content placeholder:text-base-content/50\" placeholder=\"Add review comment...\" rows=\"2\" autofocus style=\"resize: none;\"></textarea>' +\n\t\t\t\t\t'<div class=\"review-comment-actions mt-3 flex items-center justify-end gap-2\">' +\n\t\t\t\t\t'<button type=\"button\" class=\"btn btn-sm btn-ghost review-cancel-btn\">Cancel</button>' +\n\t\t\t\t\t'<button type=\"button\" class=\"btn btn-sm btn-success review-submit-btn\">' + escapeHtml(submitLabel || 'Comment') + '</button>' +\n\t\t\t\t\t'</div>' +\n\t\t\t\t\t'</div>';\n\t\t\t}\n\n\t\t\tfunction buildReviewFormRow(options) {\n\t\t\t\tvar formRow = document.createElement('tr');\n\t\t\t\tformRow.className = 'review-comment-form';\n\t\t\t\tformRow.dataset.mode = options.mode || 'new';\n\t\t\t\tformRow.dataset.commentId = options.commentId || '';\n\t\t\t\tformRow.dataset.filePath = options.filePath || '';\n\t\t\t\tformRow.dataset.lineNum = options.lineNum || '';\n\t\t\t\tformRow.dataset.lineType = options.lineType || '';\n\t\t\t\tformRow.dataset.reviewLayout = options.layout || 'inline';\n\t\t\t\tformRow.dataset.originalText = options.originalText || '';\n\t\t\t\tif ((options.layout || 'inline') === 'split') {\n\t\t\t\t\tformRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-content px-3 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-2 bg-base-200\">' + reviewFormInnerHtml(options.submitLabel) + '</td>';\n\t\t\t\t} else {\n\t\t\t\t\tformRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-2 bg-base-200\">' + reviewFormInnerHtml(options.submitLabel) + '</td>';\n\t\t\t\t}\n\t\t\t\tvar textarea = formRow.querySelector('textarea');\n\t\t\t\ttextarea.value = options.initialText || '';\n\t\t\t\ttextarea.addEventListener('keydown', function(e) {\n\t\t\t\t\tif (e.key === 'Escape') {\n\t\t\t\t\t\tcloseReviewForm(formRow);\n\t\t\t\t\t} else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tif (formRow.dataset.mode === 'edit') {\n\t\t\t\t\t\t\tupdateReviewComment(formRow);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\tsubmitReviewComment(options.taskId, options.filePath, options.lineNum, options.lineType, textarea.value, formRow);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tformRow.querySelector('.review-submit-btn').addEventListener('click', function() {\n\t\t\t\t\tif (formRow.dataset.mode === 'edit') {\n\t\t\t\t\t\tupdateReviewComment(formRow);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tsubmitReviewComment(options.taskId, options.filePath, options.lineNum, options.lineType, textarea.value, formRow);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tformRow.querySelector('.review-cancel-btn').addEventListener('click', function() {\n\t\t\t\t\tcloseReviewForm(formRow);\n\t\t\t\t});\n\t\t\t\treturn formRow;\n\t\t\t}\n\n\t\t\tfunction openInlineCommentForm(row) {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\n\t\t\t\tvar filePath = row.dataset.filePath;\n\t\t\t\tvar lineNum = row.dataset.lineNum;\n\t\t\t\tvar lineType = row.dataset.lineType;\n\t\t\t\tvar taskId = viewer.dataset.taskId;\n\n\t\t\t\tif (!filePath || !lineNum || !taskId) return;\n\t\t\t\tvar existingForm = row.nextElementSibling;\n\t\t\t\tif (existingForm && existingForm.classList.contains('review-comment-form')) {\n\t\t\t\t\tcloseReviewForm(existingForm);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tcloseOpenReviewForms();\n\t\t\t\tvar formRow = buildReviewFormRow({\n\t\t\t\t\tmode: 'new',\n\t\t\t\t\tlayout: row.dataset.reviewLayout || 'inline',\n\t\t\t\t\ttaskId: taskId,\n\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\tlineNum: lineNum,\n\t\t\t\t\tlineType: lineType,\n\t\t\t\t\tsubmitLabel: 'Comment'\n\t\t\t\t});\n\t\t\t\trow.parentNode.insertBefore(formRow, row.nextSibling);\n\t\t\t\trow.classList.add('diff-review-line-open');\n\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\tvar textarea = formRow.querySelector('.review-comment-textarea');\n\t\t\t\t\tif (!textarea) return;\n\t\t\t\t\ttextarea.focus();\n\t\t\t\t\ttextarea.setSelectionRange(textarea.value.length, textarea.value.length);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction handleAddCommentClick(ev) {\n\t\t\t\tev.stopPropagation();\n\t\t\t\tvar btn = ev.target.closest('.diff-add-comment-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tvar row = btn.closest('tr.diff-review-line');\n\t\t\t\tif (!row) return;\n\t\t\t\tif (!row.dataset.lineNum || row.dataset.lineNum === '0') return;\n\t\t\t\topenInlineCommentForm(row);\n\t\t\t}\n\n\t\t\tfunction cancelReview() {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\t\t\t\tvar taskId = viewer.dataset.taskId;\n\t\t\t\tif (!taskId) return;\n\n\t\t\t\t// Delete all comments for this task via the API, then reload the page\n\t\t\t\tfetch('/tasks/' + taskId + '/reviews', { method: 'GET' })\n\t\t\t\t\t.then(function() {\n\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction escapeHtml(value) {\n\t\t\t\treturn String(value || '')\n\t\t\t\t\t.replace(/&/g, '&amp;')\n\t\t\t\t\t.replace(/</g, '&lt;')\n\t\t\t\t\t.replace(/>/g, '&gt;')\n\t\t\t\t\t.replace(/\\\"/g, '&quot;')\n\t\t\t\t\t.replace(/'/g, '&#39;');\n\t\t\t}\n\n\t\t\tfunction findLineRowForComment(commentRow) {\n\t\t\t\tvar cursor = commentRow ? commentRow.previousElementSibling : null;\n\t\t\t\twhile (cursor) {\n\t\t\t\t\tif (cursor.classList && cursor.classList.contains('diff-review-line')) {\n\t\t\t\t\t\treturn cursor;\n\t\t\t\t\t}\n\t\t\t\t\tcursor = cursor.previousElementSibling;\n\t\t\t\t}\n\t\t\t\treturn null;\n\t\t\t}\n\n\t\t\tfunction findInlineCommentRows(lineRow) {\n\t\t\t\tvar rows = [];\n\t\t\t\tif (!lineRow) return rows;\n\t\t\t\tvar filePath = lineRow.dataset.filePath || '';\n\t\t\t\tvar lineNum = lineRow.dataset.lineNum || '';\n\t\t\t\tvar lineType = lineRow.dataset.lineType || '';\n\t\t\t\tvar cursor = lineRow.nextElementSibling;\n\t\t\t\twhile (cursor) {\n\t\t\t\t\tif (cursor.classList && cursor.classList.contains('diff-review-line')) {\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t\tif (cursor.classList && cursor.classList.contains('review-inline-comment')) {\n\t\t\t\t\t\tif (cursor.dataset.filePath === filePath && cursor.dataset.lineNum === lineNum && cursor.dataset.lineType === lineType) {\n\t\t\t\t\t\t\trows.push(cursor);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tcursor = cursor.nextElementSibling;\n\t\t\t\t}\n\t\t\t\treturn rows;\n\t\t\t}\n\n\t\t\tfunction extractCreatedComment(html, filePath, lineNum, lineType, fallbackText) {\n\t\t\t\tvar temp = document.createElement('div');\n\t\t\t\ttemp.innerHTML = html;\n\t\t\t\tvar items = temp.querySelectorAll('.review-comment-item');\n\t\t\t\tvar match = null;\n\t\t\t\titems.forEach(function(item) {\n\t\t\t\t\tif (item.dataset.filePath === filePath && item.dataset.lineNumber === String(lineNum) && item.dataset.lineType === lineType) {\n\t\t\t\t\t\tmatch = item;\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tif (!match) {\n\t\t\t\t\treturn {\n\t\t\t\t\t\tid: '',\n\t\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\t\tlineNum: String(lineNum),\n\t\t\t\t\t\tlineType: lineType,\n\t\t\t\t\t\tcommentText: fallbackText\n\t\t\t\t\t};\n\t\t\t\t}\n\t\t\t\tvar textEl = match.querySelector('p');\n\t\t\t\treturn {\n\t\t\t\t\tid: match.dataset.commentId || '',\n\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\tlineNum: String(lineNum),\n\t\t\t\t\tlineType: lineType,\n\t\t\t\t\tcommentText: textEl ? textEl.textContent : fallbackText\n\t\t\t\t};\n\t\t\t}\n\n\t\t\tfunction parseReviewCommentsFromListHtml(html) {\n\t\t\t\tvar temp = document.createElement('div');\n\t\t\t\ttemp.innerHTML = html;\n\t\t\t\tvar comments = [];\n\t\t\t\ttemp.querySelectorAll('.review-comment-item').forEach(function(item) {\n\t\t\t\t\tvar textEl = item.querySelector('p');\n\t\t\t\t\tcomments.push({\n\t\t\t\t\t\tid: item.dataset.commentId || '',\n\t\t\t\t\t\tfilePath: item.dataset.filePath || '',\n\t\t\t\t\t\tlineNum: item.dataset.lineNumber || '',\n\t\t\t\t\t\tlineType: item.dataset.lineType || 'new',\n\t\t\t\t\t\tcommentText: textEl ? textEl.textContent : ''\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t\treturn comments;\n\t\t\t}\n\n\t\t\tfunction reviewCommentLineKey(filePath, lineNum, lineType) {\n\t\t\t\treturn String(filePath || '') + '::' + String(lineNum || '') + '::' + String(lineType || 'new');\n\t\t\t}\n\n\t\t\tfunction setReviewToolbarEnabled(hasComments) {\n\t\t\t\tvar toolbar = document.getElementById('review-toolbar');\n\t\t\t\tif (!toolbar) return;\n\t\t\t\tvar submitBtn = toolbar.querySelector('button[hx-post]');\n\t\t\t\tif (!submitBtn) return;\n\t\t\t\tif (hasComments) {\n\t\t\t\t\tsubmitBtn.removeAttribute('disabled');\n\t\t\t\t} else {\n\t\t\t\t\tsubmitBtn.setAttribute('disabled', 'disabled');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction syncReviewCommentsFromListHtml(html) {\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer) return;\n\t\t\t\tvar comments = parseReviewCommentsFromListHtml(html);\n\t\t\t\tvar grouped = {};\n\t\t\t\tcomments.forEach(function(comment) {\n\t\t\t\t\tvar key = reviewCommentLineKey(comment.filePath, comment.lineNum, comment.lineType);\n\t\t\t\t\tif (!grouped[key]) grouped[key] = [];\n\t\t\t\t\tgrouped[key].push(comment);\n\t\t\t\t});\n\n\t\t\t\t// Detached chunks are outside querySelectorAll(viewer), but are\n\t\t\t\t// restored verbatim when scrolling or switching layouts.\n\t\t\t\tvar roots = [viewer];\n\t\t\t\tviewer.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {\n\t\t\t\t\tif (chunk._saved) roots.push(chunk._saved);\n\t\t\t\t});\n\t\t\t\troots.forEach(function(root) {\n\t\t\t\t\troot.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {\n\t\t\t\t\t\tformRow.remove();\n\t\t\t\t\t});\n\t\t\t\t\troot.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {\n\t\t\t\t\t\tcommentRow.remove();\n\t\t\t\t\t});\n\t\t\t\t\troot.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {\n\t\t\t\t\t\tlineRow.classList.remove('diff-review-line-open');\n\t\t\t\t\t\tvar key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);\n\t\t\t\t\t\t(grouped[key] || []).forEach(function(comment) {\n\t\t\t\t\t\t\tinsertInlineCommentRow(lineRow, comment);\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t});\n\n\t\t\t\tsetReviewToolbarEnabled(comments.length > 0);\n\t\t\t}\n\n\t\t\tfunction refreshReviewComments(taskId) {\n\t\t\t\tif (!taskId) return Promise.resolve();\n\t\t\t\treturn fetch('/tasks/' + taskId + '/reviews', {\n\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to load review comments');\n\t\t\t\t\treturn resp.text();\n\t\t\t\t})\n\t\t\t\t.then(function(html) {\n\t\t\t\t\tsyncReviewCommentsFromListHtml(html);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction renderInlineCommentBox(comment) {\n\t\t\t\tvar text = escapeHtml(comment.commentText || '');\n\t\t\t\treturn '<div class=\"review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text\" data-comment-id=\"' + escapeHtml(comment.id || '') + '\" onclick=\"startEditReviewComment(event)\">' +\n\t\t\t\t\t'<span class=\"review-inline-comment-bar\"></span>' +\n\t\t\t\t\t'<button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs review-delete-btn\" onclick=\"deleteReviewComment(event)\" aria-label=\"Delete review comment\">' +\n\t\t\t\t\t\t'<svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg>' +\n\t\t\t\t\t'</button>' +\n\t\t\t\t\t'<p class=\"review-comment-text whitespace-pre-wrap break-words\">' + text + '</p>' +\n\t\t\t\t\t'</div>';\n\t\t\t}\n\n\t\t\tfunction buildInlineCommentRow(comment, layout) {\n\t\t\t\tvar commentRow = document.createElement('tr');\n\t\t\t\tcommentRow.className = 'review-inline-comment';\n\t\t\t\tcommentRow.dataset.commentId = comment.id || '';\n\t\t\t\tcommentRow.dataset.filePath = comment.filePath || '';\n\t\t\t\tcommentRow.dataset.lineNum = comment.lineNum || '';\n\t\t\t\tcommentRow.dataset.lineType = comment.lineType || '';\n\t\t\t\tcommentRow.dataset.reviewLayout = layout || 'inline';\n\t\t\t\tif ((layout || 'inline') === 'split') {\n\t\t\t\t\tcommentRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-content px-3 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-0 bg-warning/15 align-top\">' + renderInlineCommentBox(comment) + '</td>';\n\t\t\t\t} else {\n\t\t\t\t\tcommentRow.innerHTML = '<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200\"></td>' +\n\t\t\t\t\t\t'<td class=\"p-0 bg-warning/15 align-top\">' + renderInlineCommentBox(comment) + '</td>';\n\t\t\t\t}\n\t\t\t\treturn commentRow;\n\t\t\t}\n\t\n\t\t\tfunction insertInlineCommentRow(lineRow, comment) {\n\t\t\t\tif (!lineRow) return;\n\t\t\t\tvar layout = (lineRow.dataset && lineRow.dataset.reviewLayout) ? lineRow.dataset.reviewLayout : 'inline';\n\t\t\t\tvar commentRow = buildInlineCommentRow({\n\t\t\t\t\tid: comment.id || '',\n\t\t\t\t\tfilePath: lineRow.dataset.filePath || comment.filePath || '',\n\t\t\t\t\tlineNum: lineRow.dataset.lineNum || comment.lineNum || '',\n\t\t\t\t\tlineType: lineRow.dataset.lineType || comment.lineType || '',\n\t\t\t\t\tcommentText: comment.commentText || ''\n\t\t\t\t}, layout);\n\t\t\t\tvar insertionPoint = lineRow;\n\t\t\t\twhile (insertionPoint.nextElementSibling && insertionPoint.nextElementSibling.classList && insertionPoint.nextElementSibling.classList.contains('review-inline-comment')) {\n\t\t\t\t\tinsertionPoint = insertionPoint.nextElementSibling;\n\t\t\t\t}\n\t\t\t\tlineRow.parentNode.insertBefore(commentRow, insertionPoint.nextElementSibling);\n\t\t\t}\n\n\t\t\tfunction startEditReviewComment(ev) {\n\t\t\t\tvar target = ev.target;\n\t\t\t\tif (target && target.closest && target.closest('.review-delete-btn')) {\n\t\t\t\t\tev.stopPropagation();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tev.stopPropagation();\n\t\t\t\tvar row = ev.target.closest('tr.review-inline-comment');\n\t\t\t\tif (!row) return;\n\t\t\t\tcloseOpenReviewForms();\n\t\t\t\tvar lineRow = findLineRowForComment(row);\n\t\t\t\tif (!lineRow) return;\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tif (!viewer || !viewer.dataset) return;\n\t\t\t\tvar textEl = row.querySelector('.review-comment-text');\n\t\t\t\tvar currentText = textEl ? textEl.textContent : '';\n\t\t\t\tfindInlineCommentRows(lineRow).forEach(function(commentRow) {\n\t\t\t\t\tcommentRow.style.display = 'none';\n\t\t\t\t});\n\t\t\t\tvar formRow = buildReviewFormRow({\n\t\t\t\t\tmode: 'edit',\n\t\t\t\t\tlayout: row.dataset.reviewLayout || 'inline',\n\t\t\t\t\ttaskId: viewer.dataset.taskId || '',\n\t\t\t\t\tcommentId: row.dataset.commentId || '',\n\t\t\t\t\tfilePath: row.dataset.filePath || '',\n\t\t\t\t\tlineNum: row.dataset.lineNum || '',\n\t\t\t\t\tlineType: row.dataset.lineType || '',\n\t\t\t\t\tinitialText: currentText,\n\t\t\t\t\toriginalText: currentText,\n\t\t\t\t\tsubmitLabel: 'Update'\n\t\t\t\t});\n\t\t\t\trow.replaceWith(formRow);\n\t\t\t\tlineRow.classList.add('diff-review-line-open');\n\t\t\t}\n\n\t\t\tfunction reviewMutationURL(commentId) {\n                var detail = document.getElementById('task-detail-content');\n                var projectId = detail && detail.dataset ? detail.dataset.projectId : '';\n                if (!projectId) projectId = new URLSearchParams(window.location.search).get('project_id') || '';\n                return '/reviews/' + encodeURIComponent(commentId) + (projectId ? '?project_id=' + encodeURIComponent(projectId) : '');\n            }\n\n            function updateReviewComment(formRow) {\n\t\t\t\tif (!formRow) return;\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tvar taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';\n\t\t\t\tvar commentId = formRow.dataset.commentId;\n\t\t\t\tif (!commentId) return;\n\t\t\t\tvar textarea = formRow.querySelector('textarea');\n\t\t\t\tif (!textarea) return;\n\t\t\t\tvar text = textarea.value.trim();\n\t\t\t\tif (!text) return;\n\t\t\t\tvar formData = new URLSearchParams();\n\t\t\t\tformData.append('comment_text', text);\n\t\t\t\tfetch(reviewMutationURL(commentId), {\n\t\t\t\t\tmethod: 'PATCH',\n\t\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },\n\t\t\t\t\tbody: formData.toString()\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to save comment');\n\t\t\t\t\tvar lineRow = findLineRowForComment(formRow);\n\t\t\t\t\tvar existingRows = findInlineCommentRows(lineRow);\n\t\t\t\t\tif (existingRows.length > 0) {\n\t\t\t\t\t\texistingRows.forEach(function(commentRow) {\n\t\t\t\t\t\t\tcommentRow.style.display = '';\n\t\t\t\t\t\t\tif (commentRow.dataset.commentId === commentId) {\n\t\t\t\t\t\t\t\tvar textNode = commentRow.querySelector('.review-comment-text');\n\t\t\t\t\t\t\t\tif (textNode) textNode.textContent = text;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t\tformRow.remove();\n\t\t\t\t\t} else {\n\t\t\t\t\t\tformRow.replaceWith(buildInlineCommentRow({\n\t\t\t\t\t\t\tid: commentId,\n\t\t\t\t\t\t\tfilePath: formRow.dataset.filePath || '',\n\t\t\t\t\t\t\tlineNum: formRow.dataset.lineNum || '',\n\t\t\t\t\t\t\tlineType: formRow.dataset.lineType || '',\n\t\t\t\t\t\t\tcommentText: text\n\t\t\t\t\t\t}, formRow.dataset.reviewLayout || 'inline'));\n\t\t\t\t\t}\n\t\t\t\t\tif (lineRow) lineRow.classList.remove('diff-review-line-open');\n\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\trefreshReviewComments(taskId).catch(function(err) {\n\t\t\t\t\t\t\tconsole.error(err);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t})\n\t\t\t\t.catch(function(err) {\n\t\t\t\t\tconsole.error(err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction deleteReviewComment(ev) {\n\t\t\t\tev.stopPropagation();\n\t\t\t\tvar row = ev.target.closest('tr.review-inline-comment, tr.review-comment-form');\n\t\t\t\tif (!row) return;\n\t\t\t\tvar viewer = document.getElementById('diff-viewer');\n\t\t\t\tvar taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';\n\t\t\t\tvar commentId = row.dataset.commentId;\n\t\t\t\tif (!commentId) return;\n\t\t\t\tvar lineRow = findLineRowForComment(row);\n\t\t\t\tfetch(reviewMutationURL(commentId), {\n\t\t\t\t\tmethod: 'DELETE',\n\t\t\t\t\theaders: { 'HX-Request': 'true' }\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to delete comment');\n\t\t\t\t\trow.remove();\n\t\t\t\t\tif (lineRow) lineRow.classList.remove('diff-review-line-open');\n\t\t\t\t\tif (taskId) {\n\t\t\t\t\t\trefreshReviewComments(taskId).catch(function(err) {\n\t\t\t\t\t\t\tconsole.error(err);\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t})\n\t\t\t\t.catch(function(err) {\n\t\t\t\t\tconsole.error(err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction submitReviewComment(taskId, filePath, lineNum, lineType, text, formRow) {\n\t\t\t\tif (!text.trim()) return;\n\n\t\t\t\tvar formData = new URLSearchParams();\n\t\t\t\tformData.append('file_path', filePath);\n\t\t\t\tformData.append('line_number', lineNum);\n\t\t\t\tformData.append('line_type', lineType);\n\t\t\t\tformData.append('comment_text', text);\n\n\t\t\t\tfetch('/tasks/' + taskId + '/reviews', {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },\n\t\t\t\t\tbody: formData.toString()\n\t\t\t\t})\n\t\t\t\t.then(function(resp) {\n\t\t\t\t\tif (!resp.ok) throw new Error('failed to add review comment');\n\t\t\t\t\treturn resp.text();\n\t\t\t\t})\n\t\t\t\t.then(function(html) {\n\t\t\t\t\tvar row = findLineRowForComment(formRow);\n\t\t\t\t\tvar comment = extractCreatedComment(html, filePath, lineNum, lineType, text);\n\t\t\t\t\tvar layout = formRow.dataset.reviewLayout || (row && row.dataset ? row.dataset.reviewLayout : '') || 'inline';\n\t\t\t\t\tif (formRow && formRow.parentNode) {\n\t\t\t\t\t\tformRow.replaceWith(buildInlineCommentRow({\n\t\t\t\t\t\t\tid: comment.id || '',\n\t\t\t\t\t\t\tfilePath: filePath,\n\t\t\t\t\t\t\tlineNum: String(lineNum),\n\t\t\t\t\t\t\tlineType: lineType,\n\t\t\t\t\t\t\tcommentText: comment.commentText || text\n\t\t\t\t\t\t}, layout));\n\t\t\t\t\t}\n\t\t\t\t\tif (row) row.classList.remove('diff-review-line-open');\n\t\t\t\t\trefreshReviewComments(taskId).catch(function(err) {\n\t\t\t\t\t\tconsole.error(err);\n\t\t\t\t\t});\n\t\t\t\t})\n\t\t\t\t.catch(function(err) {\n\t\t\t\t\tconsole.error(err);\n\t\t\t\t});\n\t\t\t}\n\n\t\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1102,7 +1102,7 @@ func diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool
 			var templ_7745c5c3_Var29 string
 			templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", idx)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1526, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1534, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 			if templ_7745c5c3_Err != nil {
@@ -1115,7 +1115,7 @@ func diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(diffFileStatusValue(f.Status)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1527, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1535, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 			if templ_7745c5c3_Err != nil {
@@ -1161,7 +1161,7 @@ func diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-chevron-split-%d", idx)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1534, Col: 50}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1542, Col: 50}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 				if templ_7745c5c3_Err != nil {
@@ -1179,7 +1179,7 @@ func diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool
 				var templ_7745c5c3_Var32 string
 				templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-chevron-%d", idx)).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1536, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1544, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 				if templ_7745c5c3_Err != nil {
@@ -1269,7 +1269,7 @@ func diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(diffFileStatusLabel(f.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1549, Col: 118}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1557, Col: 118}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
@@ -1292,7 +1292,7 @@ func diffFileHeader(f DiffFile, idx int, defaultExpanded bool, splitChevron bool
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(diffFileDisplayPath(f))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1554, Col: 110}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1562, Col: 110}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
@@ -1350,7 +1350,7 @@ func diffFileCopyPathButton(path string) templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression("Copy file path " + path).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1566, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1574, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 			if templ_7745c5c3_Err != nil {
@@ -1363,7 +1363,7 @@ func diffFileCopyPathButton(path string) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.NewAttributeExpression(path).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1567, Col: 23}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1575, Col: 23}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 			if templ_7745c5c3_Err != nil {
@@ -1425,7 +1425,7 @@ func diffStatsBadge(f DiffFile) templ.Component {
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templruntime.NewAttributeExpression(diffStatsAriaLabel(f)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1578, Col: 128}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1586, Col: 128}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 		if templ_7745c5c3_Err != nil {
@@ -1438,7 +1438,7 @@ func diffStatsBadge(f DiffFile) templ.Component {
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", diffStatCounts(f).Adds))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1579, Col: 96}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1587, Col: 96}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 		if templ_7745c5c3_Err != nil {
@@ -1451,7 +1451,7 @@ func diffStatsBadge(f DiffFile) templ.Component {
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", diffStatCounts(f).Dels))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1580, Col: 96}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1588, Col: 96}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 		if templ_7745c5c3_Err != nil {
@@ -1489,7 +1489,7 @@ func diffFileEmptyBody(f DiffFile) templ.Component {
 		var templ_7745c5c3_Var48 string
 		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(diffFileSummaryText(f))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1586, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1594, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 		if templ_7745c5c3_Err != nil {
@@ -1507,7 +1507,7 @@ func diffFileEmptyBody(f DiffFile) templ.Component {
 			var templ_7745c5c3_Var49 string
 			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(f.OldPath)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1589, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1597, Col: 15}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {
@@ -1520,7 +1520,7 @@ func diffFileEmptyBody(f DiffFile) templ.Component {
 			var templ_7745c5c3_Var50 string
 			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(f.Path)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1589, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1597, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 			if templ_7745c5c3_Err != nil {
@@ -1563,7 +1563,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var52 string
 		templ_7745c5c3_Var52, templ_7745c5c3_Err = templruntime.NewAttributeExpression(comment.ID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1598, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1606, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 		if templ_7745c5c3_Err != nil {
@@ -1576,7 +1576,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var53 string
 		templ_7745c5c3_Var53, templ_7745c5c3_Err = templruntime.NewAttributeExpression(filePath).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1599, Col: 27}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1607, Col: 27}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 		if templ_7745c5c3_Err != nil {
@@ -1589,7 +1589,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", target.LineNumber)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1600, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1608, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
@@ -1602,7 +1602,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templruntime.NewAttributeExpression(target.LineType).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1601, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1609, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
@@ -1615,7 +1615,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templruntime.NewAttributeExpression(layout).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1602, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1610, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {
@@ -1643,7 +1643,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var57 string
 		templ_7745c5c3_Var57, templ_7745c5c3_Err = templruntime.NewAttributeExpression(comment.ID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1613, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1621, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 		if templ_7745c5c3_Err != nil {
@@ -1656,7 +1656,7 @@ func reviewInlineCommentRow(comment models.ReviewComment, filePath string, targe
 		var templ_7745c5c3_Var58 string
 		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(comment.CommentText)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1618, Col: 88}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1626, Col: 88}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 		if templ_7745c5c3_Err != nil {
@@ -1694,7 +1694,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 		var templ_7745c5c3_Var60 string
 		templ_7745c5c3_Var60, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-file-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1625, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1633, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {
@@ -1715,7 +1715,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 		var templ_7745c5c3_Var61 string
 		templ_7745c5c3_Var61, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-body-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1628, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1636, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 		if templ_7745c5c3_Err != nil {
@@ -1753,7 +1753,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 				var templ_7745c5c3_Var62 string
 				templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(hunk.Header)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1641, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1649, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 				if templ_7745c5c3_Err != nil {
@@ -1793,7 +1793,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var65 string
 						templ_7745c5c3_Var65, templ_7745c5c3_Err = templruntime.NewAttributeExpression(f.Path).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1646, Col: 32}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1654, Col: 32}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 						if templ_7745c5c3_Err != nil {
@@ -1806,7 +1806,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var66 string
 						templ_7745c5c3_Var66, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", line.OldNum)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1647, Col: 55}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1655, Col: 55}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 						if templ_7745c5c3_Err != nil {
@@ -1819,7 +1819,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var67 string
 						templ_7745c5c3_Var67, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", line.NewNum)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1648, Col: 55}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1656, Col: 55}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 						if templ_7745c5c3_Err != nil {
@@ -1832,7 +1832,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var68 string
 						templ_7745c5c3_Var68, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", lineNumForReview(line))).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1649, Col: 66}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1657, Col: 66}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 						if templ_7745c5c3_Err != nil {
@@ -1845,7 +1845,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var69 string
 						templ_7745c5c3_Var69, templ_7745c5c3_Err = templruntime.NewAttributeExpression(lineTypeForDiff(line.Type)).Resolve(ctx)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1650, Col: 52}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1658, Col: 52}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 						if templ_7745c5c3_Err != nil {
@@ -1873,7 +1873,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var70 string
 						templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", line.OldNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1654, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1662, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 						if templ_7745c5c3_Err != nil {
@@ -1888,7 +1888,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 						var templ_7745c5c3_Var71 string
 						templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", line.NewNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1659, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1667, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
 						if templ_7745c5c3_Err != nil {
@@ -1908,7 +1908,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 					var templ_7745c5c3_Var72 string
 					templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(lineMarker(line.Type))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1666, Col: 99}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1674, Col: 99}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 					if templ_7745c5c3_Err != nil {
@@ -1921,7 +1921,7 @@ func inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 					var templ_7745c5c3_Var73 string
 					templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(line.Content)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1666, Col: 122}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1674, Col: 122}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 					if templ_7745c5c3_Err != nil {
@@ -1978,7 +1978,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 		var templ_7745c5c3_Var75 string
 		templ_7745c5c3_Var75, templ_7745c5c3_Err = templruntime.NewAttributeExpression(revision).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1684, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1692, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 		if templ_7745c5c3_Err != nil {
@@ -1991,7 +1991,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 		var templ_7745c5c3_Var76 string
 		templ_7745c5c3_Var76, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", len(metas))).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1684, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1692, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 		if templ_7745c5c3_Err != nil {
@@ -2004,7 +2004,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 		var templ_7745c5c3_Var77 string
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templruntime.NewAttributeExpression(diffViewerStateKey(metas, "")).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1684, Col: 199}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1692, Col: 199}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 		if templ_7745c5c3_Err != nil {
@@ -2017,7 +2017,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 		var templ_7745c5c3_Var78 string
 		templ_7745c5c3_Var78, templ_7745c5c3_Err = templruntime.NewAttributeExpression(normalizeDiffViewMode(initialView)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1684, Col: 256}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1692, Col: 256}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 		if templ_7745c5c3_Err != nil {
@@ -2030,7 +2030,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 		var templ_7745c5c3_Var79 string
 		templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(metas)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1689, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1697, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 		if templ_7745c5c3_Err != nil {
@@ -2043,7 +2043,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 		var templ_7745c5c3_Var80 string
 		templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(fileCountSuffix(len(metas)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1689, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1697, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 		if templ_7745c5c3_Err != nil {
@@ -2160,7 +2160,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 					var templ_7745c5c3_Var85 string
 					templ_7745c5c3_Var85, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.SafeURL(fmt.Sprintf("#diff-file-%d", m.Index))).ResolveURL(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1730, Col: 66}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1738, Col: 66}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
 					if templ_7745c5c3_Err != nil {
@@ -2197,7 +2197,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision 
 				var templ_7745c5c3_Var87 string
 				templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinStringErrs(diffFileName(m.File.Path))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1734, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 1742, Col: 71}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
 				if templ_7745c5c3_Err != nil {
@@ -2375,7 +2375,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 		var templ_7745c5c3_Var93 string
 		templ_7745c5c3_Var93, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-file-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2065, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2073, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 		if templ_7745c5c3_Err != nil {
@@ -2396,7 +2396,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 		var templ_7745c5c3_Var94 string
 		templ_7745c5c3_Var94, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-body-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2068, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2076, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var94)
 		if templ_7745c5c3_Err != nil {
@@ -2434,7 +2434,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 				var templ_7745c5c3_Var95 string
 				templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.JoinStringErrs(hunk.Header)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2081, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2089, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var95))
 				if templ_7745c5c3_Err != nil {
@@ -2489,7 +2489,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 						var templ_7745c5c3_Var98 string
 						templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", line.OldNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2087, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2095, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 						if templ_7745c5c3_Err != nil {
@@ -2504,7 +2504,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 						var templ_7745c5c3_Var99 string
 						templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", line.NewNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2092, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2100, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var99))
 						if templ_7745c5c3_Err != nil {
@@ -2518,7 +2518,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 					var templ_7745c5c3_Var100 string
 					templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.JoinStringErrs(lineMarker(line.Type))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2096, Col: 99}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2104, Col: 99}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var100))
 					if templ_7745c5c3_Err != nil {
@@ -2531,7 +2531,7 @@ func inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 					var templ_7745c5c3_Var101 string
 					templ_7745c5c3_Var101, templ_7745c5c3_Err = templ.JoinStringErrs(line.Content)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2096, Col: 122}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2104, Col: 122}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var101))
 					if templ_7745c5c3_Err != nil {
@@ -2580,7 +2580,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-file-split-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2109, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2117, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {
@@ -2601,7 +2601,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 		var templ_7745c5c3_Var104 string
 		templ_7745c5c3_Var104, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-body-split-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2112, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2120, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var104)
 		if templ_7745c5c3_Err != nil {
@@ -2639,7 +2639,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 				var templ_7745c5c3_Var105 string
 				templ_7745c5c3_Var105, templ_7745c5c3_Err = templ.JoinStringErrs(hunk.Header)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2131, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2139, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var105))
 				if templ_7745c5c3_Err != nil {
@@ -2657,7 +2657,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 					var templ_7745c5c3_Var106 string
 					templ_7745c5c3_Var106, templ_7745c5c3_Err = templruntime.NewAttributeExpression(f.Path).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2136, Col: 32}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2144, Col: 32}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var106)
 					if templ_7745c5c3_Err != nil {
@@ -2670,7 +2670,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 					var templ_7745c5c3_Var107 string
 					templ_7745c5c3_Var107, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", pair.Left.OldNum)).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2137, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2145, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 					if templ_7745c5c3_Err != nil {
@@ -2683,7 +2683,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 					var templ_7745c5c3_Var108 string
 					templ_7745c5c3_Var108, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", pair.Right.NewNum)).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2138, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2146, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var108)
 					if templ_7745c5c3_Err != nil {
@@ -2696,7 +2696,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 					var templ_7745c5c3_Var109 string
 					templ_7745c5c3_Var109, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", lineNumForReview(pair.Right))).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2139, Col: 72}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2147, Col: 72}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var109)
 					if templ_7745c5c3_Err != nil {
@@ -2709,7 +2709,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 					var templ_7745c5c3_Var110 string
 					templ_7745c5c3_Var110, templ_7745c5c3_Err = templruntime.NewAttributeExpression(lineTypeForDiff(pair.Right.Type)).Resolve(ctx)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2140, Col: 58}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2148, Col: 58}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var110)
 					if templ_7745c5c3_Err != nil {
@@ -2763,7 +2763,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 						var templ_7745c5c3_Var113 string
 						templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", pair.Left.OldNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2146, Col: 48}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2154, Col: 48}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 						if templ_7745c5c3_Err != nil {
@@ -2818,7 +2818,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 						var templ_7745c5c3_Var116 string
 						templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(pair.Left.Content)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2151, Col: 30}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2159, Col: 30}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 						if templ_7745c5c3_Err != nil {
@@ -2873,7 +2873,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 						var templ_7745c5c3_Var119 string
 						templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", pair.Right.NewNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2156, Col: 49}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2164, Col: 49}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var119))
 						if templ_7745c5c3_Err != nil {
@@ -2940,7 +2940,7 @@ func splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID s
 						var templ_7745c5c3_Var122 string
 						templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.JoinStringErrs(pair.Right.Content)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2166, Col: 31}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2174, Col: 31}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var122))
 						if templ_7745c5c3_Err != nil {
@@ -2998,7 +2998,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 		var templ_7745c5c3_Var124 string
 		templ_7745c5c3_Var124, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-file-split-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2185, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2193, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var124)
 		if templ_7745c5c3_Err != nil {
@@ -3019,7 +3019,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 		var templ_7745c5c3_Var125 string
 		templ_7745c5c3_Var125, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-body-split-%d", idx)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2188, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2196, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var125)
 		if templ_7745c5c3_Err != nil {
@@ -3057,7 +3057,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 				var templ_7745c5c3_Var126 string
 				templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.JoinStringErrs(hunk.Header)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2207, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2215, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var126))
 				if templ_7745c5c3_Err != nil {
@@ -3116,7 +3116,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 						var templ_7745c5c3_Var129 string
 						templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", pair.Left.OldNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2214, Col: 48}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2222, Col: 48}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 						if templ_7745c5c3_Err != nil {
@@ -3171,7 +3171,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 						var templ_7745c5c3_Var132 string
 						templ_7745c5c3_Var132, templ_7745c5c3_Err = templ.JoinStringErrs(pair.Left.Content)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2219, Col: 30}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2227, Col: 30}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var132))
 						if templ_7745c5c3_Err != nil {
@@ -3226,7 +3226,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 						var templ_7745c5c3_Var135 string
 						templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", pair.Right.NewNum))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2225, Col: 49}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2233, Col: 49}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var135))
 						if templ_7745c5c3_Err != nil {
@@ -3281,7 +3281,7 @@ func splitDiffFile(f DiffFile, idx int, defaultExpanded bool) templ.Component {
 						var templ_7745c5c3_Var138 string
 						templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(pair.Right.Content)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2230, Col: 31}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2238, Col: 31}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 						if templ_7745c5c3_Err != nil {
@@ -3766,7 +3766,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 		var templ_7745c5c3_Var140 string
 		templ_7745c5c3_Var140, templ_7745c5c3_Err = templruntime.NewAttributeExpression(diffFileCardID(meta.Index, view)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2680, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2688, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var140)
 		if templ_7745c5c3_Err != nil {
@@ -3779,7 +3779,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 		var templ_7745c5c3_Var141 string
 		templ_7745c5c3_Var141, templ_7745c5c3_Err = templruntime.NewAttributeExpression(meta.Revision).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2682, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2690, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var141)
 		if templ_7745c5c3_Err != nil {
@@ -3797,7 +3797,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var142 string
 			templ_7745c5c3_Var142, templ_7745c5c3_Err = templruntime.NewAttributeExpression(diffLazyURL(meta, taskID, view, reviewMode)).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2684, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2692, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var142)
 			if templ_7745c5c3_Err != nil {
@@ -3810,7 +3810,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var143 string
 			templ_7745c5c3_Var143, templ_7745c5c3_Err = templruntime.NewAttributeExpression(meta.File.Path).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2685, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2693, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var143)
 			if templ_7745c5c3_Err != nil {
@@ -3841,7 +3841,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var144 string
 			templ_7745c5c3_Var144, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-body-split-%d", meta.Index)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2691, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2699, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var144)
 			if templ_7745c5c3_Err != nil {
@@ -3859,7 +3859,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var145 string
 			templ_7745c5c3_Var145, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("diff-body-%d", meta.Index)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2693, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2701, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var145)
 			if templ_7745c5c3_Err != nil {
@@ -3887,7 +3887,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var146 string
 			templ_7745c5c3_Var146, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2704, Col: 122}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2712, Col: 122}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var146))
 			if templ_7745c5c3_Err != nil {
@@ -3900,7 +3900,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var147 string
 			templ_7745c5c3_Var147, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2708, Col: 122}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2716, Col: 122}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var147)
 			if templ_7745c5c3_Err != nil {
@@ -3913,7 +3913,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var148 string
 			templ_7745c5c3_Var148, templ_7745c5c3_Err = templruntime.NewAttributeExpression(diffFileCardTargetSelector(meta.Index, view)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2709, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2717, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var148)
 			if templ_7745c5c3_Err != nil {
@@ -3931,7 +3931,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var149 string
 			templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.JoinStringErrs(meta.BlockedReason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2716, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2724, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var149))
 			if templ_7745c5c3_Err != nil {
@@ -4012,7 +4012,7 @@ func LoadDiffFileCardMeta(meta DiffFileRenderMeta, exists bool, view string, tas
 			var templ_7745c5c3_Var152 string
 			templ_7745c5c3_Var152, templ_7745c5c3_Err = templ.JoinStringErrs(meta.BlockedReason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2738, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2746, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var152))
 			if templ_7745c5c3_Err != nil {
