@@ -25,7 +25,7 @@ templ diffViewerPerformanceScript() {
     var panel = viewer && viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
     var scroller = viewer && (viewer.closest('#tab-changes') || document.getElementById('main-content'));
     if (!panel || !scroller) return null;
-    var top = scroller.getBoundingClientRect().top;
+    var top = scroller.getBoundingClientRect().top + (parseFloat(viewer.style.getPropertyValue('--diff-toolbar-height')) || 0);
     var snapshot = {heights:new Map(), anchor:null};
     panel.querySelectorAll('.diff-file-card').forEach(function(card) {
      var path = card.querySelector('[data-copy-path]');
@@ -81,7 +81,7 @@ templ diffViewerPerformanceScript() {
      }
      if (match) { element = match; offset = anchor.offset; }
     }
-    scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset;
+    scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - (parseFloat(viewer.style.getPropertyValue('--diff-toolbar-height')) || 0) - offset;
     if (target.hasAttribute('data-diff-lazy-url')) target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
    };
    window.retryLazyDiffFile = function(button) {
@@ -112,7 +112,8 @@ templ diffViewerPerformanceScript() {
    }, {root:scroller, rootMargin:'300px 0px'});
    // Only threshold crossings update sticky styling. There is no document
    // scroll handler, header scan, or per-frame layout measurement.
-   var stickyObserver = new IntersectionObserver(function(entries) {
+   function observeStickyHeaders(height) {
+   return new IntersectionObserver(function(entries) {
     entries.forEach(function(entry) {
      var header = headers.get(entry.target);
      if (!header || !header.isConnected || !entry.rootBounds) return;
@@ -120,7 +121,21 @@ templ diffViewerPerformanceScript() {
      if (stuck && header.getAttribute('data-stuck') !== '1') header.setAttribute('data-stuck','1');
      else if (!stuck && header.hasAttribute('data-stuck')) header.removeAttribute('data-stuck');
     });
-   }, {root:scroller, rootMargin:'-1px 0px 0px 0px', threshold:[0,1]});
+   }, {root:scroller, rootMargin:-(height + 1)+'px 0px 0px 0px', threshold:[0,1]});
+   }
+   var stickyObserver = observeStickyHeaders(0);
+   var toolbar = viewer.closest('.worktree-changes') && viewer.querySelector('[data-diff-toolbar]');
+   var toolbarHeight = 0;
+   var toolbarObserver = toolbar && new ResizeObserver(function() {
+    var height = Math.ceil(toolbar.getBoundingClientRect().height);
+    if (height === toolbarHeight) return;
+    toolbarHeight = height;
+    viewer.style.setProperty('--diff-toolbar-height', height + 'px');
+    stickyObserver.disconnect();
+    stickyObserver = observeStickyHeaders(height);
+    headers.forEach(function(header, sentinel) { stickyObserver.observe(sentinel); });
+   });
+   if (toolbarObserver) toolbarObserver.observe(toolbar);
 
    function expanded(card) {
     var header = card.querySelector('[data-diff-toggle]');
@@ -169,6 +184,8 @@ templ diffViewerPerformanceScript() {
    }
    function refresh() {
     if (stopped || !viewer.isConnected) return;
+    // HTMX settle restores incoming inline attributes after script initialization.
+    if (toolbar) viewer.style.setProperty('--diff-toolbar-height', toolbarHeight + 'px');
     var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
     if (activePanel !== panel) {
      loadObserver.disconnect(); stickyObserver.disconnect();
@@ -201,6 +218,7 @@ templ diffViewerPerformanceScript() {
    }
    return {refresh:refresh, destroy:function() {
     stopped = true;
+    if (toolbarObserver) toolbarObserver.disconnect();
     loadObserver.disconnect(); stickyObserver.disconnect();
     pending.forEach(function(abort) { abort.abort(); });
     visible.clear(); observed.clear(); headers.clear();

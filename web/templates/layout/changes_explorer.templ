@@ -81,7 +81,9 @@ templ ChangesExplorerScript() {
                     var scroller = viewer.closest('#tab-changes');
                     if (card && scroller) {
                         delete card._diffScrollAnchor;
-                        scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+                        var toolbar = viewer.closest('.worktree-changes') && viewer.querySelector('[data-diff-toolbar]');
+                        var toolbarHeight = toolbar ? toolbar.getBoundingClientRect().height : 0;
+                        scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top - toolbarHeight;
                     }
                 };
                 parent.append(button);
