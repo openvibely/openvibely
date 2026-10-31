@@ -141,9 +141,16 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(!sub.hidden && sub.querySelectorAll('.ov-mp-pick').length===12,'provider submenu');
  assert(sub.querySelector('.ov-mp-subhead').hidden,'no redundant submenu heading');
  const row=sub.querySelector('.ov-mp-row');
- assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.firstElementChild.firstElementChild.classList.contains('ov-mp-check')&&row.lastElementChild.classList.contains('ov-mp-star'),'checkmark on left, favorite on right');
+ assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.firstElementChild.firstElementChild.classList.contains('ov-mp-copy')&&row.lastElementChild.classList.contains('ov-mp-star'),'text starts at normal inset, favorite on right');
  row.dispatchEvent(new PointerEvent('pointermove'));
  assert(row.hasAttribute('data-picker-active'),'hover activates model row');
+ document.documentElement.style.setProperty('--bc','0.8 0 0');
+ document.documentElement.style.setProperty('--shell-row-selected','rgb(40, 45, 55)');
+ const hoverColor=getComputedStyle(row).backgroundColor;
+ const originalSelected=row.dataset.selected;row.dataset.selected='true';
+ assert(getComputedStyle(row).backgroundColor==='rgb(40, 45, 55)'&&hoverColor!==getComputedStyle(row).backgroundColor,'selection uses task-list color and remains distinct from hover');
+ row.dataset.selected=originalSelected;
+
  const hoverObserver=new MutationObserver(()=>{});hoverObserver.observe(sub,{attributes:true,subtree:true,attributeFilter:['data-picker-active']});
  for(let i=0;i<10;i++)row.dispatchEvent(new PointerEvent('pointermove'));
  assert(hoverObserver.takeRecords().length===0,'moving within model row does not rewrite highlight');hoverObserver.disconnect();
@@ -325,7 +332,7 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const sub=document.getElementById('conversation-provider-models');
  sub.querySelector('[data-model=c]').click();await trigger._ovModelState.ready;
  assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains visible without effort');
- assert(sub.querySelector('[data-model=c]').closest('.ov-mp-row').querySelector('.ov-mp-check').textContent==='✓','selected checkmark without effort');
+ assert(sub.querySelector('[data-model=c]').closest('.ov-mp-row').dataset.selected==='true'&&!sub.querySelector('.ov-mp-check'),'selected row without checkmark or effort');
  window.ovModelPicker.close(false);trigger.click();
  assert(sub.hidden,'reopen without automatically opening selected provider');
  [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='Ollama').click();

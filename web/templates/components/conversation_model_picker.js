@@ -429,13 +429,6 @@
     pick.append(copy);
     pick.onclick = () => choose(m);
     r.prepend(pick);
-    const check = el(
-      "span",
-      "ov-menu-check ov-mp-check",
-      m.id === active.dataset.currentValue ? "✓" : "",
-    );
-    check.setAttribute("aria-hidden", "true");
-    pick.prepend(check);
     target.append(r);
   }
   function renderList() {
