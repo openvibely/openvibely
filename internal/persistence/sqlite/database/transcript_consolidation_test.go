@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -85,7 +86,7 @@ func TestConsolidatedTranscriptMigration(t *testing.T) {
 			require.NoError(t, db.QueryRow(`SELECT max(version_id) FROM goose_db_version WHERE is_applied=1`).Scan(&version))
 			require.EqualValues(t, latestMigrationVersion, version)
 			var n int
-			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (220,221)`).Scan(&n))
+			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id=221`).Scan(&n))
 			require.Zero(t, n)
 			require.NoError(t, db.QueryRow(`SELECT count(*) FROM goose_db_version WHERE version_id IN (217,218) AND is_applied=1`).Scan(&n))
 			require.Equal(t, 2, n, "main's 217/218 must apply after adoption")
@@ -176,14 +177,34 @@ func TestConsolidatedOffsetIndexPreservesMigrationHistory(t *testing.T) {
 func TestTranscriptAdoptionPreservesFutureMigration(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "future.db"))
 	require.NoError(t, initializeSQLite(db))
-	goose.SetBaseFS(fstest.MapFS{"220_future.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nCREATE TABLE future_feature(id INTEGER PRIMARY KEY);\n-- +goose Down\nDROP TABLE future_feature;\n")}})
+	goose.SetBaseFS(fstest.MapFS{"221_future.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nCREATE TABLE future_feature(id INTEGER PRIMARY KEY);\n-- +goose Down\nDROP TABLE future_feature;\n")}})
 	defer goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.Up(db, ".", goose.WithAllowMissing()))
 	for range 2 {
 		require.NoError(t, migrations.NormalizeTranscriptDevelopmentVersions(context.Background(), db))
 		version, err := goose.GetDBVersion(db)
 		require.NoError(t, err)
-		require.EqualValues(t, 220, version)
+		require.EqualValues(t, 221, version)
 		require.NoError(t, goose.Up(db, ".", goose.WithAllowMissing()))
 	}
+}
+
+func TestTranscriptAdoptsFormer219WithMainSnapshotMigration(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "branch.db"))
+	require.NoError(t, initializeSQLite(db))
+	// Recreate main's pre-219 schema while retaining the consolidated transcript.
+	raw, err := migrations.FS.ReadFile("219_drop_account_usage_snapshots.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(strings.Split(string(raw), "-- +goose Down")[1])
+	require.NoError(t, err)
+	_, err = db.Exec(`DELETE FROM goose_db_version WHERE version_id>=219; INSERT INTO goose_db_version(version_id,is_applied) VALUES(219,1)`)
+	require.NoError(t, err)
+	for range 2 {
+		require.NoError(t, initializeSQLite(db))
+	}
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='account_usage_snapshots'`).Scan(&count))
+	require.Zero(t, count)
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='conversation_checkpoint_ranges'`).Scan(&count))
+	require.Equal(t, 1, count)
 }

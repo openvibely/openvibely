@@ -278,5 +278,7 @@ func TestBrowserFunctional_ToolOutputPreference(t *testing.T) {
 		b.waitFor("compact survives reload", `String(location.search.includes('reload=1') && document.readyState==='complete' && !!window.selectOpenVibelyDisplay && openVibelyDisplay.get('output')==='compact')`, "true")
 		b.evaluate(`selectOpenVibelyDisplay('output','full'); 'full'`)
 		b.waitFor("full restored", `String(openVibelyDisplay.get('output')==='full' && localStorage.getItem('openvibely.outputDetail')==='full')`, "true")
+		b.call("Page.navigate", map[string]any{"url": server.URL + "?section=chat&reload=2"}, nil)
+		b.waitFor("saved full overrides compact default", `String(location.search.includes('reload=2') && document.readyState==='complete' && !!window.selectOpenVibelyDisplay && openVibelyDisplay.get('output')==='full')`, "true")
 	})
 }

@@ -18,7 +18,7 @@ func findLLMConfigByID(configs []models.LLMConfig, id string) *models.LLMConfig 
 	return nil
 }
 
-func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *testing.T) {
+func TestLLMConfigRepo_VerifiedPrincipalAdoptionPreservesConnections(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
@@ -33,14 +33,6 @@ func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *
 	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'verified-principal', oauth_principal_verified = 1 WHERE id IN (?, ?)`, canonical.OAuthConnectionID, source.OAuthConnectionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`
-		INSERT INTO account_usage_snapshots (id, provider, agent_config_id, oauth_connection_id, oauth_config_revision, raw_json)
-		VALUES ('source-current', 'anthropic', ?, ?, 0, '{}'),
-		       ('source-stale-collision', 'anthropic', ?, ?, 1, '{}')`,
-		source.ID, source.OAuthConnectionID, source.ID, source.OAuthConnectionID); err != nil {
-		t.Fatal(err)
-	}
-
 	updated, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(
 		ctx, canonical.ID, canonical.OAuthConnectionID, 0, models.ProviderAnthropic,
 		"new-access", "new-refresh", 1234, "organization:shared", "Real account", "verified-principal",
@@ -54,16 +46,6 @@ func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *
 	}
 	if loadedSource.OAuthConnectionID != canonical.OAuthConnectionID {
 		t.Fatalf("source connection = %q, want %q", loadedSource.OAuthConnectionID, canonical.OAuthConnectionID)
-	}
-	for id, wantRevision := range map[string]int64{"source-current": 1, "source-stale-collision": -1} {
-		var connectionID string
-		var revision int64
-		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, id).Scan(&connectionID, &revision); err != nil {
-			t.Fatal(err)
-		}
-		if connectionID != canonical.OAuthConnectionID || revision != wantRevision {
-			t.Fatalf("snapshot %s = %q/%d, want %q/%d", id, connectionID, revision, canonical.OAuthConnectionID, wantRevision)
-		}
 	}
 	removed, err := repo.GetOAuthConnectionByID(ctx, source.OAuthConnectionID)
 	if err != nil {
@@ -403,16 +385,10 @@ func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
 	if err := repo.Create(ctx, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO account_usage_snapshots (
-			provider, account_id, agent_config_id, oauth_connection_id,
-			oauth_config_revision, account_display_name, account_detail, raw_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		models.ProviderAnthropic, "secret-account-id", cfg.ID, cfg.OAuthConnectionID,
-		cfg.OAuthConfigRevision, "Alice", "alice@example.com", `{"private":"profile"}`,
-	); err != nil {
-		t.Fatalf("create account profile snapshot: %v", err)
+	if _, err := db.ExecContext(ctx, `UPDATE oauth_connections SET oauth_provider_display_name = 'Alice' WHERE id = ?`, cfg.OAuthConnectionID); err != nil {
+		t.Fatal(err)
 	}
+
 	connections, err := repo.ListOAuthConnections(ctx, "")
 	if err != nil {
 		t.Fatalf("ListOAuthConnections: %v", err)

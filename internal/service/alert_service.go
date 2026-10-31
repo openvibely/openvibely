@@ -320,7 +320,7 @@ func (s *AlertService) CreateAccountUsageAlert(ctx context.Context, a *models.Al
 		return err
 	}
 	if s.broadcaster != nil {
-		s.broadcaster.Publish(events.TaskEvent{Type: events.AlertCreated, ProjectID: a.ProjectID, AlertID: a.ID, AlertSource: "account_usage", AlertTitle: a.Title, AlertURL: link})
+		s.broadcaster.Publish(events.TaskEvent{Type: events.AlertCreated, ProjectID: a.ProjectID, AlertID: a.ID, AlertSource: "account_usage", AlertTitle: a.Title, AlertSeverity: string(a.Severity), AlertURL: link})
 	}
 	return nil
 }

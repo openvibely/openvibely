@@ -463,6 +463,7 @@
             ? active.parentElement.getAttribute('data-tool-disclosure-key') : null;
         const old = new Map(shiftedWindow ? [] : Array.from(owner.children).filter(el => el.hasAttribute('data-chat-lazy-row')).map(el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
         const fragment = document.createDocumentFragment();
+        const reused = [];
         owner._chatVirtualData = data;
         owner.setAttribute('data-chat-virtual-owner', 'true');
         owner._chatVirtualRows = data.models.map((model, index) => {
@@ -485,11 +486,26 @@
                 focusedActivityKey = null;
             };
             sizePlaceholder(row, estimate(model, width));
-            fragment.appendChild(node || placeholder);
+            if (node && owner.isConnected && owner.moveBefore && window.OVFileViewer?.commitStream) {
+                const marker = document.createComment('retained row');
+                fragment.appendChild(marker);
+                (fragment._fileStreamMoves ||= []).push([marker, node]);
+                reused.push(node);
+            } else fragment.appendChild(node || placeholder);
             list.rows.set(placeholder, row);
             return row;
         });
-        owner.replaceChildren(fragment);
+        // Keep reused rows connected, and preserve equations/previews from
+        // discarded DOM for adoption when the new lazy rows render.
+        const pool = window.OVFileViewer?.retainVirtual(owner, data.source, reused);
+        window.retainChatMathForVirtualRows?.(owner, data.source, reused);
+        if (pool) {
+            const marker = document.createComment('pending previews');
+            fragment.appendChild(marker);
+            (fragment._fileStreamMoves ||= []).push([marker, pool]);
+        }
+        if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(fragment, owner);
+        else owner.replaceChildren(fragment);
         restore();
         if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
         return window.renderVisibleChatRows(messages);
@@ -500,11 +516,18 @@
         owners.forEach(owner => {
             delete owner._chatVirtualData;
             delete owner._chatVirtualRows;
+            delete owner._chatMathNodes;
+            delete owner._chatMathSource;
+            owner._filePreviewPool?.remove();
+            delete owner._filePreviewPool;
+            delete owner._filePreviewSource;
             owner.removeAttribute('data-chat-virtual-owner');
         });
     };
     window.captureChatVirtualData = function (root) {
-        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(Boolean);
+        // Expanded activity bodies are derived from the outer transcript models.
+        // They have no source/key and must not be retained as standalone snapshots.
+        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(data => data && !data.ungrouped);
     };
     // Query transcript content in display order without mounting offscreen rows.
     // Unrendered models can be projected by the caller into lightweight elements.
@@ -559,6 +582,7 @@
         return Promise.all(pending);
     };
     window.cloneVirtualChatRows = function (source, clone) {
+        clone.querySelectorAll('[data-chat-preview-pool]').forEach(pool => pool.remove());
         const placeholders = new Map(Array.from(clone.querySelectorAll('[data-virtual-chat-row]'), el => [el.getAttribute('data-virtual-chat-row'), el]));
         lists.forEach(list => list.rows.forEach(row => {
             // Raw source and measured placeholders are sufficient to restore a

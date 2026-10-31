@@ -65,7 +65,7 @@ templ TaskWorkspaceScript() {
 		function historyView(tab) {
 			var url = displayedURL();
 			url.searchParams.set('tab', tab);
-			if (!(window.updateCachedThreadNavigationURL && window.updateCachedThreadNavigationURL(url.href)) && url.href !== window.location.href) history.pushState(Object.assign({}, history.state, {taskWorkspace: taskID}), '', url);
+			if (!(window.updateCachedThreadNavigationURL && window.updateCachedThreadNavigationURL(url.href)) && url.href !== window.location.href) window.workspaceNavigation.commit(url.href);
 			var context = root.querySelector('[data-breadcrumb-selector-context][name="tab"]');
 			if (context) context.value = tab;
 		}
@@ -159,8 +159,8 @@ templ TaskWorkspaceScript() {
 			if (push !== false) historyView(diff ? 'changes' : (panel.hidden ? 'chat' : selected));
             if (window.syncAppearanceSettings) window.syncAppearanceSettings();
 		}
-		function applyURL() {
-			var tab = displayedURL().searchParams.get('tab') || root.dataset.initialTab || 'chat';
+		function applyURL(url) {
+			var tab = (url || displayedURL()).searchParams.get('tab') || root.dataset.initialTab || 'chat';
 			if (taskID) workspace(tab === 'changes', false);
 			if (tabNames.indexOf(tab) >= 0) openPanel(tab, false, false);
 			else if (read('task-inspector-open') === 'true') openPanel(selected, false, false);
@@ -219,7 +219,7 @@ templ TaskWorkspaceScript() {
 			} finally { navigating = false; }
 		}
 		on(document, 'keydown', function(event) {
-			if (event.defaultPrevented || event.isComposing || event.repeat || !root.isConnected) return;
+			if (event.defaultPrevented || event.isComposing || event.repeat || !root.isConnected || root.closest('[hidden], [inert]')) return;
 			var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
@@ -305,12 +305,16 @@ templ TaskWorkspaceScript() {
 			}
 			renderSummary();
 		});
-		window.addEventListener('popstate', function(event) {
-			if (location.pathname === '/tasks/' + taskID) { event.stopImmediatePropagation(); applyURL(); }
-		}, {signal:signal, capture:true});
+        var unregisterView = window.workspaceNavigation.registerTask({
+            matches: function(url) {
+                return root.isConnected && url.pathname === '/tasks/' + taskID &&
+                    (!url.searchParams.has('project_id') || url.searchParams.get('project_id') === root.dataset.projectId);
+            },
+            show: applyURL
+        });
 		on(panel, 'click', function(event) { var tab = event.target.closest('[role="tab"]'); if (tab) selectTab(tab.dataset.tab, true); });
 		on(document, 'keydown', function(event) {
-			if (event.key === 'Escape' && !event.defaultPrevented && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open], [data-openvibely-picker-open], [data-menu-open]') && !(typeof HTMLElement.prototype.showPopover === 'function' && event.target.closest('[popover]:popover-open'))) {
+			if (event.key === 'Escape' && !event.defaultPrevented && !root.closest('[hidden], [inert]') && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open], [data-openvibely-picker-open], [data-menu-open]') && !(typeof HTMLElement.prototype.showPopover === 'function' && event.target.closest('[popover]:popover-open'))) {
 				event.preventDefault();
 				closePanel();
 			}
@@ -355,7 +359,7 @@ templ TaskWorkspaceScript() {
 		on(window, 'blur', endResize);
 		var observer = new ResizeObserver(function() { resize(width); });
 		observer.observe(root);
-		function destroy() { abort.abort(); clearTimeout(timer); observer.disconnect(); }
+		function destroy() { if (unregisterView) unregisterView(); abort.abort(); clearTimeout(timer); observer.disconnect(); }
 		on(document, 'htmx:beforeSwap', function(event) { var target = event.detail.target; if (target === root || (target && target.contains(root))) destroy(); });
 		window.taskWorkspace = {
 			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },

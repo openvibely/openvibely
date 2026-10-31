@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // NormalizeTranscriptDevelopmentVersions adopts unpublished 217–221 databases
 // without rebuilding their transcript rows. Run before Goose examines versions.
-// Main's 217/218 are intentionally not registered by this branch; they remain
-// free for the upstream migrations when main is merged.
+// Main owns versions 217–219; the consolidated transcript migration is 220.
 func NormalizeTranscriptDevelopmentVersions(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -38,9 +38,31 @@ func NormalizeTranscriptDevelopmentVersions(ctx context.Context, db *sql.DB) err
 		return err
 	}
 	if ranges != 0 && (legacy == 0 || organizations != 0) {
-		// Consolidated databases may already have later migrations applied.
-		// The offset index also ships in 219, so its presence cannot identify
-		// the abandoned development 220. Preserve migration history here.
+		// Main's 219 removes account snapshots. Earlier branch databases used
+		// 219 for transcripts instead. Only that known schema collision needs
+		// applying main's 219; never delete unrelated later migration records.
+		var snapshots int
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name='account_usage_snapshots'`).Scan(&snapshots); err != nil {
+			return err
+		}
+		if snapshots != 0 {
+			migration, readErr := FS.ReadFile("219_drop_account_usage_snapshots.sql")
+			if readErr != nil {
+				return readErr
+			}
+			up, _, _ := strings.Cut(string(migration), "-- +goose Down")
+			if _, err = tx.ExecContext(ctx, up); err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO goose_db_version(version_id,is_applied) SELECT 219,1 WHERE NOT EXISTS (SELECT 1 FROM goose_db_version WHERE version_id=219 AND is_applied=1 AND id=(SELECT max(id) FROM goose_db_version WHERE version_id=219))`); err != nil {
+				return err
+			}
+		}
+		// The complete schema is already installed, including databases which
+		// recorded the short-lived offset-only 220. Adopt its final number.
+		if _, err = tx.ExecContext(ctx, `INSERT INTO goose_db_version(version_id,is_applied) SELECT 220,1 WHERE NOT EXISTS (SELECT 1 FROM goose_db_version WHERE version_id=220 AND is_applied=1 AND id=(SELECT max(id) FROM goose_db_version WHERE version_id=220))`); err != nil {
+			return err
+		}
 		if _, err = tx.ExecContext(ctx, streamOffsetIndexSQL); err != nil {
 			return err
 		}
@@ -84,7 +106,7 @@ func NormalizeTranscriptDevelopmentVersions(ctx context.Context, db *sql.DB) err
 			return fmt.Errorf("adopting transcript stage %d: %w", next, err)
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM goose_db_version WHERE version_id BETWEEN 217 AND 221; INSERT INTO goose_db_version(version_id,is_applied) VALUES(219,1)`); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM goose_db_version WHERE version_id BETWEEN 217 AND 221; INSERT INTO goose_db_version(version_id,is_applied) VALUES(220,1)`); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, streamOffsetIndexSQL); err != nil {

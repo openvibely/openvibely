@@ -1496,6 +1496,9 @@ func TestSendAgentic_NoCompactionWhenDisabled(t *testing.T) {
 
 func TestSendAgentic_OAuthSetsXAppHeader(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.Header.Get("User-Agent"), "claude-cli/"+ClaudeCodeVersion+" (external, cli)"; got != want {
+			t.Fatalf("User-Agent = %q, want %q", got, want)
+		}
 		if r.URL.RawQuery != "beta=true" {
 			t.Fatalf("raw query = %q, want beta=true", r.URL.RawQuery)
 		}

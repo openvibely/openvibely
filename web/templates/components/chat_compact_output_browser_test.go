@@ -166,6 +166,34 @@ func TestBrowserFunctional_CompactFoldVirtualization(t *testing.T) {
  `)
 }
 
+func TestBrowserFunctional_CompactSnapshotExcludesExpandedLists(t *testing.T) {
+	runIncrementalChatBrowser(t, `
+ const messages=document.getElementById('messages');messages.id='chat-messages';
+ document.getElementById('pair').dataset.execStatus='completed';
+ document.documentElement.setAttribute('data-output-detail','compact');
+ const source='[Using tool: bash | echo first]\n[Tool bash done]\nfirst output\n[/Tool]\n[Using tool: bash | echo second]\n[Tool bash done]\nsecond output\n[/Tool]\n';
+ await renderStreamingContent(stream,source,true);await paint();await paint();
+ const outer=stream._chatVirtualData;
+ assert(outer && typeof outer.source==='string' && typeof outer.normalized==='string','fixture must have source-backed transcript data');
+ const summary=stream.querySelector('.stream-activity-summary');
+ assert(summary && summary.getAttribute('aria-expanded')==='false','fixture must start collapsed');
+ summary.click();await paint();await paint();
+ const body=stream.querySelector('.stream-activity-body');
+ assert(body._chatVirtualData?.ungrouped && body.hasAttribute('data-chat-virtual-owner'),'fixture must mount a nested virtual list');
+ const nested=body._chatVirtualData;
+ const captured=window.captureChatVirtualData(messages);
+ assert(captured.length===1 && captured[0]===outer,'snapshot must retain only the source-backed outer transcript');
+ assert(!captured.includes(nested),'snapshot must exclude derived expanded lists');
+ const output=captured[0].models.flatMap(model=>model.segments).map(segment=>segment.resultOutput||'').join('\n');
+ assert(output.includes('first output') && output.includes('second output'),'outer snapshot must retain every tool result');
+ assert(summary.getAttribute('aria-expanded')==='true' && body._chatVirtualData===nested,'snapshot capture must not alter the expanded group');
+ summary.click();await paint();
+ const collapsed=window.captureChatVirtualData(messages);
+ assert(collapsed.length===1 && collapsed[0]===outer,'collapsed snapshot must retain the same outer data');
+ return {};
+ `)
+}
+
 func TestBrowserFunctional_CompactDeferredToolRemount(t *testing.T) {
 	runIncrementalChatBrowser(t, `
  const messages=document.getElementById('messages');messages.id='chat-messages';messages.style.height='160px';
