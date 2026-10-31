@@ -628,7 +628,7 @@ func (h *Handler) messageAttachmentOwner(ctx context.Context, execID string) (ta
 	if h.execRepo == nil || h.taskRepo == nil {
 		return "", nil
 	}
-	exec, err := h.execRepo.GetByID(ctx, execID)
+	exec, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), execID)
 	if err != nil {
 		return "", fmt.Errorf("resolve attachment owner execution=%s: %w", execID, err)
 	}

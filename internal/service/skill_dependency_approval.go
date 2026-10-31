@@ -6,6 +6,7 @@ import (
 	"fmt"
 	contracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"github.com/openvibely/openvibely/internal/transcript"
 	"reflect"
@@ -61,7 +62,7 @@ func (s *LLMService) completeInstallationTranscript(req contracts.AgentRequest) 
 	if err != nil {
 		return req, err
 	}
-	current, err := s.execRepo.GetByID(req.Ctx, req.ExecID)
+	current, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(req.Ctx), req.ExecID)
 	if err != nil {
 		return req, err
 	}

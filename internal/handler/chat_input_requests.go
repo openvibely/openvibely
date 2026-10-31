@@ -361,7 +361,7 @@ func (h *Handler) chatInputRequestEvents(ctx context.Context, projectID string) 
 	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
 	for _, req := range requests {
 		if req.Installation != nil {
-			execution, err := h.execRepo.GetByID(ctx, req.ExecID)
+			execution, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID)
 			if err != nil {
 				return nil, err
 			}
@@ -474,7 +474,7 @@ func (h *Handler) completeRecoveredChatInputExecution(ctx context.Context, req *
 	if h == nil || h.execRepo == nil || req == nil || strings.TrimSpace(req.ExecID) == "" {
 		return
 	}
-	exec, err := h.execRepo.GetByID(ctx, req.ExecID)
+	exec, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID)
 	if err != nil || exec == nil || (exec.Status != models.ExecRunning && exec.Status != models.ExecQueued) {
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/skilldeps"
 	"sync"
 )
@@ -16,7 +17,7 @@ func (s *LLMService) withDependencyProgress(req llmcontracts.AgentRequest) conte
 	var taskID string
 	return skilldeps.WithProgress(req.Ctx, func(progress skilldeps.Progress) {
 		once.Do(func() {
-			if execution, err := s.execRepo.GetByID(req.Ctx, req.ExecID); err == nil && execution != nil {
+			if execution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(req.Ctx), req.ExecID); err == nil && execution != nil {
 				taskID = execution.TaskID
 			}
 		})

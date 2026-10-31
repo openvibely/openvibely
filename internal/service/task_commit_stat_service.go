@@ -68,7 +68,7 @@ func applyTaskCommitStatContext(ctx context.Context, stat *models.TaskCommitStat
 		if execModel.CompletedAt != nil && !execModel.CompletedAt.IsZero() {
 			stat.ProducedAt = execModel.CompletedAt.UTC()
 		} else if execRepo != nil && execModel.ID != "" {
-			storedExec, err := execRepo.GetByID(ctx, execModel.ID)
+			storedExec, err := execRepo.GetByID(persistence.WithExecutionMetadata(ctx), execModel.ID)
 			if err == nil && storedExec != nil && storedExec.CompletedAt != nil && !storedExec.CompletedAt.IsZero() {
 				stat.ProducedAt = storedExec.CompletedAt.UTC()
 			}

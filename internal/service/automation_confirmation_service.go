@@ -79,11 +79,11 @@ func (s *AutomationConfirmationService) PrepareChatConfirmation(ctx context.Cont
 	if normalizeAutomationSaveCommand(message) != normalizeAutomationSaveCommand("save "+automationName) {
 		return nil, nil
 	}
-	inputExecution, err := s.execRepo.GetByID(ctx, inputID)
+	inputExecution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), inputID)
 	if err != nil || inputExecution == nil || inputExecution.TaskID != threadID {
 		return nil, errors.New("confirming user input not found in the pending plan thread")
 	}
-	planExecution, err := s.execRepo.GetByID(ctx, receipt.PlanMessageID)
+	planExecution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), receipt.PlanMessageID)
 	if err != nil || planExecution == nil || planExecution.Status != models.ExecCompleted || !inputExecution.StartedAt.After(planExecution.StartedAt) {
 		return nil, errors.New("automation save requires a completed plan and later user input")
 	}
@@ -167,7 +167,7 @@ func (s *AutomationConfirmationService) ValidateChatConfirmation(ctx context.Con
 	if input.ConfirmingUserInputID == receipt.PlanMessageID {
 		return "", errors.New("automation save requires a later user input")
 	}
-	planExecution, err := s.execRepo.GetByID(ctx, receipt.PlanMessageID)
+	planExecution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), receipt.PlanMessageID)
 	if err != nil || planExecution == nil {
 		return "", errors.New("stored automation plan message not found")
 	}

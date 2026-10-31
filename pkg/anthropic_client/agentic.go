@@ -417,11 +417,28 @@ func hasLeadingCompactionMessageWithRole(messages []agenticMessage, role string)
 	if err != nil || len(blocks) == 0 {
 		return false
 	}
-	var block compactionBlockJSON
-	if err := json.Unmarshal(blocks[0], &block); err != nil {
+	var kind string
+	var content json.RawMessage
+	if err := requestjson.Object(blocks[0], func(key string, value json.RawMessage) error {
+		switch strings.ToLower(key) {
+		case "type":
+			return json.Unmarshal(value, &kind)
+		case "content":
+			if string(value) != "null" && (len(value) == 0 || value[0] != '"') {
+				return fmt.Errorf("invalid compaction content")
+			}
+			content = value
+		case "encrypted_content":
+			if string(value) != "null" && (len(value) == 0 || value[0] != '"') {
+				return fmt.Errorf("invalid encrypted content")
+			}
+		}
+		return nil
+	}); err != nil {
 		return false
 	}
-	return block.Type == "compaction" && block.Content != nil
+	return kind == "compaction" && len(content) > 0 && content[0] == '"'
+
 }
 
 func contentBlocksJSON(content any) ([]json.RawMessage, error) {
@@ -2165,6 +2182,18 @@ func anthropicProviderResultContentRaw(textValue, rawValue string) json.RawMessa
 
 // marshalAgenticMessage preserves immutable content for both sending and recovery.
 func marshalAgenticMessage(m agenticMessage) ([]byte, error) {
+	if rows, ok := m.Content.([]json.RawMessage); ok {
+		items := make([]any, len(rows))
+		for i := range rows {
+			items[i] = rows[i]
+		}
+		field, err := requestjson.PrepareItems("content", items)
+		if err != nil {
+			return nil, err
+		}
+		return field.Marshal(map[string]any{"role": m.Role})
+	}
+
 	if raw, ok := m.Content.(json.RawMessage); ok {
 		field, err := requestjson.PrepareRaw("content", raw)
 		if err != nil {

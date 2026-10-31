@@ -393,7 +393,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 		if params.ExecID != "" {
-			if exec, err := h.execRepo.GetByID(preRuntimeCtx(), params.ExecID); err == nil && exec != nil && exec.Status == models.ExecCancelled {
+			if exec, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(preRuntimeCtx()), params.ExecID); err == nil && exec != nil && exec.Status == models.ExecCancelled {
 				applog.Infof("[handler] processStreamingResponse exec=%s task=%s observed cancelled execution before model preparation", params.ExecID, params.TaskID)
 				return true
 			} else if err != nil {
@@ -1497,7 +1497,7 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 	// fallbacks converge even when the per-execution terminal event races or is missed.
 	terminalStatus := ""
 	if h.execRepo != nil && params.ExecID != "" {
-		if exec, err := h.execRepo.GetByID(context.Background(), params.ExecID); err == nil && exec != nil {
+		if exec, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(context.Background()), params.ExecID); err == nil && exec != nil {
 			terminalStatus = string(exec.Status)
 		} else if err != nil {
 			applog.Infof("[handler] finalizeStreamingTurn exec=%s error loading terminal status: %v", params.ExecID, err)

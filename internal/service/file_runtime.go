@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"net/http"
 	"net/url"
 	"os"
@@ -96,7 +97,7 @@ func (s *LLMService) fileRuntime(req llmcontracts.AgentRequest) *llmcontracts.Ru
 			return "", true, true, err
 		}
 		if s.broadcaster != nil && s.execRepo != nil {
-			if execution, err := s.execRepo.GetByID(ctx, req.ExecID); err == nil && execution != nil {
+			if execution, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID); err == nil && execution != nil {
 				s.broadcaster.Publish(events.TaskEvent{Type: events.TaskFilesChanged, ProjectID: req.ProjectID, TaskID: execution.TaskID, ExecID: req.ExecID})
 			}
 		}

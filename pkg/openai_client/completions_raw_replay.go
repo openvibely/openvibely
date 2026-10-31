@@ -149,14 +149,24 @@ func PrepareCompletionsHistory(replay models.ExecutionReplayMessage) (PreparedCo
 			continue
 		}
 		// Decode the small metadata only; preserve the tool-result string verbatim.
-		fields["content"] = json.RawMessage(`""`)
-		meta, err := json.Marshal(fields)
-		if err != nil {
-			return PreparedCompletionsHistory{}, err
-		}
 		var m CompletionsHistoryMessage
-		if err := json.Unmarshal(meta, &m); err != nil {
-			return PreparedCompletionsHistory{}, err
+		for key, value := range fields {
+			var target any
+			switch key {
+			case "role":
+				target = &m.Role
+			case "reasoning_content":
+				target = &m.ReasoningContent
+			case "tool_calls":
+				target = &m.ToolCalls
+			case "tool_call_id":
+				target = &m.ToolCallID
+			default:
+				continue
+			}
+			if err := json.Unmarshal(value, target); err != nil {
+				return PreparedCompletionsHistory{}, err
+			}
 		}
 		view, err := jsonview.Borrow(content)
 		if err != nil {

@@ -47,7 +47,7 @@ func (h *Handler) requestSkillInstallation(ctx context.Context, req contracts.Ag
 	if h.chatInputRequestRepo == nil || h.chatInputRequests == nil {
 		return errors.New("question broker unavailable")
 	}
-	execution, err := h.execRepo.GetByID(ctx, req.ExecID)
+	execution, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), req.ExecID)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (h *Handler) answerSkillInstallation(c echo.Context, record *persistence.Ch
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{Type: events.ChatUserInputResolved, ProjectID: req.ProjectID, ExecID: req.ExecID, InputRequest: chatInputRequestForEvent(req)})
 	}
-	execution, e := h.execRepo.GetByID(c.Request().Context(), req.ExecID)
+	execution, e := h.execRepo.GetByID(persistence.WithExecutionMetadata(c.Request().Context()), req.ExecID)
 	if e == nil && execution != nil {
 		if task, e := h.taskRepo.GetByID(c.Request().Context(), execution.TaskID); e == nil && task != nil {
 			if h.broadcaster != nil {
@@ -215,7 +215,7 @@ func (h *Handler) OpenChatInputRequest(c echo.Context) error {
 	if err != nil || record == nil || record.ProjectID != h.mutationProjectID(c) {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
-	execution, err := h.execRepo.GetByID(c.Request().Context(), record.ExecutionID)
+	execution, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(c.Request().Context()), record.ExecutionID)
 	if err != nil || execution == nil {
 		return echo.NewHTTPError(http.StatusNotFound)
 	}
@@ -432,7 +432,7 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 	if err != nil {
 		return err
 	}
-	exec, err := h.execRepo.GetByID(ctx, meta.ContinuationExecutionID)
+	exec, err := h.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), meta.ContinuationExecutionID)
 	if err != nil {
 		return err
 	}

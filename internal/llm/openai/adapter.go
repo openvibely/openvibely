@@ -177,7 +177,7 @@ func (a *Adapter) asyncRuntimeToolCallbacks(ctx context.Context, projectID, exec
 	callbacks := openAIAsyncToolCallbacks{
 		enabled: true,
 		onCall: func(callCtx context.Context, call openaiclient.AsyncToolCall) (openaiclient.AsyncToolCallRecord, error) {
-			execution, err := a.execRepo.GetByID(callCtx, execID)
+			execution, err := a.execRepo.GetByID(persistence.WithExecutionMetadata(callCtx), execID)
 			if err != nil {
 				return openaiclient.AsyncToolCallRecord{}, err
 			}
