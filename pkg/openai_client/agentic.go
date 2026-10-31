@@ -51,6 +51,7 @@ Return only the summary text.`
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
+	requestTools    *requestjson.Field // prepared anew before each ordinary turn
 	compactionTools *requestjson.Field // prepared immutable schemas, scoped to compaction only
 	// responseText is owned by one sampling turn. The parser and failure recovery
 	// share this builder instead of accumulating the same delivered text twice.
@@ -545,6 +546,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return nil, err
 			}
 		}
+		// Prepare once for this turn; filtering remains live for every attempt.
+		opts.requestTools, _ = requestjson.Prepare("tools", tools)
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
 		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil && !summarizing {
@@ -2270,7 +2273,15 @@ func ensureOpenAIAgenticRequestFits(inputItems []any, tools []ToolDefinition, op
 	}
 	safety := max(1024, window/50)
 	safe := window - reserved - safety
-	tokens := estimateCompactionRequestTokens(inputItems, tools, opts.System) + 32
+	var tokens int
+	if opts.requestTools != nil {
+		tokens = estimateInputItemsTokens(inputItems) + approxOpenAITokenCount(opts.System) + 32
+		if len(tools) > 0 {
+			tokens += approxOpenAITokensFromByteCount(len(opts.requestTools.JSON()))
+		}
+	} else {
+		tokens = estimateCompactionRequestTokens(inputItems, tools, opts.System) + 32
+	}
 	if tokens <= safe {
 		return nil
 	}
@@ -2637,7 +2648,21 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
-	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), func(name string) bool { return openAIToolAllowed(opts, name) })
+	var preparedRequestTools *requestjson.Field
+	if opts.requestTools != nil {
+		indices := make([]int, 0, len(tools))
+		filtered := make([]ToolDefinition, 0, len(tools))
+		for i, tool := range tools {
+			if openAIToolAllowed(opts, strings.TrimSpace(tool.Name)) {
+				indices = append(indices, i)
+				filtered = append(filtered, tool)
+			}
+		}
+		preparedRequestTools, _ = opts.requestTools.Select(indices, nil)
+		tools = filtered
+	} else {
+		tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), func(name string) bool { return openAIToolAllowed(opts, name) })
+	}
 	payload := map[string]any{
 		"prompt_cache_key": c.sessionID,
 		"model":            opts.Model,
@@ -2707,6 +2732,21 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		payload["truncation"] = "auto"
 	}
 
+	if preparedRequestTools != nil {
+		// Native tools are small request-specific additions. Reuse the prepared
+		// prefix without caching the permission decision above.
+		if combined, ok := payload["tools"].([]any); ok && len(combined) >= len(tools) {
+			indices := make([]int, len(tools))
+			for i := range indices {
+				indices[i] = i
+			}
+			if selected, err := preparedRequestTools.Select(indices, combined[len(tools):]); err == nil {
+				payload["tools"] = json.RawMessage(selected.JSON())
+			}
+		} else if len(tools) > 0 {
+			payload["tools"] = json.RawMessage(preparedRequestTools.JSON())
+		}
+	}
 	if opts.compactionTools != nil && !opts.WebSearchEnabled && len(tools) > 0 {
 		payload["tools"] = json.RawMessage(opts.compactionTools.JSON())
 	}

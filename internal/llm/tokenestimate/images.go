@@ -256,3 +256,17 @@ func FromRows(rows []json.RawMessage, imageType string, imageTokens int, aliases
 	}
 	return FromByteCount(size + adjustment), nil
 }
+
+// FromEnvelopeRows preserves raw-envelope byte accounting while inspecting only
+// message content for image adjustments. size includes the immutable envelope.
+func FromEnvelopeRows(size int, rows []json.RawMessage, imageType string, imageTokens int) (int, error) {
+	adjustment := 0
+	for _, row := range rows {
+		content, _, err := contentFields(row, false)
+		if err != nil {
+			return 0, err
+		}
+		adjustment += contentImageAdjustment(content, imageType, imageTokens)
+	}
+	return FromByteCount(size + adjustment), nil
+}

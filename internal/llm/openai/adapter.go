@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"strings"
 	"sync"
 	"time"
@@ -439,13 +440,9 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	}
 	defer releaseTransport()
 	if len(summaryInput) > 0 && summaryInput[0] != nil {
-		var items []any
-		for _, raw := range summaryInput[0] {
-			var item any
-			if err := json.Unmarshal(raw, &item); err != nil {
-				return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
-			}
-			items = append(items, item)
+		items, err := preparedhistory.TakeRows(ctx, summaryInput[0], jsonview.ToolOutputs)
+		if err != nil {
+			return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
 		}
 		client.History = []openaiclient.Message{{ResponsesInputItems: items}}
 	}
@@ -1253,12 +1250,12 @@ func recordOpenAINativeCompactionState(usage *llmcontracts.Usage, resp *openaicl
 	if usage == nil || resp == nil || len(resp.CompactedInputItems) == 0 {
 		return
 	}
-	raw, err := json.Marshal(resp.CompactedInputItems)
+	prepared, err := requestjson.PrepareItems("input", resp.CompactedInputItems)
 	if err != nil {
 		applog.Infof("[openai-adapter] marshal native compaction checkpoint: %v", err)
 		return
 	}
-	usage.NativeCompactionStateJSON = string(raw)
+	usage.NativeCompactionStateJSON = string(prepared.JSON())
 	if usage.ProviderIDs == nil {
 		usage.ProviderIDs = make(map[string]string)
 	}
@@ -1370,8 +1367,8 @@ func wrapAuthScopeError(agent models.LLMConfig, err error) error {
 }
 
 func toolSecondaryInfo(name string, input json.RawMessage) string {
-	var m map[string]interface{}
-	if err := json.Unmarshal(input, &m); err != nil {
+	m, err := jsonview.ToolDisplayFields(input)
+	if err != nil {
 		return ""
 	}
 	switch name {

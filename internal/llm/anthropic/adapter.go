@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"math"
 	"os"
@@ -377,8 +378,8 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	if req.SummaryInput != nil {
 		messages := make([]anthropicclient.Message, 0, len(req.SummaryInput)+1)
 		for _, raw := range req.SummaryInput {
-			var message anthropicclient.Message
-			if err := json.Unmarshal(raw, &message); err != nil {
+			message, err := anthropicclient.DecodeReplayMessage(raw)
+			if err != nil {
 				return result, fmt.Errorf("decode summary history: %w", err)
 			}
 			messages = append(messages, message)
@@ -853,12 +854,28 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 	for _, exec := range chatHistory {
 		var structured []anthropicclient.Message
 		for _, replay := range exec.ReplayMessages {
-			var saved anthropicEnvironmentReplay
+			var saved struct {
+				Environment string            `json:"anthropic_execution_environment"`
+				Messages    []json.RawMessage `json:"messages,omitempty"`
+			}
 			if replay.DecodeTranscript(&saved) != nil {
 				continue
 			}
 			if len(saved.Messages) > 0 {
-				structured = saved.Messages
+				decoded := make([]anthropicclient.Message, 0, len(saved.Messages))
+				valid := true
+				for _, row := range saved.Messages {
+					message, err := anthropicclient.DecodeReplayMessage(row)
+					if err != nil {
+						valid = false
+						break
+					}
+					decoded = append(decoded, message)
+				}
+				if !valid {
+					continue
+				}
+				structured = decoded
 			}
 			if strings.HasPrefix(saved.Environment, executionenv.Marker+"\n") && saved.Environment != lastEnvironment {
 				messages = append(messages, anthropicclient.Message{Role: "user", Content: saved.Environment})
@@ -945,8 +962,8 @@ func stopReasonIfMaxTokens(err error) string {
 
 // toolSecondaryInfo extracts a short secondary label from tool input.
 func toolSecondaryInfo(name string, input json.RawMessage) string {
-	var m map[string]interface{}
-	if err := json.Unmarshal(input, &m); err != nil {
+	m, err := jsonview.ToolDisplayFields(input)
+	if err != nil {
 		return ""
 	}
 	switch name {

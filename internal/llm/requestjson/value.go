@@ -97,3 +97,9 @@ func appendValue(dst []byte, value any) ([]byte, error) {
 	}
 	return append(dst, '}'), nil
 }
+
+// MarshalValue encodes one immutable replay value with the same raw-field policy
+// used for requests. Ordinary values retain encoding/json validation.
+func MarshalValue(value any) ([]byte, error) {
+	return appendValue(make([]byte, 0, rawSizeHint(value)), value)
+}

@@ -259,7 +259,11 @@ func portableAnthropicCheckpoint(raw string) ([]models.Execution, error) {
 		if typ != "compaction" || text == nil {
 			return nil, fmt.Errorf("invalid Anthropic checkpoint")
 		}
-		row, err := json.Marshal(map[string]any{"role": "assistant", "content": []json.RawMessage{json.RawMessage(raw)}})
+		block, err := requestjson.PrepareItems("content", []any{json.RawMessage(raw)})
+		if err != nil {
+			return nil, err
+		}
+		row, err := block.Marshal(map[string]any{"role": "assistant"})
 		if err != nil {
 			return nil, err
 		}

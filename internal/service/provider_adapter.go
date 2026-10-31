@@ -506,7 +506,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 		budget.NativeStateTokens = estimateNativeStateTokens(req)
 		budget.HistoryTokens = estimateHistoryTokensContext(req.Ctx, req.Agent.Provider, req.ChatHistory)
 	}
-	budget.HistoryTokens += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
+	budget.HistoryTokens += estimateSummaryInputTokensContext(req.Ctx, req.Agent.Provider, req.SummaryInput)
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimateRequestAttachmentTokens(req, att)
 	}
@@ -564,6 +564,10 @@ func estimateHistoryTokensContext(ctx context.Context, provider models.LLMProvid
 			}
 			if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "array" && !replay.Rows.NullItems {
 				if tokens, err := tokenestimate.FromRows(replay.Rows.Items, imageType, imageTokens, "content_blocks", "image_content"); err == nil {
+					total += tokens - tokenestimate.FromByteCount(replay.TranscriptBytes())
+				}
+			} else if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "envelope" && replay.Rows.ItemsKey == "messages" && !hasOtherMessageField(replay.Rows.Envelope) {
+				if tokens, err := tokenestimate.FromEnvelopeRows(replay.TranscriptBytes(), replay.Rows.Items, imageType, imageTokens); err == nil {
 					total += tokens - tokenestimate.FromByteCount(replay.TranscriptBytes())
 				}
 			} else if raw := replay.FullTranscriptJSON(); raw != "" {
@@ -753,7 +757,7 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	for _, att := range req.Attachments {
 		total += estimateRequestAttachmentTokens(req, att)
 	}
-	total += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
+	total += estimateSummaryInputTokensContext(req.Ctx, req.Agent.Provider, req.SummaryInput)
 	return total - savedApplicationContextTokens(req)
 }
 
@@ -1214,7 +1218,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 			}
 			for _, replay := range execution.ReplayMessages {
 				var saved struct {
-					Input []any `json:"responses_input"`
+					Input []json.RawMessage `json:"responses_input"`
 				}
 				if replay.DecodeTranscript(&saved) == nil && len(saved.Input) > 0 {
 					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
@@ -2266,4 +2270,14 @@ var artifactReaderSchema = &toolschema.Schema{
 	},
 	Required:             []string{"offset", "limit"},
 	AdditionalProperties: toolschema.Pointer(false),
+}
+
+// Ambiguous case variants retain the legacy encoder's sorted-field semantics.
+func hasOtherMessageField(fields map[string]json.RawMessage) bool {
+	for key := range fields {
+		if strings.EqualFold(key, "messages") {
+			return true
+		}
+	}
+	return false
 }

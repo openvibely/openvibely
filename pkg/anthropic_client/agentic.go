@@ -837,7 +837,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	if hasDurableCompactionState {
-		encodedState, err := json.Marshal(nativeCompactionState{Version: nativeCompactionStateVersion, Messages: messages})
+		preparedState, err := prepareAgenticMessages(messages)
+		if err != nil {
+			return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
+		}
+		encodedState, err := preparedState.Marshal(struct {
+			Version int `json:"version"`
+		}{nativeCompactionStateVersion})
 		if err != nil {
 			return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
 		}

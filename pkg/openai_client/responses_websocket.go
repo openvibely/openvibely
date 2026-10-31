@@ -679,7 +679,7 @@ func incrementalResponsesWebsocketPayload(payload map[string]any, state *Respons
 			propertiesPayload[key] = value
 		}
 	}
-	encoded, _ := json.Marshal(propertiesPayload)
+	encoded, _ := requestjson.MarshalValue(propertiesPayload)
 	properties := string(encoded)
 	if state.lastResponseID != "" && state.lastProperties == properties && hasInputPrefix(fullInput, state.lastBaseline) {
 		wire["input"] = append([]any(nil), fullInput[len(state.lastBaseline):]...)

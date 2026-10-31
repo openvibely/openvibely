@@ -4337,11 +4337,11 @@ func (h *Handler) taskHasStartingFirstTurn(ctx context.Context, task *models.Tas
 	if task.Category != models.CategoryActive || (task.Status != models.StatusPending && task.Status != models.StatusQueued && task.Status != models.StatusRunning) {
 		return false, nil
 	}
-	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	count, err := h.execRepo.CountByTask(ctx, task.ID)
 	if err != nil {
 		return false, err
 	}
-	return len(execs) == 0, nil
+	return count == 0, nil
 }
 
 func (h *Handler) bindQueuedTaskInputToActiveExecutionIfAvailable(ctx context.Context, input *models.ThreadInput) error {

@@ -45,11 +45,41 @@ type Metadata struct {
 // envelope accepts only metadata: the prepared field must be absent or null.
 // Rejecting a populated field prevents accidental duplicate full serialization.
 func (f *Field) envelope(metadata any) ([]byte, error) {
+	fields, err := f.metadataFields(metadata)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	head := []byte{'{'}
+	for i, name := range keys {
+		if i > 0 {
+			head = append(head, ',')
+		}
+		encoded, _ := json.Marshal(name)
+		head = append(head, encoded...)
+		head = append(head, ':')
+		head = append(head, fields[name]...)
+	}
+	key, _ := json.Marshal(f.key)
+	if len(fields) > 0 {
+		head = append(head, ',')
+	}
+	head = append(head, key...)
+	head = append(head, ':')
+	return head, nil
+}
+
+// metadataFields validates metadata without copying prepared payloads.
+func (f *Field) metadataFields(metadata any) (map[string]json.RawMessage, error) {
 	var prepared map[string]*Field
 	if m, ok := metadata.(Metadata); ok {
 		metadata, prepared = m.Value, m.Fields
 	}
-	b, err := json.Marshal(metadata)
+	b, err := MarshalValue(metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -76,39 +106,24 @@ func (f *Field) envelope(metadata any) ([]byte, error) {
 		}
 		fields[key] = value.JSON()
 	}
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	head := []byte{'{'}
-	for i, name := range keys {
-		if i > 0 {
-			head = append(head, ',')
-		}
-		encoded, _ := json.Marshal(name)
-		head = append(head, encoded...)
-		head = append(head, ':')
-		head = append(head, fields[name]...)
-	}
-	key, _ := json.Marshal(f.key)
-	if len(fields) > 0 {
-		head = append(head, ',')
-	}
-	head = append(head, key...)
-	head = append(head, ':')
-	return head, nil
+	return fields, nil
 }
 
 // Size computes exact encoded bytes without copying the prepared field.
 func (f *Field) Size(metadata any) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	head, err := f.envelope(metadata)
+	fields, err := f.metadataFields(metadata)
 	if err != nil {
 		return 0, err
 	}
-	return len(head) + len(f.raw) + 1, nil
+	key, _ := json.Marshal(f.key)
+	n := 2 + len(key) + 1 + len(f.raw)
+	for name, value := range fields {
+		encoded, _ := json.Marshal(name)
+		n += 1 + len(encoded) + 1 + len(value)
+	}
+	return n, nil
 }
 
 func (f *Field) Marshal(metadata any) ([]byte, error) {

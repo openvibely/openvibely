@@ -63,3 +63,16 @@ func ToolOutput(raw json.RawMessage) (any, error) {
 		return typ == "function_call_output" && len(v) > 0 && v[0] == '"'
 	})
 }
+
+// ToolOutputs prepares immutable Responses rows while preserving tool text.
+func ToolOutputs(rows []json.RawMessage) ([]any, error) {
+	var items []any
+	for _, raw := range rows {
+		item, err := ToolOutput(raw)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}

@@ -5,6 +5,7 @@ package recovery
 import (
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"strings"
 )
 
 type Snapshot struct{ rows []json.RawMessage }
@@ -40,12 +41,22 @@ func (s *Snapshot) JSON(legacy string) string {
 	if s == nil {
 		return ""
 	}
-	out := []byte{'['}
+	var out strings.Builder
+	size := 2
+	for _, row := range s.rows {
+		size += len(row)
+	}
+	if len(s.rows) > 1 {
+		size += len(s.rows) - 1
+	}
+	out.Grow(size)
+	out.WriteByte('[')
 	for i, row := range s.rows {
 		if i > 0 {
-			out = append(out, ',')
+			out.WriteByte(',')
 		}
-		out = append(out, row...)
+		out.Write(row)
 	}
-	return string(append(out, ']'))
+	out.WriteByte(']')
+	return out.String()
 }

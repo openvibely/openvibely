@@ -20,6 +20,7 @@ type cache struct {
 	mu      sync.Mutex
 	entries map[reflect.Type]entry
 	states  map[reflect.Type]stateEntry
+	rows    map[reflect.Type]rowsEntry
 }
 
 // WithScope always creates a fresh scope, including for nested provider calls.

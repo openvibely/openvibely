@@ -1,10 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/recovery"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"strings"
 
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
@@ -29,12 +33,17 @@ func summaryHistoryInput(provider models.LLMProvider, history []models.Execution
 	case models.ProviderAnthropic:
 		return summaryRows(llmanthropic.SummaryHistory(history))
 	default:
-		return summaryRows(compatible.SummaryHistory(history))
+		return compatible.SummaryHistoryRows(history)
 	}
 }
 
 func summaryRows[T any](messages []T) ([]json.RawMessage, error) {
-	snapshot, err := recovery.Capture(messages, func(m T) ([]byte, error) { return json.Marshal(m) })
+	snapshot, err := recovery.Capture(messages, func(m T) ([]byte, error) {
+		if message, ok := any(m).(anthropicclient.Message); ok {
+			return anthropicclient.EncodeReplayMessage(message)
+		}
+		return requestjson.MarshalValue(m)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -42,12 +51,17 @@ func summaryRows[T any](messages []T) ([]json.RawMessage, error) {
 }
 
 func estimateSummaryInputTokens(provider models.LLMProvider, input []json.RawMessage) int {
+	return estimateSummaryInputTokensContext(context.Background(), provider, input)
+}
+func estimateSummaryInputTokensContext(ctx context.Context, provider models.LLMProvider, input []json.RawMessage) int {
 	if provider == models.ProviderOpenAI {
-		items := make([]any, 0, len(input))
-		for _, raw := range input {
-			var item any
-			if json.Unmarshal(raw, &item) == nil {
-				items = append(items, item)
+		items, err := preparedhistory.ReadRows(ctx, input, jsonview.ToolOutputs)
+		if err != nil {
+			// Budgeting historically ignores malformed rows; sending rejects them.
+			for _, raw := range input {
+				if item, e := jsonview.ToolOutput(raw); e == nil {
+					items = append(items, item)
+				}
 			}
 		}
 		return openaiclient.EstimateResponsesInputTokens(items)

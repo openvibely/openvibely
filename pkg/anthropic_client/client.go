@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"net/http"
@@ -657,4 +659,34 @@ func RefreshTokenContext(ctx context.Context, refreshTok string) (*StoredAuth, e
 		RefreshToken: result.RefreshToken,
 		ExpiresAt:    time.Now().UnixMilli() + result.ExpiresIn*1000,
 	}, nil
+}
+
+// DecodeReplayMessage borrows content blocks from an immutable replay row.
+// Callers must not mutate the returned ContentBlocks. Public JSON decoding
+// remains independent and continues to copy its payload.
+func DecodeReplayMessage(raw json.RawMessage) (Message, error) {
+	var m Message
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return m, nil
+	}
+	err := jsonview.Object(raw, func(k string, v json.RawMessage) error {
+		switch strings.ToLower(k) {
+		case "role":
+			return json.Unmarshal(v, &m.Role)
+		case "content":
+			return json.Unmarshal(v, &m.Content)
+		case "content_blocks":
+			m.ContentBlocks = v
+		}
+		return nil
+	})
+	return m, err
+}
+
+// EncodeReplayMessage preserves immutable native content blocks in snapshots.
+func EncodeReplayMessage(m Message) ([]byte, error) {
+	if len(m.ContentBlocks) == 0 {
+		return json.Marshal(m)
+	}
+	return requestjson.MarshalValue(map[string]any{"role": m.Role, "content": m.Content, "content_blocks": m.ContentBlocks})
 }

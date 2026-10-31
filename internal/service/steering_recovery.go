@@ -212,7 +212,9 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 				replay.ContentBlocks = message.Content
 			}
 			var encodeErr error
-			snapshot, encodeErr = models.EncodeReplayRows("messages", []anthropicclient.Message{replay})
+			var row []byte
+			row, encodeErr = anthropicclient.EncodeReplayMessage(replay)
+			snapshot = models.ReplayFromRows("messages", []json.RawMessage{row})
 			if encodeErr != nil {
 				return
 			}

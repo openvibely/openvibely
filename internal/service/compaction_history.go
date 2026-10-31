@@ -107,9 +107,16 @@ func savedApplicationContextTokens(req llmcontracts.AgentRequest) int {
 		}
 	}
 	for _, raw := range req.SummaryInput {
-		var item struct{ Role, Content string }
-		if json.Unmarshal(raw, &item) == nil && item.Role == "user" {
-			saved[item.Content] = true
+		fields, err := jsonview.FoldedFields(raw)
+		if err != nil {
+			continue
+		}
+		var role string
+		if json.Unmarshal(fields["role"], &role) == nil && role == "user" {
+			var content string
+			if json.Unmarshal(fields["content"], &content) == nil {
+				saved[content] = true
+			}
 		}
 	}
 	total := 0

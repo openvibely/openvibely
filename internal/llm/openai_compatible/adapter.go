@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"net/http"
 	"strings"
@@ -292,15 +293,11 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		client.SetPreparedCompletionsHistory(history[0])
 	}
 	if req.SummaryInput != nil {
-		var history []openaiclient.CompletionsHistoryMessage
-		for _, raw := range req.SummaryInput {
-			var message openaiclient.CompletionsHistoryMessage
-			if err := json.Unmarshal(raw, &message); err != nil {
-				return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
-			}
-			history = append(history, message)
+		history, err := openaiclient.PrepareCompletionsHistory(models.ExecutionReplayMessage{Rows: &models.ReplayRows{Format: "array", Items: req.SummaryInput}})
+		if err != nil {
+			return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
 		}
-		client.SetCompletionsHistory(history)
+		client.SetPreparedCompletionsHistory(history)
 	}
 
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
@@ -862,8 +859,8 @@ func effectiveWorkDir(workDir string) string {
 }
 
 func toolSecondaryInfo(name string, input json.RawMessage) string {
-	var m map[string]interface{}
-	if err := json.Unmarshal(input, &m); err != nil {
+	m, err := jsonview.ToolDisplayFields(input)
+	if err != nil {
 		return ""
 	}
 	get := func(key string) string {
@@ -937,4 +934,13 @@ func buildPreparedClientHistory(history []models.Execution) []openaiclient.Prepa
 		}
 	}
 	return []openaiclient.PreparedCompletionsHistory{result}
+}
+
+// SummaryHistoryRows uses the same immutable projection as continuing requests.
+func SummaryHistoryRows(history []models.Execution) ([]json.RawMessage, error) {
+	prepared := buildPreparedClientHistory(history)
+	if len(prepared) == 0 {
+		return nil, nil
+	}
+	return prepared[0].SnapshotRows()
 }

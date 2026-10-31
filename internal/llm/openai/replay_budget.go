@@ -26,7 +26,7 @@ func EffectiveReplayHistory(history []models.Execution) []models.Execution {
 				hasInput = len(replay.Rows.Items) > 0
 			} else {
 				var saved struct {
-					Input []any `json:"responses_input"`
+					Input []json.RawMessage `json:"responses_input"`
 				}
 				hasInput = replay.DecodeTranscript(&saved) == nil && len(saved.Input) > 0
 			}
@@ -93,7 +93,7 @@ func TakeHistoryInputItems(ctx context.Context, history []models.Execution) []an
 // A checkpoint replaces its prefix, just as it does when building a request.
 // Non-native histories retain their existing representation.
 func UserMessageHistory(history []models.Execution) []models.Execution {
-	messages := buildClientHistory(history)
+	messages := buildPreparedHistory(history)
 	hasCheckpoint := false
 	for _, message := range messages {
 		if len(message.ResponsesInputItems) > 0 {
@@ -105,7 +105,7 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 		return history
 	}
 	var users []models.Execution
-	for _, raw := range HistoryInputItems(history) {
+	for _, raw := range historyMessageItems(messages) {
 		item, ok := raw.(map[string]any)
 		if !ok || (item["type"] != nil && item["type"] != "message") || item["role"] != "user" {
 			continue

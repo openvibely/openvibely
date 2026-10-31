@@ -88,22 +88,32 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 			converted = true
 		}
 		if converted && provider == models.ProviderAnthropic {
-			var merged []anthropicclient.Message
+			var merged []json.RawMessage
 			for _, replay := range out[i].ReplayMessages {
-				var saved struct{ Messages []anthropicclient.Message }
-				if replay.DecodeTranscript(&saved) == nil && len(saved.Messages) > 0 {
-					merged = append(merged, saved.Messages...)
-				} else {
-					if replay.UserContent != "" {
-						merged = append(merged, anthropicclient.Message{Role: "user", Content: replay.UserContent})
-					}
-					if replay.AssistantContent != "" {
-						merged = append(merged, anthropicclient.Message{Role: "assistant", Content: replay.AssistantContent})
+				var saved struct{ Messages []json.RawMessage }
+				valid := replay.DecodeTranscript(&saved) == nil && len(saved.Messages) > 0
+				if valid {
+					for _, row := range saved.Messages {
+						if _, err := anthropicclient.DecodeReplayMessage(row); err != nil {
+							valid = false
+							break
+						}
 					}
 				}
+				if valid {
+					merged = append(merged, saved.Messages...)
+					continue
+				}
+				if replay.UserContent != "" {
+					row, _ := anthropicclient.EncodeReplayMessage(anthropicclient.Message{Role: "user", Content: replay.UserContent})
+					merged = append(merged, row)
+				}
+				if replay.AssistantContent != "" {
+					row, _ := anthropicclient.EncodeReplayMessage(anthropicclient.Message{Role: "assistant", Content: replay.AssistantContent})
+					merged = append(merged, row)
+				}
 			}
-			next, _ := models.EncodeReplayRows("messages", merged)
-			out[i].ReplayMessages = []models.ExecutionReplayMessage{next}
+			out[i].ReplayMessages = []models.ExecutionReplayMessage{models.ReplayFromRows("messages", merged)}
 		}
 	}
 	return out

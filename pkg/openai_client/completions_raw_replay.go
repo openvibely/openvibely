@@ -101,6 +101,12 @@ func DecodeCompletionsHistory(replay models.ExecutionReplayMessage) ([]Completio
 type PreparedCompletionsHistory struct{ messages []CompletionsHistoryMessage }
 
 func PrepareCompletionsHistory(replay models.ExecutionReplayMessage) (PreparedCompletionsHistory, error) {
+	if replay.TranscriptJSON != "" {
+		if rows, err := jsonview.Array([]byte(replay.TranscriptJSON)); err == nil {
+			replay.TranscriptJSON = ""
+			replay.Rows = &models.ReplayRows{Format: "array", Items: rows}
+		}
+	}
 	if replay.TranscriptJSON != "" || replay.Rows == nil || replay.Rows.Format != "array" {
 		m, err := DecodeCompletionsHistory(replay)
 		return PreparedCompletionsHistory{m}, err
@@ -225,6 +231,7 @@ func (h PreparedCompletionsHistory) DecodedMessages() []CompletionsHistoryMessag
 	for i := range out {
 		out[i].Content = out[i].contentText()
 		out[i].rawContent = nil
+		out[i].rawReplay = nil
 	}
 	return out
 }

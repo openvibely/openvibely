@@ -149,6 +149,9 @@ func replaceMatchOutsideMarkdownCode(s string, re *regexp.Regexp, repl string) s
 }
 
 func replaceOutsideMarkdownCode(s string, re *regexp.Regexp, repl string, locateControlMarker bool) string {
+	if !re.MatchString(s) {
+		return s
+	}
 	ranges := markdownCodeRanges(s)
 	var buf strings.Builder
 	previous := 0
@@ -192,6 +195,9 @@ func replaceOutsideMarkdownCode(s string, re *regexp.Regexp, repl string, locate
 // summary of each kind is retained for task-result link hydration.
 func DeduplicateTaskSummaries(text string) string {
 	for _, prefix := range []string{"Created ", "Edited "} {
+		if !strings.Contains(text, prefix) || !strings.Contains(text, "---") {
+			continue
+		}
 		lines := llmtranscript.MarkdownLineRanges(text)
 		ranges := markdownCodeRanges(text)
 		type summaryBlock struct {
@@ -245,6 +251,9 @@ func positionInAnyRange(ranges []codeRange, position int) bool {
 }
 
 func cleanUnclosedThinkingBlocks(text string) string {
+	if !strings.Contains(text, "[Thinking]") {
+		return text
+	}
 	for {
 		lines := llmtranscript.MarkdownLineRanges(text)
 		openLine := -1
@@ -304,7 +313,7 @@ func doCleanChatOutput(output string, stripSummaries bool) string {
 		text  string
 	}
 	var protected []protectedCode
-	if ranges := markdownCodeRanges(result); len(ranges) > 0 {
+	if ranges := thinkingCodeRanges(result); len(ranges) > 0 {
 		var masked strings.Builder
 		previous := 0
 		for i, r := range ranges {
@@ -342,4 +351,12 @@ func doCleanChatOutput(output string, stripSummaries bool) string {
 	result = ReplaceOutsideMarkdownCode(result, reCleanEdited, "")
 
 	return strings.TrimSpace(result)
+}
+
+// Thinking cleanup only needs to shield code when a thinking control is present.
+func thinkingCodeRanges(text string) []codeRange {
+	if !strings.Contains(text, "[Thinking]") {
+		return nil
+	}
+	return markdownCodeRanges(text)
 }

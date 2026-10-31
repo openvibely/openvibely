@@ -41,6 +41,9 @@ var thinkingStateMarkers = regexp.MustCompile(`(?m)^[\t ]*(\[/?Thinking\]|\[Tool
 
 func unfinishedThinking(text string) bool {
 	text = transcript.NormalizeMarkers(withoutToolOutput(text))
+	if !thinkingStateMarkers.MatchString(text) {
+		return false
+	}
 	ranges := transcript.MarkdownCodeRanges(text)
 	thinking, tool := false, false
 	for _, match := range thinkingStateMarkers.FindAllStringIndex(text, -1) {
@@ -72,6 +75,9 @@ func unfinishedThinking(text string) bool {
 var recoveryToolBlocks = regexp.MustCompile(`(?m)^[\t ]*\[Tool \S+ (?:done|error)\][\t ]*\r?\n[\s\S]*?^[\t ]*\[/Tool\][\t ]*\r?(?:\n|$)`)
 
 func withoutToolOutput(text string) string {
+	if !recoveryToolBlocks.MatchString(text) {
+		return text
+	}
 	var out strings.Builder
 	previous := 0
 	for _, match := range recoveryToolBlocks.FindAllStringIndex(text, -1) {

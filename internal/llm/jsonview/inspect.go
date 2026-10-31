@@ -64,3 +64,22 @@ func FoldedFields(raw json.RawMessage) (map[string]json.RawMessage, error) {
 	err := Object(raw, func(k string, v json.RawMessage) error { out[strings.ToLower(k)] = v; return nil })
 	return out, err
 }
+
+// ToolDisplayFields decodes only fields used by tool labels, borrowing/skipping
+// unrelated arguments such as file contents. Tool execution still decodes its
+// complete validated arguments independently.
+func ToolDisplayFields(raw json.RawMessage) (map[string]any, error) {
+	out := map[string]any{}
+	err := Object(raw, func(k string, v json.RawMessage) error {
+		switch k {
+		case "file_path", "command", "pattern", "path", "query", "url", "action", "search_query", "image_query", "find", "open":
+			var value any
+			if err := json.Unmarshal(v, &value); err != nil {
+				return err
+			}
+			out[k] = value
+		}
+		return nil
+	})
+	return out, err
+}
