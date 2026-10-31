@@ -167,7 +167,10 @@ window.addEventListener('DOMContentLoaded',function(){
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, r)
 			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1)))
+			// These scenarios exercise individual tool output controls and rows.
+			// Set the preference before layout and transcript scripts initialize.
+			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>localStorage.setItem('openvibely.outputDetail','full');</script>`, 1)
+			_, _ = w.Write([]byte(strings.Replace(html, "</body>", runner+"</body>", 1)))
 			return
 		}
 		e.ServeHTTP(w, r)

@@ -283,7 +283,9 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			// Capture startup failures before dependencies and page initializers run.
 			// DOMContentLoaded-only listeners miss the error that caused a lazy
 			// transcript never to mount, leaving only an unhelpful timeout.
+			// Keep individual tool rows for paging and offscreen-row assertions.
 			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>
+localStorage.setItem('openvibely.outputDetail','full');
 window._pagedStartupErrors=[];
 window.addEventListener('error',function(event){
  const target=event.target;
