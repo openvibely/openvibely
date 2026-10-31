@@ -310,21 +310,30 @@ templ displayToggle(pref, label, description, firstValue, firstLabel, secondValu
 						if pref == "output" {
                             <div class="p-2 text-xs flex flex-col gap-2">
                                 <span class="opacity-70">I’ll check the files.</span>
-                                <div class="border border-base-300 rounded p-2">
-                                    <span>
-                                        if opt[0] == "compact" {
-                                            <span>›</span>
-                                        }
-                                        if opt[0] == "compact" {
-                                            2 tool calls
-                                        } else {
-                                            Read file
-                                        }
-                                    </span>
-                                    if opt[0] == "full" {
-                                        <div class="opacity-50 mt-2 font-mono">IN · app.go<br/>OUT · File contents…</div>
-                                    }
-                                </div>
+                                if opt[0] == "compact" {
+                                    <div class="stream-activity">
+                                        <div class="stream-activity-summary">
+                                            <span class="tool-disclosure-caret"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"></path></svg></span>
+                                            <span class="stream-activity-label">1 tool call</span>
+                                        </div>
+                                    </div>
+                                } else {
+                                    <div class="stream-tool">
+                                        <div class="stream-tool-summary">
+                                            <svg class="tool-status-icon tool-status-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                                            <span class="tool-name-text">Read</span>
+                                            <span class="tool-name-secondary">app.go</span>
+                                        </div>
+                                        <div class="stream-tool-body">
+                                            <div class="stream-tool-body-grid">
+                                                <div class="stream-tool-body-row">
+                                                    <div class="stream-tool-body-label">OUT</div>
+                                                    <div class="stream-tool-body-content"><span class="font-mono">File contents…</span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
                                 <span class="opacity-70">Here’s what I found.</span>
                             </div>
                         } else if pref == "surfaces" || pref == "layout" || pref == "tabs" {
