@@ -73,8 +73,11 @@ func TestDiffChunkCacheBoundsAndExpiry(t *testing.T) {
 	if cache.lookup("oversized", now) != nil {
 		t.Fatal("oversized entry retained")
 	}
-	if cache.lookup("new", now.Add(diffChunkCacheTTL+4*time.Second)) != nil || cache.bytes != 0 {
-		t.Fatal("expired entries retained")
+	if cache.lookup("new", now.Add(diffChunkCacheTTL+4*time.Second)) != nil {
+		t.Fatal("expired entry returned")
+	}
+	if _, ok := cache.entries["new"]; ok || cache.bytes != value.bytes {
+		t.Fatal("expired entry retained")
 	}
 	for i := 0; i < diffChunkCacheEntries+5; i++ {
 		cache.store(string(rune(i)), &preparedDiffChunks{bytes: 1}, now.Add(time.Duration(i)*time.Millisecond))
