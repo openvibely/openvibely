@@ -83,7 +83,7 @@ diff --git a/b.txt b/b.txt
 		t.Fatalf("update diff output: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -111,7 +111,7 @@ diff --git a/b.txt b/b.txt
 		path   string
 		status int
 	}{{"b.txt", http.StatusOK}, {"a.txt", http.StatusConflict}, {"removed.txt", http.StatusConflict}} {
-		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=true&file_path="+url.QueryEscape(identity.path), nil)
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&file_path="+url.QueryEscape(identity.path), nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("taskId")
@@ -124,18 +124,56 @@ diff --git a/b.txt b/b.txt
 		}
 	}
 
-	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=inline&review=false", nil)
-	noReviewRec := httptest.NewRecorder()
-	noReviewContext := e.NewContext(noReviewReq, noReviewRec)
-	noReviewContext.SetParamNames("taskId")
-	noReviewContext.SetParamValues(task.ID)
-	if err := h.GetTaskChangesFile(noReviewContext); err != nil {
-		t.Fatalf("GetTaskChangesFile without review mode failed: %v", err)
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		{"chunk=0", http.StatusOK},
+		{"chunk=", http.StatusBadRequest},
+		{"chunk=-1", http.StatusBadRequest},
+		{"chunk=999", http.StatusBadRequest},
+		{"chunk=0&revision=stale", http.StatusConflict},
+		{"chunk=0&anchor_old_line=-1", http.StatusBadRequest},
+		{"chunk=0&anchor_new_line=oops", http.StatusBadRequest},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split&"+tc.query, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		if err := h.GetTaskChangesFile(c); err != nil {
+			e.HTTPErrorHandler(err, c)
+		}
+		if rec.Code != tc.status {
+			t.Fatalf("%s: got %d want %d", tc.query, rec.Code, tc.status)
+		}
+		if tc.status == http.StatusOK && !strings.Contains(rec.Body.String(), "data-diff-chunk-response") {
+			t.Fatal("missing chunk metadata")
+		}
 	}
-	noReviewBody := noReviewRec.Body.String()
-	if strings.Contains(noReviewBody, comment.ID) || strings.Contains(noReviewBody, comment.CommentText) {
-		t.Fatalf("expected review=false lazy card to omit review comments, got: %s", noReviewBody)
+
+	largeDiff := "diff --git a/large.txt b/large.txt\n--- a/large.txt\n+++ b/large.txt\n@@ -1,1000 +1,1000 @@\n" + strings.Repeat("-old\n+new\n", 1000)
+	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, largeDiff); err != nil {
+		t.Fatal(err)
 	}
+	for _, tc := range []struct{ view, anchor, chunk string }{
+		{"inline", "anchor_new_line=401", "4"},
+		{"split", "anchor_new_line=401", "2"},
+		{"split", "anchor_old_line=401", "2"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&chunk=0&view="+tc.view+"&"+tc.anchor, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("taskId")
+		c.SetParamValues(task.ID)
+		if err := h.GetTaskChangesFile(c); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rec.Body.String(), `data-chunk="`+tc.chunk+`"`) {
+			t.Fatalf("%s %s did not return anchor chunk %s", tc.view, tc.anchor, tc.chunk)
+		}
+	}
+
 }
 
 func TestHandlerLoadTaskReviewComments_PreservesOptionalReadContract(t *testing.T) {
@@ -232,7 +270,7 @@ func TestHandler_GetTaskChangesFile_RecoversLiveWorktreeLineage(t *testing.T) {
 		t.Fatalf("store stale execution diff: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&view=inline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=0&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -320,7 +358,7 @@ func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testin
 	// Tracked git diff files are ordered before synthetic untracked files, so the
 	// second lazy card should resolve only the untracked file and not the tracked
 	// file's body.
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=split", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -400,11 +438,11 @@ func TestHandler_GetTaskChangesFile_FallsBackToPreservedDiffWhenNonActiveBranchA
 	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, preservedDiff); err != nil {
 		t.Fatalf("store preserved execution diff: %v", err)
 	}
-	if diff, ok := service.GetWorktreeDiffFileWithUncommitted(repoDir, worktreeBranch, "main", worktreePath, 0); ok || strings.TrimSpace(diff) != "" {
+	if diff, ok := service.GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, worktreeBranch, "main", worktreePath, 0); ok || strings.TrimSpace(diff) != "" {
 		t.Fatalf("expected already-merged live targeted diff to be empty before fallback, ok=%v diff:\n%s", ok, diff)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&view=inline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=0&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")

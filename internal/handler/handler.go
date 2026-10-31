@@ -26,6 +26,7 @@ import (
 )
 
 type Handler struct {
+	diffChunks                 diffChunkCache
 	organizationSvc            *service.OrganizationService
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService

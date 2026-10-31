@@ -1,7 +1,6 @@
 package components
 
-// File bodies stay mounted once loaded. Only unopened files and the unused
-// layout are deferred; this is not row virtualization.
+// Progressive file loading with bounded mounted chunks and preserved reading anchors.
 templ diffViewerPerformanceScript() {
  <script>
  (function() {
@@ -27,13 +26,13 @@ templ diffViewerPerformanceScript() {
     if (!panel || !scroller) return null;
     var top = scroller.getBoundingClientRect().top + (parseFloat(viewer.style.getPropertyValue('--diff-toolbar-height')) || 0);
     var snapshot = {heights:new Map(), anchor:null};
-    panel.querySelectorAll('.diff-file-card').forEach(function(card) {
-     var path = card.querySelector('[data-copy-path]');
+    panel.querySelectorAll('.diff-file-card, .diff-file-slot').forEach(function(card) {
+     var path = window._diffCardPath(card);
      if (!path) return;
      var rect = card.getBoundingClientRect();
-     snapshot.heights.set(path.dataset.copyPath, rect.height);
+     snapshot.heights.set(path, rect.height);
      if (!snapshot.anchor && rect.bottom > top && rect.height > 0) {
-      var anchor = {path:path.dataset.copyPath, cardOffset:rect.top-top};
+      var anchor = {path:path, cardOffset:rect.top-top};
       var rows = card.querySelectorAll('tr.diff-review-line');
       for (var i=0; i<rows.length; i++) {
        var rowRect = rows[i].getBoundingClientRect();
@@ -45,7 +44,7 @@ templ diffViewerPerformanceScript() {
        }
       }
       // Keep the original line while its placeholder is still loading.
-      var saved = card._diffScrollAnchor;
+      var saved = card._diffScrollAnchor || card._diffReadingAnchor;
       if (saved && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) anchor = saved.snapshot.anchor;
       snapshot.anchor = anchor;
      }
@@ -59,37 +58,49 @@ templ diffViewerPerformanceScript() {
     var scroller = viewer && (viewer.closest('#tab-changes') || document.getElementById('main-content'));
     if (!panel || !scroller) return;
     var target = null;
-    panel.querySelectorAll('.diff-file-card').forEach(function(card) {
-     var path = card.querySelector('[data-copy-path]');
+    panel.querySelectorAll('.diff-file-card, .diff-file-slot').forEach(function(card) {
+     var path = window._diffCardPath(card);
      if (!path) return;
-     if (reserve && card.hasAttribute('data-diff-lazy-url') && !card.querySelector('[data-collapsed]')) {
-      var height = snapshot.heights.get(path.dataset.copyPath);
+     if (reserve && card.hasAttribute('data-diff-lazy-url') && !card.hasAttribute('data-collapsed') && !card.querySelector('[data-collapsed]')) {
+      var height = snapshot.heights.get(path);
       if (height) card.style.minHeight = height + 'px';
      }
-     if (snapshot.anchor && path.dataset.copyPath === snapshot.anchor.path) target = card;
+     if (snapshot.anchor && path === snapshot.anchor.path) target = card;
     });
     if (!target) return;
-    var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset;
+    var anchor = snapshot.anchor, element = target, offset = anchor.cardOffset, match = null;
     if (anchor.oldLine || anchor.newLine) {
      var rows = target.querySelectorAll('tr.diff-review-line');
      // Split rows can represent both sides. Prefer the new side when both
      // exist, but preserve old-only anchors (including deletions) by old line.
-     var match = null;
      for (var i=0; i<rows.length; i++) {
       if (anchor.newLine && Number(rows[i].dataset.newLine) === anchor.newLine) { match = rows[i]; break; }
-      if (!match && anchor.oldLine && Number(rows[i].dataset.oldLine) === anchor.oldLine) match = rows[i];
+      if (!match && anchor.oldLine && (!reserve || !anchor.newLine) && Number(rows[i].dataset.oldLine) === anchor.oldLine) match = rows[i];
      }
      if (match) { element = match; offset = anchor.offset; }
     }
     scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - (parseFloat(viewer.style.getPropertyValue('--diff-toolbar-height')) || 0) - offset;
-    if (target.hasAttribute('data-diff-lazy-url')) target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+    if (match) {
+     delete target._diffScrollAnchor;
+     // A split row represents two lines. Keep the original side when toggling
+     // back without scrolling, rather than changing an old-line anchor to new.
+     target._diffReadingAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+    }
+    else if (reserve && (anchor.oldLine || anchor.newLine) && viewer._diffPerformance &&
+             (target.dataset.diffLazyUrl || target.dataset.chunkUrl)) {
+     viewer._diffPerformance.restoreAnchor(target, snapshot);
+    } else if (target.hasAttribute('data-diff-lazy-url')) {
+     target._diffScrollAnchor = {snapshot:snapshot, scrollTop:scroller.scrollTop};
+    } else delete target._diffScrollAnchor;
    };
    window.retryLazyDiffFile = function(button) {
     var card = button.closest('[data-diff-lazy-url]');
     if (!card) return;
     delete card.dataset.diffLoadFailed;
     button.classList.add('hidden');
-    window._refreshDiffPerformance();
+    var viewer = card.closest('#diff-viewer');
+    if (card._diffRetryAnchor && viewer && viewer._diffPerformance) viewer._diffPerformance.restoreAnchor(card, card._diffRetryAnchor);
+    else window._refreshDiffPerformance();
    };
    document.body.addEventListener('htmx:afterSettle', window._refreshDiffPerformance);
    document.body.addEventListener('htmx:beforeCleanupElement', function(event) {
@@ -99,9 +110,56 @@ templ diffViewerPerformanceScript() {
   }
 
   function createController(viewer) {
-   var activePanel = null, stopped = false, inFlight = 0;
+   // Explicit line anchoring owns geometry changes, including cached chunks.
+   // Native anchoring would otherwise compensate a second time after a swap.
+   viewer.style.overflowAnchor = 'none';
+   var activePanel = null, stopped = false, inFlight = 0, anchorRestore = null;
    var pending = new Map(), visible = new Set(), observed = new Set();
-   var headers = new Map();
+   var headers = new Map(), chunks = new Set(), retained = [];
+   function retain(chunk) {
+    var index = retained.indexOf(chunk);
+    if (index >= 0) retained.splice(index, 1);
+    retained.push(chunk);
+    while (retained.length > 20) {
+     var evicted = retained.shift();
+     if (evicted._saved) {
+      evicted._saved = null;
+      // Eviction also discards the Retry button. Allow a fresh request when
+      // this placeholder becomes visible again instead of leaving it blank.
+      delete evicted.dataset.diffLoadFailed;
+     }
+    }
+   }
+   function protectedContent(node) {
+    var selection = window.getSelection();
+    return node.contains(document.activeElement) || node.querySelector('.review-comment-form') ||
+      (selection && !selection.isCollapsed && selection.containsNode(node, true));
+   }
+   var chunkObserver = new IntersectionObserver(function(entries) {
+    var snapshot = window._captureDiffScroll(), changed = false;
+    entries.forEach(function(entry) {
+     var chunk = entry.target;
+     var rect = chunk.getBoundingClientRect(), bounds = scroller.getBoundingClientRect();
+     var measured = rect.height;
+     if (measured > 0) chunk._height = measured;
+     // Layout switches can invalidate queued observer entries before delivery.
+     chunk._near = measured > 0 && rect.bottom >= bounds.top-600 && rect.top <= bounds.bottom+600;
+     if (chunk._near) {
+      if (chunk._saved) { chunk.appendChild(chunk._saved); chunk._saved = null; chunk.style.minHeight = ''; changed = true; }
+      if (!chunk.firstElementChild) { visible.add(chunk); }
+     } else if (chunk.firstElementChild && !protectedContent(chunk)) {
+      var height = chunk.getBoundingClientRect().height || chunk._height;
+      if (!height) return;
+      chunk.style.minHeight = height + 'px';
+      chunk._saved = document.createDocumentFragment();
+      while (chunk.firstChild) chunk._saved.appendChild(chunk.firstChild);
+      retain(chunk);
+      visible.delete(chunk);
+     }
+    });
+    if (changed) window._restoreDiffScroll(snapshot, false);
+    pump();
+   }, {root:viewer.closest('#tab-changes') || document.getElementById('main-content'), rootMargin:'600px 0px'});
    var scroller = viewer.closest('#tab-changes') || document.getElementById('main-content');
    var loadObserver = new IntersectionObserver(function(entries) {
     entries.forEach(function(entry) {
@@ -138,67 +196,248 @@ templ diffViewerPerformanceScript() {
    if (toolbarObserver) toolbarObserver.observe(toolbar);
 
    function expanded(card) {
-    var header = card.querySelector('[data-diff-toggle]');
+    if (card.classList.contains('diff-file-slot')) return !card.hasAttribute('data-collapsed');
+    var owner = card.closest('.diff-file-card') || card;
+    var header = owner.querySelector('[data-diff-toggle]');
     return header && !header.hasAttribute('data-collapsed');
+   }
+   function cancelAnchor() {
+    if (!anchorRestore) return;
+    var previous = anchorRestore; anchorRestore = null;
+    delete previous.card._diffScrollAnchor;
+    if (previous.abort) previous.abort.abort();
+   }
+   function cancelAnchorForInput(event) {
+    // A second layout toggle captures the pending line before refresh cancels
+    // its request. Do not discard that line during the button's pointerdown.
+    if ((event.type === 'pointerdown' || event.type === 'keydown') && event.target.closest &&
+        event.target.closest('#diff-btn-inline, #diff-btn-split')) return;
+    if (event.type === 'keydown' && !['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) return;
+    cancelAnchor();
+    pump();
+   }
+   ['wheel','touchstart','pointerdown','keydown'].forEach(function(type) {
+    scroller.addEventListener(type, cancelAnchorForInput, {passive:true});
+   });
+   function restoreAnchor(card, snapshot) {
+    cancelAnchor();
+    delete card._diffRetryAnchor;
+    delete card.dataset.diffLoadFailed;
+    var retry = card.querySelector('[data-diff-anchor-retry]');
+    if (retry) retry.remove();
+    // A retained chunk may already contain the destination line. Restore it
+    // without a request; evicted/unopened chunks are resolved by the server.
+    var anchor = snapshot.anchor, cached = null;
+    [anchor.newLine ? 'newLine' : 'oldLine'].some(function(side) {
+     if (!anchor[side]) return false;
+     return Array.from(card.querySelectorAll('[data-chunk-index]')).some(function(chunk) {
+      if (chunk._saved && chunk._saved.querySelector('tr.diff-review-line[data-' + (side === 'newLine' ? 'new' : 'old') + '-line="' + anchor[side] + '"]')) { cached = chunk; return true; }
+      return false;
+     });
+    });
+    if (cached) {
+     cached.appendChild(cached._saved); cached._saved = null; cached.style.minHeight = '';
+     window._restoreDiffScroll(snapshot, false);
+     return;
+    }
+    anchorRestore = {card:card, snapshot:snapshot, scrollTop:scroller.scrollTop, started:false};
+    card._diffScrollAnchor = anchorRestore;
+    // An ordinary first-chunk request cannot restore a deep line. Fence it
+    // before issuing the targeted request, retaining the shared concurrency cap.
+    var existing = pending.get(card);
+    if (existing) existing.abort();
+    pump();
    }
    function pump() {
     if (stopped || !viewer.isConnected) return;
+    if (anchorRestore) {
+     if (!activePanel || !activePanel.contains(anchorRestore.card) || Math.abs(scroller.scrollTop-anchorRestore.scrollTop) >= 2) cancelAnchor();
+     else {
+      if (!anchorRestore.started && inFlight < 3 && !pending.has(anchorRestore.card)) {
+       anchorRestore.started = true;
+       load(anchorRestore.card, anchorRestore);
+      }
+      return;
+     }
+    }
     visible.forEach(function(card) {
      if (inFlight >= 3 || !card.isConnected || !activePanel || !activePanel.contains(card) ||
-         !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
+         (card.hasAttribute('data-chunk-index') && (card.firstElementChild || card._saved)) || !expanded(card) || pending.has(card) || card.dataset.diffLoadFailed) return;
      load(card);
     });
    }
-   function load(card) {
+   function load(card, restore) {
     var abort = new AbortController();
+    var reviewCommentsAtStart = viewer._diffReviewComments;
     pending.set(card, abort); inFlight++;
-    card.querySelector('[data-diff-load-status]').textContent = 'Loading diff…';
-    var url = new URL(card.dataset.diffLazyUrl, location.href);
+    if (restore) restore.abort = abort;
+    if (card.classList.contains('diff-file-slot') && !card.querySelector('[data-diff-load-status]')) {
+     var statusNode = document.createElement('div'); statusNode.setAttribute('data-diff-load-status',''); statusNode.setAttribute('role','status');
+     var retryButton = document.createElement('button'); retryButton.type='button'; retryButton.className='btn btn-sm btn-ghost hidden';
+     retryButton.setAttribute('data-diff-retry',''); retryButton.textContent='Retry loading diff'; retryButton.onclick=function(){window.retryLazyDiffFile(retryButton);};
+     card.append(statusNode,retryButton);
+    }
+    var status = card.querySelector('[data-diff-load-status]');
+    if (status) status.textContent = 'Loading diff…';
+    else if (!card.firstChild) card.appendChild(document.createTextNode('Loading diff…'));
+    card.setAttribute('aria-busy', 'true');
+    var url = new URL(card.dataset.diffLazyUrl || card.dataset.chunkUrl, location.href);
     url.searchParams.set('file_path', card.dataset.diffFilePath);
+    if (card.hasAttribute('data-chunk-index')) url.searchParams.set('chunk', card.dataset.chunkIndex);
+    if (restore) {
+     url.searchParams.set('chunk', '0');
+     url.searchParams.set('anchor_old_line', restore.snapshot.anchor.oldLine || 0);
+     url.searchParams.set('anchor_new_line', restore.snapshot.anchor.newLine || 0);
+    }
     fetch(url, {headers:{'HX-Request':'true'}, signal:abort.signal})
      .then(function(response) {
       if (!response.ok) throw new Error('Could not load diff');
       return response.text();
      }).then(function(html) {
-      if (stopped || !card.isConnected) return;
+      if (stopped || !card.isConnected || abort.signal.aborted) return;
+      if (restore && (anchorRestore !== restore || !activePanel.contains(card) || Math.abs(scroller.scrollTop-restore.scrollTop) >= 2)) return;
+      if (anchorRestore && !restore) return;
       var content = document.createElement('template');
       content.innerHTML = html;
-      var replacement = content.content.firstElementChild;
-      if (!replacement || replacement.id !== card.id) throw new Error('Diff changed; reload the Changes view');
+      var response = content.content.querySelector('[data-diff-chunk-response]');
+      var replacement = response ? response.querySelector('.diff-file-card') : content.content.firstElementChild;
+      if (!replacement || (!response && replacement.id !== card.id)) throw new Error('Diff changed; reload the Changes view');
+      // A comment refresh may have completed while this HTML was in flight.
+      // Reconcile before mounting, without overwriting newer server comments
+      // on requests that started after the latest local refresh.
+      if (viewer._diffReviewComments && viewer._diffReviewComments !== reviewCommentsAtStart && window.applyDiffReviewComments) {
+       window.applyDiffReviewComments(replacement, viewer._diffReviewComments);
+       if (!response) html = content.innerHTML;
+      }
       // Swap only this card. HTMX preserves its normal cleanup, processing,
       // and afterSwap/afterSettle hooks, including saved collapse state.
-      var scroll = window._captureDiffScroll();
+      var scroll = restore ? restore.snapshot : window._captureDiffScroll();
       var saved = card._diffScrollAnchor;
       if (saved && scroller && Math.abs(scroller.scrollTop-saved.scrollTop) < 2) scroll = saved.snapshot;
-      htmx.swap(card, html, {swapStyle:'outerHTML'});
+      if (response) {
+       if (card.classList.contains('diff-file-slot')) {
+        var header = replacement.querySelector('.diff-file-header');
+        var destinationBody = document.createElement('div');
+        destinationBody.id = replacement.querySelector('.diff-file-body').id;
+        destinationBody.className = 'diff-file-body overflow-hidden transition-all duration-300 ease-in-out';
+        var adds=card.dataset.diffAdds, dels=card.dataset.diffDels;
+        header.querySelector('.diff-stat-add').textContent='+'+adds;
+        header.querySelector('.diff-stat-del').textContent='-'+dels;
+        header.querySelector('.diff-file-stats').setAttribute('aria-label',adds+' added lines, '+dels+' deleted lines');
+        card.className = replacement.className;
+        card.removeAttribute('role'); card.removeAttribute('tabindex'); card.removeAttribute('aria-expanded');
+        card.onclick=null; card.onkeydown=null;
+        card.replaceChildren(header,destinationBody);
+       }
+       var body = replacement.querySelector('.diff-file-body');
+       if (card.hasAttribute('data-chunk-index')) {
+        card.replaceChildren();
+        while (body.firstChild) card.appendChild(body.firstChild);
+        card.style.minHeight = '';
+        visible.delete(card);
+        chunkObserver.unobserve(card); chunkObserver.observe(card);
+       } else {
+        var destination = card.querySelector('.diff-file-body');
+        var count = Number(response.dataset.chunks);
+        var selectedChunk = Number(response.dataset.chunk);
+        loadObserver.unobserve(card); observed.delete(card);
+        if (!card.dataset.chunkUrl) {
+         destination.replaceChildren();
+         var rowCounts = (response.dataset.chunkRows || '').split(',').map(Number);
+         var rowHeight = 20;
+         for (var i=0; i<count; i++) {
+          var chunk = document.createElement('div');
+          chunk.dataset.chunkIndex = String(i);
+          chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
+          chunk.dataset.diffFilePath = card.dataset.diffFilePath;
+          if (i === selectedChunk) { while (body.firstChild) chunk.appendChild(body.firstChild); }
+          else chunk.setAttribute('aria-label', 'Diff lines load when visible');
+          destination.appendChild(chunk);
+         }
+         var loadedChunk = destination.children[selectedChunk];
+         var loadedHeight = loadedChunk ? loadedChunk.getBoundingClientRect().height : 0;
+         if (loadedHeight > 0 && rowCounts[selectedChunk] > 0) rowHeight = loadedHeight / rowCounts[selectedChunk];
+         Array.from(destination.children).forEach(function(chunk, i) {
+          if (i !== selectedChunk) chunk.style.minHeight = Math.round((rowCounts[i] || 200) * rowHeight) + 'px';
+         });
+         card.dataset.chunkUrl = card.dataset.diffLazyUrl;
+         delete card.dataset.diffLazyUrl;
+        } else {
+         var targetChunk = destination.querySelector('[data-chunk-index="' + selectedChunk + '"]');
+         if (!targetChunk) throw new Error('Diff changed; reload the Changes view');
+         targetChunk.replaceChildren(); targetChunk._saved = null;
+         while (body.firstChild) targetChunk.appendChild(body.firstChild);
+         targetChunk.style.minHeight = '';
+         chunkObserver.unobserve(targetChunk); chunkObserver.observe(targetChunk);
+        }
+        card.style.minHeight = '';
+        visible.delete(card);
+       }
+       if (window._restoreDiffFileState) window._restoreDiffFileState();
+       if (window.htmx) htmx.process(card);
+      } else htmx.swap(card, html, {swapStyle:'outerHTML'});
+      if (restore) { anchorRestore = null; delete card._diffScrollAnchor; }
       window._restoreDiffScroll(scroll, false);
      }).catch(function(error) {
-      if (stopped || !card.isConnected || error.name === 'AbortError') return;
+      if (stopped || !card.isConnected || error.name === 'AbortError' || (restore && anchorRestore !== restore)) return;
+      if (restore) card._diffRetryAnchor = restore.snapshot;
       card.dataset.diffLoadFailed = 'true';
-      card.querySelector('[data-diff-load-status]').textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
-      card.querySelector('[data-diff-retry]').classList.remove('hidden');
+      var status = card.querySelector('[data-diff-load-status]');
+      if (status) {
+       status.textContent = 'Unable to load this diff. Retry, or reopen Changes if files have changed.';
+       card.querySelector('[data-diff-retry]').classList.remove('hidden');
+      } else {
+       if (!restore) card.replaceChildren();
+       var retry = document.createElement('button'); retry.className = 'btn btn-sm btn-ghost';
+       retry.textContent = 'Unable to load lines. Retry';
+       retry.onclick = function() {
+        if (restore) { restoreAnchor(card, restore.snapshot); return; }
+        delete card.dataset.diffLoadFailed; card.replaceChildren(); visible.add(card); pump();
+       };
+       if (restore) { retry.setAttribute('data-diff-anchor-retry', ''); card.querySelector('.diff-file-body').prepend(retry); }
+       else card.appendChild(retry);
+      }
      }).finally(function() {
-      pending.delete(card); inFlight--;
+      if (restore && anchorRestore === restore) { anchorRestore = null; delete card._diffScrollAnchor; }
+      card.removeAttribute('aria-busy'); pending.delete(card); inFlight--;
       if (!stopped) refresh();
      });
    }
+   function reconsiderProtected() {
+    chunks.forEach(function(chunk) {
+     if (!chunk._near && chunk.firstElementChild && !protectedContent(chunk)) {
+      chunkObserver.unobserve(chunk); chunkObserver.observe(chunk);
+     }
+    });
+   }
+   var interactionObserver = new MutationObserver(reconsiderProtected);
+   interactionObserver.observe(viewer, {childList:true, subtree:true});
+   document.addEventListener('selectionchange', reconsiderProtected);
+   viewer.addEventListener('focusout', reconsiderProtected);
    function refresh() {
     if (stopped || !viewer.isConnected) return;
     // HTMX settle restores incoming inline attributes after script initialization.
     if (toolbar) viewer.style.setProperty('--diff-toolbar-height', toolbarHeight + 'px');
     var panel = viewer.querySelector('#diff-content-inline:not(.hidden), #diff-content-split:not(.hidden)');
+    reconsiderProtected();
     if (activePanel !== panel) {
+     cancelAnchor();
+     pending.forEach(function(abort, card) { if (!panel || !panel.contains(card)) abort.abort(); });
      loadObserver.disconnect(); stickyObserver.disconnect();
-     observed.clear(); visible.clear(); headers.clear(); activePanel = panel;
+     observed.clear(); visible.clear(); headers.clear(); chunkObserver.disconnect(); chunks.clear(); activePanel = panel;
     }
     if (!panel) return;
+    if (window._prepareDiffPanel) window._prepareDiffPanel(viewer,panel);
     observed.forEach(function(card) {
-     if (!card.isConnected) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
+     if (!card.isConnected || !card.hasAttribute('data-diff-lazy-url')) { loadObserver.unobserve(card); observed.delete(card); visible.delete(card); }
     });
     headers.forEach(function(header, sentinel) {
      if (!header.isConnected) { stickyObserver.unobserve(sentinel); headers.delete(sentinel); }
     });
-    panel.querySelectorAll('[data-diff-lazy-url]').forEach(function(card) {
+    viewer.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
+     if (!chunks.has(chunk)) { chunks.add(chunk); if (chunk._saved) retain(chunk); chunkObserver.observe(chunk); }
+    });
+    panel.querySelectorAll('.diff-file-card[data-diff-lazy-url], .diff-file-slot[data-diff-lazy-url]').forEach(function(card) {
      if (observed.has(card)) return;
      observed.add(card); loadObserver.observe(card);
     });
@@ -216,10 +455,16 @@ templ diffViewerPerformanceScript() {
     });
     pump();
    }
-   return {refresh:refresh, destroy:function() {
+   return {refresh:refresh, restoreAnchor:restoreAnchor, cancelAnchor:cancelAnchor, destroy:function() {
     stopped = true;
     if (toolbarObserver) toolbarObserver.disconnect();
+    cancelAnchor();
+    ['wheel','touchstart','pointerdown','keydown'].forEach(function(type) { scroller.removeEventListener(type, cancelAnchorForInput); });
+    interactionObserver.disconnect();
+    document.removeEventListener('selectionchange', reconsiderProtected);
+    viewer.removeEventListener('focusout', reconsiderProtected);
     loadObserver.disconnect(); stickyObserver.disconnect();
+    chunkObserver.disconnect(); chunks.clear(); retained.length = 0;
     pending.forEach(function(abort) { abort.abort(); });
     visible.clear(); observed.clear(); headers.clear();
    }};

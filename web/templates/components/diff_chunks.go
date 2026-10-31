@@ -1,0 +1,216 @@
+package components
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+const diffChunkRows = 200
+
+const (
+	maxDiffFileLines = 50000
+	maxDiffFileBytes = 5 * 1024 * 1024
+)
+
+// DiffFileTooLarge reports files that are listed but never parsed into chunks.
+func DiffFileTooLarge(file DiffFile) bool {
+	lines, bytes := 0, 0
+	for _, hunk := range file.Hunks {
+		lines += len(hunk.Lines)
+		for _, line := range hunk.Lines {
+			bytes += len(line.Content)
+		}
+		if lines > maxDiffFileLines || bytes > maxDiffFileBytes {
+			return true
+		}
+	}
+	return false
+}
+
+// DiffCodeRevision identifies only code; review mutations cannot invalidate chunk URLs.
+func DiffCodeRevision(file DiffFile) string {
+	return DiffFileRevision(file, nil)
+}
+
+// File revisions include review annotations so unchanged cards can survive refreshes.
+func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
+	return diffFileRevision(file, comments, DiffFileTooLarge(file))
+}
+
+func diffFileRevision(file DiffFile, comments []models.ReviewComment, tooLarge bool) string {
+	relevant := make([]models.ReviewComment, 0)
+	for _, comment := range comments {
+		if comment.FilePath == file.Path {
+			relevant = append(relevant, comment)
+		}
+	}
+	if tooLarge {
+		return streamedDiffFileRevision(file, relevant)
+	}
+	data, _ := json.Marshal(struct {
+		File     DiffFile
+		Comments []models.ReviewComment
+	}{file, relevant})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+// Oversized files are hashed line by line so a page load never builds a JSON copy of them.
+func streamedDiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
+	h := sha256.New()
+	header, _ := json.Marshal(struct {
+		Path, OldPath, Status string
+		IsBinary              bool
+		SimilarityIndex       int
+		Comments              []models.ReviewComment
+	}{file.Path, file.OldPath, file.Status, file.IsBinary, file.SimilarityIndex, comments})
+	h.Write(header)
+	for _, hunk := range file.Hunks {
+		fmt.Fprintf(h, "\x00h%d:%s", len(hunk.Header), hunk.Header)
+		for _, line := range hunk.Lines {
+			fmt.Fprintf(h, "\x00%s:%d:%d:%d:", line.Type, line.OldNum, line.NewNum, len(line.Content))
+			io.WriteString(h, line.Content)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func progressiveDiffMetas(files []DiffFile, comments []models.ReviewComment) []DiffFileRenderMeta {
+	result := make([]DiffFileRenderMeta, 0, len(files))
+	for index, file := range files {
+		tooLarge := DiffFileTooLarge(file)
+		result = append(result, DiffFileRenderMeta{
+			Index:        index,
+			File:         file,
+			Revision:     diffFileRevision(file, comments, tooLarge),
+			CodeRevision: diffFileRevision(file, nil, tooLarge),
+			TooLarge:     tooLarge,
+		})
+	}
+	return result
+}
+
+// DiffFileChunks keeps split pairs together, even when one replacement block
+// spans several pages. Original line numbers remain the review identities.
+func DiffFileChunks(file DiffFile, view string) []DiffFile {
+	chunks := make([]DiffFile, 0)
+	current := file
+	current.Hunks = nil
+	rows, bytes := 0, 0
+	flush := func() {
+		if len(current.Hunks) > 0 {
+			chunks = append(chunks, current)
+			current.Hunks = nil
+			rows, bytes = 0, 0
+		}
+	}
+	for _, hunk := range file.Hunks {
+		var units [][]DiffLine
+		var pairs []SplitPair
+		if view == "split" {
+			pairs = buildSplitLines(hunk.Lines)
+			for _, pair := range pairs {
+				var lines []DiffLine
+				if pair.Left.Type == "ctx" {
+					lines = append(lines, pair.Left)
+				} else {
+					if pair.Left.Type != "empty" {
+						lines = append(lines, pair.Left)
+					}
+					if pair.Right.Type != "empty" {
+						lines = append(lines, pair.Right)
+					}
+				}
+				units = append(units, lines)
+			}
+		} else {
+			for _, line := range hunk.Lines {
+				units = append(units, []DiffLine{line})
+			}
+		}
+		part := DiffHunk{Header: hunk.Header}
+		appendPart := func() {
+			if len(part.Lines) > 0 {
+				current.Hunks = append(current.Hunks, part)
+				part = DiffHunk{Header: hunk.Header}
+			}
+		}
+		for index, unit := range units {
+			size := 0
+			for _, line := range unit {
+				size += len(line.Content)
+			}
+			if rows >= diffChunkRows || (bytes+size > 64*1024 && rows > 0) {
+				appendPart()
+				flush()
+			}
+			part.Lines = append(part.Lines, unit...)
+			if view == "split" {
+				part.SplitPairs = append(part.SplitPairs, pairs[index])
+			}
+			rows++
+			bytes += size
+		}
+		appendPart()
+	}
+	flush()
+	if len(chunks) == 0 {
+		chunks = append(chunks, file)
+	}
+	return chunks
+}
+
+// Table rows per chunk, including hunk headers, so unloaded chunks reserve their own height.
+func diffChunkRowCounts(chunks []DiffFile, view string) string {
+	counts := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		rows := 0
+		for _, hunk := range chunk.Hunks {
+			rows++
+			if view == "split" {
+				rows += len(splitHunkLines(hunk))
+			} else {
+				rows += len(hunk.Lines)
+			}
+		}
+		counts[i] = strconv.Itoa(rows)
+	}
+	return strings.Join(counts, ",")
+}
+
+// Preserve exact alignment when a chunk cuts through unequal replacement runs.
+func splitHunkLines(hunk DiffHunk) []SplitPair {
+	if hunk.SplitPairs != nil {
+		return hunk.SplitPairs
+	}
+	return buildSplitLines(hunk.Lines)
+}
+
+// DiffChunkContainingLine resolves a reading anchor in the destination layout.
+// Prefer the new side, matching the browser's row restoration, then the old side
+// for deleted lines or anchors whose new side is absent.
+func DiffChunkContainingLine(chunks []DiffFile, oldLine, newLine int) (int, bool) {
+	for _, side := range []struct {
+		line int
+		new  bool
+	}{{newLine, true}, {oldLine, false}} {
+		if side.line <= 0 {
+			continue
+		}
+		for index, chunk := range chunks {
+			for _, hunk := range chunk.Hunks {
+				for _, line := range hunk.Lines {
+					if (side.new && line.NewNum == side.line) || (!side.new && line.OldNum == side.line) {
+						return index, true
+					}
+				}
+			}
+		}
+	}
+	return 0, false
+}

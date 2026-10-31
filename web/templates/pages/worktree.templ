@@ -164,7 +164,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 				}
 			</style>
 			// Diff viewer
-			@components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable))
+			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable))
 		</div>
 	</div>
 }

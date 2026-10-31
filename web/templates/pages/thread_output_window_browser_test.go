@@ -172,6 +172,10 @@ func TestBrowserFunctional_ByteWindowToolStateAndTouch(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=state-project", "byte-state", func(b *composerFocusCDP) {
 				b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1200, "height": 1100, "deviceScaleFactor": 1, "mobile": false}, nil)
+				b.waitFor("display prefs ready", `String(!!window.openVibelyDisplay && document.readyState==='complete')`, "true")
+				b.evaluate(`localStorage.setItem('openvibely.outputDetail','full');'full'`)
+				b.call("Page.navigate", map[string]any{"url": server.URL + "/chat?project_id=state-project&full=1"}, nil)
+				b.waitFor("full output mode", `String(document.readyState==='complete' && location.search.includes('full=1') && openVibelyDisplay.get('output')==='full')`, "true")
 				b.waitFor("tool ready", `String(!!document.querySelector('.stream-tool-output-toggle') && document.getElementById('chat-messages').dataset.transcriptHydrating!=='true')`, "true")
 				if touch {
 					b.waitFor("short window cannot scroll", `String(document.getElementById('chat-messages').scrollHeight<=document.getElementById('chat-messages').clientHeight)`, "true")

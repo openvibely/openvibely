@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -27,6 +28,24 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		}
 	}
 	var cleared atomic.Bool
+	var edited atomic.Bool
+	var many atomic.Bool
+	largeDiff := diff
+	for i := 0; i < 350; i++ {
+		largeDiff += fmt.Sprintf("diff --git a/extra%d.txt b/extra%d.txt\n--- a/extra%d.txt\n+++ b/extra%d.txt\n@@ -0,0 +1 @@\n+extra file %d\n", i, i, i, i, i)
+	}
+	currentDiff := func() string {
+		if cleared.Load() {
+			return ""
+		}
+		if many.Load() {
+			return largeDiff
+		}
+		if edited.Load() {
+			return strings.ReplaceAll(diff, "+src/nested/second.go line 0", "+updated second file")
+		}
+		return diff
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -62,16 +81,25 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		case "/tasks/explorer-task/thread":
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
-			currentDiff := diff
-			if cleared.Load() {
-				currentDiff = ""
-			}
-			if err := TaskChangesWorktreeContent(currentDiff, task, nil, nil, nil, false, false).Render(r.Context(), w); err != nil {
+			current := currentDiff()
+			if err := TaskChangesWorktreeContent(current, task, nil, nil, nil, false, false).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/file":
 			index, _ := strconv.Atoi(r.URL.Query().Get("file_index"))
-			if err := components.LoadDiffFileCard(diff, index, r.URL.Query().Get("view"), task.ID, nil, true).Render(r.Context(), w); err != nil {
+			files := components.ParseDiffOutput(currentDiff())
+			if index < 0 || index >= len(files) {
+				http.Error(w, "changed", 409)
+				return
+			}
+			view := r.URL.Query().Get("view")
+			chunk, _ := strconv.Atoi(r.URL.Query().Get("chunk"))
+			chunks := components.DiffFileChunks(files[index], view)
+			if chunk < 0 || chunk >= len(chunks) {
+				http.Error(w, "invalid chunk", 400)
+				return
+			}
+			if err := components.DiffChunk(chunks, index, view, task.ID, nil, chunk, components.DiffFileRevision(files[index], nil)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/summary":
@@ -102,6 +130,30 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("existing task search stays open and retains query", `String(!document.documentElement.classList.contains('changes-explorer-active') && document.activeElement===document.getElementById('task-list-search-input') && document.getElementById('task-list-search-input').getBoundingClientRect().height>0 && document.getElementById('task-list-search-input').value==='Explore')`, "true")
 		b.evaluate(`document.getElementById('task-list-search-toggle').click();document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'return to changes'`)
 		b.waitFor("all inline file cards remain visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && ['diff-file-0','diff-file-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0))`, "true")
+		b.evaluate(`window.retainedDiffBody=document.getElementById('diff-body-0');window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;'capture body'`)
+		b.evaluate(`openInlineCommentForm(document.querySelector('#diff-file-0 tr.diff-review-line'));document.querySelector('.review-comment-form textarea').value='Keep review draft';'open draft'`)
+		edited.Store(true)
+		b.evaluate(`_updateDiffViewer('final');_updateDiffViewer('final');'final update during draft'`)
+		b.waitFor("final update retained without disturbing draft", `String(document.getElementById('changes-content')._diffRefreshState.dirty && !document.getElementById('changes-content')._diffRefreshState.pending && document.getElementById('diff-viewer').dataset.diffRevision===window.beforeDiffRevision && document.querySelector('.review-comment-form textarea').value==='Keep review draft')`, "true")
+		b.evaluate(`document.querySelector('.review-cancel-btn').click();'cancel draft'`)
+		b.waitFor("final update resumes after cancel", `String(document.getElementById('diff-viewer').dataset.diffRevision!==window.beforeDiffRevision && !document.getElementById('changes-content')._diffRefreshState.cleanup)`, "true")
+		b.waitFor("unchanged body preserved", `String(document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
+		// Hold a response while a draft opens, then save it without another live event.
+		b.evaluate(`window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;window.originalDiffFetch=window.fetch;window.fetch=function(url,opts){if(url==='/tasks/explorer-task/changes'){window.fetch=window.originalDiffFetch;return window.originalDiffFetch(url,opts).then(resp=>new Promise(resolve=>{window.releaseDiffResponse=()=>resolve(resp);}));}return window.originalDiffFetch(url,opts);};'hold next response'`)
+		edited.Store(false)
+		b.evaluate(`_updateDiffViewer('final');'request final diff'`)
+		b.waitFor("response held", `String(typeof window.releaseDiffResponse==='function')`, "true")
+		b.evaluate(`openInlineCommentForm(document.querySelector('#diff-file-0 tr.diff-review-line'));document.querySelector('.review-comment-form textarea').value='Save review draft';window.releaseDiffResponse();'draft opened during fetch'`)
+		b.waitFor("response deferred until save", `String(document.getElementById('changes-content')._diffRefreshState.dirty && !document.getElementById('changes-content')._diffRefreshState.pending && document.getElementById('diff-viewer').dataset.diffRevision===window.beforeDiffRevision)`, "true")
+		b.evaluate(`document.querySelector('.review-submit-btn').click();'save draft'`)
+		b.waitFor("final update resumes after save", `String(!document.querySelector('.review-comment-form') && document.getElementById('diff-viewer').dataset.diffRevision!==window.beforeDiffRevision && !document.getElementById('changes-content')._diffRefreshState.cleanup)`, "true")
+		// A final event during an ordinary in-flight refresh must also be replayed.
+		b.evaluate(`window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;delete window.releaseDiffResponse;window.fetch=function(url,opts){if(url==='/tasks/explorer-task/changes'){window.fetch=window.originalDiffFetch;return window.originalDiffFetch(url,opts).then(resp=>new Promise(resolve=>{window.releaseDiffResponse=()=>resolve(resp);}));}return window.originalDiffFetch(url,opts);};_updateDiffViewer();'hold unchanged response'`)
+		b.waitFor("unchanged response held", `String(typeof window.releaseDiffResponse==='function')`, "true")
+		edited.Store(true)
+		b.evaluate(`_updateDiffViewer('final');window.releaseDiffResponse();'final event during fetch'`)
+		b.waitFor("in-flight final event resumes", `String(document.getElementById('diff-viewer').dataset.diffRevision!==window.beforeDiffRevision && !document.getElementById('changes-content')._diffRefreshState.pending)`, "true")
+
 		b.evaluate(`toggleAllDiffFiles(false);document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'expand and navigate'`)
 		b.waitFor("second lazy diff loaded", `String(document.getElementById('diff-file-0').getBoundingClientRect().height>0 && document.getElementById('diff-file-1').getBoundingClientRect().height>0 && !!document.querySelector('#diff-file-1 .diff-line-content') && document.getElementById('diff-file-1').getBoundingClientRect().height>2000)`, "true")
 		b.evaluate(`document.getElementById('tab-changes').scrollTop=900;'scroll'`)
@@ -114,8 +166,14 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("wrapped toolbar updates sticky offset", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'),header=document.querySelector('#diff-file-1 .diff-file-header');return bar.getBoundingClientRect().height>60 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2})())`, "true")
 		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='';'restore changes width'`)
 		b.waitFor("toolbar returns to one row", `String((()=>{const height=document.querySelector('[data-diff-toolbar]').getBoundingClientRect().height;return height<60 && parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height'))===Math.ceil(height)})())`, "true")
+		b.evaluate(`document.querySelector('[data-diff-toolbar]').style.height='68.25px';'fractional toolbar height'`)
+		b.waitFor("fractional toolbar offset stored", `String(parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height'))===Math.ceil(document.querySelector('[data-diff-toolbar]').getBoundingClientRect().height))`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/first.go"]').click();'select loaded file'`)
-		b.waitFor("loaded file starts at header", `String(!document.getElementById('diff-file-0').hidden && Math.abs(document.getElementById('diff-file-0').getBoundingClientRect().top-document.getElementById('tab-changes').getBoundingClientRect().top-parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height')))<2)`, "true")
+		b.waitFor("loaded file starts at header", `String(!document.getElementById('diff-file-0').hidden && Math.abs(document.getElementById('diff-file-0').getBoundingClientRect().top-document.getElementById('tab-changes').getBoundingClientRect().top-parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height')))<0.51)`, "true")
+		b.evaluate(`document.getElementById('tab-changes').scrollTop+=500;'scroll inside first file'`)
+		b.waitFor("first header pinned", `String(document.getElementById('diff-file-0').getBoundingClientRect().top < document.getElementById('tab-changes').getBoundingClientRect().top)`, "true")
+		b.evaluate(`window.collapseHeaderTop=document.querySelector('#diff-file-0 .diff-file-header').getBoundingClientRect().top;document.querySelector('#diff-file-0 .diff-file-header').click();'collapse pinned first file'`)
+		b.waitFor("collapsed header stays in place", `String(document.querySelector('#diff-file-0 .diff-file-header').hasAttribute('data-collapsed') && document.getElementById('diff-body-0').getBoundingClientRect().height<1 && Math.abs(document.querySelector('#diff-file-0 .diff-file-header').getBoundingClientRect().top-window.collapseHeaderTop)<1 || JSON.stringify({before:window.collapseHeaderTop,after:document.querySelector('#diff-file-0 .diff-file-header').getBoundingClientRect().top,height:document.getElementById('diff-body-0').getBoundingClientRect().height,scroll:document.getElementById('tab-changes').scrollTop}))`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'second'`)
 		b.evaluate(`switchDiffView('split',false);'split'`)
 		b.waitFor("split selection preserved", `String(['diff-file-split-0','diff-file-split-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0) && document.getElementById('diff-file-split-1').textContent.includes('second'))`, "true")
@@ -172,5 +230,19 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		cleared.Store(false)
 		b.evaluate(`_updateDiffViewer('');'refresh files'`)
 		b.waitFor("live refresh repopulates explorer", `String(document.querySelectorAll('[data-explorer-path]').length===2 && !document.getElementById('diff-file-0').hidden && !document.getElementById('diff-file-1').hidden)`, "true")
+		many.Store(true)
+		b.evaluate(`_updateDiffViewer('');'many files'`)
+		b.waitFor("explorer first page", `String(document.querySelector('#diff-viewer').dataset.fileCount==='352' && document.querySelectorAll('[data-explorer-path]').length===100)`, "true")
+		b.waitFor("distant files remain lightweight", `String(document.querySelectorAll('#diff-viewer .diff-file-card').length<30 && document.querySelectorAll('#diff-viewer .diff-file-slot').length>300)`, "true")
+		b.evaluate(`Array.from(document.querySelectorAll('.changes-explorer button')).find(el=>el.textContent==='Show more files').click();'next page'`)
+		b.waitFor("explorer next page", `String(document.querySelectorAll('[data-explorer-path]').length===200)`, "true")
+		b.evaluate(`var input=document.querySelector('.explorer-search');input.value='extra349';input.dispatchEvent(new Event('input'));'search unloaded file'`)
+		b.waitFor("search beyond old limit", `String(document.querySelectorAll('[data-explorer-path]').length===1 && !!document.querySelector('[data-explorer-path="extra349.txt"]'))`, "true")
+		b.evaluate(`document.querySelector('[data-explorer-path="extra349.txt"]').click();'open distant file'`)
+		b.waitFor("distant file loads", `String(!!document.querySelector('#diff-file-351 .diff-line-content, #diff-file-split-351 .diff-line-content'))`, "true")
+		b.waitFor("navigation leaves intervening files unloaded", `String(document.querySelectorAll('#diff-viewer .diff-file-card').length<40 && document.querySelectorAll('#diff-viewer .diff-file-slot').length>300)`, "true")
+		b.evaluate(`toggleAllDiffFiles(false);switchDiffView('inline',false);'collapse across layouts'`)
+		b.waitFor("unvisited files remain collapsed", `String(document.getElementById('diff-file-200').hasAttribute('data-collapsed') && !document.querySelector('#diff-file-200 .diff-line-content'))`, "true")
+
 	})
 }

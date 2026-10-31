@@ -893,20 +893,22 @@ func expectedTaskBranchName(task *models.Task) string {
 	return fmt.Sprintf("task/%s-%s", task.ID[:8], slug)
 }
 
-func gitRefExists(repoDir, ref string) bool {
+func gitRefExists(ctx context.Context, repoDir, ref string) bool {
 	if repoDir == "" || ref == "" {
 		return false
 	}
-	cmd := exec.Command("git", "rev-parse", "--verify", ref)
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", ref)
+	cmd.WaitDelay = time.Second
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
 }
 
-func gitBranchHasCommitsBeyondTarget(repoDir, targetRef, branchRef string) bool {
+func gitBranchHasCommitsBeyondTarget(ctx context.Context, repoDir, targetRef, branchRef string) bool {
 	if repoDir == "" || targetRef == "" || branchRef == "" {
 		return false
 	}
-	cmd := exec.Command("git", "rev-list", "--count", fmt.Sprintf("%s..%s", targetRef, branchRef))
+	cmd := exec.CommandContext(ctx, "git", "rev-list", "--count", fmt.Sprintf("%s..%s", targetRef, branchRef))
+	cmd.WaitDelay = time.Second
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -915,11 +917,12 @@ func gitBranchHasCommitsBeyondTarget(repoDir, targetRef, branchRef string) bool 
 	return strings.TrimSpace(string(out)) != "0"
 }
 
-func worktreeCurrentBranch(worktreePath string) string {
+func worktreeCurrentBranch(ctx context.Context, worktreePath string) string {
 	if worktreePath == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.WaitDelay = time.Second
 	cmd.Dir = worktreePath
 	out, err := cmd.Output()
 	if err != nil {
@@ -944,7 +947,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	worktreePath := task.WorktreePath
 	if worktreePath == "" && task.ID != "" {
 		candidate := filepath.Join(project.RepoPath, ".worktrees", fmt.Sprintf("task_%s", task.ID))
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() && service.IsGitRepo(candidate) {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() && service.IsGitRepoContext(ctx, candidate) {
 			worktreePath = candidate
 			task.WorktreePath = candidate
 			changed = true
@@ -957,7 +960,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 		// lineage can replace the stored branch while retaining/replacing the path;
 		// using the stale DB branch makes headers, file stats, and lazy file indices
 		// disagree with the live target-to-working-tree diff.
-		if currentBranch := worktreeCurrentBranch(worktreePath); currentBranch != "" && currentBranch != worktreeBranch {
+		if currentBranch := worktreeCurrentBranch(ctx, worktreePath); currentBranch != "" && currentBranch != worktreeBranch {
 			if worktreeBranch != "" {
 				applog.Infof("[task-changes] recovering task=%s worktree branch metadata stored=%s current=%s", task.ID, worktreeBranch, currentBranch)
 			}
@@ -966,7 +969,7 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	}
 	if worktreeBranch == "" {
 		candidate := expectedTaskBranchName(task)
-		if gitRefExists(project.RepoPath, candidate) {
+		if gitRefExists(ctx, project.RepoPath, candidate) {
 			worktreeBranch = candidate
 		}
 	}
@@ -986,13 +989,13 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	}
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
-		targetBranch = service.GetDefaultBranch(project.RepoPath)
+		targetBranch = service.GetDefaultBranchContext(ctx, project.RepoPath)
 	}
 	if targetBranch == "" {
 		return changed
 	}
 
-	if task.MergeStatus == models.MergeStatusMerged && gitBranchHasCommitsBeyondTarget(project.RepoPath, targetBranch, task.WorktreeBranch) {
+	if task.MergeStatus == models.MergeStatusMerged && gitBranchHasCommitsBeyondTarget(ctx, project.RepoPath, targetBranch, task.WorktreeBranch) {
 		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
 			applog.Infof("[handler] recoverTaskWorktreeState: failed to reset stale merge_status for task %s: %v", task.ID, err)
 		} else {
@@ -1003,11 +1006,11 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	return changed
 }
 
-func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
-	return h.taskRebaseAvailableWithLocks(task, project, branchAlreadyMerged, nil)
+func (h *Handler) taskRebaseAvailable(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
+	return h.taskRebaseAvailableWithLocks(ctx, task, project, branchAlreadyMerged, nil)
 }
 
-func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *models.Project, branchAlreadyMerged bool, worktreeLocks map[string]bool) bool {
+func (h *Handler) taskRebaseAvailableWithLocks(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool, worktreeLocks map[string]bool) bool {
 	if task == nil || project == nil || project.RepoPath == "" || task.WorktreeBranch == "" || task.WorktreePath == "" {
 		return false
 	}
@@ -1017,7 +1020,7 @@ func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *model
 	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false
 	}
-	if status, err := service.GitStatusPorcelain(task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
+	if status, err := service.GitStatusPorcelain(ctx, task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
 		return false
 	}
 	targetBranch := task.MergeTargetBranch
@@ -1030,7 +1033,7 @@ func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *model
 	return service.IsBranchDivergedFromTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
-func taskBranchAlreadyMergedForProject(task *models.Task, project *models.Project) bool {
+func taskBranchAlreadyMergedForProject(ctx context.Context, task *models.Task, project *models.Project) bool {
 	if task == nil || task.WorktreeBranch == "" || project == nil || project.RepoPath == "" {
 		return false
 	}
@@ -1038,19 +1041,19 @@ func taskBranchAlreadyMergedForProject(task *models.Task, project *models.Projec
 		return false
 	}
 	if task.WorktreePath != "" {
-		if statusOut, statusErr := service.GitStatusPorcelain(task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
+		if statusOut, statusErr := service.GitStatusPorcelain(ctx, task.WorktreePath); statusErr == nil && strings.TrimSpace(statusOut) != "" {
 			return false
 		}
 	}
 
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
-		targetBranch = service.GetDefaultBranch(project.RepoPath)
+		targetBranch = service.GetDefaultBranchContext(ctx, project.RepoPath)
 	}
 	if targetBranch == "" {
 		return false
 	}
-	return service.IsBranchTipMergedInto(project.RepoPath, task.WorktreeBranch, targetBranch)
+	return service.IsBranchTipMergedInto(ctx, project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
 func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {
@@ -1062,7 +1065,7 @@ func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models
 		return false
 	}
 	h.recoverTaskWorktreeState(ctx, task, project)
-	return taskBranchAlreadyMergedForProject(task, project)
+	return taskBranchAlreadyMergedForProject(ctx, task, project)
 }
 
 type taskMergeActionState struct {
@@ -1085,8 +1088,8 @@ func (h *Handler) resolveTaskMergeActionStateForProjectWithLocks(ctx context.Con
 		return state
 	}
 	state.UseWorktreeContent = true
-	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(task, project)
-	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(task, project, state.BranchAlreadyMerged, worktreeLocks)
+	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(ctx, task, project)
+	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(ctx, task, project, state.BranchAlreadyMerged, worktreeLocks)
 	return state
 }
 
@@ -1168,11 +1171,11 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 		result.Reason = fmt.Sprintf("task status %s is not mergeable", task.Status)
 		return result
 	}
-	if task.WorktreeBranch == "" || !gitRefExists(project.RepoPath, task.WorktreeBranch) {
+	if task.WorktreeBranch == "" || !gitRefExists(ctx, project.RepoPath, task.WorktreeBranch) {
 		result.Reason = "task branch does not exist"
 		return result
 	}
-	if targetBranch == "" || !gitRefExists(project.RepoPath, targetBranch) {
+	if targetBranch == "" || !gitRefExists(ctx, project.RepoPath, targetBranch) {
 		result.Reason = "target branch does not exist"
 		return result
 	}
@@ -1301,7 +1304,7 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 
 	targetBranch := task.MergeTargetBranch
 	if targetBranch == "" {
-		targetBranch = service.GetDefaultBranch(project.RepoPath)
+		targetBranch = service.GetDefaultBranchContext(ctx, project.RepoPath)
 	}
 	if targetBranch == "" {
 		return components.DiffFileRenderMeta{}, false
@@ -1311,15 +1314,18 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 	var diffOutput string
 	var ok bool
 	if useLiveUncommitted {
-		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(ctx, project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
 	} else {
-		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(ctx, project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
+	}
+	if ctx.Err() != nil {
+		return components.DiffFileRenderMeta{}, false
 	}
 	if _, err := os.Stat(task.WorktreePath); os.IsNotExist(err) {
 		return preservedMeta()
 	}
 	if !ok {
-		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
+		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMergedContext(ctx, project.RepoPath, task.WorktreeBranch, targetBranch)) {
 			return preservedMeta()
 		}
 		return components.DiffFileRenderMeta{}, false
@@ -1401,7 +1407,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 	return render(c, http.StatusOK, pages.TaskChangesContentWithView(state.DiffOutput, task.ID, reviewComments, diffView))
 }
 
-// GetTaskChangesFile returns a single diff file card for per-file lazy loading.
+// GetTaskChangesFile returns one row chunk of a diff file.
 func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 	taskID := c.Param("taskId")
 
@@ -1423,17 +1429,58 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		view = "inline"
 	}
 
-	reviewMode := strings.EqualFold(c.QueryParam("review"), "true")
-	var reviewComments []models.ReviewComment
-	if reviewMode {
-		reviewComments = h.loadTaskReviewComments(c.Request().Context(), taskID)
+	ctx := c.Request().Context()
+	expectedPath, expectedRevision := c.QueryParam("file_path"), c.QueryParam("revision")
+	chunk, err := strconv.Atoi(c.QueryParam("chunk"))
+	if err != nil || chunk < 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid chunk")
 	}
-
-	meta, exists := h.resolveTaskChangesFileMeta(c.Request().Context(), task, fileIndex)
-	if expectedPath := c.QueryParam("file_path"); expectedPath != "" && (!exists || meta.File.Path != expectedPath) {
+	oldLine, newLine := 0, 0
+	for name, value := range map[string]*int{"anchor_old_line": &oldLine, "anchor_new_line": &newLine} {
+		if raw := c.QueryParam(name); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 0 {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid line anchor")
+			}
+			*value = parsed
+		}
+	}
+	prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, expectedRevision, func(loadCtx context.Context) (*preparedDiffChunks, error) {
+		meta, exists := h.resolveTaskChangesFileMeta(loadCtx, task, fileIndex)
+		if err := loadCtx.Err(); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
+		}
+		revision := components.DiffCodeRevision(meta.File)
+		if expectedRevision != "" && expectedRevision != revision {
+			return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
+		}
+		if components.DiffFileTooLarge(meta.File) {
+			return nil, echo.NewHTTPError(http.StatusRequestEntityTooLarge, "diff file too large to display")
+		}
+		return prepareDiffChunks(meta, revision), nil
+	})
+	if err != nil {
+		return err
+	}
+	if expectedPath != "" && expectedPath != prepared.path {
 		return echo.NewHTTPError(http.StatusConflict, "diff files changed; reload the Changes view")
 	}
-	return render(c, http.StatusOK, components.LoadDiffFileCardMeta(meta, exists, view, taskID, reviewComments, reviewMode))
+	chunks := prepared.inline
+	if view == "split" {
+		chunks = prepared.split
+	}
+	if index, found := components.DiffChunkContainingLine(chunks, oldLine, newLine); found {
+		chunk = index
+	}
+	if chunk >= len(chunks) {
+		return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
+	}
+	// Code snapshots are cached; annotations are always read fresh.
+	comments := h.loadTaskReviewComments(ctx, taskID)
+	return render(c, http.StatusOK, components.DiffChunk(chunks, prepared.index, view, taskID, comments, chunk, prepared.revision))
 }
 
 // GetTaskChangesLive returns only the diff viewer fragment for realtime updates.
@@ -1469,7 +1516,7 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 			return err
 		}
 		diffView := h.uiDiffViewPreference(c.Request().Context())
-		if err := components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView).Render(ctx, w); err != nil {
+		if err := components.DiffViewer(diffOutput, task.ID, reviewComments, diffView).Render(ctx, w); err != nil {
 			return err
 		}
 		_, err := io.WriteString(w, `</div>`)
