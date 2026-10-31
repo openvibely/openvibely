@@ -1736,7 +1736,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					// File changes are consumed from the shared sidebar live stream.
 				// Keep per-task filtering in-page to avoid creating another EventSource.
 				var _fileChangesListening = false;
-				var _fileChangesUpdatePending = false;
 				var _fileChangesTaskId = null;
 
 				function _isChangesTabActive() {
@@ -1759,6 +1758,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			}
 
 			function _startFileChangesSSE(taskId) {
+                var content = document.getElementById("changes-content");
+                if (content && content._diffRefreshState && content._diffRefreshState.dirty) _updateDiffViewer();
 				if (!taskId) return;
 				if (_fileChangesListening && _fileChangesTaskId === taskId) return;
 				_fileChangesTaskId = taskId;
@@ -1794,15 +1795,52 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					return (splitBtn && splitBtn.classList.contains('btn-active')) ? 'split' : 'inline';
 				}
 
+                function _diffRefreshBlocked(content) {
+                    var selection = window.getSelection();
+                    return content.querySelector('.review-comment-form') ||
+                        (selection && !selection.isCollapsed && selection.containsNode(content, true));
+                }
+
+                function _watchDeferredDiffRefresh(content, state) {
+                    if (state.cleanup) return;
+                    function resume() {
+                        if (!content.isConnected) { state.cleanup(); return; }
+                        if (state.dirty && !state.pending && !_diffRefreshBlocked(content) && _isChangesTabActive()) {
+                            state.cleanup();
+                            _updateDiffViewer();
+                        }
+                    }
+                    var observer = new MutationObserver(resume);
+                    observer.observe(content, {childList:true, subtree:true});
+                    function cleanupElement(event) {
+                        var element = event.detail && event.detail.elt;
+                        if (element && (element === content || element.contains(content))) state.cleanup();
+                    }
+                    state.cleanup = function() {
+                        observer.disconnect();
+                        document.removeEventListener('selectionchange', resume);
+                        document.body.removeEventListener('htmx:beforeCleanupElement', cleanupElement);
+                        state.cleanup = null;
+                    };
+                    document.addEventListener('selectionchange', resume);
+                    document.body.addEventListener('htmx:beforeCleanupElement', cleanupElement);
+                }
+
 				function _updateDiffViewer(diffOutput) {
 					var changesContent = document.getElementById('changes-content');
 					if (!changesContent) return;
 					if (!_isChangesTabActive()) return;
-                    if (changesContent.querySelector('.review-comment-form')) return;
-
-					// Debounce: skip if an update is already in flight
-					if (_fileChangesUpdatePending) return;
-					_fileChangesUpdatePending = true;
+                    var state = changesContent._diffRefreshState || (changesContent._diffRefreshState = {pending:false, dirty:false});
+                    state.dirty = true;
+                    if (_diffRefreshBlocked(changesContent)) {
+                        _watchDeferredDiffRefresh(changesContent, state);
+                        return;
+                    }
+                    // Coalesce updates during a request, but do not lose a final event.
+                    if (state.pending) return;
+                    if (state.cleanup) state.cleanup();
+                    state.dirty = false;
+                    state.pending = true;
 
 				var taskId = changesContent.dataset.taskId;
 				if (taskId) {
@@ -1816,8 +1854,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						if (!resp.ok) throw new Error('HTTP ' + resp.status);
 						return resp.text();
 					}).then(function(html) {
-						_fileChangesUpdatePending = false;
-
 						if (!changesContent.isConnected || !_isChangesTabActive()) return;
 						// Parse the response in a detached element to compute fingerprint
 						// without touching the live DOM at all.
@@ -1829,11 +1865,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							// Diff unchanged — no DOM mutation, no scroll disruption.
 							return;
 						}
-                        // A response arriving while the reader starts a draft must
-                        // not remove the editor. The next refresh retries it.
-                        var selection = window.getSelection();
-                        if (changesContent.querySelector('.review-comment-form') ||
-                            (selection && !selection.isCollapsed && selection.containsNode(changesContent, true))) return;
+                        // A draft may have opened after the request began. Fetch
+                        // fresh content after it closes instead of applying old HTML.
+                        if (_diffRefreshBlocked(changesContent)) {
+                            state.dirty = true;
+                            _watchDeferredDiffRefresh(changesContent, state);
+                            return;
+                        }
 						_lastDiffFingerprint = newFp;
 
 						// Content changed — apply the swap with UI state preservation.
@@ -1865,12 +1903,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									// Restore scroll position so the user stays where they were.
 								window.scrollTo(scrollX, scrollY);
 							});
-					}).catch(function() {
-						_fileChangesUpdatePending = false;
-					});
-				} else {
-					_fileChangesUpdatePending = false;
-				}
+                    }).catch(function() {
+                        // A later event or explicit refresh can retry network failures.
+                    }).finally(function() {
+                        state.pending = false;
+                        if (state.dirty && changesContent.isConnected && _isChangesTabActive()) _updateDiffViewer();
+                    });
+                } else {
+                    state.pending = false;
+                }
 			}
 
 				// Start SSE if changes tab is active on page load and task is running/queued
