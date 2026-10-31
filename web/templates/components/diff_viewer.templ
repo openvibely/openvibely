@@ -598,10 +598,12 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 						card = candidate;
 						return true;
 					});
-					var scroller = document.getElementById('main-content');
+					var viewer = document.getElementById('diff-viewer');
+					var scroller = card && (card.closest('#tab-changes') || document.getElementById('main-content'));
 					if (card && scroller) {
-						var cardTop = card.getBoundingClientRect().top;
-						var scrollerTop = scroller.getBoundingClientRect().top;
+						var cardTop = card.getBoundingClientRect().top + card.clientTop;
+						var toolbarHeight = viewer ? (parseFloat(viewer.style.getPropertyValue('--diff-toolbar-height')) || 0) : 0;
+						var scrollerTop = scroller.getBoundingClientRect().top + toolbarHeight;
 						if (cardTop < scrollerTop) {
 							scroller.scrollTop -= (scrollerTop - cardTop);
 						}
