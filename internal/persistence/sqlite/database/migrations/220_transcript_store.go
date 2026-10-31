@@ -13,10 +13,10 @@ import (
 )
 
 func init() {
-	goose.AddNamedMigrationContext("220_transcript_store.go", upTranscriptStore219, downTranscriptStore219)
+	goose.AddNamedMigrationContext("220_transcript_store.go", upTranscriptStore220, downTranscriptStore220)
 }
 
-const conversationItemsSchema217 = `
+const conversationItemsSchema = `
 -- One journal for provider items, display items and their incremental changes.
 -- Sequence IDs are durable reconnect cursors, not message positions.
 CREATE TABLE conversation_items (
@@ -67,7 +67,7 @@ CREATE INDEX conversation_execution_display_offset ON conversation_items(executi
 `
 
 // Must match displayBytesSQL in conversation_repo.go for put revisions.
-const displayBytesBackfill217 = `UPDATE conversation_items SET display_bytes = length(CAST(
+const displayBytesBackfill = `UPDATE conversation_items SET display_bytes = length(CAST(
     COALESCE(json_extract(payload, '$.prefix'), '') ||
     CASE WHEN json_extract(payload, '$.type') = 'tool_result' AND COALESCE(json_extract(payload, '$.encoded'), 0) = 0
         THEN replace(replace(COALESCE(json_extract(payload, '$.text'), ''), '&', '&amp;'), '[', '&#91;')
@@ -77,38 +77,38 @@ WHERE lane = 'display' AND operation = 'put'`
 
 // Goose runs the whole conversion in one transaction: malformed source data
 // rolls everything back and leaves the original tables and columns in place.
-func upConversationItems217(ctx context.Context, tx *sql.Tx) error {
-	if _, err := tx.ExecContext(ctx, conversationItemsSchema217); err != nil {
+func upConversationItems(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, conversationItemsSchema); err != nil {
 		return err
 	}
-	if err := migrateReplayItems217(ctx, tx); err != nil {
+	if err := migrateReplayItems(ctx, tx); err != nil {
 		return err
 	}
-	if err := migrateCheckpointItems217(ctx, tx); err != nil {
+	if err := migrateCheckpointItems(ctx, tx); err != nil {
 		return err
 	}
-	if err := migrateDisplayItems217(ctx, tx); err != nil {
+	if err := migrateDisplayItems(ctx, tx); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, displayBytesBackfill217)
+	_, err := tx.ExecContext(ctx, displayBytesBackfill)
 	return err
 }
 
-func downConversationItems217(ctx context.Context, tx *sql.Tx) error {
-	if err := restoreDisplayOutput217(ctx, tx); err != nil {
+func downConversationItems(ctx context.Context, tx *sql.Tx) error {
+	if err := restoreDisplayOutput(ctx, tx); err != nil {
 		return err
 	}
-	if err := restoreCheckpoints217(ctx, tx); err != nil {
+	if err := restoreCheckpoints(ctx, tx); err != nil {
 		return err
 	}
-	if err := restoreReplayMessages217(ctx, tx); err != nil {
+	if err := restoreReplayMessages(ctx, tx); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `DROP TABLE conversation_items`)
 	return err
 }
 
-func insertMigratedItem217(ctx context.Context, tx *sql.Tx, executionID, scopeType, scopeID any, r models.ConversationChange) error {
+func insertMigratedItem(ctx context.Context, tx *sql.Tx, executionID, scopeType, scopeID any, r models.ConversationChange) error {
 	result, err := tx.ExecContext(ctx, `INSERT INTO conversation_items(execution_id,checkpoint_scope_type,checkpoint_scope_id,generation,lane,item_id,position,operation,payload,mutation_id) VALUES(?,?,?,0,?,?,?,'put',?,?)`, executionID, scopeType, scopeID, r.Lane, r.ItemID, r.Position, string(r.Payload), "migration217:"+r.ItemID)
 	if err != nil {
 		return err
@@ -125,7 +125,7 @@ func insertMigratedItem217(ctx context.Context, tx *sql.Tx, executionID, scopeTy
 }
 
 // Process one frame at a time, including multi-frame steering executions.
-func migrateReplayItems217(ctx context.Context, tx *sql.Tx) error {
+func migrateReplayItems(ctx context.Context, tx *sql.Tx) error {
 	advance, finish := migrationProgress("replay frames")
 	defer finish()
 	rows, err := tx.QueryContext(ctx, `SELECT execution_id,sequence,user_content,assistant_content,reasoning_content,transcript_json FROM execution_replay_messages ORDER BY execution_id,sequence`)
@@ -157,7 +157,7 @@ func migrateReplayItems217(ctx context.Context, tx *sql.Tx) error {
 				record.ItemID = transcript.ReplayItemID(frame, int(record.Position))
 				record.Position = int64(frame)<<32 | record.Position
 			}
-			if err := insertMigratedItem217(ctx, tx, id, nil, nil, record); err != nil {
+			if err := insertMigratedItem(ctx, tx, id, nil, nil, record); err != nil {
 				return err
 			}
 		}
@@ -173,7 +173,7 @@ func migrateReplayItems217(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func migrateCheckpointItems217(ctx context.Context, tx *sql.Tx) error {
+func migrateCheckpointItems(ctx context.Context, tx *sql.Tx) error {
 	advance, finish := migrationProgress("checkpoints")
 	defer finish()
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_compaction_checkpoints ADD COLUMN native_state_exists INTEGER NOT NULL DEFAULT 0 CHECK(native_state_exists IN (0,1))`); err != nil {
@@ -208,7 +208,7 @@ func migrateCheckpointItems217(ctx context.Context, tx *sql.Tx) error {
 			return err
 		}
 		for _, r := range records {
-			if err := insertMigratedItem217(ctx, tx, nil, scope, id, r); err != nil {
+			if err := insertMigratedItem(ctx, tx, nil, scope, id, r); err != nil {
 				return err
 			}
 		}
@@ -231,7 +231,7 @@ func migrateCheckpointItems217(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func migrateDisplayItems217(ctx context.Context, tx *sql.Tx) error {
+func migrateDisplayItems(ctx context.Context, tx *sql.Tx) error {
 	advance, finish := migrationProgress("execution output")
 	defer finish()
 	rows, err := tx.QueryContext(ctx, `SELECT id,COALESCE(output,'') || COALESCE((SELECT group_concat(output,'') FROM (SELECT output FROM execution_output_chunks WHERE execution_id=executions.id ORDER BY id)),'') FROM executions WHERE COALESCE(output,'')!='' OR EXISTS(SELECT 1 FROM execution_output_chunks WHERE execution_id=executions.id)`)
@@ -249,7 +249,7 @@ func migrateDisplayItems217(ctx context.Context, tx *sql.Tx) error {
 			return fmt.Errorf("migrate display %s: %w", id, err)
 		}
 		for _, r := range records {
-			if err := insertMigratedItem217(ctx, tx, id, nil, nil, r); err != nil {
+			if err := insertMigratedItem(ctx, tx, id, nil, nil, r); err != nil {
 				return err
 			}
 		}
@@ -268,7 +268,7 @@ func migrateDisplayItems217(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func restoreDisplayOutput217(ctx context.Context, tx *sql.Tx) error {
+func restoreDisplayOutput(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE executions ADD COLUMN output TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
@@ -319,7 +319,7 @@ func restoreDisplayOutput217(ctx context.Context, tx *sql.Tx) error {
 	return flush()
 }
 
-func restoreCheckpoints217(ctx context.Context, tx *sql.Tx) error {
+func restoreCheckpoints(ctx context.Context, tx *sql.Tx) error {
 	for _, statement := range []string{`ALTER TABLE chat_compaction_checkpoints ADD COLUMN history_json TEXT NOT NULL DEFAULT '[]'`, `ALTER TABLE chat_compaction_checkpoints ADD COLUMN provider_state_json TEXT NOT NULL DEFAULT ''`} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return err
@@ -382,7 +382,7 @@ func restoreCheckpoints217(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-func restoreReplayMessages217(ctx context.Context, tx *sql.Tx) error {
+func restoreReplayMessages(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `CREATE TABLE execution_replay_messages(execution_id TEXT NOT NULL REFERENCES executions(id) ON DELETE CASCADE,sequence INTEGER NOT NULL,user_content TEXT NOT NULL DEFAULT '',assistant_content TEXT NOT NULL DEFAULT '',reasoning_content TEXT NOT NULL DEFAULT '',transcript_json TEXT NOT NULL DEFAULT '',PRIMARY KEY(execution_id,sequence))`); err != nil {
 		return err
 	}

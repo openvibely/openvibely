@@ -8,66 +8,66 @@ import (
 	"fmt"
 )
 
-func ApplyTranscriptDevelopmentStep(ctx context.Context, tx *sql.Tx, version int64, up bool) error {
+func ApplyTranscriptStep(ctx context.Context, tx *sql.Tx, version int64, up bool) error {
 	_, finish := migrationProgress(fmt.Sprintf("transcript step %d up=%t", version, up))
 	defer finish()
 	if version == 217 {
 		if up {
-			return upConversationItems217(ctx, tx)
+			return upConversationItems(ctx, tx)
 		}
-		return downConversationItems217(ctx, tx)
+		return downConversationItems(ctx, tx)
 	}
 	var statement string
 	switch version {
 	case 218:
 		if up {
-			statement = legacyUp218
+			statement = checkpointReferencesUpSQL
 		} else {
-			statement = legacyDown218
+			statement = checkpointReferencesDownSQL
 		}
 	case 219:
 		if up {
-			statement = legacyUp219
+			statement = streamTextUpSQL
 		} else {
-			statement = legacyDown219
+			statement = streamTextDownSQL
 		}
 	case 220:
 		if up {
-			statement = legacyUp220
+			statement = displayMetadataUpSQL
 		} else {
-			statement = legacyDown220
+			statement = displayMetadataDownSQL
 		}
 	case 221:
 		if up {
-			statement = legacyUp221
+			statement = checkpointRangesUpSQL
 		} else {
-			statement = legacyDown221
+			statement = checkpointRangesDownSQL
 		}
 	default:
-		return fmt.Errorf("unknown transcript development step %d", version)
+		return fmt.Errorf("unknown transcript step %d", version)
 	}
 	_, err := tx.ExecContext(ctx, statement)
 	return err
 }
-func upTranscriptStore219(ctx context.Context, tx *sql.Tx) error {
+func upTranscriptStore220(ctx context.Context, tx *sql.Tx) error {
 	for v := int64(217); v <= 221; v++ {
-		if err := ApplyTranscriptDevelopmentStep(ctx, tx, v, true); err != nil {
+		if err := ApplyTranscriptStep(ctx, tx, v, true); err != nil {
 			return err
 		}
 	}
 	_, err := tx.ExecContext(ctx, streamOffsetIndexSQL)
 	return err
 }
-func downTranscriptStore219(ctx context.Context, tx *sql.Tx) error {
+func downTranscriptStore220(ctx context.Context, tx *sql.Tx) error {
 	for v := int64(221); v >= 217; v-- {
-		if err := ApplyTranscriptDevelopmentStep(ctx, tx, v, false); err != nil {
+		if err := ApplyTranscriptStep(ctx, tx, v, false); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-const legacyUp218 = `
+const checkpointReferencesUpSQL = `
 -- New provider writes index their compact JSON so checkpoints can locate retained
 -- items without loading the execution's entire replay. Older rows safely fall
 -- back to checkpoint-owned payloads; upgrading needs no full transcript scan.
@@ -103,7 +103,7 @@ LEFT JOIN conversation_checkpoint_references ref ON ref.checkpoint_sequence=item
 LEFT JOIN conversation_items source ON source.sequence=ref.source_sequence;
 
 `
-const legacyDown218 = `
+const checkpointReferencesDownSQL = `
 UPDATE conversation_items SET payload=(SELECT source.payload FROM conversation_checkpoint_references ref
  JOIN conversation_items source ON source.sequence=ref.source_sequence WHERE ref.checkpoint_sequence=conversation_items.sequence)
 WHERE sequence IN (SELECT checkpoint_sequence FROM conversation_checkpoint_references);
@@ -114,7 +114,7 @@ DROP INDEX conversation_provider_payload;
 ALTER TABLE conversation_items DROP COLUMN payload_hash;
 `
 
-const legacyUp219 = `
+const streamTextUpSQL = `
 -- Only unfinished output lives here. Offsets are relative to this execution's
 -- pending suffix; finalized display items remain independently pageable.
 CREATE TABLE execution_stream_text (
@@ -150,7 +150,7 @@ END;
 
 
 `
-const legacyDown219 = `
+const streamTextDownSQL = `
 -- Preserve pending output as ordinary display items before dropping the buffer.
 INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id,display_bytes)
 SELECT execution_id,0,'display','stream-downgrade:' || hex(randomblob(16)),
@@ -166,7 +166,7 @@ DROP TABLE execution_stream_text;
 ALTER TABLE executions DROP COLUMN display_digest;
 `
 
-const legacyUp220 = `
+const displayMetadataUpSQL = `
 -- A batch needs to invalidate a cached projection only once.
 DROP TRIGGER display_digest_insert;
 
@@ -245,7 +245,7 @@ END;
 
 
 `
-const legacyDown220 = `
+const displayMetadataDownSQL = `
 DROP TRIGGER display_digest_insert;
 
 CREATE TRIGGER display_digest_insert AFTER INSERT ON conversation_items
@@ -293,7 +293,7 @@ DROP TRIGGER display_plan_invalidate;
 ALTER TABLE executions DROP COLUMN display_has_plan;
 `
 
-const legacyUp221 = `
+const checkpointRangesUpSQL = `
 -- Contiguous immutable provider revisions need one retained boundary, not one
 -- reference per message. Noncontiguous histories keep individual references.
 CREATE TABLE conversation_checkpoint_ranges (
@@ -324,7 +324,7 @@ END;
 
 
 `
-const legacyDown221 = `
+const checkpointRangesDownSQL = `
 -- Expand the compressed rows back to the previous per-item representation.
 DELETE FROM conversation_items WHERE checkpoint_scope_type IS NOT NULL AND lane='provider' AND operation='remove';
 
@@ -341,5 +341,5 @@ DROP TABLE conversation_checkpoint_ranges;
 DELETE FROM conversation_items WHERE item_id LIKE 'checkpoint:range:%';
 `
 
-// The unpublished transcript migration owns the offset-only covering index.
+// The transcript migration owns the offset-only covering index.
 const streamOffsetIndexSQL = `CREATE INDEX IF NOT EXISTS execution_stream_offsets ON execution_stream_text(execution_id,end_offset)`

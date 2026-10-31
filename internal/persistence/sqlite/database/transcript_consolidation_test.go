@@ -13,7 +13,7 @@ import (
 
 // Exercise individual transcript migration stages for conversion and downgrade tests.
 // They are not registered with Goose or installed on fresh databases.
-func legacyTranscriptTo(db *sql.DB, target int64) error {
+func transcriptStageTo(db *sql.DB, target int64) error {
 	version, err := goose.GetDBVersion(db)
 	if err != nil {
 		return err
@@ -32,14 +32,14 @@ func legacyTranscriptTo(db *sql.DB, target int64) error {
 	ctx := context.Background()
 	if version < target {
 		for v := version + 1; v <= target; v++ {
-			if err = migrations.ApplyTranscriptDevelopmentStep(ctx, tx, v, true); err != nil {
+			if err = migrations.ApplyTranscriptStep(ctx, tx, v, true); err != nil {
 				return err
 			}
 		}
 	}
 	if version > target {
 		for v := version; v > target; v-- {
-			if err = migrations.ApplyTranscriptDevelopmentStep(ctx, tx, v, false); err != nil {
+			if err = migrations.ApplyTranscriptStep(ctx, tx, v, false); err != nil {
 				return err
 			}
 		}
