@@ -355,7 +355,6 @@ templ diffViewerPerformanceScript() {
       } else htmx.swap(card, html, {swapStyle:'outerHTML'});
       if (restore) { anchorRestore = null; delete card._diffScrollAnchor; }
       window._restoreDiffScroll(scroll, false);
-      if (restore) delete card._diffScrollAnchor;
      }).catch(function(error) {
       if (stopped || !card.isConnected || error.name === 'AbortError' || (restore && anchorRestore !== restore)) return;
       if (restore) card._diffRetryAnchor = restore.snapshot;

@@ -76,14 +76,13 @@ type diffChunkCache struct {
 func (c *diffChunkCache) lookup(key string, now time.Time) *preparedDiffChunks {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for k, entry := range c.entries {
-		if !now.Before(entry.expires) {
-			delete(c.entries, k)
-			c.bytes -= entry.value.bytes
-		}
-	}
 	entry, ok := c.entries[key]
 	if !ok {
+		return nil
+	}
+	if !now.Before(entry.expires) {
+		delete(c.entries, key)
+		c.bytes -= entry.value.bytes
 		return nil
 	}
 	entry.used = now
