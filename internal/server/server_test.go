@@ -1294,30 +1294,3 @@ func startTestServer(t *testing.T, ctx context.Context, cfg *config.Config) (*In
 	cfg.DatabaseDriver = teststores.Driver()
 	return Start(ctx, cfg)
 }
-
-type upgradedStartupBackend struct {
-	persistence.Backend
-	closed bool
-}
-
-func (b *upgradedStartupBackend) UpgradedOnOpen() bool { return true }
-func (b *upgradedStartupBackend) Close() error         { b.closed = true; return nil }
-
-func TestStartStopsAfterCommittedUpgrade(t *testing.T) {
-	original := openPersistence
-	defer func() { openPersistence = original }()
-	backend := &upgradedStartupBackend{}
-	openPersistence = func(*config.Config, *events.Broadcaster) (persistence.Backend, error) { return backend, nil }
-	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "1")
-	root := t.TempDir()
-	cfg := &config.Config{Mode: config.ModeDesktop, Port: "0", DatabasePath: filepath.Join(root, "db"), ProjectRepoRoot: filepath.Join(root, "repos"), AppDataDir: root, Environment: "test"}
-	instance, err := Start(context.Background(), cfg, Options{RestartAfterUpgrade: true})
-	if instance != nil || !errors.Is(err, ErrDatabaseUpgraded) {
-		t.Fatalf("instance=%v error=%v", instance, err)
-	}
-	if !backend.closed {
-		t.Fatal("upgrade connection not closed")
-	}
-	// Other Backend methods panic via the nil embedded interface if startup
-	// proceeds into stores, maintenance, or workers before returning the signal.
-}

@@ -109,6 +109,3 @@ func (b *Backend) Close() error {
 	b.unregisterWriter()
 	return b.conns.Close()
 }
-
-// UpgradedOnOpen reports a committed upgrade of an existing database.
-func (b *Backend) UpgradedOnOpen() bool { return b.conns.Upgraded }

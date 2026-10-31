@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,7 +12,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -67,12 +65,6 @@ func main() {
 	applog.Infof("[desktop] starting OpenVibely desktop app...")
 
 	if err := runDesktop(cfg, startDesktopBackend, launchNativeWindow); err != nil {
-		if errors.Is(err, server.ErrDatabaseUpgraded) {
-			if err := relaunchAfterUpgrade(); err != nil {
-				log.Fatalf("[desktop] restart failed: %v; reopen the app manually", err)
-			}
-			return
-		}
 		log.Fatalf("[desktop] failed: %v", err)
 	}
 }
@@ -229,10 +221,7 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 }
 
 func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBackend, error) {
-	restartAfterUpgrade := os.Getenv("OPENVIBELY_MIGRATION_RELAUNCHED") != "1"
-	// Consume the guard so future independent updates do not inherit it.
-	_ = os.Unsetenv("OPENVIBELY_MIGRATION_RELAUNCHED")
-	inst, err := server.Start(ctx, cfg, server.Options{RestartAfterUpgrade: restartAfterUpgrade, ProjectFolderPicker: desktopProjectFolderPicker(), DesktopFileSaver: desktopFileSaver()})
+	inst, err := server.Start(ctx, cfg, server.Options{ProjectFolderPicker: desktopProjectFolderPicker(), DesktopFileSaver: desktopFileSaver()})
 	if err != nil {
 		return nil, err
 	}
@@ -365,31 +354,4 @@ func registerDesktopUpdaterBinding(
 	onApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		bind()
 	})
-}
-
-// Relaunch only after the committed migration connection has closed, before any
-// workers or native window exist. The child guard prevents a restart loop.
-func relaunchAfterUpgrade() error {
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	command := migrationRelaunchCommand(executable, os.Args[1:], os.Environ())
-	log.Print("[desktop] database upgrade complete; restarting to release migration memory")
-	if err := command.Start(); err != nil {
-		return err
-	}
-	return command.Process.Release()
-}
-
-func migrationRelaunchCommand(executable string, args, environment []string) *exec.Cmd {
-	command := exec.Command(executable, args...)
-	for _, entry := range environment {
-		if !strings.HasPrefix(entry, "OPENVIBELY_MIGRATION_RELAUNCHED=") {
-			command.Env = append(command.Env, entry)
-		}
-	}
-	command.Env = append(command.Env, "OPENVIBELY_MIGRATION_RELAUNCHED=1")
-	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return command
 }
