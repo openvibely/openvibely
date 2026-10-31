@@ -138,7 +138,23 @@ func (c *diffChunkCache) get(ctx context.Context, taskID string, index int, revi
 		// and has its own deadline. Each caller still waits using its own ctx.
 		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), diffChunkPreparationTimeout)
 		defer cancel()
-		value, err := load(loadCtx)
+		type preparationResult struct {
+			value *preparedDiffChunks
+			err   error
+		}
+		completed := make(chan preparationResult, 1)
+		go func() {
+			value, err := load(loadCtx)
+			completed <- preparationResult{value, err}
+		}()
+		var value *preparedDiffChunks
+		var err error
+		select {
+		case <-loadCtx.Done():
+			return nil, loadCtx.Err()
+		case result := <-completed:
+			value, err = result.value, result.err
+		}
 		if loadCtx.Err() != nil {
 			return nil, loadCtx.Err()
 		}

@@ -208,3 +208,36 @@ func TestDiffChunkCachePreparationTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestDiffChunkCacheTimeoutBoundsUnresponsiveLoader(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var cache diffChunkCache
+		release := make(chan struct{})
+		defer close(release)
+		done := make(chan error, 1)
+		go func() {
+			_, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) {
+				<-release
+				return &preparedDiffChunks{bytes: 1}, nil
+			})
+			done <- err
+		}()
+		synctest.Wait()
+		time.Sleep(diffChunkPreparationTimeout + time.Second)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expected deadline: %v", err)
+			}
+		default:
+			t.Fatal("waiter remained blocked after preparation deadline")
+		}
+		// A retry must start fresh even while the old operation is still unwinding.
+		fresh := &preparedDiffChunks{bytes: 2}
+		got, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) { return fresh, nil })
+		if err != nil || got != fresh {
+			t.Fatalf("retry failed: %v", err)
+		}
+	})
+}

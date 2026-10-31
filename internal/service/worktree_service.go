@@ -164,7 +164,11 @@ func GetCurrentBranch(repoDir string) string {
 }
 
 func GitStatusPorcelain(repoDir string) (string, error) {
-	cmd := exec.Command("git", "status", "--porcelain")
+	return GitStatusPorcelainContext(context.Background(), repoDir)
+}
+
+func GitStatusPorcelainContext(ctx context.Context, repoDir string) (string, error) {
+	cmd := diffGitCommand(ctx, "status", "--porcelain")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -1248,6 +1252,10 @@ func SameRepositoryMutationScope(first, second string) bool {
 }
 
 func canonicalRepositoryMutationKey(repoDir string) string {
+	return canonicalRepositoryMutationKeyContext(context.Background(), repoDir)
+}
+
+func canonicalRepositoryMutationKeyContext(ctx context.Context, repoDir string) string {
 	key := filepath.Clean(repoDir)
 	if absolute, err := filepath.Abs(key); err == nil {
 		key = absolute
@@ -1256,7 +1264,7 @@ func canonicalRepositoryMutationKey(repoDir string) string {
 		key = resolved
 	}
 
-	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+	cmd := diffGitCommand(ctx, "rev-parse", "--git-common-dir")
 	cmd.Dir = key
 	if out, err := cmd.Output(); err == nil {
 		commonDir := strings.TrimSpace(string(out))
@@ -2431,26 +2439,37 @@ func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBra
 // It resolves the changed-file order from compact name-status/untracked output,
 // then runs a path-scoped git diff or synthesizes one untracked-file diff.
 func GetWorktreeDiffFileWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
-	lock := worktreeLifecycleLock(repoDir)
-	lock.RLock()
+	return GetWorktreeDiffFileWithUncommittedContext(context.Background(), repoDir, branchName, targetBranch, worktreePath, fileIndex)
+}
+
+func GetWorktreeDiffFileWithUncommittedContext(ctx context.Context, repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
+	key := canonicalRepositoryMutationKeyContext(ctx, repoDir)
+	if ctx.Err() != nil {
+		return "", false
+	}
+	value, _ := worktreeLifecycleLocks.LoadOrStore(key, &sync.RWMutex{})
+	lock := value.(*sync.RWMutex)
+	if !diffReadLock(ctx, lock) {
+		return "", false
+	}
 	defer lock.RUnlock()
 	if fileIndex < 0 || targetBranch == "" {
 		return "", false
 	}
-	if worktreePath != "" && isGitWorktreeDir(worktreePath) && gitRefExists(worktreePath, targetBranch) {
-		mergeBaseOut, err := gitOutput(worktreePath, "merge-base", targetBranch, "HEAD")
+	if worktreePath != "" && isGitRepoDirContext(ctx, worktreePath) && gitRefExistsContext(ctx, worktreePath, targetBranch) {
+		mergeBaseOut, err := diffGitOutput(ctx, worktreePath, "merge-base", targetBranch, "HEAD")
 		if err == nil {
 			mergeBase := strings.TrimSpace(string(mergeBaseOut))
 			if mergeBase != "" {
-				return captureWorktreeDiffFileAgainstMergeBase(worktreePath, mergeBase, fileIndex)
+				return captureWorktreeDiffFileAgainstMergeBaseContext(ctx, worktreePath, mergeBase, fileIndex)
 			}
 		}
 	}
 
-	if branchName == "" || targetBranch == "" || !isGitRepoDir(repoDir) || !gitRefExists(repoDir, branchName) || !gitRefExists(repoDir, targetBranch) {
+	if branchName == "" || targetBranch == "" || !isGitRepoDirContext(ctx, repoDir) || !gitRefExistsContext(ctx, repoDir, branchName) || !gitRefExistsContext(ctx, repoDir, targetBranch) {
 		return "", false
 	}
-	return captureCommittedDiffFile(repoDir, targetBranch+"..."+branchName, fileIndex)
+	return captureCommittedDiffFileContext(ctx, repoDir, targetBranch+"..."+branchName, fileIndex)
 }
 
 // captureWorktreeDiffAgainstTarget captures tracked changes between the
@@ -2479,6 +2498,10 @@ func captureWorktreeDiffAgainstTarget(worktreePath, targetBranch string) (string
 }
 
 func isGitRepoDir(dir string) bool {
+	return isGitRepoDirContext(context.Background(), dir)
+}
+
+func isGitRepoDirContext(ctx context.Context, dir string) bool {
 	if dir == "" {
 		return false
 	}
@@ -2486,7 +2509,7 @@ func isGitRepoDir(dir string) bool {
 	if err != nil || !info.IsDir() {
 		return false
 	}
-	cmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	cmd := diffGitCommand(ctx, "rev-parse", "--is-inside-work-tree")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) == "true"
@@ -2497,10 +2520,14 @@ func isGitWorktreeDir(dir string) bool {
 }
 
 func gitRefExists(repoDir, ref string) bool {
+	return gitRefExistsContext(context.Background(), repoDir, ref)
+}
+
+func gitRefExistsContext(ctx context.Context, repoDir, ref string) bool {
 	if repoDir == "" || ref == "" {
 		return false
 	}
-	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	cmd := diffGitCommand(ctx, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
 }
@@ -2512,7 +2539,11 @@ type worktreeDiffFileTarget struct {
 }
 
 func captureWorktreeDiffFileAgainstMergeBase(worktreePath string, mergeBase string, fileIndex int) (string, bool) {
-	targets, err := worktreeDiffFileTargets(worktreePath, mergeBase)
+	return captureWorktreeDiffFileAgainstMergeBaseContext(context.Background(), worktreePath, mergeBase, fileIndex)
+}
+
+func captureWorktreeDiffFileAgainstMergeBaseContext(ctx context.Context, worktreePath string, mergeBase string, fileIndex int) (string, bool) {
+	targets, err := worktreeDiffFileTargetsContext(ctx, worktreePath, mergeBase)
 	if err != nil || fileIndex < 0 || fileIndex >= len(targets) {
 		return "", false
 	}
@@ -2521,11 +2552,15 @@ func captureWorktreeDiffFileAgainstMergeBase(worktreePath string, mergeBase stri
 		diff := generateNewFileDiffForWorktree(worktreePath, target.Path)
 		return diff, diff != ""
 	}
-	return captureTrackedDiffFile(worktreePath, mergeBase, target.Pathspecs)
+	return captureTrackedDiffFileContext(ctx, worktreePath, mergeBase, target.Pathspecs)
 }
 
 func worktreeDiffFileTargets(worktreePath string, mergeBase string) ([]worktreeDiffFileTarget, error) {
-	trackedCmd := exec.Command("git", "diff", "--name-status", mergeBase)
+	return worktreeDiffFileTargetsContext(context.Background(), worktreePath, mergeBase)
+}
+
+func worktreeDiffFileTargetsContext(ctx context.Context, worktreePath string, mergeBase string) ([]worktreeDiffFileTarget, error) {
+	trackedCmd := diffGitCommand(ctx, "diff", "--name-status", mergeBase)
 	trackedCmd.Dir = worktreePath
 	trackedOut, err := trackedCmd.Output()
 	if err != nil {
@@ -2533,7 +2568,7 @@ func worktreeDiffFileTargets(worktreePath string, mergeBase string) ([]worktreeD
 	}
 	targets := parseWorktreeDiffFileTargets(trackedOut)
 
-	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	untrackedCmd := diffGitCommand(ctx, "ls-files", "--others", "--exclude-standard")
 	untrackedCmd.Dir = worktreePath
 	untrackedOut, err := untrackedCmd.Output()
 	if err != nil {
@@ -2591,11 +2626,15 @@ func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
 }
 
 func captureTrackedDiffFile(worktreePath string, base string, pathspecs []string) (string, bool) {
+	return captureTrackedDiffFileContext(context.Background(), worktreePath, base, pathspecs)
+}
+
+func captureTrackedDiffFileContext(ctx context.Context, worktreePath string, base string, pathspecs []string) (string, bool) {
 	if len(pathspecs) == 0 {
 		return "", false
 	}
 	args := append([]string{"diff", base, "--"}, pathspecs...)
-	cmd := exec.Command("git", args...)
+	cmd := diffGitCommand(ctx, args...)
 	cmd.Dir = worktreePath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -2606,7 +2645,11 @@ func captureTrackedDiffFile(worktreePath string, base string, pathspecs []string
 }
 
 func captureCommittedDiffFile(repoDir string, revision string, fileIndex int) (string, bool) {
-	targetsCmd := exec.Command("git", "diff", "--name-status", revision)
+	return captureCommittedDiffFileContext(context.Background(), repoDir, revision, fileIndex)
+}
+
+func captureCommittedDiffFileContext(ctx context.Context, repoDir string, revision string, fileIndex int) (string, bool) {
+	targetsCmd := diffGitCommand(ctx, "diff", "--name-status", revision)
 	targetsCmd.Dir = repoDir
 	targetsOut, err := targetsCmd.Output()
 	if err != nil {
@@ -2617,7 +2660,7 @@ func captureCommittedDiffFile(repoDir string, revision string, fileIndex int) (s
 		return "", false
 	}
 	args := append([]string{"diff", revision, "--"}, targets[fileIndex].Pathspecs...)
-	cmd := exec.Command("git", args...)
+	cmd := diffGitCommand(ctx, args...)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -2885,23 +2928,27 @@ func IsBranchMergedContext(ctx context.Context, repoDir string, branchName strin
 // false so UI reconciliation does not falsely hide merge actions for tasks
 // whose worktree branch was never actually created.
 func IsBranchTipMergedInto(repoDir string, branchName string, targetBranch string) bool {
+	return IsBranchTipMergedIntoContext(context.Background(), repoDir, branchName, targetBranch)
+}
+
+func IsBranchTipMergedIntoContext(ctx context.Context, repoDir string, branchName string, targetBranch string) bool {
 	if branchName == "" || targetBranch == "" {
 		return false
 	}
-	if !IsGitRepo(repoDir) {
+	if !IsGitRepoContext(ctx, repoDir) {
 		return false
 	}
 
 	// Branch must exist locally to be considered merged-in-git.
-	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", branchName).Run(); err != nil {
+	if err := diffGitCommand(ctx, "-C", repoDir, "rev-parse", "--verify", branchName).Run(); err != nil {
 		return false
 	}
 	// Target branch must also exist; otherwise we can't compare ancestry.
-	if err := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", targetBranch).Run(); err != nil {
+	if err := diffGitCommand(ctx, "-C", repoDir, "rev-parse", "--verify", targetBranch).Run(); err != nil {
 		return false
 	}
 
-	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", branchName, targetBranch)
+	cmd := diffGitCommand(ctx, "-C", repoDir, "merge-base", "--is-ancestor", branchName, targetBranch)
 	return cmd.Run() == nil
 }
 
