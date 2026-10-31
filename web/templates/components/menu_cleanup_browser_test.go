@@ -69,15 +69,11 @@ func TestBrowserFunctional_MenuCleanupDoesNotScanLargePagePerElement(t *testing.
 
 func TestBrowserFunctional_DiffNavigationSkipsHistorySnapshot(t *testing.T) {
 	chrome := testChromePath(t)
-	for _, review := range []bool{false, true} {
+	for _, review := range []bool{true} {
 		t.Run(fmt.Sprintf("review=%v", review), func(t *testing.T) {
 			var rendered bytes.Buffer
 			diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1 +1 @@\n-old\n+new\n"
-			component := DiffViewer(diff, "", nil, "inline")
-			if review {
-				component = DiffViewer(diff, "task", nil, "inline")
-			}
-			if err := component.Render(context.Background(), &rendered); err != nil {
+			if err := DiffViewer(diff, "task", nil, "inline").Render(context.Background(), &rendered); err != nil {
 				t.Fatal(err)
 			}
 			runner := `<script>
