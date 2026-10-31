@@ -109,7 +109,7 @@ func downConversationItems(ctx context.Context, tx *sql.Tx) error {
 }
 
 func insertMigratedItem(ctx context.Context, tx *sql.Tx, executionID, scopeType, scopeID any, r models.ConversationChange) error {
-	result, err := tx.ExecContext(ctx, `INSERT INTO conversation_items(execution_id,checkpoint_scope_type,checkpoint_scope_id,generation,lane,item_id,position,operation,payload,mutation_id) VALUES(?,?,?,0,?,?,?,'put',?,?)`, executionID, scopeType, scopeID, r.Lane, r.ItemID, r.Position, string(r.Payload), "migration217:"+r.ItemID)
+	result, err := tx.ExecContext(ctx, `INSERT INTO conversation_items(execution_id,checkpoint_scope_type,checkpoint_scope_id,generation,lane,item_id,position,operation,payload,mutation_id) VALUES(?,?,?,0,?,?,?,'put',?,?)`, executionID, scopeType, scopeID, r.Lane, r.ItemID, r.Position, string(r.Payload), "migration220:"+r.ItemID)
 	if err != nil {
 		return err
 	}

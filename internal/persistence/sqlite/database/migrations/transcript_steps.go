@@ -8,50 +8,81 @@ import (
 	"fmt"
 )
 
-func ApplyTranscriptStep(ctx context.Context, tx *sql.Tx, version int64, up bool) error {
-	_, finish := migrationProgress(fmt.Sprintf("transcript step %d up=%t", version, up))
+// TranscriptStage identifies an ordered stage within migration 220, not a Goose version.
+type TranscriptStage int
+
+const (
+	TranscriptStageNone TranscriptStage = iota
+	TranscriptStageItems
+	TranscriptStageReferences
+	TranscriptStageStreamText
+	TranscriptStageMetadata
+	TranscriptStageRanges
+)
+
+func (stage TranscriptStage) String() string {
+	switch stage {
+	case TranscriptStageNone:
+		return "none"
+	case TranscriptStageItems:
+		return "conversation items"
+	case TranscriptStageReferences:
+		return "checkpoint references"
+	case TranscriptStageStreamText:
+		return "stream text"
+	case TranscriptStageMetadata:
+		return "display metadata"
+	case TranscriptStageRanges:
+		return "checkpoint ranges"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(stage))
+	}
+}
+
+func ApplyTranscriptStep(ctx context.Context, tx *sql.Tx, stage TranscriptStage, up bool) error {
+	_, finish := migrationProgress(fmt.Sprintf("transcript %s up=%t", stage, up))
 	defer finish()
-	if version == 217 {
+	if stage == TranscriptStageItems {
 		if up {
 			return upConversationItems(ctx, tx)
 		}
 		return downConversationItems(ctx, tx)
 	}
 	var statement string
-	switch version {
-	case 218:
+	switch stage {
+	case TranscriptStageReferences:
 		if up {
 			statement = checkpointReferencesUpSQL
 		} else {
 			statement = checkpointReferencesDownSQL
 		}
-	case 219:
+	case TranscriptStageStreamText:
 		if up {
 			statement = streamTextUpSQL
 		} else {
 			statement = streamTextDownSQL
 		}
-	case 220:
+	case TranscriptStageMetadata:
 		if up {
 			statement = displayMetadataUpSQL
 		} else {
 			statement = displayMetadataDownSQL
 		}
-	case 221:
+	case TranscriptStageRanges:
 		if up {
 			statement = checkpointRangesUpSQL
 		} else {
 			statement = checkpointRangesDownSQL
 		}
 	default:
-		return fmt.Errorf("unknown transcript step %d", version)
+		return fmt.Errorf("unknown transcript stage %d", stage)
 	}
 	_, err := tx.ExecContext(ctx, statement)
 	return err
 }
 func upTranscriptStore220(ctx context.Context, tx *sql.Tx) error {
-	for v := int64(217); v <= 221; v++ {
-		if err := ApplyTranscriptStep(ctx, tx, v, true); err != nil {
+	for stage := TranscriptStageItems; stage <= TranscriptStageRanges; stage++ {
+		if err := ApplyTranscriptStep(ctx, tx, stage, true); err != nil {
 			return err
 		}
 	}
@@ -59,8 +90,8 @@ func upTranscriptStore220(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 func downTranscriptStore220(ctx context.Context, tx *sql.Tx) error {
-	for v := int64(221); v >= 217; v-- {
-		if err := ApplyTranscriptStep(ctx, tx, v, false); err != nil {
+	for stage := TranscriptStageRanges; stage >= TranscriptStageItems; stage-- {
+		if err := ApplyTranscriptStep(ctx, tx, stage, false); err != nil {
 			return err
 		}
 	}

@@ -11,46 +11,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Exercise individual transcript migration stages for conversion and downgrade tests.
-// They are not registered with Goose or installed on fresh databases.
-func transcriptStageTo(db *sql.DB, target int64) error {
-	version, err := goose.GetDBVersion(db)
-	if err != nil {
+// Exercise migration 220's individual stages without inventing Goose versions.
+// Stage bookkeeping is test-only and commits atomically with each transition.
+func transcriptStageTo(db *sql.DB, target migrations.TranscriptStage) error {
+	if err := goose.UpTo(db, ".", 219); err != nil {
 		return err
-	}
-	if version < 216 {
-		if err = goose.UpTo(db, ".", 216); err != nil {
-			return err
-		}
-		version = 216
 	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	ctx := context.Background()
-	if version < target {
-		for v := version + 1; v <= target; v++ {
-			if err = migrations.ApplyTranscriptStep(ctx, tx, v, true); err != nil {
-				return err
-			}
-		}
-	}
-	if version > target {
-		for v := version; v > target; v-- {
-			if err = migrations.ApplyTranscriptStep(ctx, tx, v, false); err != nil {
-				return err
-			}
-		}
-	}
-	if _, err = tx.Exec(`DELETE FROM goose_db_version WHERE version_id BETWEEN 217 AND 221`); err != nil {
+	if _, err = tx.Exec(`CREATE TABLE IF NOT EXISTS transcript_test_stage(stage INTEGER NOT NULL); INSERT INTO transcript_test_stage SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM transcript_test_stage)`); err != nil {
 		return err
 	}
-	for v := int64(217); v <= target; v++ {
-		if _, err = tx.Exec(`INSERT INTO goose_db_version(version_id,is_applied) VALUES(?,1)`, v); err != nil {
+	var current migrations.TranscriptStage
+	if err = tx.QueryRow(`SELECT stage FROM transcript_test_stage`).Scan(&current); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	for stage := current + 1; stage <= target; stage++ {
+		if err = migrations.ApplyTranscriptStep(ctx, tx, stage, true); err != nil {
 			return err
 		}
+	}
+	for stage := current; stage > target; stage-- {
+		if err = migrations.ApplyTranscriptStep(ctx, tx, stage, false); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(`UPDATE transcript_test_stage SET stage=?`, target); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

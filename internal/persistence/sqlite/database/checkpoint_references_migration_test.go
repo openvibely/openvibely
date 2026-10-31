@@ -14,7 +14,7 @@ func TestCheckpointReferencesMigrationDowngradeMaterializesPayloads(t *testing.T
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "references.db"))
 	goose.SetBaseFS(migrations.FS)
 	require.NoError(t, goose.SetDialect("sqlite3"))
-	require.NoError(t, transcriptStageTo(db, 217))
+	require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageItems))
 	_, err := db.Exec(`INSERT INTO projects(id,name) VALUES('refs-project','migration');
  INSERT INTO tasks(id,project_id,title,category,priority,status,prompt) VALUES('refs-task','refs-project','migration','backlog',2,'completed','test');
  INSERT INTO executions(id,task_id,status) VALUES('refs-exec','refs-task','completed');
@@ -22,7 +22,7 @@ func TestCheckpointReferencesMigrationDowngradeMaterializesPayloads(t *testing.T
  INSERT INTO conversation_items(execution_id,generation,lane,item_id,position,operation,payload,mutation_id,snapshot_sequence)
  VALUES('refs-exec',0,'provider','replay:item',0,'put','{"encrypted_content":"opaque"}','source',1);`)
 	require.NoError(t, err)
-	require.NoError(t, transcriptStageTo(db, 218))
+	require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageReferences))
 	_, err = db.Exec(`INSERT INTO conversation_items(checkpoint_scope_type,checkpoint_scope_id,generation,lane,item_id,position,operation,payload,mutation_id,snapshot_sequence)
  VALUES('task','refs-task',0,'provider','checkpoint:item',0,'put','{}','borrower',2);
  INSERT INTO conversation_checkpoint_references(checkpoint_sequence,source_sequence) VALUES(2,1)`)
@@ -30,10 +30,10 @@ func TestCheckpointReferencesMigrationDowngradeMaterializesPayloads(t *testing.T
 	var resolved string
 	require.NoError(t, db.QueryRow(`SELECT payload FROM conversation_resolved_items WHERE sequence=2`).Scan(&resolved))
 	require.JSONEq(t, `{"encrypted_content":"opaque"}`, resolved)
-	require.NoError(t, transcriptStageTo(db, 217))
+	require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageItems))
 	require.NoError(t, db.QueryRow(`SELECT payload FROM conversation_items WHERE sequence=2`).Scan(&resolved))
 	require.JSONEq(t, `{"encrypted_content":"opaque"}`, resolved)
-	require.NoError(t, transcriptStageTo(db, 218))
+	require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageReferences))
 	require.NoError(t, db.QueryRow(`SELECT payload FROM conversation_resolved_items WHERE sequence=2`).Scan(&resolved))
 	require.JSONEq(t, `{"encrypted_content":"opaque"}`, resolved)
 	rows, err := db.Query(`PRAGMA foreign_key_check`)
@@ -49,7 +49,7 @@ func TestCheckpointRangesMigrationDowngrade(t *testing.T) {
 			db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "ranges.db"))
 			goose.SetBaseFS(migrations.FS)
 			require.NoError(t, goose.SetDialect("sqlite3"))
-			require.NoError(t, transcriptStageTo(db, 221))
+			require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageRanges))
 			_, err := db.Exec(`INSERT INTO projects(id,name) VALUES('range-project','migration');
     INSERT INTO tasks(id,project_id,title,category,priority,status,prompt) VALUES('range-task','range-project','migration','backlog',2,'completed','test');
     INSERT INTO executions(id,task_id,status) VALUES('range-exec','range-task','completed');
@@ -80,13 +80,13 @@ func TestCheckpointRangesMigrationDowngrade(t *testing.T) {
 				_, err = db.Exec(`DELETE FROM conversation_items WHERE sequence=?`, first+1)
 				require.NoError(t, err)
 			}
-			require.NoError(t, transcriptStageTo(db, 220))
+			require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageMetadata))
 			for i := 0; i < 4; i++ {
 				var raw string
 				require.NoError(t, db.QueryRow(`SELECT payload FROM conversation_items WHERE checkpoint_scope_type='task' AND checkpoint_scope_id='range-task' AND lane='provider' AND item_id=? AND is_current=1`, fmt.Sprintf("checkpoint:frame:%012d", i)).Scan(&raw))
 				require.JSONEq(t, fmt.Sprintf(`{"text":"message %d"}`, i), raw)
 			}
-			require.NoError(t, transcriptStageTo(db, 221))
+			require.NoError(t, transcriptStageTo(db, migrations.TranscriptStageRanges))
 			rows, err := db.Query(`PRAGMA foreign_key_check`)
 			require.NoError(t, err)
 			defer rows.Close()
