@@ -38,6 +38,8 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 			if err := layout.Base("Tasks", []models.Project{project}, project.ID).Render(templ.WithChildren(r.Context(), content), w); err != nil {
 				t.Error(err)
 			}
+		case "/models":
+			fmt.Fprint(w, `<div id="models-container">Models</div>`)
 		case "/themes":
 			if err := ThemesContent(nil).Render(r.Context(), w); err != nil {
 				t.Error(err)
@@ -120,9 +122,20 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("workspace and draft restored", `String(!document.documentElement.classList.contains('appearance-settings') && document.documentElement.classList.contains('task-list-collapsed') && document.getElementById('task-message-input').value==='Keep this draft')`, "true")
 		b.evaluate(`window.taskWorkspace.openChanges();'reopen'`)
 		b.waitFor("changes reopened", `String(!!document.querySelector('#tab-changes #diff-viewer') && !document.querySelector('#changes-content.htmx-settling'))`, "true")
+
+		b.evaluate(`window.historyComposer=document.getElementById('task-message-input');window.historyComposer.value='Unsent history draft';history.back();'thread via browser back'`)
+		b.waitFor("thread via history", `String(!document.documentElement.classList.contains('changes-explorer-active') && document.getElementById('task-message-input')===window.historyComposer)`, "true")
+		b.evaluate(`history.forward();'changes via history'`)
+		b.waitFor("changes via history", `String(document.documentElement.classList.contains('changes-explorer-active') && document.getElementById('task-message-input')===window.historyComposer && window.historyComposer.value==='Unsent history draft')`, "true")
 		b.evaluate(`window.retainedTaskComposer=document.getElementById('task-message-input');window.retainedTaskWorkspace=window.taskWorkspace;document.getElementById('task-list-toggle').click();document.querySelector('.sidebar-aside [data-nav-base="/themes"]').click();'settings from collapsed explorer'`)
 		b.waitFor("settings ready", `String(!!document.getElementById('themes-container') && !document.querySelector('#main-content.htmx-settling'))`, "true")
 		b.waitFor("settings expands navigation without changing saved preference", `String(!document.documentElement.classList.contains('task-list-collapsed') && document.querySelector('#appearance-settings-nav [data-settings-back]').getBoundingClientRect().height>0 && localStorage.getItem('openvibely.taskListCollapsed')==='true')`, "true")
+
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/models"]').click();'models'`)
+		b.waitFor("models ready", `String(!!document.getElementById('models-container') && !document.querySelector('#settings-content.htmx-settling'))`, "true")
+		b.evaluate(`history.back();'back within settings'`)
+		b.waitFor("themes after back", `String(!!document.getElementById('themes-container') && !document.querySelector('#settings-content.htmx-settling'))`, "true")
+		b.waitFor("changes task retained after settings history", `String(window.retainedTaskComposer.isConnected && document.getElementById('task-message-input')===window.retainedTaskComposer && window.retainedTaskComposer.value==='Unsent history draft')`, "true")
 		b.waitFor("return URL retains task and changes view", `(function(){var u=new URL(document.querySelector('#appearance-settings-nav [data-settings-back]').href);return u.pathname+'?tab='+u.searchParams.get('tab');})()`, "/tasks/explorer-task?tab=changes")
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return'`)
 		b.waitFor("returned to changes", `String(location.pathname==='/tasks/explorer-task' && document.documentElement.classList.contains('changes-explorer-active') && !!document.querySelector('#tab-changes #diff-viewer') && !document.querySelector('#main-content.htmx-settling'))`, "true")

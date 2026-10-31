@@ -261,6 +261,12 @@ window.addEventListener('DOMContentLoaded', function() {
 		.hidden{display:none!important} .flex{display:flex}.items-center{align-items:center}.gap-2{gap:.5rem}.px-1{padding-left:.25rem;padding-right:.25rem}.ml-1{margin-left:.25rem}.ml-2{margin-left:.5rem}.-ml-1{margin-left:-.25rem}.px-\[3px\]{padding-left:3px;padding-right:3px}.input-bordered{border:1px solid transparent}.relative{position:relative}.z-10{z-index:10}button{border:0} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
 		[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}</style>`
 
+	// Include the production shell navigation owner used by task views.
+	var panel bytes.Buffer
+	if err := layout.TaskListPanel("project-browser").Render(context.Background(), &panel); err != nil {
+		t.Fatalf("render workspace navigation: %v", err)
+	}
+
 	var taskSlow, taskTwo, taskBlank, taskScheduleOrigin, taskChatOrigin atomic.Int32
 	browserResult := make(chan string, 8)
 	var server *httptest.Server
@@ -279,7 +285,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				_, _ = w.Write([]byte(fragment))
 				return
 			}
-			document := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Task One - OpenVibely</title><script src="/htmx.js"></script><script>` + navigationScript + `</script>` + style + runner + `</head><body><nav><a data-nav-base="/tasks" href="/tasks?project_id=project-browser">Tasks</a><a data-nav-base="/automations" href="/automations?project_id=project-browser">Automations</a></nav><main id="main-content" hx-history-elt>` + fragment + `</main></body></html>`
+			document := `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Task One - OpenVibely</title><script src="/htmx.js"></script><script>` + navigationScript + `</script>` + style + runner + `</head><body>` + panel.String() + `<nav><a data-nav-base="/tasks" href="/tasks?project_id=project-browser">Tasks</a><a data-nav-base="/automations" href="/automations?project_id=project-browser">Automations</a></nav><main id="main-content" hx-history-elt>` + fragment + `</main></body></html>`
 			_, _ = w.Write([]byte(document))
 		case "/tasks/task-two":
 			_, _ = w.Write([]byte(renderTask("task-two", "Task Two")))

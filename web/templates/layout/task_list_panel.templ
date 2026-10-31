@@ -140,7 +140,7 @@ templ TaskListPanel(currentProjectID string) {
             var settingsPane = null;
             var restoringWorkspace = false;
             var retainedScroll = [];
-            var openingSettingsHistory = false;
+            var taskView = null;
             var settingsRequest = null;
             function isSettingsURL(value) {
                 var path = new URL(value, location.href).pathname;
@@ -179,7 +179,7 @@ templ TaskListPanel(currentProjectID string) {
                 if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
                 settingsRequest = null;
                 var main = document.getElementById('main-content');
-                if (push) history.pushState({htmx: true}, '', workspaceURL);
+                if (push) window.workspaceNavigation.commit(workspaceURL);
                 // HTMX owns cleanup for the outgoing Settings content only.
                 restoringWorkspace = true;
                 htmx.swap(settingsPane, '', {swapStyle: 'innerHTML', settleDelay: 0});
@@ -201,32 +201,62 @@ templ TaskListPanel(currentProjectID string) {
                 document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {bubbles:true, detail:{target:main, elt:main}}));
                 return true;
             };
-            document.addEventListener('click', function(event) {
-                var link = event.target.closest('a');
-                if (!link || !retainedWorkspace || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                var target = new URL(link.href, location.href);
-                if (!link.matches('[data-settings-back]') && target.pathname + target.search + target.hash !== workspaceURL) return;
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                window.restoreSettingsWorkspace(true);
-            }, true);
-            window.addEventListener('popstate', function(event) {
-                if (retainedWorkspace && location.pathname + location.search + location.hash === workspaceURL) {
-                    event.stopImmediatePropagation();
-                    window.restoreSettingsWorkspace(false);
-                } else if (!inSettings && isSettingsURL(location.href)) {
-                    event.stopImmediatePropagation();
-                    openingSettingsHistory = true;
+            // One history owner for mounted workspace views. Page-specific
+            // controllers register how to display their local view, not another
+            // popstate listener. Other destinations retain normal HTMX navigation.
+            function commitURL(url, replace) {
+                var next = new URL(url, location.href);
+                if (next.href !== location.href) history[replace ? 'replaceState' : 'pushState'](Object.assign({}, history.state, {htmx:true}), '', next);
+            }
+            function navigateWorkspace(url, push) {
+                var next = new URL(url, location.href);
+                if (next.origin !== location.origin) return false;
+                if (isSettingsURL(next.href)) {
                     var source = document.createElement('a');
                     source.hidden = true;
-                    source.setAttribute('hx-push-url', 'false');
+                    source.setAttribute('hx-push-url', push ? next.pathname + next.search + next.hash : 'false');
                     source.setAttribute('hx-replace-url', 'false');
+                    source.dataset.workspaceHistoryNavigation = push ? 'false' : 'true';
                     document.body.appendChild(source);
-                    htmx.ajax('GET', location.pathname + location.search, {source:source, target:'#main-content', swap:'innerHTML'}).finally(function() {
-                        openingSettingsHistory = false;
+                    htmx.ajax('GET', next.pathname + next.search, {source:source, target:'#main-content', swap:'innerHTML'}).finally(function() {
                         source.remove();
                     }).catch(function() {});
+                    return true;
                 }
+                var localTask = taskView && taskView.matches(next);
+                var stored = new URL(workspaceURL, location.href);
+                var retained = retainedWorkspace && (localTask || next.href === stored.href);
+                if (!retained && (!localTask || retainedWorkspace)) return false;
+                if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
+                if (push) commitURL(next.href);
+                if (retained) window.restoreSettingsWorkspace(false);
+                if (localTask) taskView.show(next);
+                if (window.syncAppearanceSettings) window.syncAppearanceSettings();
+                if (window.syncOpenVibelyPageTitle) window.syncOpenVibelyPageTitle(document.getElementById('main-content'));
+                return true;
+            }
+            window.workspaceNavigation = {
+                navigate: navigateWorkspace,
+                back: function() { return retainedWorkspace ? navigateWorkspace(workspaceURL, true) : false; },
+                commit: commitURL,
+                registerTask: function(view) {
+                    taskView = view;
+                    return function() { if (taskView === view) taskView = null; };
+                }
+            };
+            document.addEventListener('click', function(event) {
+                var link = event.target.closest('a');
+                if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
+                if (!link.matches('[hx-target="#main-content"], [data-settings-back]')) return;
+                // Appearance section selection already updates its existing pane.
+                if (link.matches('[data-settings-link]') && document.getElementById('themes-container')) return;
+                var target = link.matches('[data-settings-back]') ? workspaceURL : link.href;
+                if (!navigateWorkspace(target, true)) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }, true);
+            window.addEventListener('popstate', function(event) {
+                if (navigateWorkspace(location.href, false)) event.stopImmediatePropagation();
             }, true);
             document.addEventListener('htmx:beforeCleanupElement', function(event) {
                 if (event.detail.elt === retainedWorkspace) {
@@ -252,7 +282,7 @@ templ TaskListPanel(currentProjectID string) {
             document.addEventListener('htmx:beforeRequest', function(e) {
                 if (e.detail.target?.id === 'main-content' && isSettingsURL(e.detail.requestConfig?.path || location.href)) settingsRequest = e.detail.xhr;
                 if (e.detail.target && e.detail.target.id === 'main-content' && !inSettings) {
-                    if (!openingSettingsHistory) workspaceURL = location.pathname + location.search + location.hash;
+                    if (e.detail.elt?.dataset.workspaceHistoryNavigation !== 'true') workspaceURL = location.pathname + location.search + location.hash;
                     workspaceScroll = document.getElementById('main-content').scrollTop;
                     boardScroll.clear();
                     document.getElementById('main-content').querySelectorAll(boardScrollSelector).forEach(function(el) {
@@ -373,7 +403,7 @@ templ TaskListPanel(currentProjectID string) {
 			}
 			function openSearch(open) {
                 if (root.classList.contains('appearance-settings') && !root.classList.contains('changes-explorer-active')) {
-                    if (window.restoreSettingsWorkspace && window.restoreSettingsWorkspace(true)) {
+                    if (window.workspaceNavigation && window.workspaceNavigation.back()) {
                         openSearch(true);
                         return;
                     }

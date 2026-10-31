@@ -79,6 +79,15 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/` + route + `"] ').click();'configuration'`)
 			waitFor("settings navigation survives "+route, `String(!!document.getElementById('`+route+`-container') && document.documentElement.classList.contains('appearance-settings') && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
 			waitFor("settings rail selected", `String(document.querySelector('.sidebar-aside [data-nav-base="/themes"]').getAttribute('aria-current')==='page')`, "true")
+			if route == "models" {
+				b.evaluate(`history.back();'back within settings'`)
+				waitFor("themes restored by browser back", `String(!!document.getElementById('themes-container'))`, "true")
+				waitFor("workspace survives settings history", `String(window.originalWorkspace.isConnected && document.getElementById('settings-workspace')===window.originalWorkspace)`, "true")
+				b.evaluate(`history.forward();'forward within settings'`)
+				waitFor("models restored by browser forward", `String(!!document.getElementById('models-container') && window.originalWorkspace.isConnected)`, "true")
+
+			}
+
 		}
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'limits'`)
 		waitFor("worker limits editable", `String(document.documentElement.classList.contains('appearance-settings') && !!document.getElementById('limit-input-global') && document.getElementById('limit-input-global').getBoundingClientRect().width>0)`, "true")
