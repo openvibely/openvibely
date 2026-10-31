@@ -97,3 +97,21 @@ func BenchmarkPreparedRequest(b *testing.B) {
 		})
 	}
 }
+
+func TestPreparedMetadataReuse(t *testing.T) {
+	tools, err := Prepare("tools", []any{map[string]any{"description": strings.Repeat("schema <>&", 1000)}})
+	require.NoError(t, err)
+	messages, err := Prepare("messages", []any{"hello"})
+	require.NoError(t, err)
+	metadata := Metadata{Value: map[string]any{"model": "x"}, Fields: map[string]*Field{"tools": tools}}
+	wire, err := messages.Marshal(metadata)
+	require.NoError(t, err)
+	size, err := messages.Size(metadata)
+	require.NoError(t, err)
+	require.Equal(t, len(wire), size)
+	require.Contains(t, string(wire), string(tools.JSON()))
+	_, err = messages.Marshal(Metadata{Value: map[string]any{"tools": nil}, Fields: metadata.Fields})
+	require.Error(t, err)
+	_, err = messages.Marshal(Metadata{Value: struct{}{}, Fields: map[string]*Field{"other": messages}})
+	require.Error(t, err)
+}

@@ -1,6 +1,6 @@
 # Concurrent streaming resource checks
 
-Latest experiment: [shared provider paths across all three providers](../SHARED_PROVIDER_PATHS_RESULTS.md), previous task branch versus shared-path candidate. Earlier focused experiment: [compatible retention fix](../COMPATIBLE_RETENTION_RESULTS.md).
+Latest experiment: [remaining provider optimization parity](../PROVIDER_PARITY_RESULTS.md), previous task branch versus the shared optimization candidate. Earlier experiment: [shared provider paths across all three providers](../SHARED_PROVIDER_PATHS_RESULTS.md). Earlier focused experiment: [compatible retention fix](../COMPATIBLE_RETENTION_RESULTS.md).
 
 Provider comparison: [Anthropic and OpenAI-compatible results](../PROVIDER_RESULTS.md). Earlier OpenAI Responses measurements: [results](../RESULTS.md). Historical reports, profiles, raw data, and build metadata are in the [evidence archive](../EVIDENCE.md). Keep raw outputs outside this worktree.
 

@@ -1,7 +1,6 @@
 package anthropicclient
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -9,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"math"
 	"net"
@@ -76,6 +76,8 @@ const (
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
 	preparedMessages         *requestjson.Field
+	preparedTools            *requestjson.Field
+	responseText             *streamdecode.Text
 	ServiceTier              string // shared app preference; priority enables Anthropic fast speed
 	Model                    string
 	MaxTokens                int
@@ -543,14 +545,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// Send request (streaming)
 		// Keep text actually delivered to the caller if this sampling attempt
 		// fails before it can publish a completed assistant message.
-		var partialText strings.Builder
+		var partialText streamdecode.Text
 		streamOpts := *opts
-		streamOpts.OnText = func(text string) {
-			partialText.WriteString(text)
-			if opts.OnText != nil {
-				opts.OnText(text)
-			}
-		}
+		streamOpts.responseText = &partialText
 
 		resp, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
@@ -1288,10 +1285,21 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 			return err
 		}
 	}
-	size, err := prepared.Size(struct {
-		Tools  []ToolDefinition `json:"tools,omitempty"`
-		System string           `json:"system,omitempty"`
-	}{tools, opts.System})
+	metadata := requestjson.Metadata{Value: struct {
+		System string `json:"system,omitempty"`
+	}{opts.System}, Fields: map[string]*requestjson.Field{}}
+	if len(tools) > 0 {
+		field := opts.preparedTools
+		if field == nil {
+			var err error
+			field, err = requestjson.Prepare("tools", tools)
+			if err != nil {
+				return err
+			}
+		}
+		metadata.Fields["tools"] = field
+	}
+	size, err := prepared.Size(metadata)
 	if err != nil {
 		return err
 	}
@@ -1313,6 +1321,12 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 	}
 	preparedOpts := *opts
 	preparedOpts.preparedMessages = prepared
+	if len(tools) > 0 {
+		preparedOpts.preparedTools, err = requestjson.Prepare("tools", tools)
+		if err != nil {
+			return nil, err
+		}
+	}
 	opts = &preparedOpts
 
 	// Summary compaction sends first and trims only after provider overflow.
@@ -1360,6 +1374,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	originalToolCount := len(tools)
 	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
 	compactionStrategy, nativeCompactionEnabled := NativeCompactionStrategy(opts.Model)
 	nativeCompactionEnabled = opts.AutoCompaction && nativeCompactionEnabled
@@ -1470,7 +1485,13 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	var err error
 	if opts.preparedMessages != nil {
 		req.Messages = nil
-		body, err = opts.preparedMessages.Marshal(req)
+		metadata := requestjson.Metadata{Fields: map[string]*requestjson.Field{}}
+		if len(tools) > 0 && len(tools) == originalToolCount && !opts.WebSearchEnabled && opts.preparedTools != nil {
+			req.Tools = nil
+			metadata.Fields["tools"] = opts.preparedTools
+		}
+		metadata.Value = req
+		body, err = opts.preparedMessages.Marshal(metadata)
 	} else {
 		body, err = json.Marshal(req)
 	}
@@ -1553,7 +1574,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		return nil, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, nativeCompactionEnabled))
 	}
 
-	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult, opts.OnCompactionProgress)
+	result, err := c.parseAgenticStreamCapturing(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult, opts.responseText, opts.OnCompactionProgress)
 	if err != nil {
 		return result, httpretry.NewStreamError(err)
 	}
@@ -1575,6 +1596,22 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	onToolResult func(string, string, bool),
 	compactionCallbacks ...func(llmcontracts.CompactionProgress),
 ) (*turnResult, error) {
+	return c.parseAgenticStreamCapturing(body, onText, onThinking, onToolUse, onToolResult, nil, compactionCallbacks...)
+}
+func (c *Client) parseAgenticStreamCapturing(
+	body io.Reader, onText func(string), onThinking func(string),
+	onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool),
+	capture *streamdecode.Text, compactionCallbacks ...func(llmcontracts.CompactionProgress),
+) (*turnResult, error) {
+	originalOnText := onText
+	if capture != nil {
+		onText = func(text string) {
+			capture.Append(text)
+			if originalOnText != nil {
+				originalOnText(text)
+			}
+		}
+	}
 	var reportCompaction func(llmcontracts.CompactionProgress)
 	if len(compactionCallbacks) > 0 {
 		reportCompaction = compactionCallbacks[0]
@@ -1585,8 +1622,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			finishCompaction(false)
 		}
 	}()
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner := streamdecode.Scanner(body, 1024*1024)
 
 	result := &turnResult{
 		contentBlocks: make([]agenticBlock, 0), // must be non-nil: nil marshals as JSON null
@@ -1616,12 +1652,11 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	terminal := false
 
 	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := streamdecode.Data(scanner.Bytes(), true)
+		if !ok {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
+		if bytes.Equal(data, []byte("[DONE]")) {
 			terminal = true
 			break
 		}
@@ -1636,7 +1671,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			Error        json.RawMessage `json:"error,omitempty"`
 			RequestID    string          `json:"request_id,omitempty"`
 		}
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		if err := json.Unmarshal(data, &event); err != nil {
 			continue
 		}
 
@@ -1755,7 +1790,21 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			case "signature_delta":
 				bs.signature = delta.Signature
 			case "text_delta":
+				textStart := bs.text.Len()
 				bs.text.WriteString(delta.Text)
+				if !bs.inToolCallTag && bs.tagBuf.Len() == 0 && !strings.Contains(delta.Text, "<tool_") {
+					view := bs.text.String()[textStart:]
+					if capture != nil {
+						capture.View(bs, bs.text.String(), textStart)
+					}
+					if originalOnText != nil {
+						originalOnText(view)
+					}
+					continue
+				}
+				if capture != nil {
+					capture.Boundary()
+				}
 				if onText != nil {
 					// Filter <tool_call>...</tool_call> from streaming output.
 					// Buffer text to detect tag boundaries across deltas.
@@ -1994,6 +2043,9 @@ var reToolCallBlock = regexp.MustCompile(`(?s)<tool_call>.*?</tool_call>\s*`)
 
 // stripToolCallTags removes <tool_call>...</tool_call> XML blocks from text.
 func stripToolCallTags(s string) string {
+	if !strings.Contains(s, "<tool_call>") {
+		return strings.TrimSpace(s)
+	}
 	return strings.TrimSpace(reToolCallBlock.ReplaceAllString(s, ""))
 }
 

@@ -158,3 +158,22 @@ func messageImageAdjustment(messages []struct {
 	}
 	return bytes
 }
+
+// FromMessageArray estimates an already encoded array without constructing an
+// envelope or copying content blocks merely to inspect images.
+func FromMessageArray(encoded []byte, imageType string, imageTokens int) (int, error) {
+	adjustment, err := MessageArrayAdjustment(encoded, imageType, imageTokens)
+	if err != nil {
+		return 0, err
+	}
+	return FromByteCount(len(encoded) + len(`{"messages":}`) + adjustment), nil
+}
+
+// FromContentBlocks applies the same estimate to one message content array.
+func FromContentBlocks(encoded []byte, imageType string, imageTokens int) int {
+	if !json.Valid(encoded) {
+		return FromByteCount(len(encoded))
+	}
+	adjustment := contentImageAdjustment(encoded, imageType, imageTokens)
+	return FromByteCount(len(encoded) + len(`{"messages":[{"content":}]}`) + adjustment)
+}

@@ -89,3 +89,15 @@ Archive: 1,327,352 bytes; SHA256 `0f8f289c20d36669c27f0e41d8546c0277c53a53fe05eb
 Previous task branch versus shared request/history paths, not main. Same revisions and explicit context budget for all three providers. All 72 timing runs (2,376 turns), six diagnostic runs, and six candidate smoke runs passed. Includes every turn, RSS phases, before/after CPU/allocation/near-peak profiles, readable profile summaries, exact measured patch, separately tested recovery follow-up patch, final source, harness, revision/binary metadata, validation logs and SHA256 manifest. The recovery follow-up is not included in measured binary results; see report. Databases and generated fixture repositories are excluded.
 
 Archive: 4,931,481 bytes; SHA256 `d72899d49ff663f5494090b9d1d4bbacf354271b58ab40db26b5c44e71719510`.
+
+## Remaining provider optimization parity — baseline 3ccd98cfc
+
+Previous task branch `3ccd98cfc75931e2edaa3ea82c5a8afc2f0f952b` versus the same source plus all eight provider-parity optimizations. This is not main versus branch. All 72 timing runs (2,376 turns), six separate diagnostics (360 turns), and six smoke scenarios passed. Production files match the measured candidate exactly.
+
+- [Repository report](PROVIDER_PARITY_RESULTS.md)
+- [Download report](/files/bdec126d1f5374ed98b59a7e2b893abd?project_id=b184292efa07a415fc59967a5fc328d1)
+- [Raw measurements, CPU/allocation/heap profiles, readable summaries and exact source patch](/files/021bc814c0602bc0ae2b71f19e6e154d?project_id=b184292efa07a415fc59967a5fc328d1) (4,938,126 bytes)
+
+Archive SHA-256: `1975eb529abff6c3d6277a3a08bcfc418c90c12382a882113b9c8b4cdc844d4e`. All 1,857 payload files were read back and verified against the included checksum manifest. Databases, generated fixture repositories and binaries are excluded. Both temporary build worktrees were removed after source verification.
+
+The report retains CPU regressions, RAM ranges, delivery gaps and unchanged storage costs. SSE allocations and median RAM improved in all eight scenarios; this is not a claim of universal CPU improvement. Early development recovery-test failure is retained separately from final passing validation. No failed timing runs were omitted.

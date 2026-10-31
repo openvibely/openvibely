@@ -48,11 +48,11 @@ func EstimateHistoryTokensContext(ctx context.Context, history []models.Executio
 		}
 		return tokenestimate.FromByteCount(size)
 	}
-	raw, err := json.Marshal(map[string]any{"messages": messages})
+	raw, err := json.Marshal(messages)
 	if err != nil {
 		return 0
 	}
-	tokens, _ := tokenestimate.FromMessagesJSON(raw, "image_url", 2000)
+	tokens, _ := tokenestimate.FromMessageArray(raw, "image_url", 2000)
 	return tokens
 }
 

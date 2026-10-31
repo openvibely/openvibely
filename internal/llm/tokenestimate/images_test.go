@@ -65,3 +65,23 @@ func TestPreparedArrayMatchesLegacyEstimator(t *testing.T) {
 		}
 	}
 }
+
+func TestContentAndArrayEstimatorsMatchEnvelope(t *testing.T) {
+	for _, blocks := range []string{`null`, `[]`, `[{"type":"text","text":"<&世界"}]`, `[{"type":"image","source":{"data":"AAA"}}]`, `[{"type":"tool_result","content":[{"type":"image_url","image_url":{"url":"AAA"}}]}]`} {
+		for _, kind := range []string{"image", "image_url"} {
+			envelope := []byte(`{"messages":[{"content":` + blocks + `}]}`)
+			want, err := FromMessagesJSON(envelope, kind, 2000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := FromContentBlocks([]byte(blocks), kind, 2000)
+			if got != want {
+				t.Fatalf("%s: %d != %d", blocks, got, want)
+			}
+			got, err = FromMessageArray([]byte(`[{"content":`+blocks+`}]`), kind, 2000)
+			if err != nil || got != want {
+				t.Fatalf("array %s: %d != %d (%v)", blocks, got, want, err)
+			}
+		}
+	}
+}

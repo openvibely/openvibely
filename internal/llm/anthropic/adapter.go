@@ -907,12 +907,7 @@ func EstimateHistoryTokensContext(ctx context.Context, history []models.Executio
 		}
 		// ContentBlocks replaces Content on the wire. Count image blocks using
 		// the same fixed cost as the client, rather than counting base64 as text.
-		encoded := append([]byte(`{"messages":[{"content":`), message.ContentBlocks...)
-		encoded = append(encoded, []byte(`}]}`)...)
-		tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
-		if err != nil {
-			tokens = tokenestimate.FromByteCount(len(message.ContentBlocks))
-		}
+		tokens := tokenestimate.FromContentBlocks(message.ContentBlocks, "image", 2000)
 		total += tokens
 	}
 	return total

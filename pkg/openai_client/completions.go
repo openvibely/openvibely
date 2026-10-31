@@ -1,13 +1,13 @@
 package openaiclient
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"math"
 	"net/http"
@@ -26,6 +26,8 @@ import (
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
 	preparedMessages *requestjson.Field
+	preparedTools    *requestjson.Field
+	responseText     *strings.Builder
 	// OnReplay durably saves each assistant response before executing its tools.
 	OnReplay func(context.Context, []CompletionsHistoryMessage) error
 	// OnReplayChanged synchronously saves a read-only snapshot and its changed suffix.
@@ -90,6 +92,7 @@ func OmittedTemperature() float64 {
 
 // completionsMessage represents a message in the /v1/chat/completions format.
 type completionsMessage struct {
+	rawReplay        *immutableCompletionsReplay
 	Role             string                `json:"role"`
 	Content          interface{}           `json:"content"` // string or array of content blocks
 	ReasoningContent string                `json:"reasoning_content,omitempty"`
@@ -179,7 +182,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			if msg.Role == "tool" {
 				content = truncateToolOutputForModelInput(msg.Content, opts.ToolOutputTokenLimit)
 			}
+			raw := msg.rawReplay
+			if text, ok := content.(string); !ok || text != msg.Content {
+				raw = nil
+			}
 			messages = append(messages, completionsMessage{
+				rawReplay:        raw,
 				Role:             msg.Role,
 				Content:          content,
 				ReasoningContent: msg.ReasoningContent,
@@ -305,12 +313,18 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
-		prepared, prepareErr := requestjson.Prepare("messages", messages)
+		prepared, prepareErr := prepareCompletionsMessages(messages)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
 		preparedOpts := *opts
 		preparedOpts.preparedMessages = prepared
+		if len(tools) > 0 {
+			preparedOpts.preparedTools, prepareErr = requestjson.Prepare("tools", tools)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+		}
 		if err := ensureCompletionsRequestFits(messages, tools, &preparedOpts); err != nil && !summarizing {
 			return nil, err
 		}
@@ -318,12 +332,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		// fails before it can publish a completed assistant message.
 		var partialText strings.Builder
 		streamOpts := preparedOpts
-		streamOpts.OnText = func(text string) {
-			partialText.WriteString(text)
-			if opts.OnText != nil {
-				opts.OnText(text)
-			}
-		}
+		streamOpts.responseText = &partialText
 
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			OnRetry: func(event httpretry.RetryEvent) {
@@ -561,14 +570,24 @@ func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[str
 	prepared := opts.preparedMessages
 	if prepared == nil {
 		var err error
-		prepared, err = requestjson.Prepare("messages", messages)
+		prepared, err = prepareCompletionsMessages(messages)
 		if err != nil {
 			return err
 		}
 	}
-	size, err := prepared.Size(struct {
-		Tools []map[string]interface{} `json:"tools,omitempty"`
-	}{tools})
+	metadata := requestjson.Metadata{Value: struct{}{}, Fields: map[string]*requestjson.Field{}}
+	if len(tools) > 0 {
+		field := opts.preparedTools
+		if field == nil {
+			var err error
+			field, err = requestjson.Prepare("tools", tools)
+			if err != nil {
+				return err
+			}
+		}
+		metadata.Fields["tools"] = field
+	}
+	size, err := prepared.Size(metadata)
 	if err != nil {
 		return err
 	}
@@ -646,6 +665,7 @@ func completionsSupportsTemperature(model, reasoningEffort string) bool {
 }
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
+	originalToolCount := len(tools)
 	if opts.ToolFilter != nil {
 		permitted := make([]map[string]interface{}, 0, len(tools))
 		for _, tool := range tools {
@@ -688,7 +708,12 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 	var err error
 	if opts.preparedMessages != nil {
 		payload["messages"] = nil
-		body, err = opts.preparedMessages.Marshal(payload)
+		metadata := requestjson.Metadata{Value: payload, Fields: map[string]*requestjson.Field{}}
+		if len(tools) > 0 && len(tools) == originalToolCount && opts.preparedTools != nil {
+			delete(payload, "tools")
+			metadata.Fields["tools"] = opts.preparedTools
+		}
+		body, err = opts.preparedMessages.Marshal(metadata)
 	} else {
 		body, err = json.Marshal(payload)
 	}
@@ -738,7 +763,7 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed))
 	}
 
-	result, err := c.parseCompletionsStream(resp.Body, opts.OnText)
+	result, err := c.parseCompletionsStreamCapturing(resp.Body, opts.OnText, opts.responseText)
 	if err != nil {
 		return result, httpretry.NewStreamError(err)
 	}
@@ -746,125 +771,95 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 }
 
 func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*completionsTurnResult, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+	return c.parseCompletionsStreamCapturing(body, onText, nil)
+}
+func (c *Client) parseCompletionsStreamCapturing(body io.Reader, onText func(string), textBuilder *strings.Builder) (*completionsTurnResult, error) {
+	scanner := streamdecode.Scanner(body, 10*1024*1024)
 
 	result := &completionsTurnResult{}
-	var textBuilder strings.Builder
+	if textBuilder == nil {
+		textBuilder = new(strings.Builder)
+	}
+	textStart := textBuilder.Len()
+	var reasoning strings.Builder
+	var arguments []*strings.Builder
 	terminal := false
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
+		data, ok := streamdecode.Data(scanner.Bytes(), false)
+		if !ok {
 			continue
 		}
 
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
+		if bytes.Equal(data, []byte("[DONE]")) {
 			terminal = true
 			continue
 		}
-		if data == "" {
+		if len(data) == 0 {
 			continue
 		}
 
-		var chunk map[string]interface{}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		var chunk completionsStreamChunk
+		if err := json.Unmarshal(data, &chunk); err != nil {
 			continue
 		}
-
-		if model, ok := chunk["model"].(string); ok && result.model == "" {
-			result.model = model
+		if result.model == "" {
+			result.model = chunk.Model
 		}
-
-		choices, ok := chunk["choices"].([]interface{})
-		if !ok || len(choices) == 0 {
+		if len(chunk.Choices) == 0 || chunk.Choices[0].Delta == nil {
 			continue
 		}
-
-		choice, ok := choices[0].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		delta, ok := choice["delta"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Handle text content
-		if content, ok := delta["content"].(string); ok && content != "" {
-			textBuilder.WriteString(content)
+		choice := chunk.Choices[0]
+		delta := choice.Delta
+		if delta.Content != "" {
+			textBuilder.WriteString(delta.Content)
 			if onText != nil {
-				onText(content)
+				onText(delta.Content)
 			}
 		}
-		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
-			result.reasoningContent += reasoning
-		}
-
-		// Handle tool calls
-		if toolCalls, ok := delta["tool_calls"].([]interface{}); ok {
-			for _, tc := range toolCalls {
-				tcMap, ok := tc.(map[string]interface{})
-				if !ok {
-					continue
-				}
-
-				idx := len(result.toolCalls)
-				if rawIndex, ok := tcMap["index"].(float64); ok && rawIndex >= 0 {
-					idx = int(rawIndex)
-				}
-				for len(result.toolCalls) <= idx {
-					result.toolCalls = append(result.toolCalls, CompletionsToolCall{})
-				}
-
-				if id, ok := tcMap["id"].(string); ok {
-					result.toolCalls[idx].ID = id
-				}
-				if typ, ok := tcMap["type"].(string); ok {
-					result.toolCalls[idx].Type = typ
-				}
-				if fn, ok := tcMap["function"].(map[string]interface{}); ok {
-					if name, ok := fn["name"].(string); ok {
-						result.toolCalls[idx].Function.Name = name
-					}
-					if args, ok := fn["arguments"].(string); ok {
-						result.toolCalls[idx].Function.Arguments += args
-					}
-				}
+		reasoning.WriteString(delta.ReasoningContent)
+		for _, tc := range delta.ToolCalls {
+			idx := len(result.toolCalls)
+			if tc.Index != nil && *tc.Index >= 0 {
+				idx = int(*tc.Index)
 			}
+			for len(result.toolCalls) <= idx {
+				result.toolCalls = append(result.toolCalls, CompletionsToolCall{})
+				arguments = append(arguments, new(strings.Builder))
+			}
+			if tc.ID != nil {
+				result.toolCalls[idx].ID = *tc.ID
+			}
+			if tc.Type != nil {
+				result.toolCalls[idx].Type = *tc.Type
+			}
+			if tc.Function.Name != nil {
+				result.toolCalls[idx].Function.Name = *tc.Function.Name
+			}
+			arguments[idx].WriteString(tc.Function.Arguments)
 		}
-
-		// Handle finish reason
-		if reason, ok := choice["finish_reason"].(string); ok && reason != "" {
-			result.stopReason = reason
+		if choice.FinishReason != "" {
+			result.stopReason = choice.FinishReason
 			terminal = true
 		}
-
-		// Handle usage (appears in last chunk)
-		if usage, ok := chunk["usage"].(map[string]interface{}); ok {
-			if prompt, ok := usage["prompt_tokens"].(float64); ok {
-				result.inputTokens = int(prompt)
+		if u := chunk.Usage; u != nil {
+			if u.PromptTokens != nil {
+				result.inputTokens = int(*u.PromptTokens)
 			}
-			if completion, ok := usage["completion_tokens"].(float64); ok {
-				result.outputTokens = int(completion)
+			if u.CompletionTokens != nil {
+				result.outputTokens = int(*u.CompletionTokens)
 			}
-			if total, ok := usage["total_tokens"].(float64); ok {
-				result.totalTokens = int(total)
+			if u.TotalTokens != nil {
+				result.totalTokens = int(*u.TotalTokens)
 			}
-			if details, ok := usage["prompt_tokens_details"].(map[string]interface{}); ok {
-				if cached, ok := details["cached_tokens"].(float64); ok {
-					result.cachedInputTokens = int(cached)
-				}
+			if u.PromptDetails.CachedTokens != nil {
+				result.cachedInputTokens = int(*u.PromptDetails.CachedTokens)
 			}
-			if details, ok := usage["completion_tokens_details"].(map[string]interface{}); ok {
-				if reasoning, ok := details["reasoning_tokens"].(float64); ok {
-					result.reasoningTokens = int(reasoning)
-				}
+			if u.CompletionDetails.ReasoningTokens != nil {
+				result.reasoningTokens = int(*u.CompletionDetails.ReasoningTokens)
 			}
-			if reasoning, ok := usage["reasoning_tokens"].(float64); ok {
-				result.reasoningTokens = int(reasoning)
+			if u.ReasoningTokens != nil {
+				result.reasoningTokens = int(*u.ReasoningTokens)
 			}
 		}
 	}
@@ -876,10 +871,66 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 		return nil, io.ErrUnexpectedEOF
 	}
 
-	result.text = textBuilder.String()
+	result.text = textBuilder.String()[textStart:]
+	result.reasoningContent = reasoning.String()
+	for i, b := range arguments {
+		result.toolCalls[i].Function.Arguments = b.String()
+	}
 	if result.stopReason == "" {
 		result.stopReason = "stop"
 	}
 
 	return result, nil
+}
+
+// Typed chunks avoid a map and boxed interface value for every text delta.
+type completionsStreamChunk struct {
+	Model   string `json:"model"`
+	Choices []struct {
+		Delta *struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			ToolCalls        []struct {
+				Index    *float64 `json:"index"`
+				ID       *string  `json:"id"`
+				Type     *string  `json:"type"`
+				Function struct {
+					Name      *string `json:"name"`
+					Arguments string  `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     *float64 `json:"prompt_tokens"`
+		CompletionTokens *float64 `json:"completion_tokens"`
+		TotalTokens      *float64 `json:"total_tokens"`
+		ReasoningTokens  *float64 `json:"reasoning_tokens"`
+		PromptDetails    struct {
+			CachedTokens *float64 `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
+		CompletionDetails struct {
+			ReasoningTokens *float64 `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
+	} `json:"usage"`
+}
+
+func prepareCompletionsMessages(messages []completionsMessage) (*requestjson.Field, error) {
+	items := make([]any, len(messages))
+	for i, m := range messages {
+		var raw json.RawMessage
+		if text, ok := m.Content.(string); ok && m.rawReplay != nil {
+			raw = (CompletionsHistoryMessage{Role: m.Role, Content: text, ReasoningContent: m.ReasoningContent, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID, rawReplay: m.rawReplay}).wireReplay()
+		}
+		if len(raw) > 0 {
+			items[i] = raw
+		} else {
+			items[i] = m
+		}
+	}
+	if messages == nil {
+		items = nil
+	}
+	return requestjson.PrepareItems("messages", items)
 }

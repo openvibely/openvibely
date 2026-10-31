@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpclient"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"github.com/openvibely/openvibely/internal/llm/tooloutput"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -157,6 +158,7 @@ type CompletionsToolCall struct {
 // CompletionsHistoryMessage is a conversation message for Chat Completions
 // providers that require reasoning content to be replayed verbatim.
 type CompletionsHistoryMessage struct {
+	rawReplay        *immutableCompletionsReplay
 	ImageContent     []map[string]interface{} `json:"-"`
 	Role             string                   `json:"role"`
 	Content          string                   `json:"content"`
@@ -840,8 +842,7 @@ const responsesStreamMaxLineOverhead = len("data: ") + 1 // Allow the SSE prefix
 
 func newResponsesStreamScanner(body io.Reader) *bufio.Scanner {
 	maxLineSize := responsesWebsocketReadLimit + responsesStreamMaxLineOverhead
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), maxLineSize+1)
+	scanner := streamdecode.Scanner(body, maxLineSize+1)
 	scanner.Split(scanResponsesStreamLine)
 	return scanner
 }

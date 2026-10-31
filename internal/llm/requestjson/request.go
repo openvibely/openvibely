@@ -6,6 +6,7 @@ package requestjson
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"unicode/utf8"
 )
@@ -31,9 +32,20 @@ func Prepare(key string, value any) (*Field, error) {
 // JSON returns a read-only view; callers must not modify it.
 func (f *Field) JSON() []byte { f.mu.Lock(); defer f.mu.Unlock(); return f.raw }
 
+// Metadata adds already encoded immutable fields to a small request object.
+// This lets budgeting and sending share tool schemas without re-encoding them.
+type Metadata struct {
+	Value  any
+	Fields map[string]*Field
+}
+
 // envelope accepts only metadata: the prepared field must be absent or null.
 // Rejecting a populated field prevents accidental duplicate full serialization.
 func (f *Field) envelope(metadata any) ([]byte, error) {
+	var prepared map[string]*Field
+	if m, ok := metadata.(Metadata); ok {
+		metadata, prepared = m.Value, m.Fields
+	}
 	b, err := json.Marshal(metadata)
 	if err != nil {
 		return nil, err
@@ -49,12 +61,34 @@ func (f *Field) envelope(metadata any) ([]byte, error) {
 		return nil, fmt.Errorf("prepared field %q must be absent or null", f.key)
 	}
 	delete(fields, f.key)
-	head, err := json.Marshal(fields)
-	if err != nil {
-		return nil, err
+	for key, value := range prepared {
+		if value == nil {
+			return nil, fmt.Errorf("nil prepared metadata field %q", key)
+		}
+		if key == f.key || value == f {
+			return nil, fmt.Errorf("duplicate prepared field %q", key)
+		}
+		if _, exists := fields[key]; exists {
+			return nil, fmt.Errorf("duplicate metadata field %q", key)
+		}
+		fields[key] = value.JSON()
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	head := []byte{'{'}
+	for i, name := range keys {
+		if i > 0 {
+			head = append(head, ',')
+		}
+		encoded, _ := json.Marshal(name)
+		head = append(head, encoded...)
+		head = append(head, ':')
+		head = append(head, fields[name]...)
 	}
 	key, _ := json.Marshal(f.key)
-	head = head[:len(head)-1]
 	if len(fields) > 0 {
 		head = append(head, ',')
 	}
@@ -130,4 +164,14 @@ func MarshalItems(metadata any, key string, items []any) ([]byte, error) {
 		out = append(out, raw...)
 	}
 	return append(out, ']', '}'), nil
+}
+
+// PrepareItems encodes native raw items once, preserving their immutable bytes.
+func PrepareItems(key string, items []any) (*Field, error) {
+	body, err := MarshalItems(struct{}{}, key, items)
+	if err != nil {
+		return nil, err
+	}
+	encodedKey, _ := json.Marshal(key)
+	return &Field{key: key, raw: body[len(encodedKey)+2 : len(body)-1]}, nil
 }
