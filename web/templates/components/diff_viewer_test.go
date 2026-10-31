@@ -791,12 +791,8 @@ diff --git a/d.go b/d.go
 	if strings.Contains(body, `style="max-height: 0;"`) {
 		t.Error("expected no max-height:0 for expanded state")
 	}
-	// Expand/Collapse All buttons should be present for >1 file
-	if !strings.Contains(body, "Expand All") {
-		t.Error("expected 'Expand All' button")
-	}
-	if !strings.Contains(body, "Collapse All") {
-		t.Error("expected 'Collapse All' button")
+	if strings.Contains(body, "Expand All") || strings.Contains(body, "Collapse All") {
+		t.Error("expected no Expand/Collapse All buttons in the toolbar")
 	}
 }
 

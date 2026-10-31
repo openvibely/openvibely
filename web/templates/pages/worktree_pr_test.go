@@ -66,11 +66,11 @@ func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">`) {
-		t.Fatal("expected worktree header row to wrap within the card without clipping the actions dropdown")
+	if !strings.Contains(out, `<div class="relative flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full">`) {
+		t.Fatal("expected worktree header row to wrap within the page without clipping the actions dropdown")
 	}
 	if !strings.Contains(out, `<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">`) {
-		t.Fatal("expected branch summary to break long labels instead of widening the card")
+		t.Fatal("expected branch summary to break long labels instead of widening the page")
 	}
 	if !strings.Contains(out, `<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">task/this-is-a-very-long-worktree-branch-name-that-should-not-overflow-the-task-changes-header-on-mobile</code>`) {
 		t.Fatal("expected worktree branch label to break inside the header")
@@ -434,5 +434,38 @@ func TestTaskChangesWorktreeContent_MergedStatusWithDiffHidesLocalSection(t *tes
 	}
 	if !strings.Contains(out, "file.txt") {
 		t.Fatal("expected preserved diff file to remain visible after merge")
+	}
+}
+
+func TestTaskChangesWorktreeContent_ToolbarActionOrder(t *testing.T) {
+	task := &models.Task{ID: "task-toolbar", WorktreeBranch: "task/feature"}
+	diff := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent(diff, task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	last := -1
+	for _, marker := range []string{`data-diff-toolbar`, `id="diff-btn-inline"`, `id="diff-btn-split"`, `id="review-toolbar"`, `id="changes-actions-dropdown"`} {
+		pos := strings.Index(out, marker)
+		if pos <= last {
+			t.Fatalf("missing or misplaced toolbar control %s", marker)
+		}
+		last = pos
+	}
+	for _, unwanted := range []string{"Expand All", "Collapse All", `class="card-body"`} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("unexpected toolbar chrome: %s", unwanted)
+		}
+	}
+	if !strings.Contains(out, `popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap"`) {
+		t.Fatal("Actions should retain its accent color")
+	}
+	buf.Reset()
+	if err := TaskChangesWorktreeContent("", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `id="changes-actions-dropdown"`) {
+		t.Fatal("actions must remain available with no diff")
 	}
 }

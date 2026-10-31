@@ -86,7 +86,9 @@ templ ChangesExplorerScript() {
                     if (card && scroller) {
                         delete card._diffScrollAnchor;
                         delete card._diffReadingAnchor;
-                        scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+                        var toolbar = viewer.closest('.worktree-changes') && viewer.querySelector('[data-diff-toolbar]');
+                        var toolbarHeight = toolbar ? toolbar.getBoundingClientRect().height : 0;
+                        scroller.scrollTop += card.getBoundingClientRect().top - scroller.getBoundingClientRect().top - toolbarHeight;
                         // A short unloaded slot may be too close to the bottom to
                         // reach the viewport top until its content arrives.
                         if (card.dataset.diffLazyUrl) card._diffScrollAnchor = {

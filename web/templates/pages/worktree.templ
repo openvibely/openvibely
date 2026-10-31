@@ -122,20 +122,55 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 }
 
 templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool, diffView string) {
-	<div class="card bg-base-100 shadow-sm border border-base-300">
-		<div class="card-body">
-			// Keep the actions header above sticky diff headers in the same card.
+	<div class="worktree-changes min-w-0 max-w-full">
+		<div>
+			// Branch context scrolls away; review controls remain in the toolbar.
 			if task.WorktreeBranch != "" {
-				<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">
+				<div class="relative flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full">
 					<div class="min-w-0 max-w-full flex-1">
-						<h4 class="text-lg font-bold">Worktree Changes</h4>
+						<h4 class="text-sm font-semibold mb-1">Worktree changes</h4>
 						<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
-							Changes on branch
+							Comparing
 							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ task.WorktreeBranch }</code>
 							vs
 							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ components.TaskWorktreeMergeTarget(task) }</code>
 						</p>
 					</div>
+
+					</div>
+				}
+				if conflictRecovery {
+					<div class="alert alert-warning mb-4 text-sm" role="status" data-merge-conflict-guidance>
+						<span>A merge conflict is active. Resolve the conflicting files or abort the merge before retrying.</span>
+					</div>
+				}
+
+			<style>
+				.worktree-changes #diff-viewer > [data-diff-toolbar] {
+					position: sticky;
+					top: 0;
+					z-index: 40;
+					padding: 0.5rem 0 0.75rem;
+					border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+				}
+				.worktree-changes #diff-viewer .diff-file-header {
+					top: var(--diff-toolbar-height, 0px);
+				}
+				.worktree-changes .diff-file-card {
+					scroll-margin-top: calc(var(--diff-toolbar-height, 0px) + 8px);
+				}
+				.worktree-changes #diff-viewer > [data-diff-toolbar] > :first-child {
+					flex-wrap: wrap;
+				}
+			</style>
+			// Diff viewer
+			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable))
+		</div>
+	</div>
+}
+
+templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool) {
+ if task.WorktreeBranch != "" {
 						// Unified actions dropdown with Local and GitHub sections
 						<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">
 							<button type="button" role="button" popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap">
@@ -205,18 +240,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 							</ul>
 							@changesActionsPopoverScript()
 						</div>
-					</div>
-				}
-				if conflictRecovery {
-					<div class="alert alert-warning mb-4 text-sm" role="status" data-merge-conflict-guidance>
-						<span>A merge conflict is active. Resolve the conflicting files or abort the merge before retrying.</span>
-					</div>
-				}
-
-			// Diff viewer
-			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView)
-		</div>
-	</div>
+ }
 }
 
 // Helper functions for worktree templates
