@@ -131,6 +131,9 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("settings ready", `String(!!document.getElementById('themes-container') && !document.querySelector('#main-content.htmx-settling'))`, "true")
 		b.waitFor("settings expands navigation without changing saved preference", `String(!document.documentElement.classList.contains('task-list-collapsed') && document.querySelector('#appearance-settings-nav [data-settings-back]').getBoundingClientRect().height>0 && localStorage.getItem('openvibely.taskListCollapsed')==='true')`, "true")
 
+		b.evaluate(`window.settingsShortcutURL=location.href;window.settingsShortcutHistory=history.length;window.hiddenInspectorState=document.getElementById('task-details-panel').hidden;window.hiddenChangesState=document.getElementById('tab-changes').className;window.taskShortcutsIgnored=['KeyB','KeyD','ArrowUp','ArrowDown','KeyL'].every(code=>{var mac=/Mac|iPhone|iPad/.test(navigator.platform);var e=new KeyboardEvent('keydown',{code:code,key:code,metaKey:mac,ctrlKey:!mac,shiftKey:true,bubbles:true,cancelable:true});document.body.dispatchEvent(e);return !e.defaultPrevented;});'shortcuts in settings'`)
+		b.waitFor("hidden task shortcuts ignored in settings", `String(window.taskShortcutsIgnored && location.href===window.settingsShortcutURL && history.length===window.settingsShortcutHistory && document.getElementById('task-details-panel').hidden===window.hiddenInspectorState && document.getElementById('tab-changes').className===window.hiddenChangesState)`, "true")
+
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/models"]').click();'models'`)
 		b.waitFor("models ready", `String(!!document.getElementById('models-container') && !document.querySelector('#settings-content.htmx-settling'))`, "true")
 		b.evaluate(`history.back();'back within settings'`)
