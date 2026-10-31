@@ -27,7 +27,7 @@ func TestDiffChunkCacheSharesPreparation(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			got, err := cache.get(context.Background(), "task", 0, true, "v1", load)
+			got, err := cache.get(context.Background(), "task", 0, "v1", load)
 			if err != nil || got != value {
 				t.Errorf("get=%p,%v", got, err)
 			}
@@ -39,19 +39,18 @@ func TestDiffChunkCacheSharesPreparation(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("prepared %d times", calls.Load())
 	}
-	// Revision, task, file and review mode are separate identities.
+	// Revision, task and file are separate identities.
 	for _, key := range []struct {
 		task     string
 		index    int
-		review   bool
 		revision string
-	}{{"task", 0, true, "v2"}, {"other", 0, true, "v1"}, {"task", 1, true, "v1"}, {"task", 0, false, "v1"}, {"task", 0, true, ""}, {"task", 0, true, ""}} {
-		_, err := cache.get(context.Background(), key.task, key.index, key.review, key.revision, load)
+	}{{"task", 0, "v2"}, {"other", 0, "v1"}, {"task", 1, "v1"}, {"task", 0, ""}, {"task", 0, ""}} {
+		_, err := cache.get(context.Background(), key.task, key.index, key.revision, load)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if calls.Load() != 7 {
+	if calls.Load() != 6 {
 		t.Fatalf("unexpected identity reuse: %d loads", calls.Load())
 	}
 }
@@ -88,12 +87,12 @@ func TestDiffChunkCacheBoundsAndExpiry(t *testing.T) {
 func TestDiffChunkCacheDoesNotCacheFailures(t *testing.T) {
 	var cache diffChunkCache
 	expected := errors.New("source unavailable")
-	_, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) { return nil, expected })
+	_, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) { return nil, expected })
 	if !errors.Is(err, expected) {
 		t.Fatal(err)
 	}
 	value := &preparedDiffChunks{bytes: 1}
-	got, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) { return value, nil })
+	got, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) { return value, nil })
 	if err != nil || got != value {
 		t.Fatal("failed load poisoned cache")
 	}
@@ -104,7 +103,7 @@ func TestDiffChunkCacheWaiterCancellation(t *testing.T) {
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
-		_, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) {
+		_, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) {
 			close(entered)
 			<-release
 			return &preparedDiffChunks{bytes: 1}, nil
@@ -116,7 +115,7 @@ func TestDiffChunkCacheWaiterCancellation(t *testing.T) {
 	<-entered
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := cache.get(ctx, "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) {
+	_, err := cache.get(ctx, "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) {
 		t.Error("duplicate preparation")
 		return nil, errors.New("unexpected")
 	})
@@ -137,7 +136,7 @@ func TestDiffChunkCacheLeaderCancellation(t *testing.T) {
 		leaderDone, waiterDone := make(chan error, 1), make(chan error, 1)
 		value := &preparedDiffChunks{bytes: 1}
 		go func() {
-			_, err := cache.get(leaderCtx, "task", 0, true, "v1", func(loadCtx context.Context) (*preparedDiffChunks, error) {
+			_, err := cache.get(leaderCtx, "task", 0, "v1", func(loadCtx context.Context) (*preparedDiffChunks, error) {
 				started <- loadCtx
 				select {
 				case <-release:
@@ -156,7 +155,7 @@ func TestDiffChunkCacheLeaderCancellation(t *testing.T) {
 			t.Fatal("missing independent preparation deadline")
 		}
 		go func() {
-			got, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) {
+			got, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) {
 				t.Error("duplicate preparation")
 				return value, nil
 			})
@@ -177,7 +176,7 @@ func TestDiffChunkCacheLeaderCancellation(t *testing.T) {
 		if err := <-waiterDone; err != nil {
 			t.Fatalf("live waiter failed: %v", err)
 		}
-		_, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) {
+		_, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) {
 			t.Error("completed snapshot was not cached")
 			return nil, errors.New("unexpected reload")
 		})
@@ -193,7 +192,7 @@ func TestDiffChunkCacheLeaderCancellation(t *testing.T) {
 func TestDiffChunkCachePreparationTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var cache diffChunkCache
-		_, err := cache.get(context.Background(), "task", 0, true, "v1", func(loadCtx context.Context) (*preparedDiffChunks, error) {
+		_, err := cache.get(context.Background(), "task", 0, "v1", func(loadCtx context.Context) (*preparedDiffChunks, error) {
 			<-loadCtx.Done()
 			// Even a loader returning a late success must not populate the cache.
 			return &preparedDiffChunks{bytes: 1}, nil
@@ -202,7 +201,7 @@ func TestDiffChunkCachePreparationTimeout(t *testing.T) {
 			t.Fatalf("preparation deadline: %v", err)
 		}
 		calls := 0
-		_, err = cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) { calls++; return &preparedDiffChunks{bytes: 1}, nil })
+		_, err = cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) { calls++; return &preparedDiffChunks{bytes: 1}, nil })
 		if err != nil || calls != 1 {
 			t.Fatal("timed-out preparation poisoned cache")
 		}
@@ -216,7 +215,7 @@ func TestDiffChunkCacheTimeoutBoundsUnresponsiveLoader(t *testing.T) {
 		defer close(release)
 		done := make(chan error, 1)
 		go func() {
-			_, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) {
+			_, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) {
 				<-release
 				return &preparedDiffChunks{bytes: 1}, nil
 			})
@@ -235,7 +234,7 @@ func TestDiffChunkCacheTimeoutBoundsUnresponsiveLoader(t *testing.T) {
 		}
 		// A retry must start fresh even while the old operation is still unwinding.
 		fresh := &preparedDiffChunks{bytes: 2}
-		got, err := cache.get(context.Background(), "task", 0, true, "v1", func(context.Context) (*preparedDiffChunks, error) { return fresh, nil })
+		got, err := cache.get(context.Background(), "task", 0, "v1", func(context.Context) (*preparedDiffChunks, error) { return fresh, nil })
 		if err != nil || got != fresh {
 			t.Fatalf("retry failed: %v", err)
 		}

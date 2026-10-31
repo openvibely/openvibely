@@ -36,6 +36,11 @@ func DiffCodeRevision(file DiffFile) string {
 	return DiffFileRevision(file, nil)
 }
 
+// DiffCodeRevisionSized is DiffCodeRevision for callers that already ran DiffFileTooLarge.
+func DiffCodeRevisionSized(file DiffFile, tooLarge bool) string {
+	return diffFileRevision(file, nil, tooLarge)
+}
+
 // File revisions include review annotations so unchanged cards can survive refreshes.
 func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
 	return diffFileRevision(file, comments, DiffFileTooLarge(file))

@@ -69,14 +69,12 @@ func TestBrowserFunctional_MenuCleanupDoesNotScanLargePagePerElement(t *testing.
 
 func TestBrowserFunctional_DiffNavigationSkipsHistorySnapshot(t *testing.T) {
 	chrome := testChromePath(t)
-	for _, review := range []bool{true} {
-		t.Run(fmt.Sprintf("review=%v", review), func(t *testing.T) {
-			var rendered bytes.Buffer
-			diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1 +1 @@\n-old\n+new\n"
-			if err := DiffViewer(diff, "task", nil, "inline").Render(context.Background(), &rendered); err != nil {
-				t.Fatal(err)
-			}
-			runner := `<script>
+	var rendered bytes.Buffer
+	diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1 +1 @@\n-old\n+new\n"
+	if err := DiffViewer(diff, "task", nil, "inline").Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	runner := `<script>
     window.addEventListener('load',async function(){
      const result=document.getElementById('fixture-root');
      try {
@@ -95,23 +93,21 @@ func TestBrowserFunctional_DiffNavigationSkipsHistorySnapshot(t *testing.T) {
      }catch(error){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(error));}
     });
    </script>`
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch r.URL.Path {
-				case "/htmx.js":
-					w.Header().Set("Content-Type", "text/javascript")
-					w.Write(htmx204)
-				case "/other":
-					fmt.Fprint(w, `<div>Other project</div>`)
-				default:
-					if r.Header.Get("HX-History-Restore-Request") == "true" {
-						fmt.Fprint(w, `<main id="main-content" hx-history-elt><div id="fresh-diff" hx-history="false">Fresh diff</div></main>`)
-						return
-					}
-					fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script></head><body><main id="fixture-root" data-test-result="pending"></main><a id="navigate" hx-push-url="true"></a><main id="main-content" hx-history-elt>`+rendered.String()+`</main>`+runner+`</body></html>`)
-				}
-			}))
-			defer server.Close()
-			runHeadlessChromeFixture(t, chrome, server.URL, "diff history opt out", 5000, 20*time.Second)
-		})
-	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Write(htmx204)
+		case "/other":
+			fmt.Fprint(w, `<div>Other project</div>`)
+		default:
+			if r.Header.Get("HX-History-Restore-Request") == "true" {
+				fmt.Fprint(w, `<main id="main-content" hx-history-elt><div id="fresh-diff" hx-history="false">Fresh diff</div></main>`)
+				return
+			}
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script></head><body><main id="fixture-root" data-test-result="pending"></main><a id="navigate" hx-push-url="true"></a><main id="main-content" hx-history-elt>`+rendered.String()+`</main>`+runner+`</body></html>`)
+		}
+	}))
+	defer server.Close()
+	runHeadlessChromeFixture(t, chrome, server.URL, "diff history opt out", 5000, 20*time.Second)
 }

@@ -102,7 +102,7 @@ func TestChunkReviewAtBoundary(t *testing.T) {
 		chunks := DiffFileChunks(file, view)
 		for index, chunk := range chunks {
 			var out bytes.Buffer
-			if err := DiffChunk(chunk, 0, view, "task", comments, true, index, len(chunks), DiffFileRevision(file, comments)).Render(context.Background(), &out); err != nil {
+			if err := DiffChunk(chunk, 0, view, "task", comments, index, len(chunks), DiffFileRevision(file, comments)).Render(context.Background(), &out); err != nil {
 				t.Fatal(err)
 			}
 			if strings.Contains(out.String(), "boundary-review") != (index == 1) {

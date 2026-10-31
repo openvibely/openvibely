@@ -1910,7 +1910,6 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		view = "inline"
 	}
 
-	reviewMode := strings.EqualFold(c.QueryParam("review"), "true")
 	ctx := c.Request().Context()
 	expectedPath, expectedRevision := c.QueryParam("file_path"), c.QueryParam("revision")
 	chunk, err := strconv.Atoi(c.QueryParam("chunk"))
@@ -1927,7 +1926,7 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 			*value = parsed
 		}
 	}
-	prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, reviewMode, expectedRevision, func(loadCtx context.Context) (*preparedDiffChunks, error) {
+	prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, expectedRevision, func(loadCtx context.Context) (*preparedDiffChunks, error) {
 		meta, exists := h.resolveTaskChangesFileMeta(loadCtx, task, fileIndex)
 		if err := loadCtx.Err(); err != nil {
 			return nil, err
@@ -1935,11 +1934,12 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		if !exists {
 			return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
 		}
-		revision := components.DiffCodeRevision(meta.File)
+		tooLarge := components.DiffFileTooLarge(meta.File)
+		revision := components.DiffCodeRevisionSized(meta.File, tooLarge)
 		if expectedRevision != "" && expectedRevision != revision {
 			return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
 		}
-		if components.DiffFileTooLarge(meta.File) {
+		if tooLarge {
 			return nil, echo.NewHTTPError(http.StatusRequestEntityTooLarge, "diff file too large to display")
 		}
 		return prepareDiffChunks(meta, revision), nil
@@ -1961,11 +1961,8 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
 	}
 	// Code snapshots are cached; annotations are always read fresh.
-	var comments []models.ReviewComment
-	if reviewMode {
-		comments = h.loadTaskReviewComments(ctx, taskID)
-	}
-	return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, comments, reviewMode, chunk, len(chunks), prepared.revision))
+	comments := h.loadTaskReviewComments(ctx, taskID)
+	return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, comments, chunk, len(chunks), prepared.revision))
 }
 
 // GetTaskChangesLive returns only the diff viewer fragment for realtime updates.

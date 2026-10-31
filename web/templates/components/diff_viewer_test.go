@@ -1126,7 +1126,7 @@ func TestDiffViewerWithReview_WithComments(t *testing.T) {
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1312,7 +1312,7 @@ func TestDiffViewerWithReview_SplitViewHasAddCommentButtons(t *testing.T) {
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", nil, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", nil, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1477,7 +1477,7 @@ func TestDiffViewerWithReview_InlineCommentRowsSupportEditAndDelete(t *testing.T
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1593,7 +1593,7 @@ func TestDiffViewerWithReview_RendersSharedReviewCommentRows(t *testing.T) {
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1693,7 +1693,7 @@ diff --git a/src/review.go b/src/review.go
 	}
 	for _, view := range []string{"inline", "split"} {
 		var buf bytes.Buffer
-		if err := DiffChunk(targetedMeta.File, targetedMeta.Index, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(targetedMeta.File, targetedMeta.Index, view, "task123", comments, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatalf("render %s failed: %v", view, err)
 		}
 		body := buf.String()
@@ -1883,7 +1883,6 @@ func TestDiffViewerToolbar_ResponsiveNonOverlappingLayout(t *testing.T) {
 			t.Error("toolbar right group must not use flex-shrink-0 ml-auto: causes overflow-at-x=0 overlap with the left group on narrow viewports")
 		}
 	})
-
 }
 
 func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) {
@@ -1910,7 +1909,7 @@ func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) 
 	}
 	for _, meta := range progressiveDiffMetas(ParseDiffOutput(diff), nil) {
 		for _, view := range []string{"inline", "split"} {
-			if err := DiffChunk(meta.File, meta.Index, view, "large-task", nil, true, 0, 1, "").Render(context.Background(), &eager); err != nil {
+			if err := DiffChunk(meta.File, meta.Index, view, "large-task", nil, 0, 1, "").Render(context.Background(), &eager); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1934,7 +1933,7 @@ func renderDiffViewerWithCards(diff string, w io.Writer) error {
 		return err
 	}
 	for index, file := range ParseDiffOutput(diff) {
-		if err := DiffChunk(file, index, "inline", "task", nil, true, 0, 1, DiffCodeRevision(file)).Render(context.Background(), w); err != nil {
+		if err := DiffChunk(file, index, "inline", "task", nil, 0, 1, DiffCodeRevision(file)).Render(context.Background(), w); err != nil {
 			return err
 		}
 	}

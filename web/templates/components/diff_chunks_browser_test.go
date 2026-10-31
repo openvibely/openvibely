@@ -284,7 +284,7 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 				http.Error(w, "invalid", 400)
 				return
 			}
-			if err := DiffChunk(chunks[chunk], 0, view, "chunk-task", comments, true, chunk, len(chunks), DiffCodeRevision(file)).Render(r.Context(), w); err != nil {
+			if err := DiffChunk(chunks[chunk], 0, view, "chunk-task", comments, chunk, len(chunks), DiffCodeRevision(file)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		default:
