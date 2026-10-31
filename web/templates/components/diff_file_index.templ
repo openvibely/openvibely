@@ -58,7 +58,7 @@ templ diffFileIndexScript() {
     slot.className = 'diff-file-slot bg-base-200 rounded-lg px-4 py-2 cursor-pointer';
     slot.dataset.diffFilePath = file.path;
     slot.dataset.fileRevision = file.revision;
-    slot.dataset.diffLazyUrl = '/tasks/' + encodeURIComponent(viewer.dataset.taskId) + '/changes/file?file_index=' + file.index + '&view=' + (split?'split':'inline') + '&review=true&chunk=0&revision=' + encodeURIComponent(file.codeRevision);
+    slot.dataset.diffLazyUrl = '/tasks/' + encodeURIComponent(viewer.dataset.taskId) + '/changes/file?file_index=' + file.index + '&view=' + (split?'split':'inline') + '&chunk=0&revision=' + encodeURIComponent(file.codeRevision);
     slot.dataset.diffAdds = file.adds; slot.dataset.diffDels = file.dels;
     slot.textContent = file.path;
     slot.setAttribute('role','button'); slot.tabIndex = 0;
