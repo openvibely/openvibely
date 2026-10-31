@@ -19,6 +19,21 @@ func TestParseDiffOutput_Empty(t *testing.T) {
 	}
 }
 
+func TestParseDiffOutput_TrailingNewlineMatchesFullDiffRevision(t *testing.T) {
+	first := "diff --git a/a.md b/a.md\nnew file mode 100644\n--- /dev/null\n+++ b/a.md\n@@ -0,0 +1,2 @@\n+one\n+two\n"
+	full := first + "diff --git a/b.md b/b.md\n--- a/b.md\n+++ b/b.md\n@@ -1 +1 @@\n-x\n+y\n"
+	single, ok := DiffRenderMetaByIndex(first, 0)
+	if !ok {
+		t.Fatal("expected file 0")
+	}
+	if got := len(single.File.Hunks[0].Lines); got != 2 {
+		t.Fatalf("trailing newline added a phantom line: %d lines", got)
+	}
+	if DiffCodeRevision(single.File) != DiffCodeRevision(ParseDiffOutput(full)[0]) {
+		t.Fatal("per-file revision differs from full-diff revision")
+	}
+}
+
 func TestParseDiffOutput_SingleFile(t *testing.T) {
 	diff := `diff --git a/main.go b/main.go
 index abc1234..def5678 100644
