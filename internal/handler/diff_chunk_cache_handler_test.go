@@ -26,6 +26,7 @@ func (s *countingDiffStore) GetLatestNonEmptyDiffOutput(ctx context.Context, tas
 func TestHandler_DiffChunkSnapshotCache(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithStores(t)
 	defer db.Close()
+	h.SetReviewCommentRepo(db.ReviewComments)
 	ctx := context.Background()
 	projects, err := db.Projects.List(ctx)
 	if err != nil || len(projects) == 0 {
@@ -51,12 +52,12 @@ func TestHandler_DiffChunkSnapshotCache(t *testing.T) {
 		if err := store.UpdateDiffOutput(ctx, execution.ID, text); err != nil {
 			t.Fatal(err)
 		}
-		return components.DiffFileRevision(components.ParseDiffOutput(text)[0], nil)
+		return components.DiffCodeRevision(components.ParseDiffOutput(text)[0])
 	}
 	revision := save(diff)
 	request := func(rev, view, path string, chunk int, status int) string {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/tasks/%s/changes/file?file_index=0&chunk=%d&view=%s&revision=%s&file_path=%s", task.ID, chunk, view, rev, path), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/tasks/%s/changes/file?file_index=0&review=true&chunk=%d&view=%s&revision=%s&file_path=%s", task.ID, chunk, view, rev, path), nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("taskId")
@@ -100,4 +101,42 @@ func TestHandler_DiffChunkSnapshotCache(t *testing.T) {
 	h.diffChunks.bytes = 0
 	h.diffChunks.mu.Unlock()
 	request(revision, "inline", "big.txt", 0, 409)
+	// Review mutations must neither invalidate URLs nor serve cached annotations.
+	request(next, "inline", "big.txt", 2, 200)
+	comment := &models.ReviewComment{TaskID: task.ID, FilePath: "big.txt", LineNumber: 401, LineType: "new", CommentText: "fresh review", ReviewedBy: "user"}
+	if err := db.ReviewComments.Create(ctx, comment); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"fresh review", "edited review", ""} {
+		if text == "" {
+			if err := db.ReviewComments.Delete(ctx, comment.ID); err != nil {
+				t.Fatal(err)
+			}
+		} else if text != "fresh review" {
+			if err := db.ReviewComments.UpdateText(ctx, comment.ID, text); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, cold := range []bool{false, true} {
+			if cold {
+				h.diffChunks.mu.Lock()
+				h.diffChunks.entries = nil
+				h.diffChunks.bytes = 0
+				h.diffChunks.mu.Unlock()
+			}
+			for _, view := range []string{"inline", "split"} {
+				body := request(next, view, "big.txt", 2, 200)
+				if text != "" && !strings.Contains(body, text) {
+					t.Fatalf("missing current review: view=%s cold=%v", view, cold)
+				}
+				if text == "" && strings.Contains(body, `data-comment-id="`+comment.ID+`"`) {
+					t.Fatal("deleted review survived cache")
+				}
+				if text == "edited review" && strings.Contains(body, "fresh review") {
+					t.Fatal("old comment text survived cache")
+				}
+			}
+		}
+	}
+
 }

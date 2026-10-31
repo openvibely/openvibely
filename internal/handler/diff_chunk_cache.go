@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"golang.org/x/sync/singleflight"
 )
@@ -21,18 +20,12 @@ const diffChunkCacheTTL = 5 * time.Minute
 type preparedDiffChunks struct {
 	path, revision string
 	index          int
-	comments       []models.ReviewComment
 	inline, split  []components.DiffFile
 	bytes          int64
 }
 
-func prepareDiffChunks(meta components.DiffFileRenderMeta, comments []models.ReviewComment, revision string) *preparedDiffChunks {
+func prepareDiffChunks(meta components.DiffFileRenderMeta, revision string) *preparedDiffChunks {
 	p := &preparedDiffChunks{path: meta.File.Path, index: meta.Index, revision: revision}
-	for _, comment := range comments {
-		if comment.FilePath == p.path {
-			p.comments = append(p.comments, comment)
-		}
-	}
 	// Parser strings can reference the full multi-file diff. Detach the selected
 	// file so retaining one snapshot cannot retain an unaccounted whole-task buffer.
 	file := meta.File
@@ -51,7 +44,7 @@ func prepareDiffChunks(meta components.DiffFileRenderMeta, comments []models.Rev
 	p.inline = components.DiffFileChunks(file, "inline")
 	p.split = components.DiffFileChunks(file, "split")
 	// Conservative accounting includes backing arrays, split pairs, strings and
-	// annotations. Counting shared strings twice keeps the memory budget bounded.
+	// chunk metadata. Counting shared strings twice keeps the memory budget bounded.
 	p.bytes = int64(1024 + len(p.path))
 	for _, chunks := range [][]components.DiffFile{p.inline, p.split} {
 		for _, chunk := range chunks {
@@ -63,9 +56,6 @@ func prepareDiffChunks(meta components.DiffFileRenderMeta, comments []models.Rev
 				}
 			}
 		}
-	}
-	for _, comment := range p.comments {
-		p.bytes += int64(2048 + len(comment.CommentText) + len(comment.FilePath) + len(comment.ID) + len(comment.TaskID) + len(comment.LineType) + len(comment.ReviewedBy))
 	}
 	return p
 }

@@ -17,8 +17,8 @@ import (
 
 func diffLazyURL(meta DiffFileRenderMeta, taskID, view string, review bool) string {
 	path := fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, review)
-	if meta.Revision != "" {
-		path += "&chunk=0&revision=" + url.QueryEscape(meta.Revision)
+	if meta.CodeRevision != "" {
+		path += "&chunk=0&revision=" + url.QueryEscape(meta.CodeRevision)
 	}
 	return path
 }
@@ -66,7 +66,7 @@ func DiffChunk(file DiffFile, index int, view, taskID string, comments []models.
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" data-file-revision=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" data-code-revision=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

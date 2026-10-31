@@ -45,7 +45,7 @@ func loadInlineTaskDiffCards(t *testing.T, h *Handler, e *echo.Echo, taskID, mar
 			if attr.Key == "data-diff-index" {
 				index = attr.Val
 			}
-			if attr.Key == "data-file-revision" {
+			if attr.Key == "data-code-revision" {
 				revision = attr.Val
 			}
 		}
