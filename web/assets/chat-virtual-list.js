@@ -500,7 +500,9 @@
         });
     };
     window.captureChatVirtualData = function (root) {
-        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(Boolean);
+        // Expanded activity bodies are derived from the outer transcript models.
+        // They have no source/key and must not be retained as standalone snapshots.
+        return Array.from(root.querySelectorAll('[data-chat-virtual-owner]'), owner => owner._chatVirtualData).filter(data => data && !data.ungrouped);
     };
     // Query transcript content in display order without mounting offscreen rows.
     // Unrendered models can be projected by the caller into lightweight elements.

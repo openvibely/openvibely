@@ -42,7 +42,17 @@ func TestTaskHiddenLargeRowScrollStabilityInChrome(t *testing.T) {
 	testTaskPagedCachedNavigation(t, "hidden-row")
 }
 
-func testTaskPagedCachedNavigation(t *testing.T, mode string) {
+func TestTaskCompactPagingInChrome(t *testing.T) {
+	for _, mode := range []string{"cache", "bounded", "scroll", "hidden", "hidden-row", "fold"} {
+		t.Run(mode, func(t *testing.T) { testTaskPagedCachedNavigation(t, mode, "compact") })
+	}
+}
+
+func testTaskPagedCachedNavigation(t *testing.T, mode string, modes ...string) {
+	outputMode := "full"
+	if len(modes) > 0 {
+		outputMode = modes[0]
+	}
 	nativeWheel := mode == "native-wheel" || mode == "native-wheel-delayed"
 	hiddenRow := mode == "hidden-row"
 	bounded := mode == "bounded"
@@ -80,6 +90,10 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	}
 	samples[len(samples)-1].Output = strings.Repeat("**Progress**\n[Using tool: shell | echo example]\n[Tool shell done]\n"+strings.Repeat("tool output line\n", 100)+"[/Tool]\n", 120) + "Final answer.\n"
 
+	if mode == "fold" {
+		samples[len(samples)-1].Output = strings.Repeat("[Using tool: shell | echo compact]\n[Tool shell done]\n"+strings.Repeat("compact tool output\n", 100)+"[/Tool]\n", 160) + strings.Repeat("Final answer paragraph.\n\n", 30)
+	}
+
 	if nativeWheel {
 		for i := range samples {
 			samples[i].Output = strings.Repeat("Assistant progress.\n[Using tool: shell | echo example]\n[Tool shell done]\nresult\n[/Tool]\n", 40)
@@ -87,7 +101,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 	}
 
 	if hiddenRow {
-		samples[len(samples)-1].Output = strings.Repeat("Large **paragraph**.\n\n", 4000) + strings.Repeat("[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n", 30) + "Latest message."
+		samples[len(samples)-1].Output = strings.Repeat("Large **paragraph**.\n\n", 4000) + strings.Repeat("Tail progress paragraph.\n\n[Using tool: shell | echo tail]\n[Tool shell done]\nsmall result\n[/Tool]\n", 60) + "Latest message."
 	}
 
 	if scrollStability {
@@ -122,10 +136,37 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
  const messages=()=>document.getElementById('task-thread-messages');
  const view=()=>document.getElementById('task-thread-view');
  function debug(){const m=messages();return JSON.stringify({errors,url:location.href,readyState:document.readyState,htmx:typeof window.htmx,htmxTrigger:typeof window.htmx?.trigger,view:!!view(),messages:!!m,virtualizer:typeof window.renderVisibleChatRows,queue:window._chatContentRenderQueue?.length,active:window._chatContentRenderActive,top:m?.scrollTop,height:m?.scrollHeight,viewport:m?.clientHeight,hydrating:m?.dataset.transcriptHydrating,owners:Array.from(m?.querySelectorAll('[data-chat-virtual-owner]')||[],o=>({rows:o._chatVirtualRows?.length,text:o.textContent.length,revision:!!o._renderedRevision,rendering:!!o._renderingRevision,scheduled:!!o._scheduledChatRender,active:!!o._activeScheduledChatRender,raw:!!o.getAttribute('data-raw-content'),class:o.className,rect:[o.getBoundingClientRect().top,o.getBoundingClientRect().height],ready:o._chatVirtualRows?.filter(r=>r.ready).length}))})}
- function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
+ function visible(){const m=messages();if(!m||getComputedStyle(m).visibility!=='visible')return false;const b=m.getBoundingClientRect();return Array.from(m.querySelectorAll('.chat-markdown,.stream-tool,details.stream-thinking,.stream-activity-summary')).some(el=>{const r=el.getBoundingClientRect();return el.textContent.trim()&&r.height>0&&r.bottom>b.top&&r.top<b.bottom})}
  (async()=>{
   await until(visible,'initial messages'); await settled('initial render settled');
  %s
+  if(document.documentElement.dataset.outputDetail==='compact' && %t){
+   const m=messages();
+   const row=Array.from(m.querySelectorAll('[data-chat-virtual-owner]')).flatMap(o=>o._chatVirtualRows||[]).find(r=>r.model.segments.filter(s=>s.type==='using').length===160);
+   if(!row)throw Error('Missing large activity model');
+   const target=row.node?.isConnected?row.node:row.placeholder;
+   m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));
+   m.scrollTop+=target.getBoundingClientRect().top-m.getBoundingClientRect().top-60;
+   m.dispatchEvent(new Event('scroll'));await window.renderVisibleChatRows(m);await settled('activity visible');
+   const fold=row.node.querySelector('.stream-activity-summary');
+   if(!fold || fold.getAttribute('aria-expanded')!=='false')throw Error('Missing collapsed activity');
+   const group=fold.parentElement;
+   if(group.querySelector('.stream-tool'))throw Error('Collapsed group eagerly rendered tools');
+   m.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));
+   m.scrollTop+=fold.getBoundingClientRect().top-m.getBoundingClientRect().top-60;
+   m.dispatchEvent(new Event('scroll'));await settled('reading activity');
+   if(!window._taskThreadPageTracker?.userScrolledUp)throw Error('Fixture must establish a history reading position');
+   const top=fold.getBoundingClientRect().top;
+   fold.click();await until(()=>group.querySelector('.stream-tool'),'expanded activity');await settled('expanded tools');
+   const count=group.querySelectorAll('.stream-tool').length;
+   if(count>=40)throw Error('Expanded group rendered all tools: '+count);
+   if(!group.textContent.includes('compact tool output'))throw Error('Wrong expanded output');
+   if(Math.abs(fold.getBoundingClientRect().top-top)>3)throw Error('Expansion moved reading position '+JSON.stringify({before:top,after:fold.getBoundingClientRect().top,scroll:m.scrollTop,tracker:window._taskThreadPageTracker?.userScrolledUp}));
+   fold.click();await settled('collapsed tools');
+   if(group.querySelector('.stream-tool'))throw Error('Collapse retained tool DOM');
+   if(Math.abs(fold.getBoundingClientRect().top-top)>3)throw Error('Collapse moved reading position');
+   await fetch('/browser-result?status=pass');return;
+  }
   if(hiddenRow){
    const m=messages(),paint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
    const owner=Array.from(m.querySelectorAll('[data-chat-virtual-owner]')).find(o=>o._chatVirtualRows?.[0]?.model.segments.some(s=>(s.content||'').length>=65536));
@@ -213,7 +254,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
   }
   await fetch('/browser-result?status=pass');
  })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e)+'\n'+(e.stack||''))));
- });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, nativeScript, "/tasks/"+other.ID, other.ID, path, task.ID)
+ });</script>`, bounded, scrollStability, hiddenPaging, hiddenRow, nativeScript, mode == "fold", "/tasks/"+other.ID, other.ID, path, task.ID)
 	results := make(chan string, 1)
 	var documentReady chan struct{}
 	if nativeWheel {
@@ -283,9 +324,9 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			// Capture startup failures before dependencies and page initializers run.
 			// DOMContentLoaded-only listeners miss the error that caused a lazy
 			// transcript never to mount, leaving only an unhelpful timeout.
-			// Keep individual tool rows for paging and offscreen-row assertions.
+			// Apply the selected output mode before transcript initialization.
 			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>
-localStorage.setItem('openvibely.outputDetail','full');
+localStorage.setItem('openvibely.outputDetail',`+fmt.Sprintf("%q", outputMode)+`);
 window._pagedStartupErrors=[];
 window.addEventListener('error',function(event){
  const target=event.target;
