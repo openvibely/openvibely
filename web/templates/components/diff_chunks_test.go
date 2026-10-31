@@ -63,7 +63,7 @@ func TestProgressiveDiffIncludesEveryFileWithoutBodies(t *testing.T) {
 		fmt.Fprintf(&diff, "diff --git a/f%d b/f%d\n--- a/f%d\n+++ b/f%d\n@@ -0,0 +1 @@\n+hello\n", i, i, i, i)
 	}
 	var out bytes.Buffer
-	if err := DiffViewerWithReview(diff.String(), "task", nil).Render(context.Background(), &out); err != nil {
+	if err := DiffViewer(diff.String(), "task", nil, "inline").Render(context.Background(), &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), `data-diff-path="f349"`) || strings.Contains(out.String(), "<tr") {

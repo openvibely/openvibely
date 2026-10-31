@@ -64,7 +64,7 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 	fixture += navigation.String() + `<a id="theme-breadcrumb-title" data-breadcrumb-title href="#" style="position:fixed;left:220px;top:360px;width:120px;height:30px;z-index:999999">Tasks</a>`
 
 	var review bytes.Buffer
-	if err := components.DiffViewerWithReview("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n", "theme-review", nil).Render(context.Background(), &review); err != nil {
+	if err := components.DiffViewer("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n", "theme-review", nil, "inline").Render(context.Background(), &review); err != nil {
 		t.Fatal(err)
 	}
 	fixture += `<div hidden>` + review.String() + `</div>`
