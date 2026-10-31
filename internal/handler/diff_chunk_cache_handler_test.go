@@ -140,3 +140,45 @@ func TestHandler_DiffChunkSnapshotCache(t *testing.T) {
 	}
 
 }
+
+func TestHandler_DiffChunkRejectsOversizedFile(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithStores(t)
+	defer db.Close()
+	ctx := context.Background()
+	projects, err := db.Projects.List(ctx)
+	if err != nil || len(projects) == 0 {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: projects[0].ID, Title: "huge diff", Prompt: "test", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := h.llmConfigRepo.List(ctx)
+	if err != nil || len(agents) == 0 {
+		t.Fatal(err)
+	}
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecCompleted, PromptSent: "test"}
+	if err := h.execRepo.Create(ctx, execution); err != nil {
+		t.Fatal(err)
+	}
+	diff := "diff --git a/huge.txt b/huge.txt\n--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,50001 @@\n" + strings.Repeat("+x\n", 50001)
+	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, diff); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&review=true&chunk=0&view=inline", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskChangesFile(c); err != nil {
+		e.HTTPErrorHandler(err, c)
+	}
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d want=413", rec.Code)
+	}
+	h.diffChunks.mu.Lock()
+	defer h.diffChunks.mu.Unlock()
+	if len(h.diffChunks.entries) != 0 || h.diffChunks.bytes != 0 {
+		t.Fatal("oversized file was cached")
+	}
+}

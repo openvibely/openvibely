@@ -17,7 +17,7 @@ templ diffFileIndexScript() {
   window._diffFileIndex = function(viewer) {
    if (!viewer._fileIndex) viewer._fileIndex = Array.from(viewer.querySelectorAll('[data-diff-explorer-files] [data-diff-index]')).map(function(node) {
     return {index:Number(node.dataset.diffIndex), path:node.dataset.diffPath, revision:node.dataset.fileRevision, codeRevision:node.dataset.codeRevision,
-      adds:node.dataset.diffAdds, dels:node.dataset.diffDels};
+      adds:node.dataset.diffAdds, dels:node.dataset.diffDels, tooLarge:node.dataset.diffTooLarge === 'true'};
    });
    return viewer._fileIndex;
   };
@@ -34,6 +34,25 @@ templ diffFileIndexScript() {
    var split = panel.id === 'diff-content-split', bucket = state(viewer);
    var fragment = document.createDocumentFragment();
    window._diffFileIndex(viewer).forEach(function(file) {
+    if (file.tooLarge) {
+     var card = document.createElement('div');
+     card.id = (split ? 'diff-file-split-' : 'diff-file-') + file.index;
+     card.className = 'diff-file-card bg-base-200 rounded-lg px-4 py-2';
+     card.dataset.diffFilePath = file.path;
+     card.dataset.fileRevision = file.revision;
+     card.dataset.diffTooLarge = 'true';
+     var row = card.appendChild(document.createElement('div'));
+     row.className = 'flex items-center gap-2 text-sm';
+     [[file.path,'font-mono truncate'],['+'+file.adds,'text-success'],['-'+file.dels,'text-error']].forEach(function(part) {
+      var span = row.appendChild(document.createElement('span'));
+      span.textContent = part[0]; span.className = part[1];
+     });
+     var note = card.appendChild(document.createElement('div'));
+     note.className = 'text-sm opacity-60 mt-1';
+     note.textContent = 'Diff too large to display';
+     fragment.appendChild(card);
+     return;
+    }
     var slot = document.createElement('div');
     slot.id = (split ? 'diff-file-split-' : 'diff-file-') + file.index;
     slot.className = 'diff-file-slot bg-base-200 rounded-lg px-4 py-2 cursor-pointer';

@@ -232,3 +232,80 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 		t.Fatal("timed out waiting for lazy diff browser")
 	}
 }
+
+func TestBrowserFunctional_DiffOversizedFilePlaceholder(t *testing.T) {
+	chrome := testChromePath(t)
+	diff := "diff --git a/small.go b/small.go\n--- a/small.go\n+++ b/small.go\n@@ -1 +1 @@\n-old\n+new\n" +
+		"diff --git a/huge.txt b/huge.txt\n--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,50001 @@\n" + strings.Repeat("+x\n", maxDiffFileLines+1)
+	var markup bytes.Buffer
+	if err := DiffViewer(diff, "lazy-task", nil, "inline").Render(context.Background(), &markup); err != nil {
+		t.Fatal(err)
+	}
+	files := ParseDiffOutput(diff)
+	resultChannel := make(chan string, 1)
+	runner := `<script>
+ window.addEventListener('load',async function(){
+  const result=document.getElementById('fixture-root');
+  const requests=[];const originalFetch=window.fetch;
+  window.fetch=function(url){if(String(url).includes('/changes/file'))requests.push(String(url));return originalFetch.apply(this,arguments);};
+  const wait=async function(check){for(let i=0;i<400;i++){if(check())return;await new Promise(r=>requestAnimationFrame(r));}throw Error('timed out: '+check.toString());};
+  const assert=(value,message)=>{if(!value)throw Error(message);};
+  try {
+   await wait(()=>document.querySelector('#diff-file-0 tr'));
+   for (const id of ['diff-file-1','diff-file-split-1']) {
+    if (id.includes('split')) switchDiffView('split',false);
+    await wait(()=>document.getElementById(id));
+    const card=document.getElementById(id);
+    assert(card.textContent.includes('Diff too large to display'),'missing placeholder in '+id);
+    assert(card.textContent.includes('huge.txt')&&card.textContent.includes('+50001')&&card.textContent.includes('-0'),'missing counts in '+id);
+    assert(!card.hasAttribute('data-diff-lazy-url'),'placeholder is lazy-loadable');
+   }
+   toggleAllDiffFiles(false);toggleAllDiffFiles(true);
+   await new Promise(r=>setTimeout(r,200));
+   assert(!requests.some(u=>u.includes('file_index=1')),'oversized file fetched: '+JSON.stringify(requests));
+   result.setAttribute('data-test-result','pass');
+  }catch(error){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',String(error));}
+  await originalFetch('/result?status='+result.dataset.testResult+'&error='+encodeURIComponent(result.dataset.testError||''));
+ });
+ </script>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/result":
+			select {
+			case resultChannel <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("error"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			w.Write(htmx204)
+		case "/tasks/lazy-task/changes/file":
+			index, _ := strconv.Atoi(r.URL.Query().Get("file_index"))
+			if index != 0 {
+				http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			view := r.URL.Query().Get("view")
+			if err := DiffChunk(files[0], 0, view, "lazy-task", nil, true, 0, 1, DiffCodeRevision(files[0])).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		default:
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script>`+runner+`<style>#main-content{height:600px;overflow:auto}.hidden{display:none}</style></head><body><main id="fixture-root" data-test-result="pending"></main><div id="main-content">`+markup.String()+`</div></body></html>`)
+		}
+	}))
+	defer server.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL)
+	configureTestBrowserProcess(cmd)
+	if err := startTestBrowserProcess(cmd); err != nil {
+		t.Fatal(err)
+	}
+	defer stopTestBrowserProcess(cmd)
+	select {
+	case result := <-resultChannel:
+		if result != "pass:" {
+			t.Fatal(result)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("timed out waiting for oversized diff browser")
+	}
+}
