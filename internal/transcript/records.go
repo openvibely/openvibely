@@ -46,6 +46,12 @@ func ReplayRecords(messages []models.ExecutionReplayMessage) ([]models.Conversat
 }
 
 func RestoreReplayRecords(records []models.ConversationChange) ([]models.ExecutionReplayMessage, error) {
+	return restoreReplayRecords(records, false)
+}
+func RestoreReplayRows(records []models.ConversationChange) ([]models.ExecutionReplayMessage, error) {
+	return restoreReplayRecords(records, true)
+}
+func restoreReplayRecords(records []models.ConversationChange, retainRows bool) ([]models.ExecutionReplayMessage, error) {
 	headers := make(map[int]ReplayFrame)
 	items := make(map[string]json.RawMessage)
 	for _, record := range records {
@@ -97,7 +103,11 @@ func RestoreReplayRecords(records []models.ConversationChange) ([]models.Executi
 			frame = append(frame, raw)
 			delete(items, id)
 		}
-		message, err := JoinReplay(header.ReplayHeader, frame)
+		message, err := JoinReplayRows(header.ReplayHeader, frame)
+		if err == nil && !retainRows {
+			message.TranscriptJSON = message.FullTranscriptJSON()
+			message.Rows = nil
+		}
 		if err != nil {
 			return nil, err
 		}

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
-	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -70,78 +69,52 @@ func SplitReplay(message models.ExecutionReplayMessage) (ReplayHeader, []json.Ra
 	return h, []json.RawMessage{append(json.RawMessage(nil), raw...)}, nil
 }
 
-// JoinReplay is used at a provider/legacy DTO boundary, not at checkpoints.
-// Provider request encoding still needs its complete active conversation.
+// JoinReplay is the serialized compatibility boundary. Restoration can retain
+// the same validated immutable rows with JoinReplayRows instead.
 func JoinReplay(h ReplayHeader, items []json.RawMessage) (models.ExecutionReplayMessage, error) {
+	m, err := JoinReplayRows(h, items)
+	if err == nil {
+		m.TranscriptJSON = m.FullTranscriptJSON()
+		m.Rows = nil
+	}
+	return m, err
+}
+func JoinReplayRows(h ReplayHeader, items []json.RawMessage) (models.ExecutionReplayMessage, error) {
 	m := models.ExecutionReplayMessage{UserContent: h.UserContent, AssistantContent: h.AssistantContent, ReasoningContent: h.ReasoningContent}
-	// Items are already JSON records. Assemble them directly instead of asking
-	// encoding/json to copy a large array, then copy it again into an envelope.
-	var out strings.Builder
-	size := 2
 	for _, item := range items {
 		if !json.Valid(item) {
 			return m, fmt.Errorf("invalid replay item JSON")
 		}
-		size += len(item) + 1
 	}
-	writeItems := func() {
-		out.WriteByte('[')
-		for i, item := range items {
-			if i != 0 {
-				out.WriteByte(',')
-			}
-			out.Write(item)
-		}
-		out.WriteByte(']')
-	}
+	var envelope map[string]json.RawMessage
 	switch h.Format {
 	case "none":
 		if len(items) != 0 {
 			return m, fmt.Errorf("text-only replay has provider items")
 		}
 	case "array":
-		out.Grow(size)
-		writeItems()
 	case "envelope":
 		if h.ItemsKey == "" {
 			return m, fmt.Errorf("replay envelope missing item key")
 		}
-		// Marshal only small envelope metadata, excluding the provider history.
-		envelope := make(map[string]json.RawMessage, len(h.Envelope))
+		envelope = make(map[string]json.RawMessage, len(h.Envelope))
 		for key, value := range h.Envelope {
 			if key != h.ItemsKey {
 				envelope[key] = value
 			}
 		}
-		raw, err := json.Marshal(envelope)
-		if err != nil {
-			return m, err
+		for _, raw := range envelope {
+			if raw != nil && !json.Valid(raw) {
+				return m, fmt.Errorf("invalid replay envelope JSON")
+			}
 		}
-		key, err := json.Marshal(h.ItemsKey)
-		if err != nil {
-			return m, err
-		}
-		out.Grow(size + len(raw) + len(key) + 2)
-		out.Write(raw[:len(raw)-1])
-		if len(envelope) > 0 {
-			out.WriteByte(',')
-		}
-		out.Write(key)
-		out.WriteByte(':')
-		if h.NullItems && len(items) == 0 {
-			out.WriteString("null")
-		} else {
-			writeItems()
-		}
-		out.WriteByte('}')
 	case "opaque":
 		if len(items) != 1 {
 			return m, fmt.Errorf("opaque replay requires one item")
 		}
-		out.Write(items[0])
 	default:
 		return m, fmt.Errorf("unknown replay format %q", h.Format)
 	}
-	m.TranscriptJSON = out.String()
+	m.Rows = &models.ReplayRows{Format: h.Format, ItemsKey: h.ItemsKey, Envelope: envelope, Items: items, NullItems: h.NullItems && h.Format == "envelope"}
 	return m, nil
 }

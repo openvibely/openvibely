@@ -2,11 +2,13 @@ package preparedhistory
 
 import (
 	"context"
+	"github.com/openvibely/openvibely/internal/models"
 	"reflect"
 )
 
 type stateEntry struct {
 	raw   string
+	rows  *models.ReplayRows
 	value any
 }
 
@@ -21,31 +23,7 @@ func TakeState[T any](ctx context.Context, raw string, decode func(string) (T, e
 	return state(ctx, raw, decode, true)
 }
 func state[T any](ctx context.Context, raw string, decode func(string) (T, error), take bool) (T, error) {
-	if ctx == nil {
-		return decode(raw)
-	}
-	c, _ := ctx.Value(contextKey{}).(*cache)
-	if c == nil {
-		return decode(raw)
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	key := reflect.TypeFor[T]()
-	if old, ok := c.states[key]; ok && old.raw == raw {
-		if take {
-			delete(c.states, key)
-		}
-		return old.value.(T), nil
-	}
-	delete(c.states, key)
-	value, err := decode(raw)
-	if err == nil && !take && raw != "" {
-		if c.states == nil {
-			c.states = make(map[reflect.Type]stateEntry)
-		}
-		c.states[key] = stateEntry{raw, value}
-	}
-	return value, err
+	return replayState(ctx, models.ExecutionReplayMessage{TranscriptJSON: raw}, func(replay models.ExecutionReplayMessage) (T, error) { return decode(replay.TranscriptJSON) }, take)
 }
 
 // ForgetState releases a prepared state when recovery removes its checkpoint.
@@ -60,4 +38,43 @@ func ForgetState[T any](ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.states, reflect.TypeFor[T]())
+}
+
+// ReadReplayState and TakeReplayState have the same single-request ownership
+// contract as the string helpers, keyed by immutable row identity or raw JSON.
+func ReadReplayState[T any](ctx context.Context, replay models.ExecutionReplayMessage, decode func(models.ExecutionReplayMessage) (T, error)) (T, error) {
+	return replayState(ctx, replay, decode, false)
+}
+func TakeReplayState[T any](ctx context.Context, replay models.ExecutionReplayMessage, decode func(models.ExecutionReplayMessage) (T, error)) (T, error) {
+	return replayState(ctx, replay, decode, true)
+}
+func replayState[T any](ctx context.Context, replay models.ExecutionReplayMessage, decode func(models.ExecutionReplayMessage) (T, error), take bool) (T, error) {
+	if replay.TranscriptJSON != "" {
+		replay.Rows = nil
+	}
+	if ctx == nil {
+		return decode(replay)
+	}
+	c, _ := ctx.Value(contextKey{}).(*cache)
+	if c == nil {
+		return decode(replay)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := reflect.TypeFor[T]()
+	if old, ok := c.states[key]; ok && old.raw == replay.TranscriptJSON && old.rows == replay.Rows {
+		if take {
+			delete(c.states, key)
+		}
+		return old.value.(T), nil
+	}
+	delete(c.states, key)
+	value, err := decode(replay)
+	if err == nil && !take && (replay.TranscriptJSON != "" || replay.Rows != nil) {
+		if c.states == nil {
+			c.states = make(map[reflect.Type]stateEntry)
+		}
+		c.states[key] = stateEntry{raw: replay.TranscriptJSON, rows: replay.Rows, value: value}
+	}
+	return value, err
 }

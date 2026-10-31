@@ -593,7 +593,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 					execRepo = w.llmSvc.execRepo
 				}
 				if execRepo != nil {
-					if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
+					if current, err := execRepo.GetByID(persistence.WithExecutionPayload(context.Background(), persistence.ExecutionError), prepared.ExecutionID); err == nil && current != nil {
 						switch current.Status {
 						case models.ExecCompleted, models.ExecFailed, models.ExecCancelled:
 							status = current.Status

@@ -377,7 +377,7 @@ func (h *Handler) startInstallationContinuations(ctx context.Context, project, t
 	}
 }
 func (h *Handler) startInstallationContinuation(ctx context.Context, record persistence.ChatInputRequestRecord) error {
-	original, err := h.execRepo.GetByID(ctx, record.ExecutionID)
+	original, err := h.execRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionPrompt), record.ExecutionID)
 	if err != nil {
 		return err
 	}

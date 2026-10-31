@@ -58,7 +58,7 @@ func (s *LLMService) completeInstallationTranscript(req contracts.AgentRequest) 
 	if answer.SourceExecutionID == "" || answer.QuestionID == "" {
 		return req, fmt.Errorf("installation result has no original tool exchange")
 	}
-	source, err := s.execRepo.GetByID(req.Ctx, answer.SourceExecutionID)
+	source, err := s.execRepo.GetByID(persistence.WithExecutionPayload(req.Ctx, persistence.ExecutionPrompt|persistence.ExecutionReasoning|persistence.ExecutionSession), answer.SourceExecutionID)
 	if err != nil {
 		return req, err
 	}

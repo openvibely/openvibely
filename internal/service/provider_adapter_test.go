@@ -975,7 +975,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 			adapter := providerAdapterFunc(func(got llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				calls++
 				if tc.wantSummary {
-					if got.NativeCompactionStateJSON != "" {
+					if got.NativeState().FullTranscriptJSON() != "" {
 						t.Fatal("local summary or continuation retained native state")
 					}
 					if calls == 1 {
@@ -994,7 +994,7 @@ func TestAnthropicCheckpointOnlyFollowupBudget(t *testing.T) {
 					// Item-store reconstruction may reorder JSON object fields; all
 					// values and the ordered message/content arrays must survive.
 					var actual, expected any
-					if err := json.Unmarshal([]byte(got.NativeCompactionStateJSON), &actual); err != nil {
+					if err := json.Unmarshal([]byte(got.NativeState().FullTranscriptJSON()), &actual); err != nil {
 						t.Fatalf("decode restored native checkpoint: %v", err)
 					}
 					if err := json.Unmarshal([]byte(state), &expected); err != nil {
@@ -1045,7 +1045,7 @@ func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 		calls++
 		switch calls {
 		case 1:
-			if req.NativeCompactionStateJSON != state || len(req.ChatHistory) != 0 {
+			if req.NativeState().FullTranscriptJSON() != state || len(req.ChatHistory) != 0 {
 				t.Fatalf("expected restored native checkpoint: %#v", req)
 			}
 			return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
@@ -1060,7 +1060,7 @@ func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 		default:
 			t.Fatalf("unexpected call %d", calls)
 		}
-		if req.NativeCompactionStateJSON != "" || llmcontracts.NativeCompactionStateJSONFromContext(req.Ctx) != "" {
+		if req.HasNativeState() || llmcontracts.NativeCompactionStateJSONFromContext(req.Ctx) != "" {
 			t.Fatal("text compaction leaked native encrypted state")
 		}
 		return llmcontracts.AgentResult{Output: "text summary"}, nil
@@ -1288,7 +1288,7 @@ func TestProviderSessionState_PersistsWithoutReplacingCompactionCheckpoint(t *te
 		t.Fatalf("checkpoint = %#v", checkpoint)
 	}
 	restored := svc.restoreCompactionCheckpoint(req)
-	if restored.ProviderSessionStateJSON != state || restored.NativeCompactionStateJSON != `[{"type":"compaction"}]` || len(restored.ChatHistory) != 2 {
+	if restored.ProviderSessionStateJSON != state || restored.NativeState().FullTranscriptJSON() != `[{"type":"compaction"}]` || len(restored.ChatHistory) != 2 {
 		t.Fatalf("restored request = %#v", restored)
 	}
 
@@ -1404,7 +1404,7 @@ func TestProviderContextCompactionFallback_RestoresNativeStateForMatchingModelOn
 	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
 		t.Fatal(err)
 	}
-	if requests[0].NativeCompactionStateJSON != state || len(requests[0].ChatHistory) != 1 || requests[0].ChatHistory[0].ID != "new" {
+	if requests[0].NativeState().FullTranscriptJSON() != state || len(requests[0].ChatHistory) != 1 || requests[0].ChatHistory[0].ID != "new" {
 		t.Fatalf("matching-model restore = %#v", requests[0])
 	}
 
@@ -1412,7 +1412,7 @@ func TestProviderContextCompactionFallback_RestoresNativeStateForMatchingModelOn
 	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
 		t.Fatal(err)
 	}
-	if requests[1].NativeCompactionStateJSON != "" || len(requests[1].ChatHistory) != len(history) {
+	if requests[1].NativeState().FullTranscriptJSON() != "" || len(requests[1].ChatHistory) != len(history) {
 		t.Fatalf("mismatched-model restore = %#v", requests[1])
 	}
 }
@@ -1987,7 +1987,7 @@ func TestNativeCheckpointRequiresCompleteCompatibilityIdentity(t *testing.T) {
 	changed.BaseURL = "https://two.example/v1"
 	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, ProjectID: "identity", Agent: changed, ChatHistory: []models.Execution{{ID: "source", PromptSent: "original"}}}
 	got := svc.restoreCompactionCheckpoint(req)
-	if got.NativeCompactionStateJSON != "" || len(got.ChatHistory) != 1 {
+	if got.NativeState().FullTranscriptJSON() != "" || len(got.ChatHistory) != 1 {
 		t.Fatalf("incompatible opaque state restored: %#v", got)
 	}
 }

@@ -1696,8 +1696,14 @@ func modelHistoryQuery(ctx context.Context, query string, alias bool) string {
 			columns, full, prefix, output = executionSelectColumnsAliasLight, executionSelectColumnsAlias, "e.", executionOutputSelectAlias
 		}
 		projection := strings.Replace(full, output, "''", 1)
-		for _, field := range []string{"prompt_sent", "reasoning_content", "diff_output", "error_message", "cli_session_id"} {
-			projection = strings.Replace(projection, prefix+field, "''", 1)
+		selected := persistence.ExecutionPayloadFromContext(ctx)
+		for field, flag := range map[string]persistence.ExecutionPayload{
+			"prompt_sent": persistence.ExecutionPrompt, "reasoning_content": persistence.ExecutionReasoning,
+			"error_message": persistence.ExecutionError, "cli_session_id": persistence.ExecutionSession, "diff_output": 0,
+		} {
+			if selected&flag == 0 {
+				projection = strings.Replace(projection, prefix+field, "''", 1)
+			}
 		}
 		// Replace the known SELECT projection, never arbitrary WHERE/ORDER BY text.
 		if strings.Contains(query, full) {

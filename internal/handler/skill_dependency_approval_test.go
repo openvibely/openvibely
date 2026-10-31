@@ -835,7 +835,7 @@ func assertInstallationToolContinuation(t *testing.T, mock *testutil.MockLLMCall
 	var transcript string
 	for _, ex := range req.ChatHistory {
 		for _, replay := range ex.ReplayMessages {
-			transcript += replay.TranscriptJSON
+			transcript += replay.FullTranscriptJSON()
 		}
 	}
 	if !strings.Contains(transcript, want) || !strings.Contains(transcript, "original-call") {

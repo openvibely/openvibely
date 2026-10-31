@@ -59,7 +59,14 @@ func CheckpointRecords(history []models.Execution, native string) ([]models.Conv
 	return result, nil
 }
 
+// RestoreCheckpointRecords preserves the serialized compatibility API.
 func RestoreCheckpointRecords(records []models.ConversationChange) ([]models.Execution, string, error) {
+	history, native, err := RestoreCheckpointRows(records)
+	return history, native.FullTranscriptJSON(), err
+}
+
+// RestoreCheckpointRows retains immutable native items through model restoration.
+func RestoreCheckpointRows(records []models.ConversationChange) ([]models.Execution, models.ExecutionReplayMessage, error) {
 	var header checkpointHeader
 	found := false
 	entries := make(map[string]json.RawMessage)
@@ -69,11 +76,11 @@ func RestoreCheckpointRecords(records []models.ConversationChange) ([]models.Exe
 			continue
 		}
 		if r.Operation != models.ConversationPut {
-			return nil, "", fmt.Errorf("invalid checkpoint operation")
+			return nil, models.ExecutionReplayMessage{}, fmt.Errorf("invalid checkpoint operation")
 		}
 		if r.ItemID == "checkpoint:header" {
 			if err := json.Unmarshal(r.Payload, &header); err != nil {
-				return nil, "", err
+				return nil, models.ExecutionReplayMessage{}, err
 			}
 			found = true
 			continue
@@ -87,32 +94,32 @@ func RestoreCheckpointRecords(records []models.ConversationChange) ([]models.Exe
 			r.ItemID = r.ItemID[i:]
 			groups[prefix] = append(groups[prefix], r)
 		} else {
-			return nil, "", fmt.Errorf("unknown checkpoint record %q", r.ItemID)
+			return nil, models.ExecutionReplayMessage{}, fmt.Errorf("unknown checkpoint record %q", r.ItemID)
 		}
 	}
 	if !found {
 		if len(entries) != 0 || len(groups) != 0 {
-			return nil, "", fmt.Errorf("missing checkpoint header")
+			return nil, models.ExecutionReplayMessage{}, fmt.Errorf("missing checkpoint header")
 		}
-		return []models.Execution{}, "", nil // session-only checkpoint
+		return []models.Execution{}, models.ExecutionReplayMessage{}, nil // session-only checkpoint
 	}
 	if header.HistoryCount < 0 || header.HistoryCount != len(entries) {
-		return nil, "", fmt.Errorf("checkpoint history count mismatch")
+		return nil, models.ExecutionReplayMessage{}, fmt.Errorf("checkpoint history count mismatch")
 	}
 	history := make([]models.Execution, 0, header.HistoryCount)
 	for i := 0; i < header.HistoryCount; i++ {
 		prefix := fmt.Sprintf("checkpoint:history:%012d:", i)
 		raw, ok := entries[prefix+"execution"]
 		if !ok {
-			return nil, "", fmt.Errorf("missing checkpoint execution %d", i)
+			return nil, models.ExecutionReplayMessage{}, fmt.Errorf("missing checkpoint execution %d", i)
 		}
 		var entry CheckpointExecution
 		if err := json.Unmarshal(raw, &entry); err != nil {
-			return nil, "", err
+			return nil, models.ExecutionReplayMessage{}, err
 		}
 		replay, err := RestoreReplayRecords(groups[prefix])
 		if err != nil {
-			return nil, "", err
+			return nil, models.ExecutionReplayMessage{}, err
 		}
 		delete(groups, prefix)
 		entry.Execution.ReplayMessages = replay
@@ -120,20 +127,20 @@ func RestoreCheckpointRecords(records []models.ConversationChange) ([]models.Exe
 		entry.Execution.ReasoningContent = entry.Reasoning
 		history = append(history, entry.Execution)
 	}
-	var native string
+	var native models.ExecutionReplayMessage
 	if header.Native {
-		replay, err := RestoreReplayRecords(groups["checkpoint:native:"])
+		replay, err := RestoreReplayRows(groups["checkpoint:native:"])
 		if err != nil {
-			return nil, "", err
+			return nil, models.ExecutionReplayMessage{}, err
 		}
 		if len(replay) != 1 {
-			return nil, "", fmt.Errorf("missing native checkpoint frame")
+			return nil, models.ExecutionReplayMessage{}, fmt.Errorf("missing native checkpoint frame")
 		}
-		native = replay[0].FullTranscriptJSON()
+		native = replay[0]
 		delete(groups, "checkpoint:native:")
 	}
 	if len(groups) != 0 {
-		return nil, "", fmt.Errorf("checkpoint contains unowned replay records")
+		return nil, models.ExecutionReplayMessage{}, fmt.Errorf("checkpoint contains unowned replay records")
 	}
 	return history, native, nil
 }

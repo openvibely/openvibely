@@ -62,7 +62,7 @@ func TestNativeCheckpointFollowupCompactionBudget(t *testing.T) {
 					require.Equal(t, scenario == "genuinely_large_history", actual.ForceNativeCompaction, "only genuinely large model input should force compaction")
 					if steered {
 						raw, _ := json.Marshal(actual.ChatHistory)
-						require.Contains(t, actual.NativeCompactionStateJSON+string(raw), "SAVED_STEER")
+						require.Contains(t, actual.NativeState().FullTranscriptJSON()+string(raw), "SAVED_STEER")
 					}
 					budget := calculateRequestBudget(actual)
 					if scenario == "replaced_checkpoint" || scenario == "overlapping_text_checkpoint" {

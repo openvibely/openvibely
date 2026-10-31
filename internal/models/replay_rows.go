@@ -207,3 +207,12 @@ func (m ExecutionReplayMessage) HasResponsesInput() bool {
 	}
 	return m.DecodeTranscript(&saved) == nil && len(saved.Input) > 0
 }
+
+// HasTranscript checks presence without counting or assembling provider items.
+// A serialized replacement takes precedence over an older row representation.
+func (m ExecutionReplayMessage) HasTranscript() bool {
+	if m.TranscriptJSON != "" {
+		return strings.TrimSpace(m.TranscriptJSON) != ""
+	}
+	return m.Rows != nil && m.Rows.Format != "none" && (m.Rows.Format != "opaque" || len(m.Rows.Items) != 0)
+}

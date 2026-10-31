@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1339,105 +1340,124 @@ func TestDecodeNativeCompactionStateNormalizesLegacyEnvelope(t *testing.T) {
 }
 
 func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
-	requestCount := 0
-	var replayedMessages []map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		body, _ := io.ReadAll(r.Body)
-		if requestCount == 3 {
-			var payload struct {
-				Messages []map[string]any `json:"messages"`
+	for _, useRows := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rows=%t", useRows), func(t *testing.T) {
+
+			requestCount := 0
+			var replayedMessages []map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestCount++
+				body, _ := io.ReadAll(r.Body)
+				if requestCount == 3 {
+					var payload struct {
+						Messages []map[string]any `json:"messages"`
+					}
+					if err := json.Unmarshal(body, &payload); err != nil {
+						t.Errorf("decode replay request: %v", err)
+					}
+					replayedMessages = payload.Messages
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				switch requestCount {
+				case 1:
+					fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":160000}}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\",\"encrypted_content\":\"opaque-native-state\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"checking after compaction\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_after_compaction\",\"name\":\"fixture_tool\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":10}}\n\n")
+				case 2:
+					fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100}}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"first done\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n")
+				default:
+					fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_3\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100}}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"second done\"}}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+					fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n")
+				}
+				fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+			}))
+			defer server.Close()
+
+			origHost := AnthropicAPIHost
+			AnthropicAPIHost = server.URL
+			defer func() { AnthropicAPIHost = origHost }()
+
+			firstClient := NewWithAPIKey("test-key")
+			first, err := firstClient.SendAgentic(context.Background(), "first prompt", &AgenticOptions{
+				Model: "claude-sonnet-4-6", MaxTokens: 1024, AutoCompaction: true,
+				SkipDefaultTools: true,
+				ExtraTools:       []ToolDefinition{{Name: "fixture_tool", Description: "Return fixture output", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+				ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+					return "tool output after compaction", false, nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if err := json.Unmarshal(body, &payload); err != nil {
-				t.Errorf("decode replay request: %v", err)
+			if strings.TrimSpace(first.NativeCompactionStateJSON) == "" {
+				t.Fatal("native compaction state was not returned for durable persistence")
 			}
-			replayedMessages = payload.Messages
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		switch requestCount {
-		case 1:
-			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":160000}}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\",\"encrypted_content\":\"opaque-native-state\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"checking after compaction\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_after_compaction\",\"name\":\"fixture_tool\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":10}}\n\n")
-		case 2:
-			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100}}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"first done\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n")
-		default:
-			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_3\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100}}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"second done\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n")
-		}
-		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
-	}))
-	defer server.Close()
 
-	origHost := AnthropicAPIHost
-	AnthropicAPIHost = server.URL
-	defer func() { AnthropicAPIHost = origHost }()
+			secondClient := NewWithAPIKey("test-key")
+			options := &AgenticOptions{Model: "claude-sonnet-4-6", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}
+			if useRows {
+				var saved struct {
+					Version  int               `json:"version"`
+					Messages []json.RawMessage `json:"messages"`
+				}
+				if err := json.Unmarshal([]byte(first.NativeCompactionStateJSON), &saved); err != nil {
+					t.Fatal(err)
+				}
+				version, _ := json.Marshal(saved.Version)
+				options.NativeCompactionStateJSON = ""
+				options.NativeCompactionStateRows = &models.ReplayRows{Format: "envelope", ItemsKey: "messages", Envelope: map[string]json.RawMessage{"version": version}, Items: saved.Messages}
+			}
+			if _, err := secondClient.SendAgentic(context.Background(), "second prompt", options); err != nil {
+				t.Fatal(err)
+			}
+			if len(replayedMessages) != 5 || !strings.Contains(fmt.Sprint(replayedMessages[2]["content"]), "<openvibely_execution_environment>") {
+				t.Fatalf("missing restored environment after compaction: %#v", replayedMessages)
+			}
+			replayedMessages = append(replayedMessages[:2], replayedMessages[3:]...)
+			if len(replayedMessages) != 4 {
+				t.Fatalf("replayed messages = %#v, want compacted assistant, tool result, final assistant, and current user", replayedMessages)
+			}
+			if replayedMessages[0]["role"] != "assistant" || replayedMessages[1]["role"] != "user" || replayedMessages[2]["role"] != "assistant" || replayedMessages[3]["role"] != "user" {
+				t.Fatalf("replayed message roles = %#v", replayedMessages)
+			}
+			stateBlocks, _ := replayedMessages[0]["content"].([]any)
+			stateBlock, _ := stateBlocks[0].(map[string]any)
+			if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." || stateBlock["encrypted_content"] != "opaque-native-state" {
+				t.Fatalf("replayed native block = %#v", stateBlock)
+			}
+			assistantBlocks, _ := replayedMessages[0]["content"].([]any)
+			if len(assistantBlocks) != 3 || assistantBlocks[2].(map[string]any)["id"] != "toolu_after_compaction" {
+				t.Fatalf("replayed assistant continuation = %#v", assistantBlocks)
+			}
+			resultBlocks, _ := replayedMessages[1]["content"].([]any)
+			resultBlock, _ := resultBlocks[0].(map[string]any)
+			if resultBlock["tool_use_id"] != "toolu_after_compaction" || resultBlock["content"] != "tool output after compaction" {
+				t.Fatalf("replayed tool result = %#v", resultBlock)
+			}
+			finalBlocks, _ := replayedMessages[2]["content"].([]any)
+			if len(finalBlocks) != 1 || finalBlocks[0].(map[string]any)["text"] != "first done" {
+				t.Fatalf("replayed final assistant content = %#v", finalBlocks)
+			}
+			if replayedMessages[3]["content"] != "second prompt" {
+				t.Fatalf("current prompt = %#v", replayedMessages[3])
+			}
 
-	firstClient := NewWithAPIKey("test-key")
-	first, err := firstClient.SendAgentic(context.Background(), "first prompt", &AgenticOptions{
-		Model: "claude-sonnet-4-6", MaxTokens: 1024, AutoCompaction: true,
-		SkipDefaultTools: true,
-		ExtraTools:       []ToolDefinition{{Name: "fixture_tool", Description: "Return fixture output", InputSchema: json.RawMessage(`{"type":"object"}`)}},
-		ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
-			return "tool output after compaction", false, nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(first.NativeCompactionStateJSON) == "" {
-		t.Fatal("native compaction state was not returned for durable persistence")
-	}
-
-	secondClient := NewWithAPIKey("test-key")
-	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-6", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
-		t.Fatal(err)
-	}
-	if len(replayedMessages) != 5 || !strings.Contains(fmt.Sprint(replayedMessages[2]["content"]), "<openvibely_execution_environment>") {
-		t.Fatalf("missing restored environment after compaction: %#v", replayedMessages)
-	}
-	replayedMessages = append(replayedMessages[:2], replayedMessages[3:]...)
-	if len(replayedMessages) != 4 {
-		t.Fatalf("replayed messages = %#v, want compacted assistant, tool result, final assistant, and current user", replayedMessages)
-	}
-	if replayedMessages[0]["role"] != "assistant" || replayedMessages[1]["role"] != "user" || replayedMessages[2]["role"] != "assistant" || replayedMessages[3]["role"] != "user" {
-		t.Fatalf("replayed message roles = %#v", replayedMessages)
-	}
-	stateBlocks, _ := replayedMessages[0]["content"].([]any)
-	stateBlock, _ := stateBlocks[0].(map[string]any)
-	if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." || stateBlock["encrypted_content"] != "opaque-native-state" {
-		t.Fatalf("replayed native block = %#v", stateBlock)
-	}
-	assistantBlocks, _ := replayedMessages[0]["content"].([]any)
-	if len(assistantBlocks) != 3 || assistantBlocks[2].(map[string]any)["id"] != "toolu_after_compaction" {
-		t.Fatalf("replayed assistant continuation = %#v", assistantBlocks)
-	}
-	resultBlocks, _ := replayedMessages[1]["content"].([]any)
-	resultBlock, _ := resultBlocks[0].(map[string]any)
-	if resultBlock["tool_use_id"] != "toolu_after_compaction" || resultBlock["content"] != "tool output after compaction" {
-		t.Fatalf("replayed tool result = %#v", resultBlock)
-	}
-	finalBlocks, _ := replayedMessages[2]["content"].([]any)
-	if len(finalBlocks) != 1 || finalBlocks[0].(map[string]any)["text"] != "first done" {
-		t.Fatalf("replayed final assistant content = %#v", finalBlocks)
-	}
-	if replayedMessages[3]["content"] != "second prompt" {
-		t.Fatalf("current prompt = %#v", replayedMessages[3])
+		})
 	}
 }
 

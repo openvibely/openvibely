@@ -266,18 +266,37 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 // portableAnthropicCheckpoint preserves the native summary and continuation
 // without carrying compaction blocks or signed reasoning into another session.
 func portableAnthropicCheckpoint(raw string) ([]models.Execution, error) {
-
-	fields, err := jsonview.FoldedFields(json.RawMessage(raw))
-	if err != nil {
-		return nil, err
+	return portableAnthropicReplayCheckpoint(models.ExecutionReplayMessage{TranscriptJSON: raw})
+}
+func portableAnthropicReplayCheckpoint(replay models.ExecutionReplayMessage) ([]models.Execution, error) {
+	var fields map[string]json.RawMessage
+	var rows []json.RawMessage
+	var err error
+	if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "envelope" && replay.Rows.ItemsKey == "messages" {
+		// Match the legacy JSON object's sorted-key precedence for case aliases.
+		metadata, encodeErr := json.Marshal(replay.Rows.Envelope)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		fields, err = jsonview.FoldedFields(metadata)
+		if err != nil {
+			return nil, err
+		}
+		rows = replay.Rows.Items
+	} else {
+		fields, err = jsonview.FoldedFields(json.RawMessage(replay.FullTranscriptJSON()))
+		if err != nil {
+			return nil, err
+		}
 	}
 	var version int
 	_ = json.Unmarshal(fields["version"], &version)
-	var rows []json.RawMessage
 	if version == 1 {
-		rows, err = jsonview.Array(fields["messages"])
-		if err != nil {
-			return nil, err
+		if replay.TranscriptJSON != "" || replay.Rows == nil || replay.Rows.Format != "envelope" || replay.Rows.ItemsKey != "messages" {
+			rows, err = jsonview.Array(fields["messages"])
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		var typ string
@@ -287,7 +306,7 @@ func portableAnthropicCheckpoint(raw string) ([]models.Execution, error) {
 		if typ != "compaction" || text == nil {
 			return nil, fmt.Errorf("invalid Anthropic checkpoint")
 		}
-		block, err := requestjson.PrepareItems("content", []any{json.RawMessage(raw)})
+		block, err := requestjson.PrepareItems("content", []any{json.RawMessage(replay.FullTranscriptJSON())})
 		if err != nil {
 			return nil, err
 		}

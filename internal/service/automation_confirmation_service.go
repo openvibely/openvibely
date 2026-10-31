@@ -171,7 +171,7 @@ func (s *AutomationConfirmationService) ValidateChatConfirmation(ctx context.Con
 	if err != nil || planExecution == nil {
 		return "", errors.New("stored automation plan message not found")
 	}
-	confirmingExecution, err := s.execRepo.GetByID(ctx, input.ConfirmingUserInputID)
+	confirmingExecution, err := s.execRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionPrompt), input.ConfirmingUserInputID)
 	if err != nil || confirmingExecution == nil {
 		return "", errors.New("confirming user input not found")
 	}

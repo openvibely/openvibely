@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/transcript"
 )
 
@@ -21,6 +22,10 @@ func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, c mo
 }
 
 func upsertChatCompactionCheckpoint(ctx context.Context, tx sqlExecutor, c models.ChatCompactionCheckpoint) error {
+	// Serialized writes preserve the digest/storage contract for row-backed reads.
+	if c.ProviderStateJSON == "" && c.ProviderStateRows != nil {
+		c.ProviderStateJSON = c.NativeState().FullTranscriptJSON()
+	}
 	// Hash the boundary DTO without splitting/copying every provider item. A
 	// summary-only update can retain exactly the already committed history.
 	digest, err := checkpointHistoryDigest(c)
@@ -118,7 +123,13 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 	if err != nil {
 		return nil, err
 	}
-	c.History, c.ProviderStateJSON, err = transcript.RestoreCheckpointRecords(records)
+	if persistence.CheckpointRows(ctx) {
+		var native models.ExecutionReplayMessage
+		c.History, native, err = transcript.RestoreCheckpointRows(records)
+		c.ProviderStateJSON, c.ProviderStateRows = native.TranscriptJSON, native.Rows
+	} else {
+		c.History, c.ProviderStateJSON, err = transcript.RestoreCheckpointRecords(records)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("restore compaction checkpoint: %w", err)
 	}

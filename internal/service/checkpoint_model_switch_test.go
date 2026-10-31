@@ -135,10 +135,10 @@ func TestProviderSpecificCheckpointStillRequiresCompatibility(t *testing.T) {
 					} else {
 						require.Equal(t, req.ChatHistory, got.ChatHistory)
 					}
-					require.Empty(t, got.NativeCompactionStateJSON)
+					require.Empty(t, got.NativeState().FullTranscriptJSON())
 					require.Empty(t, got.ProviderSessionStateJSON)
 				} else {
-					require.Equal(t, checkpoint.ProviderStateJSON, got.NativeCompactionStateJSON)
+					require.Equal(t, checkpoint.ProviderStateJSON, got.NativeState().FullTranscriptJSON())
 					require.Equal(t, checkpoint.ProviderSessionStateJSON, got.ProviderSessionStateJSON)
 					require.Equal(t, checkpoint.History[0].PromptSent, got.ChatHistory[0].PromptSent)
 				}

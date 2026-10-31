@@ -494,6 +494,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	fixedReq.ChatHistory = nil
 	fixedReq.SummaryInput = nil
 	fixedReq.NativeCompactionStateJSON = ""
+	fixedReq.NativeCompactionStateRows = nil
 	fixedReq.Attachments = nil
 	budget.FixedTokens = max(0, estimateModelVisibleRequestTokens(fixedReq)-savedApplicationContextTokens(req))
 	rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
@@ -502,7 +503,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	}
 	budget.PendingTokens = estimatedUTF8Tokens(req.Message)
 	if req.Agent.Provider == models.ProviderOpenAI {
-		budget.HistoryTokens, budget.NativeStateTokens = llmopenai.EstimateContinuationTokensContext(req.Ctx, req.ChatHistory, req.NativeCompactionStateJSON)
+		budget.HistoryTokens, budget.NativeStateTokens = llmopenai.EstimateContinuationReplayTokens(req.Ctx, req.ChatHistory, req.NativeState())
 	} else {
 		budget.NativeStateTokens = estimateNativeStateTokens(req)
 		budget.HistoryTokens = estimateHistoryTokensContext(req.Ctx, req.Agent.Provider, req.ChatHistory)
@@ -734,15 +735,15 @@ func openAIContextWindow(model string) int {
 
 func estimateNativeStateTokens(req llmcontracts.AgentRequest) int {
 	if req.Agent.Provider == models.ProviderAnthropic {
-		return anthropicclient.EstimateNativeCompactionTokensContext(req.Ctx, req.NativeCompactionStateJSON)
+		return anthropicclient.EstimateNativeCompactionReplayTokens(req.Ctx, req.NativeState())
 	}
-	return estimatedUTF8Tokens(req.NativeCompactionStateJSON)
+	return estimatedUTF8Tokens(req.NativeState().FullTranscriptJSON())
 }
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message)
 	if req.Agent.Provider == models.ProviderOpenAI {
-		history, native := llmopenai.EstimateContinuationTokensContext(req.Ctx, req.ChatHistory, req.NativeCompactionStateJSON)
+		history, native := llmopenai.EstimateContinuationReplayTokens(req.Ctx, req.ChatHistory, req.NativeState())
 		total += history + native
 	} else {
 		total += estimateNativeStateTokens(req) + estimateHistoryTokensContext(req.Ctx, req.Agent.Provider, req.ChatHistory)
@@ -880,6 +881,7 @@ func requestContextOverhead(req llmcontracts.AgentRequest) int {
 	}
 	req.Attachments = nil
 	req.NativeCompactionStateJSON = ""
+	req.NativeCompactionStateRows = nil
 	return estimateModelVisibleRequestTokens(req)
 }
 
@@ -898,6 +900,7 @@ func estimateContextFromReportedUsage(req llmcontracts.AgentRequest, baseline mo
 		}
 		req.ChatHistory = req.ChatHistory[i+1:]
 		req.NativeCompactionStateJSON = ""
+		req.NativeCompactionStateRows = nil
 		// The reported count already includes the previous system/tools. Only
 		// add changes to that overhead and new user/tool content.
 		return max(1, baseline.ContextTokens+estimateModelVisibleRequestTokens(req)-baseline.OverheadTokens)
@@ -1008,7 +1011,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	uncompactedReq.ChatHistory = normalizeProviderReplay(req.Agent.Provider, uncompactedReq.ChatHistory, false)
 	compactionStrategy := "none"
-	if req.NativeCompactionStateJSON != "" {
+	if req.HasNativeState() {
 		compactionStrategy = "provider_native_checkpoint"
 	} else if len(req.ChatHistory) != len(originalHistory) {
 		compactionStrategy = "textual_checkpoint"
@@ -1041,9 +1044,9 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	if triggered && shouldUseLocalSummaryBeforeProviderWithBudget(req, budget) {
 		originalReq := req
-		if req.NativeCompactionStateJSON != "" {
+		if req.HasNativeState() {
 			if req.Agent.Provider == models.ProviderAnthropic {
-				history, err := portableAnthropicCheckpoint(req.NativeCompactionStateJSON)
+				history, err := portableAnthropicReplayCheckpoint(req.NativeState())
 				if err != nil {
 					return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "read Anthropic checkpoint for summary", err)
 				}
@@ -1054,8 +1057,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 				req.ChatHistory = uncompactedReq.ChatHistory
 				originalReq = req
 				originalReq.NativeCompactionStateJSON = ""
+				originalReq.NativeCompactionStateRows = nil
 			}
 			req.NativeCompactionStateJSON = ""
+			req.NativeCompactionStateRows = nil
 		}
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
 		if compactErr != nil {
@@ -1110,9 +1115,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	// A text summarizer cannot decode native encrypted state. Recover the
 	// original transcript before switching strategies, including when the
 	// checkpoint consumed every prior execution.
-	if req.NativeCompactionStateJSON != "" {
+	if req.HasNativeState() {
 		req.ChatHistory = uncompactedReq.ChatHistory
 		req.NativeCompactionStateJSON = ""
+		req.NativeCompactionStateRows = nil
 	}
 	req = restoreCurrentSteeringForRecovery(req)
 	if locallyCompactedBeforeProvider && recognizedContextLengthError(err) {
@@ -1170,12 +1176,12 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if !ok || s == nil || s.execRepo == nil {
 		return req
 	}
-	checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(req.Ctx, scope.Type, scope.ID)
+	checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(persistence.WithCheckpointRows(req.Ctx), scope.Type, scope.ID)
 	if err != nil {
 		applog.Infof("[agent-svc] restore context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
 		return req
 	}
-	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
+	if checkpoint == nil || (len(checkpoint.History) == 0 && !checkpoint.HasNativeState() && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
 		return req
 	}
 	if !s.checkpointWithinCurrentContext(req, scope, checkpoint) {
@@ -1187,17 +1193,18 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	compatible := checkpoint.CompatibilityKey == providerCompatibilityKey(req.Agent) &&
 		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
 	if !compatible {
-		if strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
+		if checkpoint.HasNativeState() {
 			if checkpoint.Strategy != "anthropic_context_management" {
 				return req
 			}
-			history, err := portableAnthropicCheckpoint(checkpoint.ProviderStateJSON)
+			history, err := portableAnthropicReplayCheckpoint(checkpoint.NativeState())
 			if err != nil {
 				applog.Infof("[agent-svc] convert Anthropic checkpoint: %v", err)
 				return req
 			}
 			checkpoint.History = normalizeProviderReplay(req.Agent.Provider, history, false)
 			checkpoint.ProviderStateJSON = ""
+			checkpoint.ProviderStateRows = nil
 			checkpoint.ProviderSessionStateJSON = ""
 			checkpoint.Strategy = "provider_recovery"
 			checkpoint.ModelConfigID = req.Agent.ID
@@ -1209,7 +1216,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		checkpoint.ProviderSessionStateJSON = ""
 	}
 	restored := req
-	if len(checkpoint.History) > 0 || strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
+	if len(checkpoint.History) > 0 || checkpoint.HasNativeState() {
 		restored.RestoredCompactionSourceExecutionID = checkpoint.SourceExecutionID
 	}
 	if checkpoint.Strategy == "local_summary_inflight" {
@@ -1224,6 +1231,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 					// Do not let cross-provider conversion append older UI output.
 					clearCompactedExecutionFallback(&restored.ChatHistory[0])
 					restored.NativeCompactionStateJSON = ""
+					restored.NativeCompactionStateRows = nil
 					restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 					return restored
 				}
@@ -1247,7 +1255,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		}
 		checkpoint.History = restoreCompactedApplicationContext(req, checkpoint.History)
 	}
-	if len(checkpoint.History) > 0 || strings.TrimSpace(checkpoint.ProviderStateJSON) != "" {
+	if len(checkpoint.History) > 0 || checkpoint.HasNativeState() {
 		restored.ChatHistory = mergeCheckpointHistory(req.ChatHistory, checkpoint.History, checkpoint.SourceExecutionID)
 		if checkpoint.Strategy == "local_summary_inflight" {
 			for i, execution := range req.ChatHistory {
@@ -1284,6 +1292,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		}
 	}
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
+	restored.NativeCompactionStateRows = checkpoint.ProviderStateRows
 	restored.ProviderSessionStateJSON = checkpoint.ProviderSessionStateJSON
 	return restored
 }
@@ -1304,7 +1313,7 @@ func (s *LLMService) checkpointWithinCurrentContext(req llmcontracts.AgentReques
 	}
 	// Session-only rows contain no prior conversation to restore. Avoid paging
 	// through the thread merely to validate transport/configuration bookkeeping.
-	if len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "" {
+	if len(checkpoint.History) == 0 && !checkpoint.HasNativeState() {
 		return true
 	}
 	inspect := func(history []models.Execution) (bool, bool) {
@@ -1447,15 +1456,15 @@ func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmco
 	if sourceID == "" {
 		sourceID = originalReq.RestoredCompactionSourceExecutionID
 	}
-	if sourceID == "" && originalReq.NativeCompactionStateJSON != "" {
+	if sourceID == "" && originalReq.HasNativeState() {
 		// A native checkpoint may cover every loaded execution. Carry its
 		// boundary forward so the next followup does not replay covered turns.
-		checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(originalReq.Ctx, scope.Type, scope.ID)
+		checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(persistence.WithCheckpointRows(originalReq.Ctx), scope.Type, scope.ID)
 		if err != nil {
 			applog.Infof("[agent-svc] read native checkpoint boundary for summary: %v", err)
 			return err
 		}
-		if checkpoint != nil && checkpoint.ProviderStateJSON == originalReq.NativeCompactionStateJSON {
+		if checkpoint != nil && checkpoint.NativeState().FullTranscriptJSON() == originalReq.NativeState().FullTranscriptJSON() {
 			sourceID = checkpoint.SourceExecutionID
 		}
 	}
@@ -1511,7 +1520,7 @@ func parseCompactionTransportScope(scope string) (compactionScope, bool) {
 }
 
 func shouldUseLocalSummaryBeforeProviderWithBudget(req llmcontracts.AgentRequest, budget requestBudget) bool {
-	if len(req.ChatHistory) == 0 && req.NativeCompactionStateJSON == "" {
+	if len(req.ChatHistory) == 0 && !req.HasNativeState() {
 		return false
 	}
 	if !providerSupportsNativeCompaction(req.Agent) {
@@ -1643,6 +1652,7 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 	// only to make the summarization request fit.
 	compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
 	compacted.NativeCompactionStateJSON = ""
+	compacted.NativeCompactionStateRows = nil
 	compacted.ForceNativeCompaction = false
 	compacted.Agent.ForceNativeCompaction = false
 	compacted.ChatHistory = restoreCompactedApplicationContext(compacted, compacted.ChatHistory, history)
@@ -1667,6 +1677,7 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	systemPrompt := providerSystemPrompt(original)
 	summaryReq := req
 	summaryReq.NativeCompactionStateJSON = ""
+	summaryReq.NativeCompactionStateRows = nil
 	summaryReq.ProviderSessionStateJSON = ""
 	summaryReq.ContextTokenEstimate = 0
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
@@ -1943,8 +1954,9 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		items := llmopenai.TakeHistoryInputItems(req.Ctx, req.ChatHistory)
 		req.Ctx = preparedhistory.WithTransfer(req.Ctx, items)
 		req.NativeCompactionStateJSON = ""
+		req.NativeCompactionStateRows = nil
 	}
-	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, req.NativeCompactionStateJSON)
+	req.Ctx = llmcontracts.WithNativeCompactionState(req.Ctx, req.NativeState())
 	req.Ctx = llmcontracts.WithProviderSessionStateJSON(req.Ctx, req.ProviderSessionStateJSON)
 	req = prepareAgentRuntimeRequest(req)
 	if req.AgentDefinition != nil {

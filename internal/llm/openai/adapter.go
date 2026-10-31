@@ -1232,12 +1232,12 @@ func nativeCompactionInputItems(ctx context.Context) []any {
 		preparedhistory.ForgetState[[]any](ctx)
 		return items
 	}
-	raw := strings.TrimSpace(llmcontracts.NativeCompactionStateJSONFromContext(ctx))
-	if raw == "" {
+	replay := llmcontracts.NativeCompactionStateFromContext(ctx)
+	if !replay.HasTranscript() {
 		preparedhistory.ForgetState[[]any](ctx)
 		return nil
 	}
-	items, err := preparedhistory.TakeState(ctx, raw, decodeNativeInput)
+	items, err := preparedhistory.TakeReplayState(ctx, replay, decodeNativeReplayInput)
 	if err != nil {
 		applog.Infof("[openai-adapter] ignoring invalid native compaction checkpoint: %v", err)
 		return nil

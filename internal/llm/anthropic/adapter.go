@@ -374,7 +374,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	agent := req.Agent
 	var replayMessages []anthropicclient.Message
 	ctx = context.WithValue(ctx, conversationReplayKey{}, &replayMessages)
-	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
+	ctx = llmcontracts.WithNativeCompactionState(ctx, req.NativeState())
 	if req.SummaryInput != nil {
 		messages := make([]anthropicclient.Message, 0, len(req.SummaryInput)+1)
 		for _, raw := range req.SummaryInput {
@@ -526,7 +526,8 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		DisableTools:              disableTools,
 		SkipDefaultTools:          skipDefaultTools,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
-		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
+		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateFromContext(ctx).TranscriptJSON,
+		NativeCompactionStateRows: llmcontracts.NativeCompactionStateFromContext(ctx).Rows,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
 		WebSearchEnabled:          webSearchEnabled,
 		ExtraTools:                extraTools,
@@ -607,7 +608,8 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
-		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
+		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateFromContext(ctx).TranscriptJSON,
+		NativeCompactionStateRows: llmcontracts.NativeCompactionStateFromContext(ctx).Rows,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
 		WebSearchEnabled:          anthropicModelSupportsWebSearch(agent.Model),
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
@@ -715,7 +717,8 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
-		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
+		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateFromContext(ctx).TranscriptJSON,
+		NativeCompactionStateRows: llmcontracts.NativeCompactionStateFromContext(ctx).Rows,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
 		WebSearchEnabled:          anthropicModelSupportsWebSearch(agent.Model),
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,

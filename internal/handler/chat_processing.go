@@ -1135,7 +1135,7 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 			reasoningContent := ""
 			var replayMessages []models.ExecutionReplayMessage
 			if h.execRepo != nil && strings.TrimSpace(params.ExecID) != "" {
-				if exec, execErr := h.execRepo.GetByID(ctx, params.ExecID); execErr == nil && exec != nil {
+				if exec, execErr := h.execRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionReasoning), params.ExecID); execErr == nil && exec != nil {
 					reasoningContent = exec.ReasoningContent
 					replayByID, replayErr := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{params.ExecID})
 					if replayErr != nil {
@@ -1251,7 +1251,7 @@ func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params strea
 	if len(steeringHistory) == 0 || h.execRepo == nil || strings.TrimSpace(params.ExecID) == "" {
 		return nil
 	}
-	exec, err := h.execRepo.GetByID(ctx, params.ExecID)
+	exec, err := h.execRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionReasoning), params.ExecID)
 	if err != nil {
 		return fmt.Errorf("load current reasoning content: %w", err)
 	}
@@ -2325,7 +2325,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 
 	// Capture changes and clear stale merge state before completion becomes visible.
 	if workDir != "" {
-		execForCommit, _ := h.execRepo.GetByID(ctx, execID)
+		execForCommit, _ := h.execRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionPrompt), execID)
 		diffOutput := h.captureTaskDiffOutput(ctx, task, execForCommit, workDir, output)
 
 		if diffOutput != "" {

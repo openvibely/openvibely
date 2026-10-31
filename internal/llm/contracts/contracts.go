@@ -121,6 +121,7 @@ type AgentRequest struct {
 	// NativeCompactionStateJSON contains provider-native compacted input items
 	// that must be replayed structurally rather than rendered as chat text.
 	NativeCompactionStateJSON string
+	NativeCompactionStateRows *models.ReplayRows
 	// ProviderSessionStateJSON contains provider-specific conversational state
 	// that is durable across transport-cache eviction and process restarts.
 	ProviderSessionStateJSON string
@@ -156,19 +157,32 @@ type retrySourceExecutionIDContextKey struct{}
 type artifactExecutionIDContextKey struct{}
 type providerAsyncToolsDisabledContextKey struct{}
 
-func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
+// NativeState returns the immutable checkpoint representation; a serialized
+// replacement takes precedence over rows, just as it does for ordinary replay.
+func (r AgentRequest) NativeState() models.ExecutionReplayMessage {
+	return models.ExecutionReplayMessage{TranscriptJSON: r.NativeCompactionStateJSON, Rows: r.NativeCompactionStateRows}
+}
+func (r AgentRequest) HasNativeState() bool { return r.NativeState().HasTranscript() }
+func WithNativeCompactionState(ctx context.Context, state models.ExecutionReplayMessage) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, nativeCompactionStateContextKey{}, state)
 }
 
-func NativeCompactionStateJSONFromContext(ctx context.Context) string {
+// Setting a serialized state also clears any older row-backed value.
+func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
+	return WithNativeCompactionState(ctx, models.ExecutionReplayMessage{TranscriptJSON: state})
+}
+func NativeCompactionStateFromContext(ctx context.Context) models.ExecutionReplayMessage {
 	if ctx == nil {
-		return ""
+		return models.ExecutionReplayMessage{}
 	}
-	state, _ := ctx.Value(nativeCompactionStateContextKey{}).(string)
+	state, _ := ctx.Value(nativeCompactionStateContextKey{}).(models.ExecutionReplayMessage)
 	return state
+}
+func NativeCompactionStateJSONFromContext(ctx context.Context) string {
+	return NativeCompactionStateFromContext(ctx).FullTranscriptJSON()
 }
 
 func WithProviderSessionStateJSON(ctx context.Context, state string) context.Context {

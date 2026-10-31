@@ -6,6 +6,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
@@ -62,6 +63,7 @@ func selectRecoveryWindow(req llmcontracts.AgentRequest, input []json.RawMessage
 // call. Destination native-compaction failures use the normal summary fallback.
 func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, original, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req.NativeCompactionStateJSON = ""
+	req.NativeCompactionStateRows = nil
 	req.ProviderSessionStateJSON = ""
 	req.ContextTokenEstimate = 0
 	req.ForceNativeCompaction = false
@@ -163,7 +165,7 @@ func recoveryExecutedTools(err error, input []json.RawMessage) bool {
 func (s *LLMService) persistSuccessfulRecoveryWindow(original, req llmcontracts.AgentRequest) error {
 	if s != nil && s.execRepo != nil && req.ExecID != "" {
 		if scope, ok := s.compactionScopeForRequest(req); ok {
-			checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(req.Ctx, scope.Type, scope.ID)
+			checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(persistence.WithCheckpointRows(req.Ctx), scope.Type, scope.ID)
 			if err != nil {
 				return err
 			}

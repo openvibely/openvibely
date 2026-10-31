@@ -121,6 +121,7 @@ type AgenticOptions struct {
 	// NativeCompactionStateJSON replays a provider-native compaction block from
 	// a compatible prior execution before post-checkpoint history.
 	NativeCompactionStateJSON string
+	NativeCompactionStateRows *models.ReplayRows
 
 	// Attachments are files to include with the initial message (images, PDFs, code files).
 	// They are sent as multimodal content blocks alongside the text prompt.
@@ -296,22 +297,40 @@ type nativeCompactionState struct {
 }
 
 func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
+	return decodeNativeCompactionReplay(models.ExecutionReplayMessage{TranscriptJSON: raw})
+}
+func decodeNativeCompactionReplay(replay models.ExecutionReplayMessage) ([]agenticMessage, error) {
+	raw := replay.TranscriptJSON
 	var state nativeCompactionState
-	var encodedMessages json.RawMessage
-	decodeErr := requestjson.Object([]byte(raw), func(k string, v json.RawMessage) error {
-		switch strings.ToLower(k) {
-		case "version":
-			return json.Unmarshal(v, &state.Version)
-		case "messages":
-			encodedMessages = v
+	var rows []json.RawMessage
+	var decodeErr error
+	if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "envelope" && replay.Rows.ItemsKey == "messages" {
+		var header struct {
+			Version  int               `json:"version"`
+			Messages []json.RawMessage `json:"messages"`
 		}
-		return nil
-	})
+		decodeErr = replay.DecodeTranscript(&header)
+		state.Version, rows = header.Version, header.Messages
+	} else {
+		raw = replay.FullTranscriptJSON()
+		var encodedMessages json.RawMessage
+		decodeErr = requestjson.Object([]byte(raw), func(k string, v json.RawMessage) error {
+			switch strings.ToLower(k) {
+			case "version":
+				return json.Unmarshal(v, &state.Version)
+			case "messages":
+				encodedMessages = v
+			}
+			return nil
+		})
+		if decodeErr == nil && state.Version == nativeCompactionStateVersion {
+			rows, decodeErr = requestjson.Array(encodedMessages)
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+		}
+	}
 	if decodeErr == nil && state.Version == nativeCompactionStateVersion {
-		rows, err := requestjson.Array(encodedMessages)
-		if err != nil {
-			return nil, err
-		}
 		state.Messages = make([]agenticMessage, 0, len(rows))
 		for _, row := range rows {
 			var m agenticMessage
@@ -361,7 +380,7 @@ func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
 	// Accept checkpoints produced before the state envelope retained the
 	// post-compaction assistant/tool continuation.
 	var block compactionBlockJSON
-	if err := json.Unmarshal([]byte(raw), &block); err != nil {
+	if err := replay.DecodeTranscript(&block); err != nil {
 		return nil, err
 	}
 	if block.Type != "compaction" || block.Content == nil {
@@ -381,12 +400,15 @@ func EstimateNativeCompactionTokens(raw string) int {
 }
 
 func EstimateNativeCompactionTokensContext(ctx context.Context, raw string) int {
-	if strings.TrimSpace(raw) == "" {
+	return EstimateNativeCompactionReplayTokens(ctx, models.ExecutionReplayMessage{TranscriptJSON: strings.TrimSpace(raw)})
+}
+func EstimateNativeCompactionReplayTokens(ctx context.Context, replay models.ExecutionReplayMessage) int {
+	if !replay.HasTranscript() {
 		return 0
 	}
-	messages, err := preparedhistory.ReadState(ctx, strings.TrimSpace(raw), decodeNativeCompactionState)
+	messages, err := preparedhistory.ReadReplayState(ctx, replay, decodeNativeCompactionReplay)
 	if err != nil {
-		return tokenestimate.FromText(raw)
+		return tokenestimate.FromText(replay.FullTranscriptJSON())
 	}
 	size := len(`{"messages":[]}`)
 	if messages == nil {
@@ -397,11 +419,11 @@ func EstimateNativeCompactionTokensContext(ctx context.Context, raw string) int 
 	for _, m := range messages {
 		n, err := requestjson.Size(map[string]any{"role": m.Role, "content": m.Content})
 		if err != nil {
-			return tokenestimate.FromText(raw)
+			return tokenestimate.FromText(replay.FullTranscriptJSON())
 		}
 		adjustment, err := tokenestimate.ContentAdjustment(m.Content, "image", 2000)
 		if err != nil {
-			return tokenestimate.FromText(raw)
+			return tokenestimate.FromText(replay.FullTranscriptJSON())
 		}
 		size += n + adjustment
 	}
@@ -536,8 +558,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.
 	messages := make([]agenticMessage, 0, len(c.History)+2)
-	if state := strings.TrimSpace(opts.NativeCompactionStateJSON); state != "" {
-		checkpointMessages, err := preparedhistory.TakeState(ctx, state, decodeNativeCompactionState)
+	if state := (models.ExecutionReplayMessage{TranscriptJSON: strings.TrimSpace(opts.NativeCompactionStateJSON), Rows: opts.NativeCompactionStateRows}); state.HasTranscript() {
+		checkpointMessages, err := preparedhistory.TakeReplayState(ctx, state, decodeNativeCompactionReplay)
 		if err != nil {
 			return nil, fmt.Errorf("decode Anthropic native compaction state: %w", err)
 		}
@@ -699,14 +721,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			})
 		}
 
-		replayBlocks, _ := json.Marshal(resp.contentBlocks)
+		var replayContent any = resp.contentBlocks
 		if resp.compaction != nil {
 			blocks := []any{compactionBlockJSON{Type: "compaction", Content: resp.compaction.content, EncryptedContent: resp.compaction.encryptedContent}}
 			for _, block := range resp.contentBlocks {
 				blocks = append(blocks, block)
 			}
-			replayBlocks, _ = json.Marshal(blocks)
+			replayContent = blocks
 		}
+		replayBlocks, _ := json.Marshal(replayContent)
 		replay = append(replay, Message{Role: "assistant", ContentBlocks: replayBlocks})
 		if opts.OnReplaySave != nil || opts.OnReplayChanged != nil {
 			if err := saveReplay(ctx); err != nil {

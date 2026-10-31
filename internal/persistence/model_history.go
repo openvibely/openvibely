@@ -32,9 +32,40 @@ type executionMetadataKey struct{}
 // WithExecutionMetadata requests only identity, ownership, status and ordering
 // fields. Callers must not use it to render output or construct model history.
 func WithExecutionMetadata(ctx context.Context) context.Context {
-	return context.WithValue(ctx, executionMetadataKey{}, true)
+	return WithExecutionPayload(ctx, 0)
 }
 func ExecutionMetadataOnly(ctx context.Context) bool {
-	value, _ := ctx.Value(executionMetadataKey{}).(bool)
+	_, ok := ctx.Value(executionMetadataKey{}).(ExecutionPayload)
+	return ok
+}
+
+// ExecutionPayload selects the large fields needed in addition to metadata.
+// Output is never included; UI and full-history callers must use their normal read.
+type ExecutionPayload uint8
+
+const (
+	ExecutionPrompt ExecutionPayload = 1 << iota
+	ExecutionReasoning
+	ExecutionError
+	ExecutionSession
+)
+
+func WithExecutionPayload(ctx context.Context, fields ExecutionPayload) context.Context {
+	return context.WithValue(ctx, executionMetadataKey{}, fields)
+}
+func ExecutionPayloadFromContext(ctx context.Context) ExecutionPayload {
+	fields, _ := ctx.Value(executionMetadataKey{}).(ExecutionPayload)
+	return fields
+}
+
+type checkpointRowsKey struct{}
+
+// WithCheckpointRows requests immutable native replay rows at internal model
+// boundaries. The default repository API retains its serialized compatibility view.
+func WithCheckpointRows(ctx context.Context) context.Context {
+	return context.WithValue(ctx, checkpointRowsKey{}, true)
+}
+func CheckpointRows(ctx context.Context) bool {
+	value, _ := ctx.Value(checkpointRowsKey{}).(bool)
 	return value
 }

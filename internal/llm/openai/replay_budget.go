@@ -44,7 +44,10 @@ func EstimateContinuationTokens(history []models.Execution, nativeJSON string) (
 }
 
 func EstimateContinuationTokensContext(ctx context.Context, history []models.Execution, nativeJSON string) (historyTokens, nativeTokens int) {
-	native, err := preparedhistory.ReadState(ctx, strings.TrimSpace(nativeJSON), decodeNativeInput)
+	return EstimateContinuationReplayTokens(ctx, history, models.ExecutionReplayMessage{TranscriptJSON: strings.TrimSpace(nativeJSON)})
+}
+func EstimateContinuationReplayTokens(ctx context.Context, history []models.Execution, replay models.ExecutionReplayMessage) (historyTokens, nativeTokens int) {
+	native, err := preparedhistory.ReadReplayState(ctx, replay, decodeNativeReplayInput)
 	if err == nil {
 		nativeTokens = openaiclient.EstimateResponsesInputTokens(native)
 	}
@@ -169,4 +172,11 @@ func decodeNativeInput(raw string) ([]any, error) {
 		}
 	}
 	return items, nil
+}
+
+func decodeNativeReplayInput(replay models.ExecutionReplayMessage) ([]any, error) {
+	if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "array" {
+		return jsonview.ToolOutputs(replay.Rows.Items)
+	}
+	return decodeNativeInput(replay.FullTranscriptJSON())
 }

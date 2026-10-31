@@ -171,7 +171,7 @@ func preparedAnthropicReplayMessages(messages []anthropicclient.Message, forSumm
 				var typ string
 				_ = json.Unmarshal(fields["type"], &typ)
 				value := fields[key]
-				return typ == "tool_result" && key == "content" && len(value) > 0 && value[0] == '"'
+				return (typ == "tool_result" && key == "content" && len(value) > 0 && value[0] == '"') || (typ == "tool_use" && key == "input")
 			})
 			if err != nil {
 				// Preserve the decoded API's handling of null or unusual blocks.
@@ -197,7 +197,15 @@ func preparedAnthropicReplayMessages(messages []anthropicclient.Message, forSumm
 				text, _ := block["text"].(string)
 				current.ImageContent = append(current.ImageContent, map[string]interface{}{"type": "text", "text": text})
 			case "tool_use":
-				input, _ := json.Marshal(block["input"])
+				inputValue := block["input"]
+				if borrowed, ok := inputValue.(jsonview.Value); ok {
+					var err error
+					inputValue, err = jsonview.DecodeNormalized(borrowed.Raw())
+					if err != nil {
+						_ = json.Unmarshal(borrowed.Raw(), &inputValue)
+					}
+				}
+				input, _ := json.Marshal(inputValue)
 				call := openaiclient.CompletionsToolCall{Type: "function"}
 				call.ID, _ = block["id"].(string)
 				call.Function.Name, _ = block["name"].(string)
@@ -328,8 +336,8 @@ func completionsAnthropicSummaryMessages(messages []openaiclient.CompletionsHist
 			}
 		}
 		for _, call := range message.ToolCalls {
-			var input any
-			if json.Unmarshal([]byte(call.Function.Arguments), &input) != nil {
+			input, err := jsonview.DecodeNormalized([]byte(call.Function.Arguments))
+			if err != nil {
 				input = map[string]any{"raw_arguments": call.Function.Arguments}
 			}
 			blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Function.Name, "input": input})

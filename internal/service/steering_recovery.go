@@ -93,6 +93,7 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 		req.Message = ""
 		req.Attachments = nil
 		req.NativeCompactionStateJSON = ""
+		req.NativeCompactionStateRows = nil
 		req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, "")
 		req.Ctx = llmcontracts.WithHistoryContinuation(req.Ctx)
 		return req
@@ -109,6 +110,7 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 	req.Message = ""
 	req.Attachments = nil
 	req.NativeCompactionStateJSON = ""
+	req.NativeCompactionStateRows = nil
 	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, "")
 	req.Ctx = llmcontracts.WithHistoryContinuation(req.Ctx)
 	req.Ctx = llmcontracts.WithInitialSteeringCommit(req.Ctx, commit)
