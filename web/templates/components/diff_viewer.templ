@@ -96,13 +96,25 @@ func ParseDiffOutput(diffOutput string) []DiffFile {
 	}
 
 	var files []DiffFile
-	lines := strings.Split(strings.TrimSuffix(diffOutput, "\n"), "\n")
+	lines := strings.Split(diffOutput, "\n")
 	var currentFile *DiffFile
 	var currentHunk *DiffHunk
 	oldLine, newLine := 0, 0
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
+
+		// Blank lines that only separate concatenated file diffs are not content.
+		if line == "" {
+			next := i + 1
+			for next < len(lines) && lines[next] == "" {
+				next++
+			}
+			if next == len(lines) || strings.HasPrefix(lines[next], "diff --git ") {
+				i = next - 1
+				continue
+			}
+		}
 
 		// File header: diff --git a/path b/path
 		if strings.HasPrefix(line, "diff --git ") {
