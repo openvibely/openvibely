@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -104,15 +106,20 @@ func historyMessageItems(messages []openaiclient.Message) []any {
 }
 
 func completionsReplayMessageInput(replay models.ExecutionReplayMessage) []any {
-	var messages []openaiclient.CompletionsHistoryMessage
-	if replay.DecodeTranscript(&messages) != nil {
+	prepared, err := openaiclient.PrepareCompletionsHistory(replay)
+	if err != nil {
 		return nil
 	}
 	var items []any
-	for _, m := range messages {
+	prepared.Visit(func(m openaiclient.CompletionsHistoryMessage, content any) {
 		if m.Role == "tool" {
-			items = append(items, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": m.Content})
-			continue
+			if view, ok := content.(jsonview.Value); ok {
+				if value, err := view.CanonicalTextValue(); err == nil {
+					content = value
+				}
+			}
+			items = append(items, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": content})
+			return
 		}
 		if m.Content != "" {
 			items = append(items, map[string]any{"type": "message", "role": m.Role, "content": m.Content})
@@ -134,13 +141,17 @@ func completionsReplayMessageInput(replay models.ExecutionReplayMessage) []any {
 		for _, call := range m.ToolCalls {
 			items = append(items, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments})
 		}
-	}
+	})
 	return items
 }
 
 // Translate conversation items when a Responses execution is followed by the
 // Completions fallback. Provider-only reasoning/compaction items are not chat messages.
 func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
+	return openaiclient.PreparedCompletionsMessages(preparedResponsesCompletionsMessages(items)).DecodedMessages()
+}
+
+func preparedResponsesCompletionsMessages(items []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
 	var result []openaiclient.CompletionsHistoryMessage
 	pending := make(map[string]bool)
 	var deferred []openaiclient.CompletionsHistoryMessage
@@ -150,11 +161,35 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 	}
 	for _, raw := range items {
 		var item struct {
-			Type, Role, Name, Arguments, Output string
-			CallID                              string `json:"call_id"`
-			Content                             json.RawMessage
+			Type, Role, Name, Arguments string
+			Output                      json.RawMessage
+			CallID                      string `json:"call_id"`
+			Content                     json.RawMessage
 		}
-		if json.Unmarshal(raw, &item) != nil {
+		err := jsonview.Object(raw, func(k string, value json.RawMessage) error {
+			switch strings.ToLower(k) {
+			case "type":
+				return json.Unmarshal(value, &item.Type)
+			case "role":
+				return json.Unmarshal(value, &item.Role)
+			case "name":
+				return json.Unmarshal(value, &item.Name)
+			case "arguments":
+				return json.Unmarshal(value, &item.Arguments)
+			case "call_id":
+				return json.Unmarshal(value, &item.CallID)
+			case "content":
+				item.Content = value
+			case "output":
+				item.Output = value
+				if string(value) != "null" && (len(value) == 0 || value[0] != '"') {
+					var text string
+					return json.Unmarshal(value, &text)
+				}
+			}
+			return nil
+		})
+		if err != nil {
 			continue
 		}
 		switch item.Type {
@@ -171,7 +206,15 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 			}
 			result = append(result, openaiclient.CompletionsHistoryMessage{Role: "assistant", ToolCalls: []openaiclient.CompletionsToolCall{call}})
 		case "function_call_output":
-			result = append(result, openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: item.CallID, Content: item.Output})
+			tool, err := openaiclient.PreparedToolMessage(item.CallID, item.Output)
+			if err != nil {
+				var text string
+				if len(item.Output) > 0 && json.Unmarshal(item.Output, &text) != nil {
+					continue
+				}
+				tool = openaiclient.CompletionsHistoryMessage{Role: "tool", ToolCallID: item.CallID, Content: text}
+			}
+			result = append(result, tool)
 			delete(pending, item.CallID)
 			if len(pending) == 0 {
 				flushDeferred()
@@ -222,4 +265,10 @@ func responsesCompletionsMessages(items []json.RawMessage) []openaiclient.Comple
 // summary call after switching providers. Tool calls and results stay paired.
 func ResponsesSummaryMessages(items []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
 	return responsesCompletionsMessages(items)
+}
+
+// PreparedResponsesSummaryMessages retains unchanged tool output through foreign
+// conversion. Callers must treat its values as immutable.
+func PreparedResponsesSummaryMessages(items []json.RawMessage) openaiclient.PreparedCompletionsHistory {
+	return openaiclient.PreparedCompletionsMessages(preparedResponsesCompletionsMessages(items))
 }

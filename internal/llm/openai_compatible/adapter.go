@@ -944,3 +944,11 @@ func SummaryHistoryRows(history []models.Execution) ([]json.RawMessage, error) {
 	}
 	return prepared[0].SnapshotRows()
 }
+
+// VisitSummaryHistory inspects prepared immutable messages without serializing
+// tool results merely to select user context. Visitors must not mutate messages.
+func VisitSummaryHistory(history []models.Execution, visit func(openaiclient.CompletionsHistoryMessage)) {
+	for _, prepared := range buildPreparedClientHistory(history) {
+		prepared.Visit(func(m openaiclient.CompletionsHistoryMessage, _ any) { visit(m) })
+	}
+}

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -21,7 +22,7 @@ func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history [
 	// Replacement construction drops application messages. Recover their saved
 	// values before refreshing from current sources, which may be unavailable.
 	for _, source := range original {
-		messages, _ := summaryHistoryInput(req.Agent.Provider, source)
+		messages, _ := summaryUserHistoryInput(req.Agent.Provider, source)
 		for _, raw := range messages {
 			fields, err := jsonview.FoldedFields(raw)
 			if err != nil {
@@ -38,12 +39,14 @@ func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history [
 			var text string
 			if json.Unmarshal(content, &text) != nil {
 				var blocks []struct{ Type, Text string }
+				var joined strings.Builder
 				_ = json.Unmarshal(content, &blocks)
 				for _, block := range blocks {
 					if block.Type == "text" || block.Type == "input_text" {
-						text += block.Text
+						joined.WriteString(block.Text)
 					}
 				}
+				text = joined.String()
 			}
 			if llmprompt.IsApplicationContext(text) {
 				saved = append(saved, models.Execution{PromptSent: text, Status: models.ExecCompleted, ContextKind: "application"})
@@ -134,18 +137,33 @@ func retainedUserTextFallback(raw json.RawMessage, text string) json.RawMessage 
 	if len(raw) == 0 {
 		return nil
 	}
-	var message map[string]any
-	if json.Unmarshal(raw, &message) != nil {
+	fields, err := jsonview.Fields(raw)
+	if err != nil {
 		return nil
+	}
+	message := make(map[string]any, len(fields))
+	for k, v := range fields {
+		message[k] = v
 	}
 	message["content"] = []any{map[string]any{"type": "input_text", "text": text}}
 	for _, key := range []string{"internal_chat_message_metadata", "internal_chat_message_metadata_passthrough"} {
-		if metadata, ok := message[key].(map[string]any); ok {
-			if _, exists := metadata["content_item_kinds"]; exists {
-				metadata["content_item_kinds"] = []string{"user.text"}
+		metadata, err := jsonview.Fields(fields[key])
+		if err != nil {
+			continue
+		}
+		if _, exists := metadata["content_item_kinds"]; exists {
+			values := make(map[string]any, len(metadata))
+			for k, v := range metadata {
+				values[k] = v
 			}
+			values["content_item_kinds"] = []string{"user.text"}
+			encoded, err := requestjson.MarshalValue(values)
+			if err != nil {
+				return nil
+			}
+			message[key] = json.RawMessage(encoded)
 		}
 	}
-	encoded, _ := json.Marshal(message)
+	encoded, _ := requestjson.MarshalValue(message)
 	return encoded
 }

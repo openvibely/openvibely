@@ -178,12 +178,14 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 			if completionsFailure != nil {
 				var blocks []struct{ Type, Text string }
 				if json.Unmarshal(message.Content, &blocks) == nil {
-					execution.Output = ""
+					var text strings.Builder
 					for _, block := range blocks {
 						if block.Type == "text" {
-							execution.Output += block.Text + "\n"
+							text.WriteString(block.Text)
+							text.WriteByte('\n')
 						}
 					}
+					execution.Output = text.String()
 				}
 			}
 			if message.Role == "user" {
@@ -192,11 +194,14 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 					Text string `json:"text"`
 				}
 				if json.Unmarshal(message.Content, &blocks) == nil {
+					var text strings.Builder
 					for _, block := range blocks {
 						if block.Type == "text" {
-							execution.PromptSent += block.Text + "\n"
+							text.WriteString(block.Text)
+							text.WriteByte('\n')
 						}
 					}
+					execution.PromptSent = text.String()
 				}
 			}
 		}

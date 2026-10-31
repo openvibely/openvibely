@@ -850,6 +850,24 @@ type anthropicEnvironmentReplay struct {
 
 func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	var messages []anthropicclient.Message
+	var joined strings.Builder
+	joinedIndex := -1
+	appendPlain := func(role, content string) {
+		if canMergeMessage(messages, role, content) {
+			index := len(messages) - 1
+			if joinedIndex != index {
+				joined.Reset()
+				joined.WriteString(messages[index].Content)
+				joinedIndex = index
+			}
+			joined.WriteString("\n\n")
+			joined.WriteString(content)
+			messages[index].Content = joined.String()
+		} else {
+			messages = append(messages, anthropicclient.Message{Role: role, Content: content})
+			joinedIndex = -1
+		}
+	}
 	lastEnvironment := ""
 	for _, exec := range chatHistory {
 		var structured []anthropicclient.Message
@@ -889,16 +907,16 @@ func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Mess
 			last := structured[len(structured)-1]
 			if (last.Role != "assistant" || (last.Content == "" && len(last.ContentBlocks) == 0)) && (exec.Status == models.ExecFailed || exec.Status == models.ExecRunning) {
 				if output := llmprompt.ReplayAssistantContent(exec); output != "" {
-					messages = appendMergedMessage(messages, "assistant", output)
+					appendPlain("assistant", output)
 				}
 			}
 			continue
 		}
 		if exec.PromptSent != "" {
-			messages = appendMergedMessage(messages, "user", exec.PromptSent)
+			appendPlain("user", exec.PromptSent)
 		}
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
-			messages = appendMergedMessage(messages, "assistant", replay)
+			appendPlain("assistant", replay)
 		}
 	}
 	return messages
@@ -932,7 +950,7 @@ func EstimateHistoryTokensContext(ctx context.Context, history []models.Executio
 
 // appendMergedMessage appends a message, merging with the previous if same role.
 func appendMergedMessage(messages []anthropicclient.Message, role, content string) []anthropicclient.Message {
-	if len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsApplicationContext(messages[len(messages)-1].Content) && !llmprompt.IsApplicationContext(content) && !llmprompt.IsCompactionContext(content) && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content) {
+	if canMergeMessage(messages, role, content) {
 		messages[len(messages)-1].Content += "\n\n" + content
 		return messages
 	}
@@ -1001,18 +1019,10 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 }
 
 func splitPath(p string) []string {
-	var parts []string
-	for _, s := range []byte(p) {
-		if s == '/' {
-			parts = append(parts, "")
-		} else if len(parts) == 0 {
-			parts = append(parts, string(s))
-		} else {
-			parts[len(parts)-1] += string(s)
-		}
-	}
-	if len(parts) == 0 {
-		return []string{p}
-	}
-	return parts
+	// Historical behavior omits the empty prefix for an absolute path.
+	return strings.Split(strings.TrimPrefix(p, "/"), "/")
+}
+
+func canMergeMessage(messages []anthropicclient.Message, role, content string) bool {
+	return len(messages) > 0 && messages[len(messages)-1].Role == role && len(messages[len(messages)-1].ContentBlocks) == 0 && !llmprompt.IsApplicationContext(messages[len(messages)-1].Content) && !llmprompt.IsApplicationContext(content) && !llmprompt.IsCompactionContext(content) && !llmprompt.IsCompactionContext(messages[len(messages)-1].Content)
 }

@@ -78,3 +78,24 @@ func TestReplayRowsPreserveCollectionDecoderAndNull(t *testing.T) {
 	require.NoError(t, row.DecodeTranscript(&messages))
 	require.Nil(t, messages)
 }
+
+func TestHasResponsesInputAcrossRepresentations(t *testing.T) {
+	for _, raw := range []string{`{"responses_input":[]}`, `{"responses_input":null}`, `{"responses_input":[{"type":"message"}]}`, `{"RESPONSES_INPUT":[null]}`, `[]`, `invalid`} {
+		replay := ExecutionReplayMessage{TranscriptJSON: raw}
+		var saved struct {
+			Input []json.RawMessage `json:"responses_input"`
+		}
+		want := replay.DecodeTranscript(&saved) == nil && len(saved.Input) > 0
+		if replay.HasResponsesInput() != want {
+			t.Fatal(raw)
+		}
+	}
+	row := ReplayFromRows("responses_input", []json.RawMessage{json.RawMessage(`{"output":"large"}`)})
+	if !row.HasResponsesInput() {
+		t.Fatal("lost row checkpoint")
+	}
+	row.Rows.Items = nil
+	if row.HasResponsesInput() {
+		t.Fatal("empty checkpoint")
+	}
+}

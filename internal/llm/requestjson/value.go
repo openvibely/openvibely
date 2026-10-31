@@ -103,3 +103,13 @@ func appendValue(dst []byte, value any) ([]byte, error) {
 func MarshalValue(value any) ([]byte, error) {
 	return appendValue(make([]byte, 0, rawSizeHint(value)), value)
 }
+
+// encodedValueSize counts one metadata field. Only directly borrowed fields
+// are verbatim; nested ordinary values follow encoding/json, like appendValue.
+func encodedValueSize(v any) (int, error) {
+	if raw, ok := rawValue(v); ok && len(raw) > 0 && utf8.Valid(raw) && json.Valid(raw) {
+		return len(raw), nil
+	}
+
+	return Size(v)
+}

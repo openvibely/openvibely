@@ -1238,10 +1238,7 @@ func steeringContextHistory(params streamingResponseParams) []models.Execution {
 func hasNativeSteeringReplay(history []models.Execution) bool {
 	for _, execution := range history {
 		for _, replay := range execution.ReplayMessages {
-			var checkpoint struct {
-				Input []json.RawMessage `json:"responses_input"`
-			}
-			if replay.DecodeTranscript(&checkpoint) == nil && len(checkpoint.Input) > 0 {
+			if replay.HasResponsesInput() {
 				return true
 			}
 		}

@@ -240,7 +240,7 @@ func responsesLiteTools(tools any) []any {
 
 	// Keep the generic path for map-based and extension tool definitions. Its
 	// JSON conversion preserves unknown fields with the same handling as before.
-	encoded, err := json.Marshal(tools)
+	encoded, err := requestjson.MarshalValue(tools)
 	if err != nil {
 		return []any{}
 	}
@@ -261,7 +261,15 @@ func responsesLiteTools(tools any) []any {
 			continue
 		}
 		delete(fields, "async")
-		filtered = append(filtered, fields)
+		object := make(map[string]any, len(fields))
+		for key, value := range fields {
+			object[key] = value
+		}
+		encoded, err := requestjson.MarshalValue(object)
+		if err != nil {
+			return []any{}
+		}
+		filtered = append(filtered, json.RawMessage(encoded))
 	}
 	return filtered
 }

@@ -26,3 +26,15 @@ func ModelHistoryFormat(ctx context.Context) (format, itemsKey string, ok bool) 
 		return "", "", false
 	}
 }
+
+type executionMetadataKey struct{}
+
+// WithExecutionMetadata requests only identity, ownership, status and ordering
+// fields. Callers must not use it to render output or construct model history.
+func WithExecutionMetadata(ctx context.Context) context.Context {
+	return context.WithValue(ctx, executionMetadataKey{}, true)
+}
+func ExecutionMetadataOnly(ctx context.Context) bool {
+	value, _ := ctx.Value(executionMetadataKey{}).(bool)
+	return value
+}

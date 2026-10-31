@@ -54,15 +54,17 @@ func portableRecoveryParts(history []models.Execution) (int, []models.Execution)
 				}
 				// Use portable messages so the old Responses snapshot cannot replace the
 				// recovered background during EffectiveReplayHistory normalization.
-				messages := repairConvertedToolResults(llmopenai.ResponsesSummaryMessages(saved.Input[k+1:]))
+				messages := repairConvertedToolResults(preparedResponsesMessages(saved.Input[k+1:]))
 				var tail []models.Execution
-				prefix := repairConvertedToolResults(llmopenai.ResponsesSummaryMessages(saved.Input[:k]))
+				prefix := repairConvertedToolResults(preparedResponsesMessages(saved.Input[:k]))
 				if len(prefix) > 0 {
-					snapshot, _ := models.EncodeReplayRows("", prefix)
+					rows, _ := openaiclient.PreparedCompletionsMessages(prefix).SnapshotRows()
+					snapshot := models.ReplayFromRows("", rows)
 					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_prefix", ReplayMessages: []models.ExecutionReplayMessage{snapshot}})
 				}
 				if len(messages) > 0 {
-					snapshot, _ := models.EncodeReplayRows("", messages)
+					rows, _ := openaiclient.PreparedCompletionsMessages(messages).SnapshotRows()
+					snapshot := models.ReplayFromRows("", rows)
 					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_tail", ReplayMessages: []models.ExecutionReplayMessage{snapshot}})
 				}
 				if j+1 < len(history[i].ReplayMessages) {
@@ -191,14 +193,40 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 	visibleSteering := make(map[string]bool)
 	for _, exec := range tail {
 		for _, replay := range exec.ReplayMessages {
+			var rows []json.RawMessage
+			if replay.DecodeTranscript(&rows) != nil {
+				continue
+			}
 			var messages []openaiclient.CompletionsHistoryMessage
-			if replay.DecodeTranscript(&messages) != nil {
+			valid := true
+			for _, raw := range rows {
+				if strings.TrimSpace(string(raw)) == "null" {
+					continue
+				}
+				fields, err := jsonview.FoldedFields(raw)
+				if err != nil {
+					valid = false
+					break
+				}
+				var role string
+				if err = json.Unmarshal(fields["role"], &role); err != nil {
+					valid = false
+					break
+				}
+				if role != "user" {
+					continue
+				}
+				var m openaiclient.CompletionsHistoryMessage
+				if json.Unmarshal(raw, &m) != nil {
+					valid = false
+					break
+				}
+				messages = append(messages, m)
+			}
+			if !valid {
 				continue
 			}
 			for _, m := range messages {
-				if m.Role != "user" {
-					continue
-				}
 				if m.Content != "" {
 					visibleSteering[m.Content] = true
 				}

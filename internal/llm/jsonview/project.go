@@ -19,21 +19,11 @@ func ProjectObject(raw json.RawMessage, keep func(map[string]json.RawMessage, st
 			if err != nil {
 				return nil, err
 			}
-			// Preserve the decoded-text budgeting convention for noncanonical
-			// escapes supplied by legacy/foreign producers.
-			if trimmed := bytes.TrimSpace(v); len(trimmed) > 0 && trimmed[0] == '"' {
-				canonical, _ := view.StringSize()
-				encoded, _ := view.Size()
-				if canonical != encoded {
-					text, err := view.Text()
-					if err != nil {
-						return nil, err
-					}
-					out[k] = text
-					continue
-				}
+			value, err := view.CanonicalTextValue()
+			if err != nil {
+				return nil, err
 			}
-			out[k] = view
+			out[k] = value
 			continue
 		}
 		var value any
@@ -75,4 +65,23 @@ func ToolOutputs(rows []json.RawMessage) ([]any, error) {
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+// CanonicalTextValue borrows ordinary text but decodes unusual escape spellings
+// when retaining them would change the budgeting convention of decoded history.
+func (v Value) CanonicalTextValue() (any, error) {
+	if trimmed := bytes.TrimSpace(v.Raw()); len(trimmed) > 0 && trimmed[0] == '"' {
+		canonical, err := v.StringSize()
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := v.Size()
+		if err != nil {
+			return nil, err
+		}
+		if canonical != encoded {
+			return v.Text()
+		}
+	}
+	return v, nil
 }

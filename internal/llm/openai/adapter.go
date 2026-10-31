@@ -449,10 +449,13 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 
 	fullPrompt := prompt
 	if len(attachments) > 0 {
-		fullPrompt += "\n\nAttached files:\n"
+		var attached strings.Builder
+		attached.WriteString(fullPrompt)
+		attached.WriteString("\n\nAttached files:\n")
 		for _, att := range attachments {
-			fullPrompt += fmt.Sprintf("- %s (absolute path: %s)\n", att.FileName, llmprompt.AttachmentAbsPath(att))
+			fmt.Fprintf(&attached, "- %s (absolute path: %s)\n", att.FileName, llmprompt.AttachmentAbsPath(att))
 		}
+		fullPrompt = attached.String()
 	}
 
 	oaAttachments, err := convertAttachmentsContext(ctx, attachments)
@@ -1161,7 +1164,7 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 	if execID == "" || a.execRepo == nil {
 		return ""
 	}
-	execution, err := a.execRepo.GetByID(ctx, execID)
+	execution, err := a.execRepo.GetByID(persistence.WithExecutionMetadata(ctx), execID)
 	if err != nil {
 		applog.Infof("[openai-adapter] resolve task transport scope exec=%s: %v", execID, err)
 		return ""

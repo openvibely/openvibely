@@ -95,3 +95,48 @@ func BenchmarkPreparedToolHistory(b *testing.B) {
 		}
 	})
 }
+
+func TestPreparedForeignToolContentAndMutableExport(t *testing.T) {
+	for _, raw := range []string{`"tool result 世界"`, `"\u0061\n"`} {
+		m, err := PreparedToolMessage("call", json.RawMessage(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared := PreparedCompletionsMessages([]CompletionsHistoryMessage{m})
+		rows, err := prepared.SnapshotRows()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got CompletionsHistoryMessage
+		if err = json.Unmarshal(rows[0], &got); err != nil {
+			t.Fatal(err)
+		}
+		var want string
+		if err = json.Unmarshal([]byte(raw), &want); err != nil {
+			t.Fatal(err)
+		}
+		if got.Content != want {
+			t.Fatalf("%q != %q", got.Content, want)
+		}
+		exported := prepared.DecodedMessages()
+		exported[0].Content = "changed"
+		if exported[0].rawContent != nil || exported[0].rawReplay != nil {
+			t.Fatal("mutable export retains private replay")
+		}
+		if prepared.DecodedMessages()[0].Content != want {
+			t.Fatal("export mutated prepared state")
+		}
+	}
+	for _, raw := range []string{`null`, `{}`, `[]`, `invalid`} {
+		if _, err := PreparedToolMessage("call", json.RawMessage(raw)); err == nil {
+			t.Fatal("accepted", raw)
+		}
+	}
+	h, err := PrepareCompletionsHistory(models.ExecutionReplayMessage{TranscriptJSON: `[null,{"role":"user","content":"keep"}]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.DecodedMessages()) != 2 || h.DecodedMessages()[1].Content != "keep" {
+		t.Fatal("null row lost valid history")
+	}
+}

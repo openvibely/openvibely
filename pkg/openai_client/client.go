@@ -954,6 +954,14 @@ func parseStreamingEvents(scanner *responsesEventIterator, onDelta func(string),
 			}
 			continue
 		}
+		// These incremental reasoning events have no output in the direct parser.
+		// Agentic streaming consumes them through its typed handlers.
+		switch typ {
+		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+			if json.Valid(data) {
+				continue
+			}
+		}
 		ev := decodeResponsesComplexEvent(data)
 		if ev == nil {
 			continue

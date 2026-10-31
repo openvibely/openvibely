@@ -113,6 +113,46 @@ func (f *Field) metadataFields(metadata any) (map[string]json.RawMessage, error)
 func (f *Field) Size(metadata any) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// Plain object metadata can be counted without creating its encoded copy.
+	// Custom structs/marshalers retain the validating encoder fallback below.
+	value := metadata
+	var prepared map[string]*Field
+	if m, ok := metadata.(Metadata); ok {
+		value, prepared = m.Value, m.Fields
+	}
+	if fields, ok := value.(map[string]any); ok && fields != nil {
+		n := 2 + StringSize(f.key) + 1 + len(f.raw)
+		for key, v := range fields {
+			if key == f.key {
+				encoded, err := MarshalValue(v)
+				if err != nil {
+					return 0, err
+				}
+				if string(encoded) != "null" {
+					return 0, fmt.Errorf("prepared field %q must be absent or null", f.key)
+				}
+				continue
+			}
+			size, err := encodedValueSize(v)
+			if err != nil {
+				return 0, err
+			}
+			n += 1 + StringSize(key) + 1 + size
+		}
+		for key, field := range prepared {
+			if field == nil {
+				return 0, fmt.Errorf("nil prepared metadata field %q", key)
+			}
+			if key == f.key || field == f {
+				return 0, fmt.Errorf("duplicate prepared field %q", key)
+			}
+			if _, exists := fields[key]; exists {
+				return 0, fmt.Errorf("duplicate metadata field %q", key)
+			}
+			n += 1 + StringSize(key) + 1 + len(field.JSON())
+		}
+		return n, nil
+	}
 	fields, err := f.metadataFields(metadata)
 	if err != nil {
 		return 0, err

@@ -162,8 +162,12 @@ func (r *ExecutionRepo) ListByProject(ctx context.Context, projectID string, lim
 }
 
 func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Execution, error) {
+	columns := executionSelectColumns
+	if persistence.ExecutionMetadataOnly(ctx) {
+		columns = modelHistoryQuery(ctx, columns, false)
+	}
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumns+` FROM executions WHERE id = ?`, id))
+		`SELECT `+columns+` FROM executions WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1683,6 +1687,25 @@ func (r *ExecutionRepo) listTaskNativeHistory(ctx context.Context, taskID string
 }
 
 func modelHistoryQuery(ctx context.Context, query string, alias bool) string {
+	if persistence.ExecutionMetadataOnly(ctx) {
+		columns := executionSelectColumnsLight
+		full := executionSelectColumns
+		prefix := ""
+		output := executionOutputSelect
+		if alias {
+			columns, full, prefix, output = executionSelectColumnsAliasLight, executionSelectColumnsAlias, "e.", executionOutputSelectAlias
+		}
+		projection := strings.Replace(full, output, "''", 1)
+		for _, field := range []string{"prompt_sent", "reasoning_content", "diff_output", "error_message", "cli_session_id"} {
+			projection = strings.Replace(projection, prefix+field, "''", 1)
+		}
+		// Replace the known SELECT projection, never arbitrary WHERE/ORDER BY text.
+		if strings.Contains(query, full) {
+			return strings.Replace(query, full, projection, 1)
+		}
+		return strings.Replace(query, columns, projection, 1)
+	}
+
 	format, itemsKey, ok := persistence.ModelHistoryFormat(ctx)
 	if !ok {
 		return query

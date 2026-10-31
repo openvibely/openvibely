@@ -195,3 +195,15 @@ func (m ExecutionReplayMessage) TranscriptBytes() int {
 	}
 	return n
 }
+
+// HasResponsesInput inspects native row headers without allocating item slices.
+// Serialized/foreign envelopes retain the decoder's compatibility semantics.
+func (m ExecutionReplayMessage) HasResponsesInput() bool {
+	if m.TranscriptJSON == "" && m.Rows != nil && m.Rows.Format == "envelope" && m.Rows.ItemsKey == "responses_input" {
+		return len(m.Rows.Items) > 0
+	}
+	var saved struct {
+		Input []json.RawMessage `json:"responses_input"`
+	}
+	return m.DecodeTranscript(&saved) == nil && len(saved.Input) > 0
+}

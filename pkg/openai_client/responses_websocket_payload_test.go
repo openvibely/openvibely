@@ -109,3 +109,35 @@ func TestWebsocketRequestReusesEncodedProperties(t *testing.T) {
 		}
 	}
 }
+
+func TestLitePreparedToolsPreserveUnknownRawFields(t *testing.T) {
+	raw := json.RawMessage(`[ {"type":"function","name":"read","async":true,"parameters": { "type":"object", "x-extension": [1, 2] } },{"type":"web_search"} ]`)
+	got := responsesLiteTools(raw)
+	if len(got) != 1 {
+		t.Fatalf("got %d tools", len(got))
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []map[string]any
+	if err = json.Unmarshal(encoded, &tools); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := tools[0]["async"]; exists {
+		t.Fatal("async leaked")
+	}
+	if tools[0]["name"] != "read" {
+		t.Fatal("lost tool")
+	}
+	if !strings.Contains(string(raw), `"async":true`) {
+		t.Fatal("mutated source")
+	}
+	rawTool, ok := got[0].(json.RawMessage)
+	if !ok {
+		t.Fatal("prepared tool was expanded into mutable maps")
+	}
+	if !strings.Contains(string(rawTool), `{ "type":"object", "x-extension": [1, 2] }`) {
+		t.Fatal("raw schema was reformatted")
+	}
+}

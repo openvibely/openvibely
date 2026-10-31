@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
+
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
@@ -37,9 +40,9 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				}
 			}
 			var envelope struct {
-				Input       []json.RawMessage         `json:"responses_input"`
-				Messages    []anthropicclient.Message `json:"messages"`
-				Environment string                    `json:"anthropic_execution_environment"`
+				Input       []json.RawMessage `json:"responses_input"`
+				Messages    []json.RawMessage `json:"messages"`
+				Environment string            `json:"anthropic_execution_environment"`
 			}
 			_ = replay.DecodeTranscript(&envelope)
 			var messages []openaiclient.CompletionsHistoryMessage
@@ -48,7 +51,7 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				if provider == models.ProviderOpenAI {
 					continue
 				}
-				messages = llmopenai.ResponsesSummaryMessages(envelope.Input)
+				llmopenai.PreparedResponsesSummaryMessages(envelope.Input).Visit(func(m openaiclient.CompletionsHistoryMessage, _ any) { messages = append(messages, m) })
 			case len(envelope.Messages) > 0:
 				if provider == models.ProviderAnthropic {
 					continue
@@ -56,14 +59,30 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				if envelope.Environment != "" {
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: envelope.Environment})
 				}
-				messages = append(messages, anthropicReplayMessages(envelope.Messages, forSummary)...)
+				var native []anthropicclient.Message
+				for _, row := range envelope.Messages {
+					m, err := anthropicclient.DecodeReplayMessage(row)
+					if err != nil {
+						// Unusual rows retain the old decoder's partial-result behavior.
+						var legacy struct {
+							Messages []anthropicclient.Message `json:"messages"`
+						}
+						_ = replay.DecodeTranscript(&legacy)
+						native = legacy.Messages
+						break
+					}
+					native = append(native, m)
+				}
+				messages = append(messages, preparedAnthropicReplayMessages(native, forSummary)...)
 			default:
 				if provider != models.ProviderAnthropic {
 					continue
 				}
-				if replay.DecodeTranscript(&messages) != nil {
+				prepared, err := openaiclient.PrepareCompletionsHistory(replay)
+				if err != nil {
 					continue
 				}
+				prepared.Visit(func(m openaiclient.CompletionsHistoryMessage, _ any) { messages = append(messages, m) })
 			}
 			messages = repairConvertedToolResults(messages)
 			if len(messages) == 0 {
@@ -79,9 +98,11 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 			}
 			var next models.ExecutionReplayMessage
 			if provider == models.ProviderAnthropic {
-				next, _ = models.EncodeReplayRows("messages", completionsAnthropicSummaryMessages(messages))
+				rows, _ := summaryRows(completionsAnthropicSummaryMessages(messages))
+				next = models.ReplayFromRows("messages", rows)
 			} else {
-				next, _ = models.EncodeReplayRows("", messages)
+				rows, _ := openaiclient.PreparedCompletionsMessages(messages).SnapshotRows()
+				next = models.ReplayFromRows("", rows)
 			}
 			out[i].ReplayMessages[j].TranscriptJSON = ""
 			out[i].ReplayMessages[j].Rows = next.Rows
@@ -120,6 +141,10 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 }
 
 func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool) []openaiclient.CompletionsHistoryMessage {
+	return openaiclient.PreparedCompletionsMessages(preparedAnthropicReplayMessages(messages, forSummary)).DecodedMessages()
+}
+
+func preparedAnthropicReplayMessages(messages []anthropicclient.Message, forSummary bool) []openaiclient.CompletionsHistoryMessage {
 	var out []openaiclient.CompletionsHistoryMessage
 	// Keep consecutive tool results together, even when Anthropic stores them
 	// in separate messages. Emit their images before the next ordinary message.
@@ -136,8 +161,26 @@ func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool
 			out = append(out, openaiclient.CompletionsHistoryMessage{Role: message.Role, Content: message.Content})
 			continue
 		}
+		rawBlocks, arrayErr := jsonview.Array(message.ContentBlocks)
 		var blocks []map[string]any
-		_ = json.Unmarshal(message.ContentBlocks, &blocks)
+		if arrayErr != nil {
+			_ = json.Unmarshal(message.ContentBlocks, &blocks)
+		}
+		for _, raw := range rawBlocks {
+			block, err := jsonview.ProjectObject(raw, func(fields map[string]json.RawMessage, key string) bool {
+				var typ string
+				_ = json.Unmarshal(fields["type"], &typ)
+				value := fields[key]
+				return typ == "tool_result" && key == "content" && len(value) > 0 && value[0] == '"'
+			})
+			if err != nil {
+				// Preserve the decoded API's handling of null or unusual blocks.
+				blocks = nil
+				_ = json.Unmarshal(message.ContentBlocks, &blocks)
+				break
+			}
+			blocks = append(blocks, block)
+		}
 		current := openaiclient.CompletionsHistoryMessage{Role: message.Role}
 		flush := func() {
 			if current.Content != "" || len(current.ToolCalls) > 0 || len(current.ImageContent) > 0 {
@@ -163,6 +206,13 @@ func anthropicReplayMessages(messages []anthropicclient.Message, forSummary bool
 			case "tool_result":
 				flush()
 				id, _ := block["tool_use_id"].(string)
+				if value, ok := block["content"].(jsonview.Value); ok {
+					tool, err := openaiclient.PreparedToolMessage(id, value.Raw())
+					if err == nil {
+						out = append(out, tool)
+						continue
+					}
+				}
 				content, ok := block["content"].(string)
 				if !ok {
 					if parts, array := block["content"].([]any); array {
@@ -226,7 +276,15 @@ func completionsAnthropicSummaryMessages(messages []openaiclient.CompletionsHist
 		if len(toolResults) == 0 {
 			return
 		}
-		raw, _ := json.Marshal(toolResults)
+		items := make([]any, len(toolResults))
+		for i := range toolResults {
+			items[i] = toolResults[i]
+		}
+		field, err := requestjson.PrepareItems("content", items)
+		if err != nil {
+			return
+		}
+		raw := field.JSON()
 		out = append(out, anthropicclient.Message{Role: "user", ContentBlocks: raw})
 		toolResults = nil
 	}
@@ -234,7 +292,13 @@ func completionsAnthropicSummaryMessages(messages []openaiclient.CompletionsHist
 		// Anthropic expects parallel results together in the next user message.
 		// Flush at any non-tool message so separate rounds are never combined.
 		if message.Role == "tool" {
-			toolResults = append(toolResults, map[string]any{"type": "tool_result", "tool_use_id": message.ToolCallID, "content": message.Content})
+			content := message.ReadOnlyContent()
+			if view, ok := content.(jsonview.Value); ok {
+				if value, err := view.CanonicalTextValue(); err == nil {
+					content = value
+				}
+			}
+			toolResults = append(toolResults, map[string]any{"type": "tool_result", "tool_use_id": message.ToolCallID, "content": content})
 			continue
 		}
 		flushToolResults()
@@ -308,4 +372,10 @@ func repairConvertedToolResults(messages []openaiclient.CompletionsHistoryMessag
 	}
 	flush()
 	return out
+}
+
+func preparedResponsesMessages(rows []json.RawMessage) []openaiclient.CompletionsHistoryMessage {
+	var messages []openaiclient.CompletionsHistoryMessage
+	llmopenai.PreparedResponsesSummaryMessages(rows).Visit(func(m openaiclient.CompletionsHistoryMessage, _ any) { messages = append(messages, m) })
+	return messages
 }

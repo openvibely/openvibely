@@ -1694,3 +1694,21 @@ func TestApplyDefaultResponsesTextVerbosity(t *testing.T) {
 		t.Fatalf("unsupported model received text options: %#v", unsupported)
 	}
 }
+
+func TestDirectStreamIgnoresReasoningAndRequiresTerminal(t *testing.T) {
+	stream := "data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"private\"}\n\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"summary\"}\n\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"answer\"}\n\n"
+	for _, complete := range []bool{false, true} {
+		input := stream
+		if complete {
+			input += "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"status\":\"completed\"}}\n\n"
+		}
+		var visible strings.Builder
+		_, err := parseStreamingResponse(strings.NewReader(input), func(text string) { visible.WriteString(text) }, false)
+		if (err == nil) != complete {
+			t.Fatalf("complete=%v: error=%v", complete, err)
+		}
+		if visible.String() != "answer" {
+			t.Fatalf("unexpected visible output %q", visible.String())
+		}
+	}
+}

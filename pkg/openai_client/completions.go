@@ -584,7 +584,7 @@ func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[str
 			return err
 		}
 	}
-	metadata := requestjson.Metadata{Value: struct{}{}, Fields: map[string]*requestjson.Field{}}
+	metadata := requestjson.Metadata{Value: map[string]any{}, Fields: map[string]*requestjson.Field{}}
 	if len(tools) > 0 {
 		field := opts.preparedTools
 		if field == nil {

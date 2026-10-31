@@ -180,3 +180,57 @@ func summaryToolIDs(raw json.RawMessage) []string {
 	}
 	return ids
 }
+
+// summaryUserHistoryInput follows the same provider conversion and checkpoint
+// rules as summaryHistoryInput, but never encodes unrelated assistant/tool rows.
+// It is only for inspecting saved application context, not sending history.
+func summaryUserHistoryInput(provider models.LLMProvider, history []models.Execution) ([]json.RawMessage, error) {
+	if provider != models.ProviderOpenAI {
+		var err error
+		history, err = readableCompactedHistory(history)
+		if err != nil {
+			return nil, err
+		}
+	}
+	history = normalizeSummaryReplay(provider, history)
+	var rows []json.RawMessage
+	appendValue := func(value any) error {
+		row, err := requestjson.MarshalValue(value)
+		if err == nil {
+			rows = append(rows, row)
+		}
+		return err
+	}
+	switch provider {
+	case models.ProviderOpenAI:
+		for _, item := range llmopenai.HistoryInputItems(history) {
+			if fields, ok := item.(map[string]any); ok && fields["role"] == "user" {
+				if err := appendValue(item); err != nil {
+					return nil, err
+				}
+			}
+		}
+	case models.ProviderAnthropic:
+		for _, m := range llmanthropic.SummaryHistory(history) {
+			if m.Role != "user" {
+				continue
+			}
+			row, err := anthropicclient.EncodeReplayMessage(m)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+	default:
+		var err error
+		compatible.VisitSummaryHistory(history, func(m openaiclient.CompletionsHistoryMessage) {
+			if err == nil && m.Role == "user" {
+				err = appendValue(m)
+			}
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return rows, nil
+}

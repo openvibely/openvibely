@@ -697,12 +697,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 		}
 		// Collect text blocks for this turn.
-		turnText := ""
+		var turnTextBuilder strings.Builder
 		for _, block := range resp.contentBlocks {
 			if block.Type == "text" && block.Text != "" {
-				turnText += block.Text
+				turnTextBuilder.WriteString(block.Text)
 			}
 		}
+
+		turnText := turnTextBuilder.String()
 
 		// Provider tool callbacks are emitted in stream-order by the parser.
 		hasServerToolResults := false
@@ -1347,9 +1349,10 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 			return err
 		}
 	}
-	metadata := requestjson.Metadata{Value: struct {
-		System string `json:"system,omitempty"`
-	}{opts.System}, Fields: map[string]*requestjson.Field{}}
+	metadata := requestjson.Metadata{Value: map[string]any{}, Fields: map[string]*requestjson.Field{}}
+	if opts.System != "" {
+		metadata.Value.(map[string]any)["system"] = opts.System
+	}
 	if len(tools) > 0 {
 		field := opts.preparedTools
 		if field == nil {

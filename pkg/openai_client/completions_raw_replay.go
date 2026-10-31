@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
@@ -113,6 +114,10 @@ func PrepareCompletionsHistory(replay models.ExecutionReplayMessage) (PreparedCo
 	}
 	out := make([]CompletionsHistoryMessage, 0, len(replay.Rows.Items))
 	for _, raw := range replay.Rows.Items {
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			out = append(out, CompletionsHistoryMessage{})
+			continue
+		}
 		var role string
 		eligible := true
 		fields := map[string]json.RawMessage{}
@@ -236,3 +241,35 @@ func (h PreparedCompletionsHistory) DecodedMessages() []CompletionsHistoryMessag
 	return out
 }
 func (h PreparedCompletionsHistory) Empty() bool { return len(h.messages) == 0 }
+
+// Visit reads prepared messages without forcing tool content into strings.
+// Messages and content are immutable; callers must not modify nested values.
+func (h PreparedCompletionsHistory) Visit(visit func(CompletionsHistoryMessage, any)) {
+	for _, m := range h.messages {
+		visit(m, m.contentValue())
+	}
+}
+
+// PreparedToolMessage preserves an unchanged textual result during format
+// conversion. DecodedMessages remains the mutable, fully decoded boundary.
+func PreparedToolMessage(id string, content json.RawMessage) (CompletionsHistoryMessage, error) {
+	view, err := jsonview.Borrow(content)
+	if err != nil {
+		return CompletionsHistoryMessage{}, err
+	}
+	if trimmed := bytes.TrimSpace(content); len(trimmed) == 0 || trimmed[0] != '"' {
+		return CompletionsHistoryMessage{}, fmt.Errorf("tool content must be a JSON string")
+	}
+	canonical, err := view.CanonicalTextValue()
+	if err != nil {
+		return CompletionsHistoryMessage{}, err
+	}
+	if text, ok := canonical.(string); ok {
+		return CompletionsHistoryMessage{Role: "tool", ToolCallID: id, Content: text}, nil
+	}
+	return CompletionsHistoryMessage{Role: "tool", ToolCallID: id, rawContent: &view}, nil
+}
+
+// ReadOnlyContent returns either decoded text or an immutable borrowed value.
+// Converters can change the envelope without decoding an unchanged tool result.
+func (m CompletionsHistoryMessage) ReadOnlyContent() any { return m.contentValue() }

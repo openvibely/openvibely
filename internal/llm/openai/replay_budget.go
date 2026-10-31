@@ -19,17 +19,7 @@ func EffectiveReplayHistory(history []models.Execution) []models.Execution {
 	for i := len(history) - 1; i >= 0; i-- {
 		for j := len(history[i].ReplayMessages) - 1; j >= 0; j-- {
 			replay := history[i].ReplayMessages[j]
-			hasInput := false
-			if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "envelope" && replay.Rows.ItemsKey == "responses_input" {
-				// The row header already identifies a complete Responses history.
-				// Inspecting that boundary must not decode every message again.
-				hasInput = len(replay.Rows.Items) > 0
-			} else {
-				var saved struct {
-					Input []json.RawMessage `json:"responses_input"`
-				}
-				hasInput = replay.DecodeTranscript(&saved) == nil && len(saved.Input) > 0
-			}
+			hasInput := replay.HasResponsesInput()
 			if hasInput {
 				result := append([]models.Execution(nil), history[i:]...)
 				result[0].ReplayMessages = result[0].ReplayMessages[j:]

@@ -115,3 +115,26 @@ func TestPreparedMetadataReuse(t *testing.T) {
 	_, err = messages.Marshal(Metadata{Value: struct{}{}, Fields: map[string]*Field{"other": messages}})
 	require.Error(t, err)
 }
+
+func TestMetadataCountingMatchesRawAwareWire(t *testing.T) {
+	f, err := Prepare("messages", []any{"hello"})
+	require.NoError(t, err)
+	schema, err := PrepareRaw("tools", []byte(`[ {"type":"function","name":"x"} ]`))
+	require.NoError(t, err)
+	for _, meta := range []any{
+		map[string]any{"system": "<&\n世界", "messages": nil},
+		map[string]any{"system": json.RawMessage(`"\u0061"`), "extra": map[string]any{"raw": json.RawMessage(`{ "x": 1 }`)}},
+		Metadata{Value: map[string]any{"system": strings.Repeat("large prompt", 100)}, Fields: map[string]*Field{"tools": schema}},
+		Metadata{Value: map[string]any{"tools": nil}, Fields: map[string]*Field{"tools": schema}},
+		Metadata{Value: map[string]any{}, Fields: map[string]*Field{"tools": nil}},
+		map[string]any{"messages": []any{"duplicate"}},
+		map[string]any{"bad": make(chan int)},
+	} {
+		size, err := f.Size(meta)
+		wire, wireErr := f.Marshal(meta)
+		require.Equal(t, wireErr == nil, err == nil)
+		if err == nil {
+			require.Equal(t, len(wire), size, string(wire))
+		}
+	}
+}

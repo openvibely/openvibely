@@ -33,6 +33,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
@@ -1217,10 +1218,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 				continue
 			}
 			for _, replay := range execution.ReplayMessages {
-				var saved struct {
-					Input []json.RawMessage `json:"responses_input"`
-				}
-				if replay.DecodeTranscript(&saved) == nil && len(saved.Input) > 0 {
+				if replay.HasResponsesInput() {
 					restored.ChatHistory = append([]models.Execution(nil), req.ChatHistory[i:]...)
 					// This snapshot already contains the summary and continuation.
 					// Do not let cross-provider conversion append older UI output.
@@ -1295,7 +1293,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 func (s *LLMService) checkpointWithinCurrentContext(req llmcontracts.AgentRequest, scope compactionScope, checkpoint *models.ChatCompactionCheckpoint) bool {
 	sourceID := checkpoint.SourceExecutionID
 	if req.ExecID != "" {
-		current, err := s.execRepo.GetByID(req.Ctx, req.ExecID)
+		current, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(req.Ctx), req.ExecID)
 		if err != nil {
 			applog.Infof("[agent-svc] read current context boundary: %v", err)
 			return false
@@ -1329,9 +1327,9 @@ func (s *LLMService) checkpointWithinCurrentContext(req llmcontracts.AgentReques
 		var err error
 		switch scope.Type {
 		case "task":
-			history, err = s.execRepo.ListByTaskChronologicalBefore(req.Ctx, scope.ID, before, 100)
+			history, err = s.execRepo.ListByTaskChronologicalBefore(persistence.WithExecutionMetadata(req.Ctx), scope.ID, before, 100)
 		case "chat_project":
-			history, err = s.execRepo.ListChatHistoryBefore(req.Ctx, scope.ID, before, 100)
+			history, err = s.execRepo.ListChatHistoryBefore(persistence.WithExecutionMetadata(req.Ctx), scope.ID, before, 100)
 		default:
 			return true
 		}
@@ -1489,7 +1487,7 @@ func (s *LLMService) compactionScopeForRequest(req llmcontracts.AgentRequest) (c
 		return scope, true
 	}
 	if req.Followup && strings.TrimSpace(req.ExecID) != "" && s != nil && s.execRepo != nil {
-		if exec, err := s.execRepo.GetByID(req.Ctx, req.ExecID); err == nil && exec != nil && strings.TrimSpace(exec.TaskID) != "" {
+		if exec, err := s.execRepo.GetByID(persistence.WithExecutionMetadata(req.Ctx), req.ExecID); err == nil && exec != nil && strings.TrimSpace(exec.TaskID) != "" {
 			return compactionScope{Type: "task", ID: strings.TrimSpace(exec.TaskID)}, true
 		}
 	}
