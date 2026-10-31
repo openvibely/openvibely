@@ -103,3 +103,48 @@ func TestBrowserFunctional_StreamingMathWithLazyTools(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserFunctional_StreamingMathPendingRefresh(t *testing.T) {
+	for _, replace := range []bool{false, true} {
+		name := "unchanged-and-appended"
+		if replace {
+			name = "replaced"
+		}
+		t.Run(name, func(t *testing.T) {
+			runStreamingMathBrowser(t, func(b *composerFocusCDP) {
+				b.waitFor("streaming fixture ready", `String(document.readyState==='complete' && typeof window.renderLiveChatContent==='function' && !!window.installChatVirtualRows)`, "true")
+				b.evaluateAwait(`(async()=>{window.mathSource='Equation \\(x=1\\).';await renderLiveChatContent(document.getElementById('math-stream'),window.mathSource);return 'ready'})()`)
+				b.waitFor("styled equation", `String(!!document.querySelector('#math-stream [data-math-ready="true"]'))`, "true")
+				replacement := "false"
+				if replace {
+					replacement = "true"
+				}
+				result := b.evaluateAwait(`(async()=>{
+     const root=document.getElementById('math-stream'),messages=document.getElementById('chat-messages');
+     const original=root.querySelector('[data-math-ready]');
+     // Pause lazy mounting as during hidden-workspace hydration. Refreshes can
+     // arrive before those rows get a viewport in which to render.
+     messages.setAttribute('data-transcript-hydrating','true');
+     await renderStreamingContent(root,window.mathSource,false);
+     if(!root._chatMathNodes?.size)throw Error('equation not saved before mounting');
+     await renderStreamingContent(root,window.mathSource,false);
+     if(!root._chatMathNodes?.size)throw Error('unchanged refresh discarded pending equation');
+     const changed=` + replacement + `;
+     const next=changed?'Replacement \\(y=2\\).':window.mathSource+' More text.';
+     await renderStreamingContent(root,next,false);
+     if(changed && (root._chatMathNodes || root._chatMathSource))throw Error('replacement retained stale equation pool');
+     if(!changed && !root._chatMathNodes?.size)throw Error('appended text discarded pending equation');
+     messages.removeAttribute('data-transcript-hydrating');
+     await renderVisibleChatRows(messages);
+     const equation=root.querySelector('[data-math-ready]');
+     if(!equation || (changed ? equation===original || equation.dataset.mathTex!=='y=2' : equation!==original))throw Error('wrong equation after mounting');
+     if(root._chatMathNodes || root._chatMathSource)throw Error('consumed pool not released');
+     return 'pass';
+    })()`)
+				if result != "pass" {
+					t.Fatal(result)
+				}
+			})
+		})
+	}
+}

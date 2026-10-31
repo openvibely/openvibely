@@ -487,7 +487,7 @@
         });
         // Reused rows have moved into fragment. Preserve only equations from
         // the remaining DOM for adoption when the new lazy rows render.
-        window.retainChatMathForVirtualRows?.(owner);
+        window.retainChatMathForVirtualRows?.(owner, data.source);
         owner.replaceChildren(fragment);
         restore();
         if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
@@ -499,6 +499,8 @@
         owners.forEach(owner => {
             delete owner._chatVirtualData;
             delete owner._chatVirtualRows;
+            delete owner._chatMathNodes;
+            delete owner._chatMathSource;
             owner.removeAttribute('data-chat-virtual-owner');
         });
     };
