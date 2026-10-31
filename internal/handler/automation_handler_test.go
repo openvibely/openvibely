@@ -241,7 +241,7 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, detail.Body.String(), ">Archive<")
 	require.NotContains(t, detail.Body.String(), "/archive?")
 	require.Contains(t, detail.Body.String(), `data-automation-view-yaml`)
-	require.Contains(t, detail.Body.String(), `data-automation-view-details`)
+	require.Contains(t, detail.Body.String(), `id="automation-node-panel"`)
 	require.Contains(t, detail.Body.String(), `data-automation-yaml-panel`)
 	require.Contains(t, detail.Body.String(), `data-automation-live-details-panel`)
 	require.Contains(t, detail.Body.String(), `data-automation-live-node-details`)
@@ -835,12 +835,12 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	}).Execute()
 	require.Equal(t, http.StatusOK, editedPreview.Code, editedPreview.Body.String())
 	require.Contains(t, editedPreview.Body.String(), `data-automation-unsaved-changes="true"`)
-	// Switching from edited YAML to Graph/Details previews without saving.
-	for _, view := range []string{"", "details"} {
+	// Switching from edited YAML to the graph and node details without saving.
+	for _, node := range []string{"", "extra_review"} {
 		previewYAML, err := service.EncodeAutomationDraftYAML(automationCandidateFromResponse(t, editedPreview))
 		require.NoError(t, err)
 		refreshed := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-			"project_id": {project.ID}, "automation_yaml": {previewYAML}, "initial_view": {view},
+			"project_id": {project.ID}, "automation_yaml": {previewYAML}, "selected_node": {node},
 		}).Execute()
 		require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
 		require.Contains(t, refreshed.Body.String(), `data-automation-unsaved-changes="true"`)
@@ -869,7 +869,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	require.Equal(t, 1, countNodeResources("extra_follow_up", "task"))
 }
 
-func TestAutomationBlankBuilderOffersGraphYAMLAndDetailsViews(t *testing.T) {
+func TestAutomationBlankBuilderOffersGraphYAMLAndNodePanel(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := tc.stores.Automations
@@ -888,7 +888,7 @@ func TestAutomationBlankBuilderOffersGraphYAMLAndDetailsViews(t *testing.T) {
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code)
-	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-view-details`, `data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`, `name="automation_yaml"`, `name="candidate_json"`, `data-automation-draft-canvas`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-add-first-node`, `data-automation-fit`, `data-automation-builder-header`, `data-automation-editable-breadcrumb`, `class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`, `class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`} {
+	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `id="automation-node-panel"`, `data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`, `name="automation_yaml"`, `name="candidate_json"`, `data-automation-draft-canvas`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-add-first-node`, `data-automation-fit`, `data-automation-builder-header`, `data-automation-editable-breadcrumb`, `class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`, `class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`} {
 		require.Contains(t, opened.Body.String(), marker)
 	}
 	for _, marker := range []string{`data-automation-builder-name`, `<h3 class="font-semibold">Canvas</h3>`, "Drag nodes to arrange them and empty space to pan.", "Connect steps:"} {
@@ -950,11 +950,11 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Contains(t, preview.Body.String(), `data-automation-edge-detail="schedule_task"`)
 	require.Contains(t, preview.Body.String(), "Task prompt")
 	require.Contains(t, preview.Body.String(), "Task goal (optional)")
-	require.NotContains(t, preview.Body.String(), "Human result")
+	require.NotContains(t, preview.Body.String(), `>Human result</span>`)
 	require.Zero(t, automationHandlerState(t, tc).Automations)
 }
 
-func TestAutomationBuilderPreviewRestoresDetailsView(t *testing.T) {
+func TestAutomationBuilderPreviewRestoresSelectedNode(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	project := tc.CreateProject().WithName("Details preview project").Build()
 	automationRepo := tc.stores.Automations
@@ -976,11 +976,11 @@ func TestAutomationBuilderPreviewRestoresDetailsView(t *testing.T) {
 	require.NoError(t, err)
 
 	response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}, "initial_view": {"details"},
+		"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}, "selected_node": {"review"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	require.Contains(t, response.Body.String(), `name="initial_view" value="details" data-automation-initial-view`)
-	require.Contains(t, response.Body.String(), `if (initialView && initialView.value === 'details') selectAutomationBuilderView('details');`)
+	require.Contains(t, response.Body.String(), `data-selected-node="review"`)
+	require.Contains(t, response.Body.String(), `nodePanel.open(builder.dataset.selectedNode, false);`)
 }
 
 func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testing.T) {
@@ -1052,7 +1052,8 @@ func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	require.Contains(t, response.Body.String(), `data-automation-node-detail="review_queue"`)
 	require.Contains(t, response.Body.String(), "Task prompt")
 	require.Contains(t, response.Body.String(), "Task goal (optional)")
-	require.NotContains(t, response.Body.String(), "Human result")
+	require.NotContains(t, response.Body.String(), `>Human result</span>`)
+	require.Contains(t, response.Body.String(), `data-selected-node="review_queue" data-focus-node="true"`)
 	require.Zero(t, automationHandlerState(t, tc).Automations)
 	require.Zero(t, automationHandlerState(t, tc).Versions)
 }

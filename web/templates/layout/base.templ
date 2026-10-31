@@ -3258,13 +3258,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab[style*="--superellipse-clip"] [role="tab"] { border-radius: 0 !important; }
 				html[data-shell-frame]:not([data-tab-style="attached"]) #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--superellipse-clip"] [role="tab"] { clip-path: var(--superellipse-clip); }
 
-				html[data-shell-frame] #task-details-panel[style*="--superellipse-clip"] { clip-path: var(--superellipse-clip); }
+				html[data-shell-frame] [data-side-panel][style*="--superellipse-clip"] { clip-path: var(--superellipse-clip); }
 				/* Keep the resize target inside the panel's clipped rounded boundary. */
-				html[data-shell-frame] #task-panel-divider { left: 0; }
-				html[data-shell-frame] #task-panel-divider::after { left: 0; }
-				html[data-shell-frame] #task-details-panel { right: var(--shell-gap); bottom: var(--shell-gap); background-color: var(--shell-page) !important; border-color: oklch(var(--bc) / .08); }
-				html[data-shell-frame] #task-details-panel[data-overlay="true"] { inset: var(--task-panel-top, 0px) var(--shell-gap) var(--shell-gap) auto; width: calc(100% - var(--rail-width) - var(--shell-gap)); }
-				html[data-shell-frame] #task-detail-content[data-inspector-docked="true"] { padding-right: calc(var(--task-panel-reserved-width) + var(--shell-gap)); }
+				html[data-shell-frame] [data-side-panel-divider] { left: 0; }
+				html[data-shell-frame] [data-side-panel-divider]::after { left: 0; }
+				html[data-shell-frame] [data-side-panel] { right: var(--shell-gap); bottom: var(--shell-gap); background-color: var(--shell-page) !important; border-color: oklch(var(--bc) / .08); }
+				html[data-shell-frame] [data-side-panel][data-overlay="true"] { inset: var(--side-panel-top, 0px) var(--shell-gap) var(--shell-gap) auto; width: calc(100% - var(--rail-width) - var(--shell-gap)); }
+				html[data-shell-frame] [data-side-panel-root][data-inspector-docked="true"] { padding-right: calc(var(--side-panel-reserved-width) + var(--shell-gap)); }
 				html[data-shell-frame] #task-detail-content[data-inspector-overlay="true"] #task-details-opener { right: var(--shell-gap); }
 				html[data-surface-step] .chat-bubble-user-msg,
 				html[data-surface-step] .chat-bubble-assistant-msg { --chat-user-bg: var(--shell-card); background-color: var(--shell-card) !important; }
@@ -5599,7 +5599,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								function shape(el) {
 									var w = el.clientWidth, h = el.clientHeight;
 									if (!w || !h) return;
-									var inspector = el.id === 'task-details-panel';
+									var inspector = el.hasAttribute('data-side-panel');
 									var layout = document.documentElement.getAttribute('data-layout');
 									var unified = layout === 'unified';
 									var list = el.id === 'task-list-panel';
@@ -5628,7 +5628,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 										observer.unobserve(el);
 										seen.delete(el);
 									});
-									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, #task-details-panel').forEach(function(el) {
+									document.querySelectorAll('#main-content, #task-list-panel, .desktop-project-tab, [data-side-panel]').forEach(function(el) {
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);

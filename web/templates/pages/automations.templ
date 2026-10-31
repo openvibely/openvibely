@@ -372,7 +372,7 @@ templ automationDescribeModalFields(currentProjectID string, description string,
 }
 
 templ automationLiveNodeShape(node models.AutomationLiveNode) {
-	<g data-automation-live-node={ node.ID } transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }>
+	<g data-automation-live-node={ node.ID } data-node-key={ node.NodeKey } tabindex="0" role="button" aria-label={ automationLiveNodeAria(node) + ", open details" } class="automation-graph-focus cursor-pointer" transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }>
 		<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class={ automationLiveNodeClass(node.DisplayState) } stroke-width="3"></rect>
 		<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span class={ automationStateTextClass(node.DisplayState) }>{ automationStateLabel(node.DisplayState) }</span>
 			if automationLiveNodeModelLabel(node) != "" {
@@ -397,35 +397,28 @@ templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 templ automationViewSwitcher(ariaLabel string) {
 	<div class="join" role="group" aria-label={ ariaLabel } data-automation-view-switcher>
 		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
-		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-details>Details</button>
 		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
 	</div>
 }
 
 templ automationViewStateScript() {
 	<script>
-		window.setAutomationCanvasView = window.setAutomationCanvasView || function(root, view, options) {
-			if (!root || ['graph', 'details', 'yaml'].indexOf(view) < 0) return false;
+		window.setAutomationCanvasView = function(root, view, options) {
+			if (!root || ['graph', 'yaml'].indexOf(view) < 0) return false;
 			options = options || {};
 			var graphPanel = root.querySelector(options.graphPanelSelector || '[data-automation-graph-panel]');
-			var detailsPanel = root.querySelector(options.detailsPanelSelector || '[data-automation-live-details-panel], [data-automation-details-panel]');
 			var yamlPanel = root.querySelector(options.yamlPanelSelector || '[data-automation-yaml-panel]');
 			var graphButton = root.querySelector('[data-automation-view-graph]');
-			var detailsButton = root.querySelector('[data-automation-view-details]');
 			var yamlButton = root.querySelector('[data-automation-view-yaml]');
-			if (!graphPanel || !detailsPanel || !yamlPanel || !graphButton || !detailsButton || !yamlButton) return false;
-			var graphSelected = view === 'graph', detailsSelected = view === 'details', yamlSelected = view === 'yaml';
+			if (!graphPanel || !yamlPanel || !graphButton || !yamlButton) return false;
+			var graphSelected = view === 'graph', yamlSelected = view === 'yaml';
 			graphPanel.hidden = !graphSelected;
 			graphPanel.style.display = graphSelected ? (options.graphDisplay || '') : 'none';
-			detailsPanel.hidden = !detailsSelected;
-			detailsPanel.style.display = detailsSelected ? (options.detailsDisplay || 'block') : 'none';
 			yamlPanel.hidden = !yamlSelected;
 			yamlPanel.style.display = yamlSelected ? (options.yamlDisplay || 'flex') : 'none';
 			graphButton.classList.toggle('btn-active', graphSelected);
-			detailsButton.classList.toggle('btn-active', detailsSelected);
 			yamlButton.classList.toggle('btn-active', yamlSelected);
 			graphButton.setAttribute('aria-pressed', String(graphSelected));
-			detailsButton.setAttribute('aria-pressed', String(detailsSelected));
 			yamlButton.setAttribute('aria-pressed', String(yamlSelected));
 			return true;
 		};
@@ -476,6 +469,7 @@ templ automationYAMLSharedScript() {
 
 templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
 		@automationViewStateScript()
+	@automationNodePanelScript()
 		@automationYAMLSharedScript()
 		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
 			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }>
@@ -519,18 +513,14 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							<line x1={ fmt.Sprintf("%.0f", automationGraphLayoutX(source.PositionX)+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", automationGraphLayoutY(source.PositionY)+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", automationGraphLayoutX(target.PositionX)) } y2={ fmt.Sprintf("%.0f", automationGraphLayoutY(target.PositionY)+automationGraphNodeHeight/2) } class={ templ.KV("automation-graph-edge", true), templ.KV("automation-graph-edge--highlighted", edge.Highlighted) } stroke-width="2" marker-end="url(#automation-live-arrow)" aria-label={ fmt.Sprintf("%s, %d transitions, %d recent", edge.Label, edge.TransitionCount, edge.RecentTransitionCount) }></line>
 						}
 					}
-					for _, node := range graph.Nodes {
-						if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
-							<a class="automation-graph-link" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" draggable="false" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" aria-label={ automationLiveNodeAria(node) } data-automation-task-link>
-								@automationLiveNodeShape(node)
-							</a>
-						} else {
-							@automationLiveNodeShape(node)
-						}
-					}
+                    for _, node := range graph.Nodes {
+                        <g data-automation-node-hit>
+                            @automationLiveNodeShape(node)
+                        </g>
+                    }
 					</svg>
 					</div>
-					@automationLiveDetailsPanel(graph)
+					@automationLiveDetailsPanel(graph, currentProjectID)
 					<div class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden style="display: none" aria-label="Saved automation YAML">
 						<div class="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-base-300 px-4 pb-3 font-sans">
 							<p class="text-sm text-base-content/70">Read-only saved YAML definition</p>
@@ -591,6 +581,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					state.generation = 0;
 					state.automationId = liveRoot.dataset.automationId;
 					window._automationLiveSelectedView = '';
+                    window._automationLiveSelectedNode = '';
 				}
 				if (state.timer) clearInterval(state.timer);
 				window.openVibelyAutomationLiveRefresh = function(method, url) {
@@ -664,14 +655,17 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				}, 20000);
 					var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
 					var yamlPanel = canvasRoot && canvasRoot.querySelector('[data-automation-yaml-panel]');
+                    var nodePanel = window.createAutomationNodePanel(liveRoot, function(key) { window._automationLiveSelectedNode = key; });
+                    if (window._automationLiveSelectedNode) nodePanel.open(window._automationLiveSelectedNode, false);
+
 					var graphViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-graph]');
-					var detailsViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-details]');
+
 					var yamlViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-yaml]');
 					function selectAutomationLiveView(view) {
-						return window.setAutomationCanvasView && window.setAutomationCanvasView(canvasRoot, view, {detailsPanelSelector: '[data-automation-live-details-panel]'});
+						return window.setAutomationCanvasView && window.setAutomationCanvasView(canvasRoot, view);
 					}
 					graphViewButton && graphViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'graph'; selectAutomationLiveView('graph'); });
-					detailsViewButton && detailsViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'details'; selectAutomationLiveView('details'); });
+
 					yamlViewButton && yamlViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'yaml'; selectAutomationLiveView('yaml'); });
 					if (window._automationLiveSelectedView && window._automationLiveSelectedView !== 'graph') {
 						selectAutomationLiveView(window._automationLiveSelectedView);
@@ -837,7 +831,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					function zoom(factor) { var cx=box[0]+box[2]/2, cy=box[1]+box[3]/2; box[2]=Math.max(300,Math.min(4000,box[2]*factor)); box[3]=Math.max(200,Math.min(2500,box[3]*factor)); box[0]=cx-box[2]/2; box[1]=cy-box[3]/2; apply(); }
 					svg.addEventListener('wheel', function(event) { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
 					svg.addEventListener('dragstart', function(event) {
-						if (event.target.closest('[data-automation-task-link]')) event.preventDefault();
+						if (event.target.closest('[data-automation-node-hit]')) event.preventDefault();
 					});
 					svg.addEventListener('pointerdown', function(event) {
 						if (document.documentElement.dataset.runtime === 'desktop') return;
@@ -846,7 +840,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						if (!rect.width || !rect.height) return;
 						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
 						suppressedNodeLink = null;
-						pan = {input:'pointer', pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						pan = {input:'pointer', pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-node-hit]')};
 						window.addEventListener('pointermove', queuePan);
 						window.addEventListener('pointerup', finishPan);
 						window.addEventListener('pointercancel', finishPan);
@@ -858,18 +852,20 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						if (!rect.width || !rect.height) return;
 						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
 						suppressedNodeLink = null;
-						pan = {input:'mouse', clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						pan = {input:'mouse', clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-node-hit]')};
 						window.addEventListener('mousemove', queueMousePan);
 						window.addEventListener('mouseup', finishMousePan);
 						window.addEventListener('blur', cancelMousePan);
 					});
 					svg.addEventListener('click', function(event) {
-						var nodeLink = event.target.closest('[data-automation-task-link]');
+						var nodeLink = event.target.closest('[data-automation-node-hit]');
 						if (!suppressedNodeLink || nodeLink !== suppressedNodeLink) return;
 						event.preventDefault(); event.stopImmediatePropagation();
 						suppressedNodeLink = null;
 						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
 					}, true);
+                    svg.addEventListener('click', function(event) { var node = event.target.closest('[data-node-key]'); if (node) nodePanel.open(node.dataset.nodeKey, true); });
+                    svg.addEventListener('keydown', function(event) { if (event.key !== 'Enter' && event.key !== ' ') return; var node = event.target.closest('[data-node-key]'); if (node) { event.preventDefault(); nodePanel.open(node.dataset.nodeKey, true); } });
 					canvasRoot.querySelector('[data-automation-zoom-in]').addEventListener('click', function(){zoom(.82);});
 					canvasRoot.querySelector('[data-automation-zoom-out]').addEventListener('click', function(){zoom(1.22);});
 					canvasRoot.querySelector('[data-automation-fit]').addEventListener('click', function(){box=original.slice();apply();});
@@ -938,12 +934,17 @@ func automationLiveEdgeCondition(raw string) string {
 	return string(encoded)
 }
 
-templ automationLiveDetailsPanel(graph models.AutomationLiveGraph) {
-	<div data-automation-live-details-panel hidden class="min-h-[20rem] w-full flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4" aria-label="Saved automation details">
-		<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-live-node-details>
+templ automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProjectID string) {
+	@components.SidePanel("automation-node-panel", "automation-node-divider", "Node details") {
+		@automationNodePanelHeader(true)
+	<div data-automation-live-details-panel class="min-h-0 flex-1 overflow-y-auto p-4" aria-label="Saved automation details">
+		<div class="space-y-4" data-automation-live-node-details>
 			for _, node := range graph.Nodes {
-				<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-live-node-detail={ node.NodeKey }>
+				<section class="p-2" data-automation-live-node-detail={ node.NodeKey } hidden>
 					<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.NodeKey } · { node.Role }</p></div><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.NodeType) }</span></div>
+                    if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
+                        <a class="btn btn-outline btn-sm mb-4" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-node-task>Open task</a>
+                    }
 					<dl class="grid grid-cols-1 gap-3 text-sm">
 						for _, field := range automationLiveCardFields(node.ConfigJSON) {
 							<div><dt class="text-xs font-medium text-base-content/55">{ field.Label }</dt><dd class="mt-1 whitespace-pre-wrap break-words">{ field.Value }</dd></div>
@@ -952,10 +953,10 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph) {
 				</section>
 			}
 		</div>
-		<div class="mt-4 rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-live-edge-details>
+		<div class="mt-4 border-t border-base-300 p-2 pt-4"><h3 class="font-semibold">Connections</h3><div class="mt-3 grid grid-cols-1 gap-3" data-automation-live-edge-details>
 			for _, edge := range graph.Edges {
 				if source, target, ok := automationLiveEdgeNodes(graph.Nodes, edge.AutomationEdge); ok {
-					<div class="rounded-box bg-base-200/40 p-3" data-automation-live-edge-detail={ edge.EdgeKey }><div class="text-sm font-medium">{ source.Name } → { target.Name }</div>
+					<div class="rounded-box bg-base-200/40 p-3" data-automation-live-edge-detail={ edge.EdgeKey } data-from={ source.NodeKey } data-to={ target.NodeKey }><div class="text-sm font-medium">{ source.Name } → { target.Name }</div>
 						if edge.Label != "" {
 							<p class="mt-2 text-sm">{ edge.Label }</p>
 						}
@@ -967,6 +968,7 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph) {
 			}
 		</div></div>
 	</div>
+	}
 }
 
 templ automationTaskModelSelector(node models.AutomationDraftNode, modelOptions []models.AutomationCapabilityRef) {
@@ -978,16 +980,18 @@ templ automationTaskModelSelector(node models.AutomationDraftNode, modelOptions 
 }
 
 templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentProjectID string) {
-	<div data-automation-details-panel hidden style="display: none" class="min-h-[20rem] flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4">
+	@components.SidePanel("automation-node-panel", "automation-node-divider", "Node details") {
+		@automationNodePanelHeader(false)
+	<div data-automation-details-panel class="min-h-0 flex-1 overflow-y-auto p-4">
 		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-details-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="builder_source" value={ page.Source }/>
 			<input type="hidden" name="save_changes" value="true"/>
 			<input type="hidden" name="automation_name" value={ page.Result.Candidate.Name } data-automation-details-name/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) }/>
-			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-node-details>
+			<div class="space-y-4" data-automation-node-details>
 				for _, node := range page.Result.Candidate.Nodes {
-					<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-node-detail={ node.Key }>
+					<section class="p-2" data-automation-node-detail={ node.Key } hidden>
 						<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p>
 							if notice := maintainedVisionSourceNotice(page.Result, node.Key); notice != "" {
 								<p class="mt-1 text-xs text-base-content/70" data-automation-vision-source={ node.Key }>{ notice }</p>
@@ -996,7 +1000,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 						<label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
 							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label>
-							<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+							<div class="mt-3 grid grid-cols-1 gap-3">
 									<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
 										for _, agent := range page.Capabilities.Agents {
 											<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
@@ -1046,9 +1050,9 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 							}					</section>
 				}
 			</div>
-			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-edge-details>
+			<div class="mt-4 border-t border-base-300 p-2 pt-4"><h3 class="font-semibold">Connections</h3><div class="mt-3 grid grid-cols-1 gap-3" data-automation-edge-details>
 				for _, edge := range page.Result.Candidate.Edges {
-					<div class="rounded-box bg-base-200/40 p-3" data-automation-edge-detail={ edge.Key }><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key } aria-label={ "Delete connection " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
+					<div class="rounded-box bg-base-200/40 p-3" data-automation-edge-detail={ edge.Key } data-from={ edge.From } data-to={ edge.To }><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key } aria-label={ "Delete connection " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
 						if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "native_approval" {
 							<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="approved" selected?={ automationDraftEdgeConditionState(edge) == "approved" }>Approved</option><option value="rejected" selected?={ automationDraftEdgeConditionState(edge) == "rejected" }>Rejected</option></select></label>
 						} else if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "github_assignment" {
@@ -1059,6 +1063,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 			</div></div>
 		</form>
 	</div>
+	}
 }
 
 templ AutomationBuilder(projects []models.Project, currentProjectID string, page models.AutomationBuilderPage) {
@@ -1079,8 +1084,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5); outline-offset: 2px; }
 	</style>
 	@automationViewStateScript()
+	@automationNodePanelScript()
 	@automationYAMLSharedScript()
-	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft data-automation-yaml-builder data-automation-unsaved-changes={ fmt.Sprint(page.UnsavedChanges) }>
+	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-selected-node={ page.SelectedNodeKey } data-focus-node={ fmt.Sprint(page.FocusNode) } data-automation-draft data-automation-yaml-builder data-automation-unsaved-changes={ fmt.Sprint(page.UnsavedChanges) }>
 		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", automationBuilderUsesEditShell(page)) } data-automation-builder-edit-pane>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if automationBuilderUsesEditShell(page) {
@@ -1262,7 +1268,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 						for _, node := range page.Result.Candidate.Nodes {
 							if node.Position != nil {
-								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
+								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use Enter to open details or arrow keys to move" }>
 									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
 										<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span>
 											if automationDraftNodeModelLabel(node, page.Capabilities.Models) != "" {
@@ -1315,7 +1321,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
 				<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<input type="hidden" name="builder_source" value={ page.Source }/>
-					<input type="hidden" name="initial_view" value={ page.InitialView } data-automation-initial-view/>
 				</form>			<input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 			<script>
 			(function() {
@@ -1324,6 +1329,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				var svg = root && root.querySelector('[data-automation-canvas]');
 				var source = builder && builder.querySelector('[data-candidate-json]');
 				if (!root || !builder || !svg || !source) return;
+					var nodePanel = window.createAutomationNodePanel(builder);
 					var candidate;
 					try { candidate = JSON.parse(source.value); } catch (_) { return; }
 					var edgePalette = [];				try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
@@ -1794,11 +1800,12 @@ yamlViewport.scrollTop = 0;
 						}, {passive: false});
 						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
 						window.addEventListener('resize', queueYAMLLineLayout);					function syncCandidate(writeYAML) {
+						nodePanel.updateConnections(candidate);
 						var automationName = builder.querySelector('[data-automation-name]');
 						var automationNameValue = automationName ? automationName.value : '';
 						if (automationName) candidate.name = automationNameValue;
 						builder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });
-						builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
+						builder.querySelectorAll('[data-candidate-json], [name="candidate_json"]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 						if (writeYAML !== false) {
 							var serializedYAML = visualCandidateYAML();
 								if (yamlEditor) {
@@ -1974,13 +1981,15 @@ yamlViewport.scrollTop = 0;
 							if (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;
 							event.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}
 						var start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
-						var dragFrame = 0;
+						var dragFrame = 0, moved = false, pointerX = event.clientX, pointerY = event.clientY;
 						function move(moveEvent) {
+							if (Math.hypot(moveEvent.clientX - pointerX, moveEvent.clientY - pointerY) > 4) moved = true;
 							var point = graphPoint(moveEvent);
 							renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();
 							if (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });
 						}
-						function done() {
+						function done(upEvent) {
+                            if (!moved && upEvent.type === 'pointerup') nodePanel.open(group.dataset.nodeKey, true);
 							group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);
 							if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }
 							syncCandidate();
@@ -1988,6 +1997,8 @@ yamlViewport.scrollTop = 0;
 						group.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);
 					});
 						group.addEventListener('keydown', function(event) {
+                            if (event.target !== group) return;
+                            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); nodePanel.open(group.dataset.nodeKey, true); return; }
 							if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeNode(group.dataset.nodeKey); return; }
 							var dx = 0, dy = 0;
 							if (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;
@@ -2052,10 +2063,45 @@ yamlViewport.scrollTop = 0;
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 						if (event.target === builder) { clearActiveConnection(); yamlThemeObserver.disconnect(); }
 					});
+                    function applyDetailField(event) {
+                        var field = event.target, section = field.closest('[data-automation-node-detail], [data-automation-edge-detail]');
+                        if (!section || !field.name) return;
+                        var key = section.dataset.automationNodeDetail || section.dataset.automationEdgeDetail;
+                        var node = nodeCandidate(key), edge = edgeCandidate(key);
+                        var prefix = (section.hasAttribute('data-automation-node-detail') ? 'node_' : 'edge_') + key + '_';
+                        var property = field.name.slice(prefix.length), value = field.type === 'checkbox' ? field.checked : field.value;
+                        if (node && section.hasAttribute('data-automation-node-detail')) {
+                            if (property === 'name') {
+                                node.name = value;
+                                var group = nodeGroup(key); if (group) { group.querySelector('strong').textContent = value; group.setAttribute('aria-label', value + ', use Enter to open details or arrow keys to move'); }
+                                section.querySelector('h3').textContent = value;
+                            } else {
+                                node.config = node.config || {};
+                                if (property === 'priority' || property === 'repeat_interval') value = field.value !== '' && Number.isFinite(Number(value)) ? Number(value) : value;
+                                if (property === 'labels') value = value.split(/[,\n]/).map(function(label) { return label.trim(); }).filter(Boolean);
+                                node.config[property] = value;
+                            }
+                        } else if (edge) {
+                            if (property === 'label') edge.label = value;
+                            else if (property === 'state') edge.condition = value ? {state:value} : {};
+                        }
+                    }
+                    builder.addEventListener('input', applyDetailField);
+                    builder.addEventListener('change', applyDetailField);
+                    builder.querySelector('[data-automation-details-form]').addEventListener('click', function(event) {
+                        var button = event.target.closest('button[name="remove_node"], button[name="remove_edge"]');
+                        if (!button) return;
+                        event.preventDefault();
+                        if (button.name === 'remove_node') { removeNode(button.value); nodePanel.close(); }
+                        else removeEdge(button.value);
+                    });
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
 					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
-					builder.addEventListener('submit', function() {
+					builder.addEventListener('submit', function(event) {
+                        var selection = event.target.querySelector('[name="selected_node"]');
+                        if (!selection) { selection = document.createElement('input'); selection.type = 'hidden'; selection.name = 'selected_node'; event.target.appendChild(selection); }
+                        selection.value = nodePanel.selected();
 						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
 							var submittedYAML = automationYAMLValue();
 							setYAMLEditorDisplay(submittedYAML);
@@ -2065,14 +2111,13 @@ yamlViewport.scrollTop = 0;
 						syncCandidate();
 					});
 						var viewRoot = builder.querySelector('[data-automation-view-root]');
-						var yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');
-						var detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');
 						var graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');
 						var yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');
-						var detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');
+
 						var detailsForm = builder.querySelector('[data-automation-details-form]');
 						function selectAutomationBuilderView(view) {
-							var applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});
+                            if (view === 'yaml') nodePanel.close(false);
+							var applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view);
 							if (!applied) return;
 							queueYAMLLineLayout();
 							if (view === 'yaml') validateYAMLNow();
@@ -2080,8 +2125,6 @@ yamlViewport.scrollTop = 0;
 						function previewYAMLThenSelect(view) {
 							var form = document.getElementById('automation-design-form');
 							if (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {
-								var initialView = form.querySelector('[data-automation-initial-view]');
-								if (initialView) initialView.value = view === 'details' ? 'details' : '';
 								form.requestSubmit();
 								return;
 							}
@@ -2089,17 +2132,12 @@ yamlViewport.scrollTop = 0;
 						}
 						graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });
 						yamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });
-							detailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });						builder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {
-							button.addEventListener('click', function(event) {
-								if (!detailsPanel || detailsPanel.hidden || !detailsForm) return;
-								event.preventDefault();
-								syncCandidate();
-								detailsForm.requestSubmit();
-							});
-						});
+
 							renderEdges(); syncCandidate(false);
-							var initialView = builder.querySelector('[data-automation-initial-view]');
-							if (initialView && initialView.value === 'details') selectAutomationBuilderView('details');
+							if (builder.dataset.selectedNode) {
+                                nodePanel.open(builder.dataset.selectedNode, false);
+                                if (builder.dataset.focusNode === 'true') requestAnimationFrame(function() { if (builder.isConnected) nodePanel.open(builder.dataset.selectedNode, true); });
+                            }
                             // Compare the editable data, not focus or input events: graph edits
                             // and programmatic field updates must also protect shortcut navigation.
                             function automationEditSnapshot() {

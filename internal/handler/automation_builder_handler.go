@@ -117,7 +117,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page := models.AutomationBuilderPage{Result: *result, Source: source, InitialView: automationBuilderInitialView(c)}
+	page := models.AutomationBuilderPage{Result: *result, Source: source, SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
@@ -231,7 +231,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return err
 	}
 	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
-		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, InitialView: automationBuilderInitialView(c)}
+		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/builder?project_id="+projectID)
 	}
@@ -274,11 +274,11 @@ func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCan
 	return service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
 }
 
-func automationBuilderInitialView(c echo.Context) string {
-	if strings.TrimSpace(c.FormValue("initial_view")) == "details" {
-		return "details"
+func automationBuilderSelectedNode(c echo.Context) string {
+	if key, ok := c.Get("automation_created_node").(string); ok {
+		return key
 	}
-	return ""
+	return strings.TrimSpace(c.FormValue("selected_node"))
 }
 
 func automationBuilderVisualActionRequested(c echo.Context) bool {
@@ -501,6 +501,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 					node.Name = name
 				}
 				candidate.Nodes = append(candidate.Nodes, node)
+				c.Set("automation_created_node", node.Key)
 				return nil
 			}
 			return echo.NewHTTPError(http.StatusBadRequest, "unsupported automation step")
@@ -557,6 +558,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 			Key: key, Name: name, Type: nodeType, Role: role, Config: config,
 			Position: &models.AutomationDraftPoint{X: float64((index % 4) * 260), Y: float64((index / 4) * 180)},
 		})
+		c.Set("automation_created_node", key)
 		return nil
 	case "add_node":
 		key := strings.TrimSpace(c.FormValue("node_key"))
@@ -568,6 +570,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		for _, node := range palette.Nodes {
 			if node.Key == key {
 				candidate.Nodes = append(candidate.Nodes, node)
+				c.Set("automation_created_node", node.Key)
 				return nil
 			}
 		}

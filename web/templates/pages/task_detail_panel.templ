@@ -1,9 +1,10 @@
 package pages
 
+import "github.com/openvibely/openvibely/web/templates/components"
+
 // TaskDetailPanel keeps supporting information outside the permanent thread workspace.
 templ TaskDetailPanel() {
-	<aside id="task-details-panel" aria-label="Task details" class="bg-base-200 border border-base-300" hidden>
-		<div id="task-panel-divider" role="separator" aria-label="Resize details panel" aria-orientation="vertical" aria-valuemin="340" aria-valuemax="720" aria-valuenow="420" tabindex="0"></div>
+	@components.SidePanel("task-details-panel", "task-panel-divider", "Task details") {
 		<div role="tablist" aria-label="Task details" class="tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap">
 			for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Files"}, {"lifecycle", "Lifecycle"}} {
 				<button type="button" role="tab" class="tab" id={ "inspector-tab-" + tab.Key } data-tab={ tab.Key } aria-controls={ "tab-" + tab.Key } aria-selected="false" tabindex="-1">{ tab.Label }</button>
@@ -12,7 +13,7 @@ templ TaskDetailPanel() {
 		<div id="task-inspector-body" class="flex flex-col flex-1 min-h-0 overflow-y-auto p-3">
 			{ children... }
 		</div>
-	</aside>
+	}
 	<style>
 		/* Prevent scroll-boundary gestures from bouncing the app shell independently
 		   of the fixed inspector. The thread and panel retain their own scrolling. */
@@ -28,24 +29,13 @@ templ TaskDetailPanel() {
 		#tab-changes { overflow:auto; }
 		/* Changes owns its scrollport; no page-padding offset is needed. */
 		#tab-changes .diff-file-header { top:0; }
-		#task-detail-content[data-inspector-docked="true"] { padding-right:var(--task-panel-reserved-width); }
-			#task-detail-content[data-inspector-overlay="true"] #task-details-opener { position:fixed; top:var(--task-panel-top,0px); right:0; z-index:61; }
-			#task-details-panel[data-overlay="true"] > [role="tablist"] { padding-right:2.5rem; }
-			#task-details-panel { position:fixed; right:0; top:var(--task-panel-top,0px); bottom:0; z-index:40; display:flex; flex-direction:column; width:var(--task-panel-width,420px); min-height:0; max-width:100%; border-width:0 0 0 1px; border-radius:0; }
-		[data-theme="light"] #task-details-panel { background-color:var(--ov-l-surface); }
+			#task-detail-content[data-inspector-overlay="true"] #task-details-opener { position:fixed; top:var(--side-panel-top,0px); right:0; z-index:61; }
 		#task-details-panel > [role="tablist"] { flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px var(--ov-border-subtle); box-shadow:inset 0 -1px color-mix(in srgb, currentColor 20%, transparent); }
 		#task-details-panel > [role="tablist"] > .tab { outline:none !important; box-shadow:none !important; height:auto; color:inherit; opacity:.6; font-weight:400; line-height:20px; padding-top:6px; padding-bottom:6px; border-bottom:2px solid transparent !important; }
 		#task-details-panel > [role="tablist"] > .tab[aria-selected="true"] { color:inherit; opacity:1; font-weight:400; border-bottom-color:currentColor !important; }
-		[data-ov-theme-layer="custom"] #task-details-panel { background-color:var(--ov-surface); color:var(--ov-text); }
 		[data-ov-theme-layer="custom"] #task-details-panel > [role="tablist"] { box-shadow:inset 0 -1px var(--ov-subtle-border); }
 		[data-ov-theme-layer="custom"] #task-details-panel > [role="tablist"] > .tab { color:var(--ov-text-muted) !important; opacity:1; }
 		[data-ov-theme-layer="custom"] #task-details-panel > [role="tablist"] > .tab[aria-selected="true"] { color:var(--ov-text) !important; }
-		#task-details-panel[hidden] { display:none; }
-		#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
-		#task-panel-divider:focus { outline:none; }
-		#task-panel-divider::after { content:""; position:absolute; top:0; bottom:0; left:6px; width:2px; background:currentColor; background:color-mix(in srgb, currentColor 60%, transparent); opacity:0; transition:opacity .12s; pointer-events:none; }
-		#task-panel-divider:hover::after, #task-panel-divider[data-resizing]::after { opacity:.45; }
-		#task-panel-divider:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
 		#task-detail-actions { margin-bottom:max(0px, calc(var(--task-actions-bottom, 24px) - 12px)); }
 		/* Keep gutters local to each tab, independent of active-tab visibility.
 		   Existing Details owns a separate scrollport and applies its gutter there. */
@@ -56,10 +46,5 @@ templ TaskDetailPanel() {
 		#tab-details { min-width:0; }
 		#tab-details #task-detail-actions { margin-inline:24px; flex-wrap:wrap; }
 
-		#task-details-panel[data-overlay="true"] { box-shadow:0 8px 30px #0003; }
-		@media(max-width:640px) {
-			#task-details-panel[data-overlay="true"] { position:fixed; inset:var(--task-panel-top,0px) 0 0; width:100%; max-width:none; z-index:60; }
-			#task-panel-divider { display:none; }
-		}
 	</style>
 }

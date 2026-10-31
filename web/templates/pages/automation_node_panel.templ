@@ -1,0 +1,105 @@
+package pages
+
+import "github.com/openvibely/openvibely/web/templates/components"
+
+templ automationNodePanelHeader(readOnly bool) {
+	<div class="flex shrink-0 items-center justify-between gap-3 border-b border-base-300 px-6 py-4">
+		<div>
+			<h2 class="font-semibold">Node details</h2>
+			<p class="text-xs text-base-content/60">
+				if readOnly {
+					Read-only preview
+				} else {
+					Changes are included when you save this automation.
+				}
+			</p>
+		</div>
+		<button type="button" class="btn btn-ghost btn-sm btn-square" data-automation-node-close aria-label="Close node details">×</button>
+	</div>
+}
+
+templ automationNodePanelScript() {
+	@components.SidePanelScript()
+	<style>
+		#automation-node-panel [hidden] { display:none !important; }
+		#automation-node-panel .input, #automation-node-panel .select, #automation-node-panel .textarea { width:100%; min-width:0; }
+		#automation-node-panel .form-control { min-width:0; }
+		[data-node-key][data-selected="true"] > rect { stroke:oklch(var(--p)); stroke-width:4px; }
+	</style>
+	<script>
+	window.createAutomationNodePanel = function(root, onSelect) {
+		var panel = root.querySelector('#automation-node-panel');
+		var closeButton = panel.querySelector('[data-automation-node-close]');
+		var selected = '', connectionSignature = '';
+		var svg = root.querySelector('[data-automation-canvas]');
+		var controller = window.createSidePanel({root:root, panel:panel,
+			storageKey:'automation-inspector-width', escapeDocked:true, onClose:close,
+			background:Array.from(root.querySelectorAll('[data-automation-graph-panel], [data-automation-yaml-panel], [data-automation-view-switcher], [data-automation-node-tool]'))});
+		function group(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
+		function showSelection() {
+			panel.querySelectorAll('[data-automation-node-detail], [data-automation-live-node-detail]').forEach(function(section) {
+				section.hidden = (section.dataset.automationNodeDetail || section.dataset.automationLiveNodeDetail) !== selected;
+			});
+			panel.querySelectorAll('[data-automation-edge-detail], [data-automation-live-edge-detail]').forEach(function(section) {
+				section.hidden = section.dataset.from !== selected && section.dataset.to !== selected;
+			});
+			svg.querySelectorAll('[data-node-key]').forEach(function(node) { node.dataset.selected = String(node.dataset.nodeKey === selected); });
+		}
+		function open(key, focus) {
+			var section = panel.querySelector('[data-automation-node-detail="' + CSS.escape(key) + '"], [data-automation-live-node-detail="' + CSS.escape(key) + '"]');
+			if (!section || !group(key)) return;
+			selected = key; showSelection(); controller.setOpen(true);
+			if (onSelect) onSelect(key);
+			if (focus || panel.dataset.overlay === 'true') {
+				var target = section.querySelector('input:not([type="hidden"]), textarea, select') || closeButton;
+				target.focus({preventScroll:true});
+			}
+		}
+		function close(focus) {
+			var previous = selected; selected = ''; showSelection(); controller.setOpen(false);
+			if (onSelect) onSelect('');
+			if (focus !== false) {
+				var target = group(previous) || svg;
+				if (target === svg) svg.setAttribute('tabindex', '-1');
+				target.focus({preventScroll:true});
+			}
+		}
+		closeButton.addEventListener('click', function() { close(); });
+		// Rebuild connection fields only when graph structure changes, preserving
+		// field focus and drafts while typing in the inspector.
+		function updateConnections(candidate) {
+			var list = panel.querySelector('[data-automation-edge-details]');
+			if (!list) return;
+			var signature = JSON.stringify([(candidate.nodes || []).map(function(n) { return [n.key,n.name,n.role]; }), (candidate.edges || []).map(function(e) { return [e.key,e.from,e.to]; })]);
+			if (signature === connectionSignature) return;
+			connectionSignature = signature;
+			list.replaceChildren();
+			function element(tag, className, text) { var el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = text; return el; }
+			(candidate.edges || []).forEach(function(edge) {
+				var source = (candidate.nodes || []).find(function(n) { return n.key === edge.from; });
+				var target = (candidate.nodes || []).find(function(n) { return n.key === edge.to; });
+				if (!source || !target) return;
+				var card = element('div', 'rounded-box bg-base-200/40 p-3');
+				card.dataset.automationEdgeDetail = edge.key; card.dataset.from = edge.from; card.dataset.to = edge.to;
+				var header = element('div', 'mb-2 flex items-center justify-between gap-2');
+				header.append(element('span', 'text-xs font-medium', source.name + ' → ' + target.name));
+				var remove = element('button', 'btn btn-ghost btn-xs text-error', '×');
+				remove.type = 'button'; remove.name = 'remove_edge'; remove.value = edge.key; remove.setAttribute('aria-label', 'Delete connection ' + source.name + ' to ' + target.name); header.append(remove); card.append(header);
+				var label = element('label', 'form-control'); label.append(element('span', 'label-text', 'Label'));
+				var input = element('input', 'input input-bordered'); input.name = 'edge_' + edge.key + '_label'; input.value = edge.label || ''; input.maxLength = 100; label.append(input); card.append(label);
+				if (source.role === 'native_approval' || source.role === 'github_assignment') {
+					var result = element('label', 'form-control mt-2'); result.append(element('span', 'label-text', 'Human result'));
+					var select = element('select', 'select select-bordered'); select.name = 'edge_' + edge.key + '_state';
+					var states = source.role === 'native_approval' ? ['', 'approved', 'rejected'] : ['', 'assigned'];
+					states.forEach(function(state) { var option = element('option', '', state || 'Choose result'); option.value = state; select.append(option); });
+					select.value = edge.condition && edge.condition.state || ''; result.append(select); card.append(result);
+				}
+				list.append(card);
+			});
+			if (selected && !(candidate.nodes || []).some(function(node) { return node.key === selected; })) close();
+			showSelection();
+		}
+		return {open:open, close:close, selected:function() { return selected; }, updateConnections:updateConnections};
+	};
+	</script>
+}

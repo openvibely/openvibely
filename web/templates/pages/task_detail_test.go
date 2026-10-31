@@ -95,7 +95,7 @@ func TestTaskPanelMatchesPageSurfaceAndInsetsTabs(t *testing.T) {
 	if err := TaskDetailPanel().Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`class="bg-base-200 border border-base-300"`, `[data-theme="light"] #task-details-panel { background-color:var(--ov-l-surface); }`, `margin:8px 12px 16px;`} {
+	for _, want := range []string{`class="bg-base-200 border border-base-300"`, `[data-theme="light"] [data-side-panel] { background-color:var(--ov-l-surface); }`, `margin:8px 12px 16px;`} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing panel styling %q", want)
 		}

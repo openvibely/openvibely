@@ -1,6 +1,9 @@
 package pages
 
+import "github.com/openvibely/openvibely/web/templates/components"
+
 templ TaskWorkspaceScript() {
+	@components.SidePanelScript()
 	<script>
 	(function() {
 		if (window.taskWorkspace) window.taskWorkspace.destroy();
@@ -8,59 +11,28 @@ templ TaskWorkspaceScript() {
 		var taskID = root.dataset.taskId;
 		var panel = root.querySelector('#task-details-panel');
 		var opener = root.querySelector('#task-details-opener');
-		var divider = root.querySelector('#task-panel-divider');
 		var thread = root.querySelector('#tab-chat');
 		var changes = root.querySelector('#tab-changes');
 		var back = root.querySelector('#task-workspace-back');
 		var abort = new AbortController();
 		var signal = abort.signal;
 		var tabNames = ['details', 'schedules', 'chaining', 'attachments', 'lifecycle'];
-		var selected = 'details', width = 420, scrollState = null, returnFocus = null, composerFocus = null;
+		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
 		var summary = null, timer = null, pending = false, dirty = false;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
 		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
 		var saved = read('task-inspector-tab-' + taskID);
 		if (tabNames.indexOf(saved) >= 0) selected = saved;
 		function on(el, name, fn) { el.addEventListener(name, fn, {signal: signal}); }
-		var titlebar = null;
 		function alignActions() {
 			// The composer ends at the workspace bottom. Use that stable boundary
 			// even before the lazy thread loads, rather than its inset send button.
 			root.style.setProperty('--task-actions-bottom', Math.max(12, window.innerHeight - root.getBoundingClientRect().bottom) + 'px');
 		}
-		function resize(value) {
-			var currentTitlebar = document.getElementById('desktop-project-titlebar');
-			if (currentTitlebar !== titlebar) {
-				if (titlebar) observer.unobserve(titlebar);
-				titlebar = currentTitlebar;
-				if (titlebar) observer.observe(titlebar);
-			}
-			root.style.setProperty('--task-panel-top', (titlebar ? Math.max(0, titlebar.getBoundingClientRect().bottom) : 0) + 'px');
-			width = Math.max(340, Math.min(720, Number(value) || 420));
-			// Keep desktop windows docked, reducing the displayed panel width before
-			// falling back to a sheet. Preserve the user's preferred width on resize.
-			// A 320px thread keeps the inspector docked in windowed desktop
-				// layouts after the sidebar and shell gutters consume their space.
-				var minimumThreadWidth = 320, minimumPanelWidth = 340;
-				var displayedWidth = titlebar ? Math.min(width, Math.max(minimumPanelWidth, root.clientWidth - minimumThreadWidth)) : width;
-			root.style.setProperty('--task-panel-width', displayedWidth + 'px');
-			divider.setAttribute('aria-valuenow', String(width));
-			store('task-inspector-width', width);
-			var overlay = titlebar ? root.clientWidth < minimumPanelWidth + minimumThreadWidth : root.clientWidth < width + 560;
-			panel.dataset.overlay = String(overlay);
-			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
-			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);
-			var main = root.closest('#main-content');
-			var gutter = main ? root.getBoundingClientRect().left - main.getBoundingClientRect().left : 24;
-			root.style.setProperty('--task-panel-reserved-width', Math.max(0, displayedWidth - (window.innerWidth - root.getBoundingClientRect().right) + gutter) + 'px');
-			opener.setAttribute('aria-label', panel.hidden ? 'Open details panel' : 'Collapse details panel');
-			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
-			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');
-			else panel.removeAttribute('aria-modal');
-			alignActions();
-			thread.inert = overlay && !panel.hidden;
-			changes.inert = overlay && !panel.hidden;
-		}
+		var sidePanel = window.createSidePanel({root: root, panel: panel, opener: opener,
+			storageKey: 'task-inspector-width', background: [thread, changes],
+			onLayout: alignActions, onClose: closePanel});
+		function resize(value) { sidePanel.resize(value === undefined ? sidePanel.width() : value); }
 		function displayedURL() { return new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href); }
 		function historyView(tab) {
 			var url = displayedURL();
@@ -91,19 +63,17 @@ templ TaskWorkspaceScript() {
 		}
 		function closePanel(push, focus) {
 			if (push !== false) store('task-inspector-open', 'false');
-			panel.hidden = true;
-			opener.setAttribute('aria-expanded', 'false');
+			sidePanel.setOpen(false);
 			selectTab(selected, false);
-			resize(width);
+			resize();
 			if (push !== false) historyView(changes.classList.contains('hidden') ? 'chat' : 'changes');
 			if (focus !== false) opener.focus({preventScroll:true});
 		}
 		function openPanel(name, push, focus) {
 			if (push !== false) store('task-inspector-open', 'true');
-			panel.hidden = false;
-			opener.setAttribute('aria-expanded', 'true');
+			sidePanel.setOpen(true);
 			selectTab(name || selected, push !== false);
-			resize(width);
+			resize();
 			if (focus !== false || panel.dataset.overlay === 'true') panel.querySelector('[aria-selected="true"]').focus({preventScroll:true});
 		}
 		function workspace(diff, push) {
@@ -129,7 +99,7 @@ templ TaskWorkspaceScript() {
 			title.disabled = !diff;
 			if (diff) { title.title = back.title || back.dataset.ovTooltip; title.setAttribute('aria-keyshortcuts', back.getAttribute('aria-keyshortcuts')); }
 			else { title.removeAttribute('title'); title.removeAttribute('data-ov-tooltip'); title.removeAttribute('aria-keyshortcuts'); }
-			resize(width);
+			resize();
 			if (diff) {
 				_startFileChangesSSE(taskID);
 				if (!wasDiff && window.htmx) {
@@ -301,7 +271,7 @@ templ TaskWorkspaceScript() {
 			// Reconcile the selected panel after a whole-page navigation settles.
 			if (root.isConnected && (target === root || (target && target.contains(root)))) {
 				selectTab(selected, false);
-				resize(width);
+				resize();
 			}
 			renderSummary();
 		});
@@ -313,12 +283,6 @@ templ TaskWorkspaceScript() {
             show: applyURL
         });
 		on(panel, 'click', function(event) { var tab = event.target.closest('[role="tab"]'); if (tab) selectTab(tab.dataset.tab, true); });
-		on(document, 'keydown', function(event) {
-			if (event.key === 'Escape' && !event.defaultPrevented && !root.closest('[hidden], [inert]') && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open], [data-openvibely-picker-open], [data-menu-open]') && !(typeof HTMLElement.prototype.showPopover === 'function' && event.target.closest('[popover]:popover-open'))) {
-				event.preventDefault();
-				closePanel();
-			}
-		});
 		on(panel, 'keydown', function(event) {
 			var tab = event.target.closest('[role="tab"]');
 			if (tab && !event.defaultPrevented && !event.isComposing && !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) >= 0) {
@@ -328,38 +292,8 @@ templ TaskWorkspaceScript() {
 				selectTab(tabNames[index], true);
 				panel.querySelector('[aria-selected="true"]').focus();
 			}
-			if (event.key === 'Tab' && panel.dataset.overlay === 'true') {
-				var controls = Array.from(panel.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter(function(el) { return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length; });
-				var first = controls[0], last = opener;
-				if (event.shiftKey && event.target === first) { event.preventDefault(); last.focus(); }
-				else if (!event.shiftKey && event.target === controls[controls.length - 1]) { event.preventDefault(); opener.focus(); }
-			}
 		});
-		on(opener, 'keydown', function(event) {
-			if (event.key !== 'Tab' || panel.hidden || panel.dataset.overlay !== 'true') return;
-			var controls = Array.from(panel.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter(function(el) { return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length; });
-			if (controls.length) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0].focus(); }
-		});
-		on(divider, 'dblclick', function() { resize(420); });
-		on(divider, 'keydown', function(event) {
-            if (event.altKey || event.ctrlKey || event.metaKey || ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) < 0) return;
-			delete divider.dataset.pointerFocus;
-			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize(width + (event.key === 'ArrowLeft' ? 20 : -20)); }
-			if (event.key === 'Home') { event.preventDefault(); resize(340); }
-			if (event.key === 'End') { event.preventDefault(); resize(720); }
-		});
-		var drag = null;
-		on(document, 'keydown', function(event) { if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) delete divider.dataset.pointerFocus; });
-		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.dataset.pointerFocus = 'true'; divider.dataset.resizing = 'true'; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
-		on(divider, 'pointermove', function(event) { if (drag) resize(drag.width + drag.x - event.clientX); });
-		function endResize() { drag = null; delete divider.dataset.resizing; }
-		on(divider, 'pointerup', endResize);
-		on(divider, 'pointercancel', endResize);
-		on(divider, 'lostpointercapture', endResize);
-		on(window, 'blur', endResize);
-		var observer = new ResizeObserver(function() { resize(width); });
-		observer.observe(root);
-		function destroy() { if (unregisterView) unregisterView(); abort.abort(); clearTimeout(timer); observer.disconnect(); }
+		function destroy() { if (unregisterView) unregisterView(); abort.abort(); clearTimeout(timer); sidePanel.destroy(); }
 		on(document, 'htmx:beforeSwap', function(event) { var target = event.detail.target; if (target === root || (target && target.contains(root))) destroy(); });
 		window.taskWorkspace = {
 			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },

@@ -662,7 +662,7 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 			t.Errorf("expected simplified Automation Live to contain %q", want)
 		}
 	}
-	if got := strings.Count(body, `<a class="automation-graph-link"`); got != 2 {
+	if got := strings.Count(body, `data-automation-node-task>`); got != 2 {
 		t.Errorf("expected exactly two task-backed node links, got %d", got)
 	}
 	for _, forbidden := range []string{
@@ -748,7 +748,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	}
 	body := out.String()
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
-		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-details`,
+		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
 		`style="caret-color: oklch(var(--bc));"`, `data-automation-yaml-key`, `data-automation-yaml-value`, `data-automation-yaml-scalar`, `data-automation-yaml-comment`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
@@ -784,7 +784,7 @@ func TestAutomationViewSwitcherMarkupAndStateHelperAreShared(t *testing.T) {
 		t.Fatalf("read automations.templ: %v", err)
 	}
 	source := string(sourceBytes)
-	for _, forbidden := range []string{"templ automationCanvasViewSwitcher", "templ automationBuilderViewSwitcher"} {
+	for _, forbidden := range []string{"templ automationCanvasViewSwitcher", "templ automationBuilderViewSwitcher", "data-automation-view-details"} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("Automation view switcher markup must not be duplicated through %s", forbidden)
 		}
@@ -803,7 +803,6 @@ func TestAutomationViewSwitcherMarkupAndStateHelperAreShared(t *testing.T) {
 	}
 	for _, marker := range []string{
 		`data-automation-view-graph>Graph</button>`,
-		`data-automation-view-details>Details</button>`,
 		`data-automation-view-yaml>YAML</button>`,
 	} {
 		if got := strings.Count(source, marker); got != 1 {
@@ -811,8 +810,8 @@ func TestAutomationViewSwitcherMarkupAndStateHelperAreShared(t *testing.T) {
 		}
 	}
 	for _, update := range []string{`style.display`, `classList.toggle('btn-active'`, `setAttribute('aria-pressed'`} {
-		if got := strings.Count(source, update); got != 3 {
-			t.Errorf("expected three shared view-state %q updates in the helper only, got %d", update, got)
+		if got := strings.Count(source, update); got != 2 {
+			t.Errorf("expected two shared view-state %q updates in the helper only, got %d", update, got)
 		}
 	}
 }
@@ -839,12 +838,12 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 	if !strings.Contains(body, `data-node-key="review"`) {
 		t.Error("graph view must render the same candidate represented by the YAML editor")
 	}
-	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-view-details`} {
+	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`, `data-automation-details-panel`, `data-automation-details-form`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synchronized authoring surface must contain %q", want)
 		}
 	}
-	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `detailsButton && detailsButton.addEventListener`, `setAutomationCanvasView(viewRoot, view`, `if (view === 'yaml') validateYAMLNow()`, `form.requestSubmit()`, `automationYAMLValue() !== visualCandidateYAML()`, `input.value = submittedYAML`} {
+	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `setAutomationCanvasView(viewRoot, view`, `if (view === 'yaml') validateYAMLNow()`, `form.requestSubmit()`, `automationYAMLValue() !== visualCandidateYAML()`, `input.value = submittedYAML`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Graph/YAML/Details synchronization must contain %q", want)
 		}
@@ -990,14 +989,14 @@ window.addEventListener('DOMContentLoaded', function() {
     Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: function(text) { copiedTexts.push(text); return Promise.resolve(); }}});
     await new Promise(function(resolve) { window.setTimeout(resolve, 200); });
     var graphPanel = document.querySelector('[data-automation-graph-panel]');
-    var detailsPanel = document.querySelector('[data-automation-live-details-panel]');
+    var detailsPanel = document.querySelector('#automation-node-panel');
     var yamlPanel = document.querySelector('[data-automation-yaml-panel]');
     var yamlButton = document.querySelector('[data-automation-view-yaml]');
-    var detailsButton = document.querySelector('[data-automation-view-details]');
+    var detailsButton = document.querySelector('[data-node-key]');
     var graphButton = document.querySelector('[data-automation-view-graph]');
     if (!graphPanel || !detailsPanel || !yamlPanel || !yamlButton || !detailsButton || !graphButton) fail('missing Live view switcher elements');
     function expectActive(view, label) {
-      [[graphButton, 'graph'], [detailsButton, 'details'], [yamlButton, 'yaml']].forEach(function(pair) {
+      [[graphButton, 'graph'], [yamlButton, 'yaml']].forEach(function(pair) {
         var selected = pair[1] === view;
         if (pair[0].classList.contains('btn-active') !== selected) fail(label + ' btn-active mismatch for ' + pair[1]);
         if (pair[0].getAttribute('aria-pressed') !== String(selected)) fail(label + ' aria-pressed mismatch for ' + pair[1]);
@@ -1047,9 +1046,12 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!indentedLine) fail('Live/Preview YAML panel did not render an indented line for the nested "name: First" source line');
     if (window.getComputedStyle(indentedLine).paddingLeft === '0px') fail('Live/Preview YAML panel must reuse the editable editor hanging-indent rendering, but nested lines have no left padding');
     if (!indentedLine.textContent.includes('First')) fail('Live/Preview YAML indented line did not render its text content');
-    detailsButton.click();
-    expectActive('details', 'selected Live Details view');
-    if (isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Details must hide the graph and YAML panels and show only the details panel');
+    graphButton.click();
+    detailsButton.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+    expectActive('graph', 'Live node details');
+    if (!isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('node details must keep graph visible');
+    if (detailsPanel.querySelector('input, textarea, select')) fail('preview node fields must be read-only');
+    detailsPanel.querySelector('[data-automation-node-close]').click();
     graphButton.click();
     expectActive('graph', 'selected Live Graph view');
     if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Graph must hide the details and YAML panels and show only the graph panel');
@@ -1068,7 +1070,7 @@ window.addEventListener('DOMContentLoaded', function() {
     });
     await new Promise(function(resolve) { window.setTimeout(resolve, 200); });
     graphPanel = document.querySelector('[data-automation-graph-panel]');
-    detailsPanel = document.querySelector('[data-automation-live-details-panel]');
+    detailsPanel = document.querySelector('#automation-node-panel');
     yamlPanel = document.querySelector('[data-automation-yaml-panel]');
     if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('a background htmx refresh swap must not reset the selected YAML view back to Graph');
     if (!yamlPanel.querySelector('[data-automation-copy-yaml]')) fail('a background refresh must preserve the scoped Copy YAML control in the selected YAML view');
@@ -1161,7 +1163,6 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
 		`data-automation-view-switcher`,
 		`data-automation-view-graph`,
-		`data-automation-view-details`,
 		`data-automation-view-yaml`,
 		`data-automation-live-badges`,
 		`data-automation-live-status`,
@@ -1171,7 +1172,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation canvas actions to contain %q", want)
 		}
 	}
-	for _, want := range []string{`data-automation-live-details-panel`, `data-automation-live-node-details`, `data-automation-live-edge-details`, `data-automation-live-node-detail="review"`, `>Prompt</dt>`, `>Review the queue.</dd>`, `selectAutomationLiveView('details')`} {
+	for _, want := range []string{`data-automation-live-details-panel`, `data-automation-live-node-details`, `data-automation-live-edge-details`, `data-automation-live-node-detail="review"`, `>Prompt</dt>`, `>Review the queue.</dd>`, `window.createAutomationNodePanel(liveRoot`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Live Automation Details view to contain %q", want)
 		}
@@ -1203,7 +1204,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-details`) && strings.Index(cardHeader, `data-automation-view-details`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, ` data-automation-live-menu`)) {
+	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, ` data-automation-live-menu`)) {
 		t.Error("expected Live breadcrumb actions in Edit, Run, then kebab order")
 	}
 	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
@@ -1215,7 +1216,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		t.Fatal("expected Live Automation canvas view switcher end")
 	}
 	liveSwitcher := cardHeader[liveSwitcherStart : liveSwitcherStart+liveSwitcherEndOffset]
-	for _, want := range []string{`>Graph</button>`, `>Details</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
+	for _, want := range []string{`>Graph</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
 		if !strings.Contains(liveSwitcher, want) {
 			t.Errorf("expected Live Automation view switcher to contain %q", want)
 		}
@@ -1336,7 +1337,7 @@ func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
 	}
 	body := out.String()
 	for _, want := range []string{
-		`data-automation-live-node="first" transform="translate(120 -40)"`,
+		`transform="translate(120 -40)"`,
 		`x1="290" y1="12" x2="520" y2="212"`,
 	} {
 		if !strings.Contains(body, want) {
@@ -1544,8 +1545,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls hidden`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
 			t.Errorf("%s YAML gutter must reserve a split-diff-style line-number lane and keep the fold-control lane hidden", source)
 		}
-		if !strings.Contains(body, `detailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });`) {
-			t.Errorf("%s Details selector must canonicalize pending YAML before showing card fields", source)
+		if !strings.Contains(body, `graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });`) {
+			t.Errorf("%s Graph selector must canonicalize pending YAML before opening node details", source)
 		}
 		for _, want := range []string{`data-automation-yaml-indent-guides`, `data-automation-yaml-indent-dot`, `data-automation-yaml-indent-rail`} {
 			if !strings.Contains(body, want) {
@@ -1688,13 +1689,13 @@ window.addEventListener('DOMContentLoaded', function() {
   function fail(message) { report('fail', message); }
   try {
     var name = document.querySelector('[data-automation-name]');
-    var detailsButton = document.querySelector('[data-automation-view-details]');
+    var detailsButton = document.querySelector('[data-node-key]');
     var detailsPanel = document.querySelector('[data-automation-details-panel]');
     var save = document.querySelector('[data-automation-builder-save]');
     if (!name || !detailsButton || !detailsPanel || !save) return fail('missing Details header-save fixture elements');
     name.value = '` + editedName + `';
     name.dispatchEvent(new Event('input', {bubbles: true}));
-    detailsButton.click();
+    detailsButton.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
     if (detailsPanel.hidden || window.getComputedStyle(detailsPanel).display === 'none') return fail('Details panel was not selected before header save');
     function assertSingleHeaderSave(theme) {
       document.documentElement.setAttribute('data-theme', theme);
@@ -1734,7 +1735,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			if got := r.FormValue("automation_name"); got != editedName {
+			if got := r.FormValue("automation_yaml"); !strings.Contains(got, editedName) {
 				browserResult <- "fail:Details header save submitted automation_name=" + got
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -1744,7 +1745,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
-			if r.FormValue("candidate_json") == "" {
+			if r.FormValue("automation_yaml") == "" {
 				browserResult <- "fail:Details header save did not submit candidate_json"
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -1859,7 +1860,7 @@ edges:
 		t.Fatalf("render browser Automation builder: %v", err)
 	}
 	detailsPage := page
-	detailsPage.InitialView = "details"
+	detailsPage.SelectedNodeKey = "first"
 	var detailsBuilder bytes.Buffer
 	if err := AutomationBuilderContent(detailsPage, "project-browser").Render(context.Background(), &detailsBuilder); err != nil {
 		t.Fatalf("render browser Details preview builder: %v", err)
@@ -1913,10 +1914,10 @@ window.addEventListener('DOMContentLoaded', function() {
     var editor = document.querySelector('[data-automation-yaml-editor]');
     var graph = document.querySelector('[data-automation-graph-panel]');
     var yaml = document.querySelector('[data-automation-yaml-panel]');
-    var requestedInitialView = document.querySelector('[data-automation-initial-view]');
-    if (requestedInitialView && requestedInitialView.value === 'details') {
+    var requestedInitialView = document.querySelector('[data-selected-node]');
+    if (requestedInitialView && requestedInitialView.dataset.selectedNode === 'first') {
       var returnedDetails = document.querySelector('[data-automation-details-panel]');
-      if (!returnedDetails || !isVisible(returnedDetails) || isVisible(graph) || isVisible(yaml)) fail('YAML preview replacement did not restore the requested Details view');
+      if (!returnedDetails || !isVisible(returnedDetails) || !isVisible(graph) || isVisible(yaml)) fail('YAML preview replacement did not restore the requested Details view');
       await report('pass', '');
       return;
     }
@@ -1957,13 +1958,13 @@ window.addEventListener('DOMContentLoaded', function() {
     }, 'initial YAML diagnostic');
     var initialDiagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     if (!initialDiagnostic || initialDiagnostic.classList.contains('hidden') || !initialDiagnostic.textContent.includes('line 1')) fail('preloaded YAML was not validated during editor initialization');
-    var details = document.querySelector('[data-automation-details-panel]');
-    var detailsButton = document.querySelector('[data-automation-view-details]');
+    var details = document.querySelector('#automation-node-panel');
+    var detailsButton = document.querySelector('[data-node-key]');
     var graphButton = document.querySelector('[data-automation-view-graph]');
     var yamlButton = document.querySelector('[data-automation-view-yaml]');
     if (!details || !detailsButton || !graphButton || !yamlButton) fail('Details view switcher or panel is missing');
     function expectBuilderActive(view, label) {
-      [[graphButton, 'graph'], [detailsButton, 'details'], [yamlButton, 'yaml']].forEach(function(pair) {
+      [[graphButton, 'graph'], [yamlButton, 'yaml']].forEach(function(pair) {
         var selected = pair[1] === view;
         if (pair[0].classList.contains('btn-active') !== selected) fail(label + ' btn-active mismatch for ' + pair[1]);
         if (pair[0].getAttribute('aria-pressed') !== String(selected)) fail(label + ' aria-pressed mismatch for ' + pair[1]);
@@ -1985,9 +1986,10 @@ window.addEventListener('DOMContentLoaded', function() {
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await waitFor(function() { return diagnostic.classList.contains('hidden'); }, 'valid YAML diagnostic to clear');
     if (!diagnostic.classList.contains('hidden')) fail('valid YAML did not clear the preloaded diagnostic');
-    detailsButton.click();
-    expectBuilderActive('details', 'selected builder Details view');
-    if (!isVisible(details) || isVisible(graph) || isVisible(yaml)) fail('Details switch did not make only the details editor visible');
+    window.setAutomationCanvasView(canvasRoot, 'graph');
+    detailsButton.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+    expectBuilderActive('graph', 'selected node details');
+    if (!isVisible(details) || !isVisible(graph) || isVisible(yaml)) fail('node details must keep graph visible: '+JSON.stringify({details:isVisible(details),graph:isVisible(graph),yaml:isVisible(yaml),node:detailsButton.outerHTML,hidden:details.hidden}));
     if (!details.querySelector('textarea[name="node_first_prompt"]') || !details.querySelector('textarea[name="node_first_goal"]')) fail('Details view omitted prior task configuration controls');
     click('[data-automation-view-yaml]', 'YAML view button after Details');
     expectBuilderActive('yaml', 're-selected builder YAML view');
@@ -2249,7 +2251,7 @@ window.addEventListener('DOMContentLoaded', function() {
     errorColorReference.remove();
     editor.value = originalYAML + '# open Details after canonical YAML preview\n';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
-    detailsButton.click();
+    graphButton.click();
     return;
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -2269,7 +2271,7 @@ window.addEventListener('DOMContentLoaded', function() {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
-				if r.FormValue("initial_view") != "details" {
+				if r.FormValue("automation_yaml") == "" {
 					http.Error(w, "Details preview must request the Details initial view", http.StatusBadRequest)
 					return
 				}

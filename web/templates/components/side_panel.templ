@@ -1,0 +1,134 @@
+package components
+
+// SidePanel provides the shared shell. Page-specific tabs and fields are children.
+templ SidePanel(id string, dividerID string, label string) {
+	@SidePanelStyles()
+	<aside id={ id } aria-label={ label } class="bg-base-200 border border-base-300" data-side-panel hidden>
+		<div id={ dividerID } data-side-panel-divider role="separator" aria-label="Resize details panel" aria-orientation="vertical" aria-valuemin="340" aria-valuemax="720" aria-valuenow="420" tabindex="0"></div>
+		{ children... }
+	</aside>
+}
+
+templ SidePanelScript() {
+	<script>
+	window.createSidePanel = window.createSidePanel || function(options) {
+		var root = options.root, panel = options.panel, opener = options.opener;
+		var divider = panel.querySelector('[data-side-panel-divider]');
+		root.setAttribute('data-side-panel-root', '');
+		var abort = new AbortController(), width = 420, titlebar = null;
+		function on(el, name, fn) { el.addEventListener(name, fn, {signal:abort.signal}); }
+		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
+		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
+		function resize(value) {
+			var currentTitlebar = document.getElementById('desktop-project-titlebar');
+			if (currentTitlebar !== titlebar) {
+				if (titlebar) observer.unobserve(titlebar);
+				titlebar = currentTitlebar;
+				if (titlebar) observer.observe(titlebar);
+			}
+			root.style.setProperty('--side-panel-top', (titlebar ? Math.max(0, titlebar.getBoundingClientRect().bottom) : 0) + 'px');
+			width = Math.max(340, Math.min(720, Number(value) || 420));
+			// Keep desktop windows docked, reducing the displayed panel width before
+			// falling back to a sheet. Preserve the user's preferred width on resize.
+			// A 320px workspace keeps the inspector docked in windowed desktop
+			// layouts after the sidebar and shell gutters consume their space.
+			var minimumContentWidth = 320, minimumPanelWidth = 340;
+			var displayedWidth = titlebar ? Math.min(width, Math.max(minimumPanelWidth, root.clientWidth - minimumContentWidth)) : width;
+			root.style.setProperty('--side-panel-width', displayedWidth + 'px');
+			divider.setAttribute('aria-valuenow', String(width));
+			store(options.storageKey, width);
+			var overlay = titlebar ? root.clientWidth < minimumPanelWidth + minimumContentWidth : root.clientWidth < width + 560;
+			panel.dataset.overlay = String(overlay);
+			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
+			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);
+			var main = root.closest('#main-content');
+			var gutter = main ? root.getBoundingClientRect().left - main.getBoundingClientRect().left : 24;
+			root.style.setProperty('--side-panel-reserved-width', Math.max(0, displayedWidth - (window.innerWidth - root.getBoundingClientRect().right) + gutter) + 'px');
+			if (opener) opener.setAttribute('aria-label', panel.hidden ? 'Open details panel' : 'Collapse details panel');
+			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
+			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');
+			else panel.removeAttribute('aria-modal');
+			(options.background || []).forEach(function(element) { element.inert = overlay && !panel.hidden; });
+			if (options.onLayout) options.onLayout();
+		}
+		on(divider, 'dblclick', function() { resize(420); });
+		on(divider, 'keydown', function(event) {
+			if (event.altKey || event.ctrlKey || event.metaKey || ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) < 0) return;
+			delete divider.dataset.pointerFocus;
+			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize(width + (event.key === 'ArrowLeft' ? 20 : -20)); }
+			if (event.key === 'Home') { event.preventDefault(); resize(340); }
+			if (event.key === 'End') { event.preventDefault(); resize(720); }
+		});
+		var drag = null;
+		on(document, 'keydown', function(event) { if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) delete divider.dataset.pointerFocus; });
+		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.dataset.pointerFocus = 'true'; divider.dataset.resizing = 'true'; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
+		on(divider, 'pointermove', function(event) { if (drag) resize(drag.width + drag.x - event.clientX); });
+		function endResize() { drag = null; delete divider.dataset.resizing; }
+		on(divider, 'pointerup', endResize);
+		on(divider, 'pointercancel', endResize);
+		on(divider, 'lostpointercapture', endResize);
+		on(window, 'blur', endResize);
+		var observer = new ResizeObserver(function() { resize(width); });
+		observer.observe(root);
+
+		function controls() {
+			return Array.from(panel.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter(function(el) { return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length; });
+		}
+		function blocked(event) {
+			return event.defaultPrevented || event.isComposing || !root.isConnected || root.closest('[hidden], [inert]') || document.querySelector('dialog[open]') || event.target.closest('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && event.target.closest('[popover]:popover-open'));
+		}
+		on(document, 'keydown', function(event) {
+			if (event.key === 'Escape' && !blocked(event) && !panel.hidden && (options.escapeDocked || panel.dataset.overlay === 'true')) {
+				event.preventDefault(); options.onClose();
+			}
+		});
+		on(panel, 'keydown', function(event) {
+			if (event.key !== 'Tab' || event.defaultPrevented || panel.dataset.overlay !== 'true') return;
+			var items = controls(), first = items[0], last = items[items.length - 1];
+			var externalOpener = opener && !panel.contains(opener) ? opener : null;
+			if (event.shiftKey && event.target === first) { event.preventDefault(); (externalOpener || last).focus(); }
+			else if (!event.shiftKey && event.target === last) { event.preventDefault(); (externalOpener || first).focus(); }
+		});
+		if (opener && !panel.contains(opener)) on(opener, 'keydown', function(event) {
+			if (event.key !== 'Tab' || panel.hidden || panel.dataset.overlay !== 'true') return;
+			var items = controls();
+			if (items.length) { event.preventDefault(); items[event.shiftKey ? items.length - 1 : 0].focus(); }
+		});
+		function setOpen(open) {
+			panel.hidden = !open;
+			if (opener) opener.setAttribute('aria-expanded', String(open));
+			resize(width);
+		}
+		function destroy() {
+			abort.abort(); observer.disconnect();
+			(options.background || []).forEach(function(element) { element.inert = false; });
+		}
+		on(document, 'htmx:beforeSwap', function(event) { var target = event.detail.target; if (target === root || (target && target.contains(root))) destroy(); });
+		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root) destroy(); });
+		resize(read(options.storageKey));
+		return {resize: resize, width: function() { return width; }, setOpen: setOpen, destroy: destroy};
+	};
+	</script>
+}
+
+templ SidePanelStyles() {
+	<style>
+		[data-side-panel-root][data-inspector-docked="true"] { padding-right:var(--side-panel-reserved-width); }
+		[data-side-panel][data-overlay="true"] > [role="tablist"] { padding-right:2.5rem; }
+		[data-side-panel] { position:fixed; right:0; top:var(--side-panel-top,0px); bottom:0; z-index:40; display:flex; flex-direction:column; width:var(--side-panel-width,420px); min-height:0; max-width:100%; border-width:0 0 0 1px; border-radius:0; }
+		[data-theme="light"] [data-side-panel] { background-color:var(--ov-l-surface); }
+		[data-ov-theme-layer="custom"] [data-side-panel] { background-color:var(--ov-surface); color:var(--ov-text); }
+		[data-side-panel][hidden] { display:none; }
+		[data-side-panel-divider] { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
+		[data-side-panel-divider]:focus { outline:none; }
+		[data-side-panel-divider]::after { content:""; position:absolute; top:0; bottom:0; left:6px; width:2px; background:currentColor; background:color-mix(in srgb, currentColor 60%, transparent); opacity:0; transition:opacity .12s; pointer-events:none; }
+		[data-side-panel-divider]:hover::after, [data-side-panel-divider][data-resizing]::after { opacity:.45; }
+		[data-side-panel-divider]:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
+		[data-side-panel][data-overlay="true"] { box-shadow:0 8px 30px #0003; }
+		[data-side-panel] { overflow:visible; }
+		@media(max-width:640px) {
+			[data-side-panel][data-overlay="true"] { position:fixed; inset:var(--side-panel-top,0px) 0 0; width:100%; max-width:none; z-index:60; }
+			[data-side-panel-divider] { display:none; }
+		}
+	</style>
+}

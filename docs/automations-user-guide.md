@@ -18,15 +18,14 @@ To reuse an eligible saved design, open its card or Live actions menu and select
 
 ## Build The Graph
 
-The builder has three synchronized views.
+The builder has two synchronized views and a node details side panel.
 
 | View | Purpose |
 |---|---|
 | `Graph` | Add, move, delete, and connect nodes on the visual canvas. |
-| `Details` | Configure Automation metadata, node prompts and settings, and transition labels or conditions. |
 | `YAML` | Edit the complete Automation definition directly. Switching back to Graph parses and validates the YAML before rebuilding the canvas. |
 
-In Graph, select `Add node`, choose a supported capability, and drag from one node's right output handle to the next node's left input handle. Use Details or YAML to configure the selected node or connection.
+In Graph, select `Add node`, choose a supported capability, and drag from one node's right output handle to the next node's left input handle. Click a node to open its details in the resizable side panel while keeping the graph visible. The panel contains that node’s settings and connected transitions. Adding a node automatically opens its panel and focuses its name. Close it with × or Escape; on smaller screens it appears as an overlay. Edit fields in the panel or YAML, then use Save to persist the automation.
 
 | Node | Purpose |
 |---|---|
@@ -91,7 +90,7 @@ edges:
 
 Top-level metadata is `schema_version`, `name`, `description`, `automation_type`, `adapter_key`, `nodes`, `edges`, and optional `assumptions` and `warnings`. A node has `key`, `name`, `type`, `role`, `config`, and optional `position`. An edge has `key`, `from`, `to`, optional ports and label, and optional `condition`.
 
-Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC templates are stored as canonical YAML and decoded through this same boundary when selected. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules. `position` is optional: omitted positions receive a deterministic preview layout during normalization. Moving a node in Graph mode writes its position to YAML; configuration changes made in Details also update the same browser-local definition.
+Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC templates are stored as canonical YAML and decoded through this same boundary when selected. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules. `position` is optional: omitted positions receive a deterministic preview layout during normalization. Moving a node in Graph mode writes its position to YAML; configuration changes made in the node panel also update the same browser-local definition.
 
 ## Validation and Save
 
@@ -101,9 +100,9 @@ Save atomically creates or replaces the one current graph and its owned Task/Sch
 
 ## Monitor And Run
 
-On a saved Automation, Graph shows the current rendered state, Details shows the saved configuration, and YAML shows the same definition in a read-only view. Switching views creates no resources. Edit opens a browser-local copy; the existing saved graph continues to run until an atomic Save succeeds.
+On a saved Automation, Graph shows the current rendered state. Clicking a node opens its saved configuration in a read-only side panel; YAML shows the same definition in a read-only view. Switching views creates no resources. Edit opens a browser-local copy; the existing saved graph continues to run until an atomic Save succeeds.
 
-The live view refreshes while visible. Schedule and Task nodes link to their bound project tasks, and tracked GitHub pull request state is refreshed automatically when it becomes stale.
+The live view refreshes while visible. The side panel for Schedule and Task nodes includes an Open task link when a project task is bound, and tracked GitHub pull request state is refreshed automatically when it becomes stale.
 
 Select `Run` from a live Automation, or `Run now` from its portfolio menu, to queue a manual run without changing its saved schedule cadence.
 
