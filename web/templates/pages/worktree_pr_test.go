@@ -66,11 +66,11 @@ func TestTaskChangesWorktreeContent_HeaderLabelsStayContained(t *testing.T) {
 		t.Fatalf("render failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">`) {
-		t.Fatal("expected worktree header row to wrap within the card without clipping the actions dropdown")
+	if !strings.Contains(out, `<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full">`) {
+		t.Fatal("expected worktree header row to wrap within the page without clipping the actions dropdown")
 	}
 	if !strings.Contains(out, `<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">`) {
-		t.Fatal("expected branch summary to break long labels instead of widening the card")
+		t.Fatal("expected branch summary to break long labels instead of widening the page")
 	}
 	if !strings.Contains(out, `<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">task/this-is-a-very-long-worktree-branch-name-that-should-not-overflow-the-task-changes-header-on-mobile</code>`) {
 		t.Fatal("expected worktree branch label to break inside the header")

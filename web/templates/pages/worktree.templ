@@ -122,15 +122,15 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 }
 
 templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool, diffView string) {
-	<div class="card bg-base-100 shadow-sm border border-base-300">
-		<div class="card-body">
-			// Keep the actions header above sticky diff headers in the same card.
+	<div class="worktree-changes min-w-0 max-w-full">
+		<div>
+			// Keep the actions menu above the diff file headers.
 			if task.WorktreeBranch != "" {
-				<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full">
+				<div class="relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full">
 					<div class="min-w-0 max-w-full flex-1">
-						<h4 class="text-lg font-bold">Worktree Changes</h4>
+						<h4 class="text-sm font-semibold mb-1">Worktree changes</h4>
 						<p class="text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
-							Changes on branch
+							Comparing
 							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ task.WorktreeBranch }</code>
 							vs
 							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs break-all">{ components.TaskWorktreeMergeTarget(task) }</code>
@@ -138,7 +138,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 					</div>
 						// Unified actions dropdown with Local and GitHub sections
 						<div class="dropdown dropdown-end relative z-[60] flex-shrink-0" id="changes-actions-dropdown">
-							<button type="button" role="button" popovertarget="changes-actions-menu" class="btn btn-primary btn-sm whitespace-nowrap">
+							<button type="button" role="button" popovertarget="changes-actions-menu" class="btn btn-ghost btn-sm whitespace-nowrap">
 								Actions
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
@@ -213,6 +213,15 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 					</div>
 				}
 
+			<style>
+				.worktree-changes #diff-viewer > [data-diff-toolbar] {
+					padding: 0.5rem 0 0.75rem;
+					border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+				}
+				.worktree-changes #diff-viewer > [data-diff-toolbar] > :first-child {
+					flex-wrap: wrap;
+				}
+			</style>
 			// Diff viewer
 			@components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView)
 		</div>
