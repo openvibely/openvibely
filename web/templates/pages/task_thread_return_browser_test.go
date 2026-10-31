@@ -32,6 +32,13 @@ func TestBrowserFunctional_RunningChatReturnPaintsAtBottom(t *testing.T) {
 
 func testThreadReturn(t *testing.T, chat, running bool) {
 	t.Helper()
+	for _, mode := range []string{"full", "compact"} {
+		t.Run(mode, func(t *testing.T) { testThreadReturnMode(t, chat, running, mode) })
+	}
+}
+
+func testThreadReturnMode(t *testing.T, chat, running bool, mode string) {
+	t.Helper()
 	chrome := chatNavigationChromePath(t)
 	projects := []models.Project{{ID: "one", Name: "One"}, {ID: "two", Name: "Two"}}
 	var updated atomic.Int32
@@ -97,7 +104,13 @@ func testThreadReturn(t *testing.T, chat, running bool) {
 		entry = "/chat?project_id=one"
 	}
 	runComposerFocusCDP(t, chrome, server.URL+entry, "thread-return", func(b *composerFocusCDP) {
-		b.waitFor("rendered transcript", `String(!!document.querySelector('#task-thread-messages .stream-tool, #chat-messages .stream-tool') && !document.querySelector('#task-thread-messages, #chat-messages').hasAttribute('data-transcript-hydrating'))`, "true")
+		b.waitFor("display preferences", `String(document.readyState==='complete' && !!window.openVibelyDisplay)`, "true")
+		b.evaluate(`window.openVibelyDisplay.set('output', '` + mode + `'); 'ok'`)
+		marker := ".stream-tool"
+		if mode == "compact" {
+			marker = ".stream-activity-summary"
+		}
+		b.waitFor("rendered transcript", `String(!!document.querySelector('#task-thread-messages `+marker+`, #chat-messages `+marker+`') && !document.querySelector('#task-thread-messages, #chat-messages').hasAttribute('data-transcript-hydrating'))`, "true")
 		result := b.evaluateAwait(`(async()=>{
  const paint=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
  const messages=()=>document.querySelector('#task-thread-messages, #chat-messages');
