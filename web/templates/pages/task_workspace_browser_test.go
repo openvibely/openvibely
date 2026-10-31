@@ -482,6 +482,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.click("#task-details-opener")
 		b.waitFor("panel opened", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
+		b.waitFor("shared tab to heading spacing", `String(Math.round(document.querySelector('#task-detail-metrics h3').getBoundingClientRect().top-document.querySelector('#task-details-panel [role="tablist"]').getBoundingClientRect().bottom))`, "28")
 		b.waitFor("inspector below project titlebar with shell inset", `(function(){var r=document.getElementById('task-details-panel').getBoundingClientRect();return [Math.round(r.top),Math.round(innerWidth-r.right),Math.round(innerHeight-r.bottom)].join(':')})()`, "46:10:10")
 		b.waitFor("task outer shell cannot rubber-band away from fixed inspector", `(function(){return String([document.documentElement,document.body,document.getElementById('main-content')].every(function(el){return getComputedStyle(el).overscrollBehaviorY==='none'}))})()`, "true")
 		b.waitFor("single toggle and no panel heading", `String(document.querySelector('#task-details-panel h2')===null && document.querySelector('#task-details-panel [aria-label="Collapse details panel"]')===null && document.querySelector('#task-details-opener line').getAttribute('x1')==='15')`, "true")

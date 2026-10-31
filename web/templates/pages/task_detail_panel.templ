@@ -7,7 +7,7 @@ templ TaskDetailPanel() {
 	@components.SidePanel("task-details-panel", "task-panel-divider", "Task details") {
         @components.InspectorTabs("inspector-tab-", "tab-", "Task details", []components.InspectorTab{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Files"}, {"lifecycle", "Lifecycle"}})
 
-		<div id="task-inspector-body" class="flex flex-col flex-1 min-h-0 overflow-y-auto p-3">
+		<div id="task-inspector-body" class="inspector-body flex flex-col">
 			{ children... }
 		</div>
 	}

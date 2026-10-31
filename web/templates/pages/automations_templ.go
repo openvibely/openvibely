@@ -2551,7 +2551,7 @@ func automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProject
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<div data-automation-live-details-panel class=\"min-h-0 flex-1 overflow-y-auto px-6 py-3\" aria-label=\"Saved automation details\"><div class=\"space-y-4\" data-automation-live-node-details>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<div data-automation-live-details-panel class=\"inspector-body\" aria-label=\"Saved automation details\"><div data-automation-live-node-details>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2932,7 +2932,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "<div data-automation-details-panel class=\"min-h-0 flex-1 overflow-y-auto px-6 py-3\"><form id=\"automation-details-form\" method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 204, "<div data-automation-details-panel class=\"inspector-body\"><form id=\"automation-details-form\" method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2958,7 +2958,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "\" hx-target=\"#main-content\" class=\"space-y-4\" data-automation-details-form><input type=\"hidden\" name=\"project_id\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 206, "\" hx-target=\"#main-content\" data-automation-details-form><input type=\"hidden\" name=\"project_id\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3023,7 +3023,7 @@ func automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPro
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "\"><div class=\"space-y-4\" data-automation-node-details>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 211, "\"><div data-automation-node-details>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

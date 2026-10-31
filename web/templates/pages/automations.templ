@@ -937,8 +937,8 @@ func automationLiveEdgeCondition(raw string) string {
 templ automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProjectID string) {
 	@components.SidePanel("automation-node-panel", "automation-node-divider", "Node details") {
 		@automationNodePanelHeader(true)
-	<div data-automation-live-details-panel class="min-h-0 flex-1 overflow-y-auto px-6 py-3" aria-label="Saved automation details">
-		<div class="space-y-4" data-automation-live-node-details>
+	<div data-automation-live-details-panel class="inspector-body" aria-label="Saved automation details">
+		<div data-automation-live-node-details>
 			for _, node := range graph.Nodes {
 				<section data-automation-live-node-detail={ node.NodeKey } hidden>
                     <h3 class="text-sm font-semibold mb-3" data-inspector-type-heading>{ automationNodeTypeLabel(node.NodeType) }</h3>
@@ -983,15 +983,15 @@ templ automationTaskModelSelector(node models.AutomationDraftNode, modelOptions 
 templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentProjectID string) {
 	@components.SidePanel("automation-node-panel", "automation-node-divider", "Node details") {
 		@automationNodePanelHeader(false)
-	<div data-automation-details-panel class="min-h-0 flex-1 overflow-y-auto px-6 py-3">
-		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-details-form>
+	<div data-automation-details-panel class="inspector-body">
+		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" data-automation-details-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="builder_source" value={ page.Source }/>
 			<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/>
 			<input type="hidden" name="save_changes" value="true"/>
 			<input type="hidden" name="automation_name" value={ page.Result.Candidate.Name } data-automation-details-name/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) }/>
-			<div class="space-y-4" data-automation-node-details>
+			<div data-automation-node-details>
 				for _, node := range page.Result.Candidate.Nodes {
 					<section data-automation-node-detail={ node.Key } hidden>
                         <h3 class="text-sm font-semibold mb-3" data-inspector-type-heading>{ automationNodeTypeLabel(node.Type) }</h3>

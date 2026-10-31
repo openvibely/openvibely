@@ -98,6 +98,7 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.waitFor("initially closed", `String(document.getElementById('automation-node-panel').hidden)`, "true")
 		b.evaluate(`document.querySelector('[data-node-key="first"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));'opened'`)
 		b.waitFor("first node docked", `String(!document.getElementById('automation-node-panel').hidden && document.getElementById('automation-node-panel').dataset.overlay==='false' && !document.querySelector('[data-automation-node-detail="first"]').hidden && document.querySelector('[data-automation-node-detail="second"]').hidden)`, "true")
+		b.waitFor("task-matching tab to heading spacing", `String(Math.round(document.querySelector('[data-automation-node-detail="first"] [data-inspector-type-heading]').getBoundingClientRect().top-document.querySelector('#automation-node-panel [role="tablist"]').getBoundingClientRect().bottom))`, "28")
 		b.waitFor("graph alongside panel", `String(document.querySelector('[data-automation-graph-panel]').getBoundingClientRect().right <= document.getElementById('automation-node-panel').getBoundingClientRect().left)`, "true")
 		b.waitFor("selection alone is not dirty", `String(document.getElementById('automation-builder').hasUnsavedAutomationChanges())`, "false")
 		b.click(`[data-automation-node-detail="first"] [data-inspector-text="prompt"]`)
