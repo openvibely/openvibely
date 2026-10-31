@@ -119,14 +119,14 @@ func (c *diffChunkCache) store(key string, value *preparedDiffChunks, now time.T
 	c.bytes += value.bytes
 }
 
-func (c *diffChunkCache) get(ctx context.Context, taskID string, index int, review bool, revision string, load func(context.Context) (*preparedDiffChunks, error)) (*preparedDiffChunks, error) {
+func (c *diffChunkCache) get(ctx context.Context, taskID string, index int, revision string, load func(context.Context) (*preparedDiffChunks, error)) (*preparedDiffChunks, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if revision == "" {
 		return load(ctx)
 	}
-	key := fmt.Sprintf("%q:%d:%t:%q", taskID, index, review, revision)
+	key := fmt.Sprintf("%q:%d:%q", taskID, index, revision)
 	if value := c.lookup(key, time.Now()); value != nil {
 		return value, nil
 	}

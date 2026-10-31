@@ -152,18 +152,6 @@ diff --git a/b.txt b/b.txt
 		}
 	}
 
-	noReviewReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&review=false", nil)
-	noReviewRec := httptest.NewRecorder()
-	noReviewContext := e.NewContext(noReviewReq, noReviewRec)
-	noReviewContext.SetParamNames("taskId")
-	noReviewContext.SetParamValues(task.ID)
-	if err := h.GetTaskChangesFile(noReviewContext); err != nil {
-		t.Fatalf("GetTaskChangesFile without review mode failed: %v", err)
-	}
-	noReviewBody := noReviewRec.Body.String()
-	if strings.Contains(noReviewBody, comment.ID) || strings.Contains(noReviewBody, comment.CommentText) {
-		t.Fatalf("expected review=false lazy card to omit review comments, got: %s", noReviewBody)
-	}
 	largeDiff := "diff --git a/large.txt b/large.txt\n--- a/large.txt\n+++ b/large.txt\n@@ -1,1000 +1,1000 @@\n" + strings.Repeat("-old\n+new\n", 1000)
 	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, largeDiff); err != nil {
 		t.Fatal(err)

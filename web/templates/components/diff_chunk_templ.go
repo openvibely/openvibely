@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func DiffChunk(file DiffFile, index int, view, taskID string, comments []models.ReviewComment, review bool, chunk, count int, revision string) templ.Component {
+func DiffChunk(file DiffFile, index int, view, taskID string, comments []models.ReviewComment, chunk, count int, revision string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -75,28 +75,14 @@ func DiffChunk(file DiffFile, index int, view, taskID string, comments []models.
 			return templ_7745c5c3_Err
 		}
 		if view == "split" {
-			if review {
-				templ_7745c5c3_Err = splitDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments)).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = splitDiffFile(file, index, true).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			templ_7745c5c3_Err = splitDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments)).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
 			}
 		} else {
-			if review {
-				templ_7745c5c3_Err = inlineDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments)).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			} else {
-				templ_7745c5c3_Err = inlineDiffFile(file, index, true).Render(ctx, templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			templ_7745c5c3_Err = inlineDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments)).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
 			}
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div>")

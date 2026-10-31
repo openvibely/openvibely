@@ -1619,50 +1619,6 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 	</div>
 }
 
-templ inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) {
-	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
-		@diffFileHeader(f, idx, defaultExpanded, false)
-		<div
-			id={ fmt.Sprintf("diff-body-%d", idx) }
-			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
-			if !defaultExpanded {
-				style="max-height: 0;"
-			}
-		>
-			if !diffHasTextualContent(f) {
-				@diffFileEmptyBody(f)
-			} else {
-				<div class="overflow-x-auto">
-					<table class="diff-table w-full text-xs font-mono border-collapse">
-						for _, hunk := range f.Hunks {
-							<tr class="diff-hunk-header">
-								<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
-							</tr>
-							for _, line := range hunk.Lines {
-								<tr class={ inlineLineClass(line.Type) }>
-									<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
-										if line.OldNum > 0 {
-											{ fmt.Sprintf("%d", line.OldNum) }
-										}
-									</td>
-									<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
-										if line.NewNum > 0 {
-											{ fmt.Sprintf("%d", line.NewNum) }
-										}
-									</td>
-									<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
-										<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
-									</td>
-								</tr>
-							}
-						}
-					</table>
-				</div>
-			}
-		</div>
-	</div>
-}
-
 templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
 	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, true)
@@ -1730,65 +1686,6 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 										@reviewInlineCommentRow(comment, f.Path, reviewTargetForDiffLine(pair.Right), "split")
 									}
 								}
-							}
-						}
-					</table>
-				</div>
-			}
-		</div>
-	</div>
-}
-
-templ splitDiffFile(f DiffFile, idx int, defaultExpanded bool) {
-	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
-		@diffFileHeader(f, idx, defaultExpanded, true)
-		<div
-			id={ fmt.Sprintf("diff-body-split-%d", idx) }
-			class="diff-file-body overflow-hidden transition-all duration-300 ease-in-out"
-			if !defaultExpanded {
-				style="max-height: 0;"
-			}
-		>
-			if !diffHasTextualContent(f) {
-				@diffFileEmptyBody(f)
-			} else {
-				<div class="overflow-x-auto">
-					<table class="diff-table w-full text-xs font-mono border-collapse">
-						<colgroup>
-							<col style="width: 40px"/>
-							<col style="width: 50%"/>
-							<col style="width: 40px"/>
-							<col style="width: 50%"/>
-						</colgroup>
-						for _, hunk := range f.Hunks {
-							<tr class="diff-hunk-header">
-								<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
-							</tr>
-							for _, pair := range splitHunkLines(hunk) {
-								<tr>
-									<!-- Left side (old) -->
-									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
-										if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
-											{ fmt.Sprintf("%d", pair.Left.OldNum) }
-										}
-									</td>
-									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
-										if pair.Left.Type != "empty" {
-											{ pair.Left.Content }
-										}
-									</td>
-									<!-- Right side (new) -->
-									<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Right.Type) }>
-										if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
-											{ fmt.Sprintf("%d", pair.Right.NewNum) }
-										}
-									</td>
-									<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
-										if pair.Right.Type != "empty" {
-											{ pair.Right.Content }
-										}
-									</td>
-								</tr>
 							}
 						}
 					</table>

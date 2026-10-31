@@ -5,20 +5,12 @@ import (
  "github.com/openvibely/openvibely/internal/models"
 )
 
-templ DiffChunk(file DiffFile, index int, view, taskID string, comments []models.ReviewComment, review bool, chunk, count int, revision string) {
+templ DiffChunk(file DiffFile, index int, view, taskID string, comments []models.ReviewComment, chunk, count int, revision string) {
  <div data-diff-chunk-response data-chunk={ fmt.Sprint(chunk) } data-chunks={ fmt.Sprint(count) } data-code-revision={ revision }>
   if view == "split" {
-   if review {
-    @splitDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments))
-   } else {
-    @splitDiffFile(file, index, true)
-   }
+   @splitDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments))
   } else {
-   if review {
-    @inlineDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments))
-   } else {
-    @inlineDiffFile(file, index, true)
-   }
+   @inlineDiffFileWithReview(file, index, true, taskID, buildCommentMap(comments))
   }
  </div>
 }

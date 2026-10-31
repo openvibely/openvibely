@@ -209,7 +209,7 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 				case <-time.After(time.Second):
 				}
 			}
-			if err := DiffChunk(ParseDiffOutput(diff.String())[index], index, view, "lazy-task", comments, true, 0, 1, DiffCodeRevision(ParseDiffOutput(diff.String())[index])).Render(r.Context(), w); err != nil {
+			if err := DiffChunk(ParseDiffOutput(diff.String())[index], index, view, "lazy-task", comments, 0, 1, DiffCodeRevision(ParseDiffOutput(diff.String())[index])).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		default:
@@ -286,7 +286,7 @@ func TestBrowserFunctional_DiffOversizedFilePlaceholder(t *testing.T) {
 				return
 			}
 			view := r.URL.Query().Get("view")
-			if err := DiffChunk(files[0], 0, view, "lazy-task", nil, true, 0, 1, DiffCodeRevision(files[0])).Render(r.Context(), w); err != nil {
+			if err := DiffChunk(files[0], 0, view, "lazy-task", nil, 0, 1, DiffCodeRevision(files[0])).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		default:
