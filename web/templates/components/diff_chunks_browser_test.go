@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,12 @@ func TestBrowserFunctional_ProgressiveDiffChunks(t *testing.T) {
 
 func TestBrowserFunctional_DiffChunkLayoutAnchors(t *testing.T) {
 	for _, kind := range []string{"mixed", "deleted"} {
+		t.Run(kind, func(t *testing.T) { runProgressiveDiffBrowser(t, kind) })
+	}
+}
+
+func TestBrowserFunctional_DiffChunkRetryAfterEviction(t *testing.T) {
+	for _, kind := range []string{"retry-recovered", "retry-fails-again"} {
 		t.Run(kind, func(t *testing.T) { runProgressiveDiffBrowser(t, kind) })
 	}
 }
@@ -149,6 +156,41 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
  } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
  });</script>`
 	}
+	if strings.HasPrefix(kind, "retry-") {
+		script = `<script>
+ window.addEventListener('load',async()=>{
+ const wait=async(fn)=>{for(let i=0;i<400;i++){if(fn())return;await new Promise(r=>setTimeout(r,20));}throw Error('timeout: '+fn);};
+ const assert=(v,m)=>{if(!v)throw Error(m);};
+ try {
+ const panel=document.querySelector('#diff-content-inline');
+ await wait(()=>panel.querySelector('[data-chunk-index="0"] tr.diff-review-line'));
+ const chunk=panel.querySelector('[data-chunk-index="10"]');
+ chunk.scrollIntoView();
+ await wait(()=>chunk.querySelector('button') && chunk.dataset.diffLoadFailed);
+ // Before eviction the retained error UI must remain usable.
+ const first=panel.querySelector('[data-chunk-index="0"]');first.scrollIntoView();
+ await wait(()=>chunk._saved);
+ chunk.scrollIntoView();
+ await wait(()=>chunk.querySelector('button'));
+ assert(chunk.dataset.diffLoadFailed==='true','failure state cleared before its Retry UI was evicted');
+ for(let i=20;i<43;i++){
+  const next=panel.querySelector('[data-chunk-index="'+i+'"]');next.scrollIntoView();
+  await wait(()=>next.querySelector('tr.diff-review-line'));
+ }
+ await wait(()=>!chunk._saved && !chunk.firstElementChild);
+ assert(!chunk.dataset.diffLoadFailed,'evicted retry left a permanent failure flag');
+ chunk.scrollIntoView();
+ if (` + strconv.FormatBool(kind == "retry-fails-again") + `) {
+  await wait(()=>chunk.querySelector('button') && chunk.dataset.diffLoadFailed);
+  chunk.querySelector('button').click();
+ }
+ await wait(()=>chunk.querySelector('tr[data-new-line="2001"]'));
+ assert(!chunk.dataset.diffLoadFailed,'successful reload retained failure flag');
+ fetch('/result?status=pass');
+ } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
+ });</script>`
+	}
+	var failedChunkRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/result":
@@ -165,6 +207,16 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 				return
 			}
 			chunk, _ := strconv.Atoi(r.URL.Query().Get("chunk"))
+			if strings.HasPrefix(kind, "retry-") && chunk == 10 {
+				failures := int32(1)
+				if kind == "retry-fails-again" {
+					failures = 2
+				}
+				if failedChunkRequests.Add(1) <= failures {
+					http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+					return
+				}
+			}
 			view := r.URL.Query().Get("view")
 			chunks := DiffFileChunks(file, view)
 			oldLine, _ := strconv.Atoi(r.URL.Query().Get("anchor_old_line"))
@@ -199,6 +251,15 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 	case status := <-result:
 		if status != "pass" {
 			t.Fatal(status)
+		}
+		if strings.HasPrefix(kind, "retry-") {
+			expected := int32(2)
+			if kind == "retry-fails-again" {
+				expected = 3
+			}
+			if got := failedChunkRequests.Load(); got != expected {
+				t.Fatalf("chunk requests=%d want=%d", got, expected)
+			}
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("browser timed out")
