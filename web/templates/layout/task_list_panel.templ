@@ -136,6 +136,106 @@ templ TaskListPanel(currentProjectID string) {
         (function() {
             var root = document.documentElement;
             var inSettings = false;
+            var retainedWorkspace = null;
+            var settingsPane = null;
+            var restoringWorkspace = false;
+            var retainedScroll = [];
+            var openingSettingsHistory = false;
+            var settingsRequest = null;
+            function isSettingsURL(value) {
+                var path = new URL(value, location.href).pathname;
+                return /^\/(themes|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(path);
+            }
+            window.isSettingsWorkspaceURL = isSettingsURL;
+            // Keep the workspace connected: its drafts, live subscriptions and
+            // virtual transcript remain owned by the original page.
+            document.addEventListener('htmx:beforeSwap', function(event) {
+                var detail = event.detail;
+                if (!detail.shouldSwap || detail.target?.id !== 'main-content') return;
+                var url = detail.xhr?.responseURL;
+                if (!url || !isSettingsURL(url)) return;
+                var main = detail.target;
+                if (!settingsPane && inSettings) return;
+                if (!settingsPane) {
+                    retainedScroll = [main].concat(Array.from(main.querySelectorAll('*'))).filter(function(el) {
+                        return el.scrollTop || el.scrollLeft;
+                    }).map(function(el) { return {el:el, top:el.scrollTop, left:el.scrollLeft}; });
+                    retainedWorkspace = document.createElement('div');
+                    retainedWorkspace.id = 'settings-retained-workspace';
+                    retainedWorkspace.hidden = true;
+                    retainedWorkspace.inert = true;
+                    retainedWorkspace.setAttribute('hx-history', 'false');
+                    while (main.firstChild) retainedWorkspace.appendChild(main.firstChild);
+                    main.appendChild(retainedWorkspace);
+                    settingsPane = document.createElement('div');
+                    settingsPane.id = 'settings-content';
+                    main.appendChild(settingsPane);
+                }
+                main.classList.remove('htmx-swapping', 'htmx-settling');
+                detail.target = settingsPane;
+            }, true);
+            window.restoreSettingsWorkspace = function(push) {
+                if (!retainedWorkspace || !settingsPane) return false;
+                if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
+                settingsRequest = null;
+                var main = document.getElementById('main-content');
+                if (push) history.pushState({htmx: true}, '', workspaceURL);
+                // HTMX owns cleanup for the outgoing Settings content only.
+                restoringWorkspace = true;
+                htmx.swap(settingsPane, '', {swapStyle: 'innerHTML', settleDelay: 0});
+                settingsPane.remove();
+                while (retainedWorkspace.firstChild) main.insertBefore(retainedWorkspace.firstChild, retainedWorkspace);
+                retainedWorkspace.remove();
+                retainedWorkspace = null;
+                settingsPane = null;
+                restoringWorkspace = false;
+                window.syncAppearanceSettings();
+                retainedScroll.forEach(function(position) {
+                    if (position.el.isConnected) {
+                        position.el.scrollTop = position.top;
+                        position.el.scrollLeft = position.left;
+                    }
+                });
+                retainedScroll = [];
+                window.dispatchEvent(new Event('resize'));
+                document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {bubbles:true, detail:{target:main, elt:main}}));
+                return true;
+            };
+            document.addEventListener('click', function(event) {
+                var link = event.target.closest('a');
+                if (!link || !retainedWorkspace || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                var target = new URL(link.href, location.href);
+                if (!link.matches('[data-settings-back]') && target.pathname + target.search + target.hash !== workspaceURL) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                window.restoreSettingsWorkspace(true);
+            }, true);
+            window.addEventListener('popstate', function(event) {
+                if (retainedWorkspace && location.pathname + location.search + location.hash === workspaceURL) {
+                    event.stopImmediatePropagation();
+                    window.restoreSettingsWorkspace(false);
+                } else if (!inSettings && isSettingsURL(location.href)) {
+                    event.stopImmediatePropagation();
+                    openingSettingsHistory = true;
+                    var source = document.createElement('a');
+                    source.hidden = true;
+                    source.setAttribute('hx-push-url', 'false');
+                    source.setAttribute('hx-replace-url', 'false');
+                    document.body.appendChild(source);
+                    htmx.ajax('GET', location.pathname + location.search, {source:source, target:'#main-content', swap:'innerHTML'}).finally(function() {
+                        openingSettingsHistory = false;
+                        source.remove();
+                    }).catch(function() {});
+                }
+            }, true);
+            document.addEventListener('htmx:beforeCleanupElement', function(event) {
+                if (event.detail.elt === retainedWorkspace) {
+                    retainedScroll = [];
+                    retainedWorkspace = null;
+                    settingsPane = null;
+                }
+            });
+
             var inContextSidebar = false;
             var contextChanges = null;
             var wasCollapsed = false;
@@ -146,9 +246,13 @@ templ TaskListPanel(currentProjectID string) {
             function boardScrollKey(el) {
                 return el.id || JSON.stringify([el.getAttribute('data-project-id'), el.getAttribute('data-category'), el.getAttribute('data-status')]);
             }
+            document.addEventListener('htmx:afterRequest', function(e) {
+                if (e.detail.xhr === settingsRequest) settingsRequest = null;
+            });
             document.addEventListener('htmx:beforeRequest', function(e) {
+                if (e.detail.target?.id === 'main-content' && isSettingsURL(e.detail.requestConfig?.path || location.href)) settingsRequest = e.detail.xhr;
                 if (e.detail.target && e.detail.target.id === 'main-content' && !inSettings) {
-                    workspaceURL = location.pathname + location.search + location.hash;
+                    if (!openingSettingsHistory) workspaceURL = location.pathname + location.search + location.hash;
                     workspaceScroll = document.getElementById('main-content').scrollTop;
                     boardScroll.clear();
                     document.getElementById('main-content').querySelectorAll(boardScrollSelector).forEach(function(el) {
@@ -157,10 +261,11 @@ templ TaskListPanel(currentProjectID string) {
                 }
             });
             window.syncAppearanceSettings = function() {
+                if (restoringWorkspace) return;
                 var appearance = !!document.getElementById('themes-container');
                 var workers = !!document.getElementById('worker-settings-content');
                 var changes = document.getElementById('tab-changes');
-                var reviewing = !!changes && !changes.classList.contains('hidden');
+                var reviewing = !settingsPane && !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
                 var settings = appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
@@ -268,12 +373,16 @@ templ TaskListPanel(currentProjectID string) {
 			}
 			function openSearch(open) {
                 if (root.classList.contains('appearance-settings') && !root.classList.contains('changes-explorer-active')) {
+                    if (window.restoreSettingsWorkspace && window.restoreSettingsWorkspace(true)) {
+                        openSearch(true);
+                        return;
+                    }
                     var back = document.querySelector('#appearance-settings-nav [data-settings-back]');
                     if (back && window.htmx) {
                         htmx.ajax('GET', back.getAttribute('href'), {source: back, target: '#main-content', swap: 'innerHTML'}).then(function() {
                             window.syncAppearanceSettings();
-                            openSearch(true);
-                        });
+                            if (!root.classList.contains('appearance-settings') || root.classList.contains('changes-explorer-active')) openSearch(true);
+                        }).catch(function() {});
                     }
                     return;
                 }
