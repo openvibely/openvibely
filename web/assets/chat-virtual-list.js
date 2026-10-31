@@ -485,6 +485,9 @@
             list.rows.set(placeholder, row);
             return row;
         });
+        // Reused rows have moved into fragment. Preserve only equations from
+        // the remaining DOM for adoption when the new lazy rows render.
+        window.retainChatMathForVirtualRows?.(owner);
         owner.replaceChildren(fragment);
         restore();
         if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;

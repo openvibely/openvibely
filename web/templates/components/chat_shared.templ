@@ -5078,11 +5078,10 @@ templ ChatAutoScrollScript() {
 				textBuffer = textBuffer || '';
 				var sourceText = textBuffer;
 				// Promoting an enhanced SVG to lazy rows discards its live figure and
-				// revokes the gallery's blob URL. Completed equations also need their
-				// existing nodes retained. Keep these segments on the DOM-preserving path.
+				// revokes the gallery's blob URL. Keep this segment on the DOM-preserving path.
 				var virtualOwner = !options?.virtualRow && container.closest('#chat-messages, #task-thread-messages') &&
 					(/^(completed|failed|cancelled)$/.test(container.closest('[data-exec-status]')?.getAttribute('data-exec-status') || '') || options?.stable || document.documentElement.getAttribute('data-output-detail') === 'compact') &&
-					!container.querySelector('.chat-svg-preview, [data-math-ready]');
+					!container.querySelector('.chat-svg-preview');
 				var projectionKey = _thinkingStateKey(container);
 				var cachedProjection = virtualOwner && (container._chatVirtualData || window.findCachedChatVirtualData?.(projectionKey, textBuffer));
 				if (cachedProjection && cachedProjection.source !== textBuffer && cachedProjection.normalized !== textBuffer) cachedProjection = null;
