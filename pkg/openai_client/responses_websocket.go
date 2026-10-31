@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpclient"
@@ -726,42 +726,12 @@ func marshalResponsesWebsocketPayload(wire map[string]any) ([]byte, error) {
 		return json.Marshal(wire)
 	}
 	rest := make(map[string]any, len(wire))
-	for key, value := range wire {
-		if key != "input" {
-			rest[key] = value
+	for k, v := range wire {
+		if k != "input" {
+			rest[k] = v
 		}
 	}
-	head, err := json.Marshal(rest)
-	if err != nil {
-		return nil, err
-	}
-	size := len(head) + len(`,"input":[]`)
-	for _, item := range input {
-		if raw, ok := item.(json.RawMessage); ok {
-			size += len(raw) + 1
-		}
-	}
-	body := make([]byte, 0, size)
-	body = append(body, head[:len(head)-1]...)
-	if len(rest) > 0 {
-		body = append(body, ',')
-	}
-	body = append(body, `"input":[`...)
-	for i, item := range input {
-		if i > 0 {
-			body = append(body, ',')
-		}
-		if raw, ok := item.(json.RawMessage); ok && len(raw) > 0 && utf8.Valid(raw) && json.Valid(raw) {
-			body = append(body, raw...)
-			continue
-		}
-		encoded, err := json.Marshal(item)
-		if err != nil {
-			return nil, err
-		}
-		body = append(body, encoded...)
-	}
-	return append(body, ']', '}'), nil
+	return requestjson.MarshalItems(rest, "input", input)
 }
 
 func hasInputPrefix(input, prefix []any) bool {

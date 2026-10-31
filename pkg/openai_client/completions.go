@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"math"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
+	preparedMessages *requestjson.Field
 	// OnReplay durably saves each assistant response before executing its tools.
 	OnReplay func(context.Context, []CompletionsHistoryMessage) error
 	// OnReplayChanged synchronously saves a read-only snapshot and its changed suffix.
@@ -141,7 +143,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 	// Build initial messages from history + new prompt
 	messages := make([]completionsMessage, 0, len(c.History)+2)
-	existingCompletionsHistory := cloneCompletionsHistory(c.completionsHistory)
+	// Repair constructs its own slice and never mutates the source messages.
+	// SetCompletionsHistory already isolated caller-owned tool-call slices.
+	existingCompletionsHistory := c.completionsHistory
 	if existingCompletionsHistory == nil && len(c.History) > 0 {
 		existingCompletionsHistory = make([]CompletionsHistoryMessage, 0, len(c.History))
 		for _, message := range c.History {
@@ -301,13 +305,19 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
-		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil && !summarizing {
+		prepared, prepareErr := requestjson.Prepare("messages", messages)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		preparedOpts := *opts
+		preparedOpts.preparedMessages = prepared
+		if err := ensureCompletionsRequestFits(messages, tools, &preparedOpts); err != nil && !summarizing {
 			return nil, err
 		}
 		// Keep text actually delivered to the caller if this sampling attempt
 		// fails before it can publish a completed assistant message.
 		var partialText strings.Builder
-		streamOpts := *opts
+		streamOpts := preparedOpts
 		streamOpts.OnText = func(text string) {
 			partialText.WriteString(text)
 			if opts.OnText != nil {
@@ -548,10 +558,17 @@ func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[str
 		window = 128000
 	}
 	safe := window - opts.MaxOutputTokens - max(1024, window/50)
-	encoded, err := json.Marshal(struct {
-		Messages []completionsMessage     `json:"messages"`
-		Tools    []map[string]interface{} `json:"tools,omitempty"`
-	}{messages, tools})
+	prepared := opts.preparedMessages
+	if prepared == nil {
+		var err error
+		prepared, err = requestjson.Prepare("messages", messages)
+		if err != nil {
+			return err
+		}
+	}
+	size, err := prepared.Size(struct {
+		Tools []map[string]interface{} `json:"tools,omitempty"`
+	}{tools})
 	if err != nil {
 		return err
 	}
@@ -559,10 +576,11 @@ func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[str
 	if opts.FirstPartyOpenAI {
 		imageTokens = 1844
 	}
-	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image_url", imageTokens)
+	adjustment, err := tokenestimate.MessageArrayAdjustment(prepared.JSON(), "image_url", imageTokens)
 	if err != nil {
 		return err
 	}
+	tokens := tokenestimate.FromByteCount(size + adjustment)
 	if tokens <= safe {
 		return nil
 	}
@@ -666,7 +684,14 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 	}
 	mergeCompletionsExtraBody(payload, opts.ExtraBody)
 
-	body, err := json.Marshal(payload)
+	var body []byte
+	var err error
+	if opts.preparedMessages != nil {
+		payload["messages"] = nil
+		body, err = opts.preparedMessages.Marshal(payload)
+	} else {
+		body, err = json.Marshal(payload)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}

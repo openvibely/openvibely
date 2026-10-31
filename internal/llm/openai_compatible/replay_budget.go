@@ -1,7 +1,9 @@
 package openai_compatible
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
 	"unicode/utf8"
@@ -10,7 +12,11 @@ import (
 // EstimateHistoryTokens uses the same replay representation as the adapter,
 // avoiding duplicate execution fields and counting images as images, not base64 text.
 func EstimateHistoryTokens(history []models.Execution) int {
-	messages := buildClientHistory(history)
+	return EstimateHistoryTokensContext(context.Background(), history)
+}
+
+func EstimateHistoryTokensContext(ctx context.Context, history []models.Execution) int {
+	messages := preparedhistory.Read(ctx, history, buildClientHistory)
 	if len(messages) == 0 {
 		return 0
 	}

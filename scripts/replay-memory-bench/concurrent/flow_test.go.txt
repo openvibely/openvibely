@@ -224,7 +224,7 @@ func TestConcurrentFlow(t *testing.T) {
 	}
 	// Keep this growing-history comparison out of compaction. Both revisions
 	// receive exactly the same explicit budget; compaction has a separate harness.
-	if provider != "openai" {
+	if profile != "compaction" {
 		require.NotEqual(t, "compaction", profile)
 		agent.ContextWindow, agent.ProviderContextWindow, agent.CompactionThreshold = 2000000, 2000000, 1500000
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"math"
 	"net"
@@ -74,6 +75,7 @@ const (
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
+	preparedMessages         *requestjson.Field
 	ServiceTier              string // shared app preference; priority enables Anthropic fast speed
 	Model                    string
 	MaxTokens                int
@@ -1278,18 +1280,26 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	if opts.AutoCompaction && SupportsNativeCompaction(opts.Model) {
 		safe = CompactionBlockingLimit(window)
 	}
-	encoded, err := json.Marshal(struct {
-		Messages []agenticMessage `json:"messages"`
-		Tools    []ToolDefinition `json:"tools,omitempty"`
-		System   string           `json:"system,omitempty"`
-	}{messages, tools, opts.System})
+	prepared := opts.preparedMessages
+	if prepared == nil {
+		var err error
+		prepared, err = requestjson.Prepare("messages", messages)
+		if err != nil {
+			return err
+		}
+	}
+	size, err := prepared.Size(struct {
+		Tools  []ToolDefinition `json:"tools,omitempty"`
+		System string           `json:"system,omitempty"`
+	}{tools, opts.System})
 	if err != nil {
 		return err
 	}
-	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+	adjustment, err := tokenestimate.MessageArrayAdjustment(prepared.JSON(), "image", 2000)
 	if err != nil {
 		return err
 	}
+	tokens := tokenestimate.FromByteCount(size + adjustment)
 	if tokens <= safe {
 		return nil
 	}
@@ -1297,6 +1307,14 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 }
 
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	prepared, err := requestjson.Prepare("messages", messages)
+	if err != nil {
+		return nil, err
+	}
+	preparedOpts := *opts
+	preparedOpts.preparedMessages = prepared
+	opts = &preparedOpts
+
 	// Summary compaction sends first and trims only after provider overflow.
 	_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
 	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil && !summarizing {
@@ -1448,7 +1466,14 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		}
 	}
 
-	body, err := json.Marshal(req)
+	var body []byte
+	var err error
+	if opts.preparedMessages != nil {
+		req.Messages = nil
+		body, err = opts.preparedMessages.Marshal(req)
+	} else {
+		body, err = json.Marshal(req)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}

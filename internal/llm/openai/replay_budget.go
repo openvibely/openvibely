@@ -1,7 +1,9 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"strings"
 
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
@@ -47,11 +49,15 @@ func EstimateHistoryTokens(history []models.Execution) int {
 // replay replaces the initial native checkpoint; plain messages append to it.
 // Native items use the same image-aware estimator as replay items.
 func EstimateContinuationTokens(history []models.Execution, nativeJSON string) (historyTokens, nativeTokens int) {
+	return EstimateContinuationTokensContext(context.Background(), history, nativeJSON)
+}
+
+func EstimateContinuationTokensContext(ctx context.Context, history []models.Execution, nativeJSON string) (historyTokens, nativeTokens int) {
 	var native []any
 	if json.Unmarshal([]byte(nativeJSON), &native) == nil {
 		nativeTokens = openaiclient.EstimateResponsesInputTokens(native)
 	}
-	for _, message := range buildClientHistory(history) {
+	for _, message := range preparedhistory.Read(ctx, history, buildClientHistory) {
 		if len(message.ResponsesInputItems) > 0 {
 			nativeTokens = 0
 			historyTokens = openaiclient.EstimateResponsesInputTokens(message.ResponsesInputItems)
@@ -65,8 +71,14 @@ func EstimateContinuationTokens(history []models.Execution, nativeJSON string) (
 // HistoryInputItems is the canonical replay representation for chat and task
 // recovery requests alike.
 func HistoryInputItems(history []models.Execution) []any {
+	return TakeHistoryInputItems(context.Background(), history)
+}
+
+// TakeHistoryInputItems hands prepared history to task/direct recovery, just as
+// chat sending does. The cache must not retain a second decoded representation.
+func TakeHistoryInputItems(ctx context.Context, history []models.Execution) []any {
 	var items []any
-	for _, message := range buildClientHistory(history) {
+	for _, message := range preparedhistory.Take(ctx, history, buildClientHistory) {
 		if len(message.ResponsesInputItems) > 0 {
 			items = append([]any(nil), message.ResponsesInputItems...)
 		} else {

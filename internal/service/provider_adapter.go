@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"io"
 	"os"
 	"path/filepath"
@@ -490,10 +491,10 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	}
 	budget.PendingTokens = estimatedUTF8Tokens(req.Message)
 	if req.Agent.Provider == models.ProviderOpenAI {
-		budget.HistoryTokens, budget.NativeStateTokens = llmopenai.EstimateContinuationTokens(req.ChatHistory, req.NativeCompactionStateJSON)
+		budget.HistoryTokens, budget.NativeStateTokens = llmopenai.EstimateContinuationTokensContext(req.Ctx, req.ChatHistory, req.NativeCompactionStateJSON)
 	} else {
 		budget.NativeStateTokens = estimateNativeStateTokens(req)
-		budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+		budget.HistoryTokens = estimateHistoryTokensContext(req.Ctx, req.Agent.Provider, req.ChatHistory)
 	}
 	budget.HistoryTokens += estimateSummaryInputTokens(req.Agent.Provider, req.SummaryInput)
 	for _, att := range req.Attachments {
@@ -530,14 +531,18 @@ func estimateExecutionTokens(exec models.Execution) int {
 }
 
 func estimateHistoryTokens(provider models.LLMProvider, history []models.Execution) int {
+	return estimateHistoryTokensContext(context.Background(), provider, history)
+}
+
+func estimateHistoryTokensContext(ctx context.Context, provider models.LLMProvider, history []models.Execution) int {
 	if provider == models.ProviderOpenAICompatible || provider == models.ProviderOllama {
-		return llmopenai_compatible.EstimateHistoryTokens(history)
+		return llmopenai_compatible.EstimateHistoryTokensContext(ctx, history)
 	}
 	if provider == models.ProviderOpenAI {
 		return llmopenai.EstimateHistoryTokens(history)
 	}
 	if provider == models.ProviderAnthropic {
-		return llmanthropic.EstimateHistoryTokens(history)
+		return llmanthropic.EstimateHistoryTokensContext(ctx, history)
 	}
 	total := 0
 	for _, exec := range history {
@@ -733,10 +738,10 @@ func estimateNativeStateTokens(req llmcontracts.AgentRequest) int {
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total := estimatedUTF8Tokens(req.Message)
 	if req.Agent.Provider == models.ProviderOpenAI {
-		history, native := llmopenai.EstimateContinuationTokens(req.ChatHistory, req.NativeCompactionStateJSON)
+		history, native := llmopenai.EstimateContinuationTokensContext(req.Ctx, req.ChatHistory, req.NativeCompactionStateJSON)
 		total += history + native
 	} else {
-		total += estimateNativeStateTokens(req) + estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
+		total += estimateNativeStateTokens(req) + estimateHistoryTokensContext(req.Ctx, req.Agent.Provider, req.ChatHistory)
 	}
 	total += estimatedUTF8Tokens(attachmentcontext.Text(req.Ctx))
 	total += estimatedUTF8Tokens(managedcontext.Text(req.Ctx))
@@ -916,6 +921,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.Ctx = context.Background()
 	}
 
+	req.Ctx = preparedhistory.WithScope(req.Ctx)
 	req.Ctx = attachment.WithToolImages(req.Ctx)
 	req.Ctx = s.withDependencyProgress(req)
 	req.Ctx = s.withSkillDependencyApproval(req)
@@ -1933,7 +1939,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 	// Task/direct adapters do not take ChatHistory. Supply the same recovered
 	// conversation through their native input field without changing tool mode.
 	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && !requestUsesChatStreaming(req) && !req.RawDirectPrompt {
-		raw, err := json.Marshal(llmopenai.HistoryInputItems(req.ChatHistory))
+		raw, err := json.Marshal(llmopenai.TakeHistoryInputItems(req.Ctx, req.ChatHistory))
 		if err != nil {
 			return llmcontracts.AgentResult{}, err
 		}

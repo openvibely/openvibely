@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"strings"
 	"sync"
 	"time"
@@ -697,7 +698,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	// Replay must be loaded before service-level budgeting and compaction.
 	// Reloading it here would undo an intentionally trimmed request.
-	client.History = append(client.History, buildClientHistory(chatHistory)...)
+	client.History = append(client.History, preparedhistory.Take(ctx, chatHistory, buildClientHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	if !isTaskFollowup {

@@ -81,3 +81,11 @@ For new measurements, use the retained [concurrent harness](concurrent/README.md
 Previous task branch versus compatible retention fixes, not main. All 12 final timing runs (396 turns), two separate diagnostics, and final smoke runs passed. Includes before/after CPU, allocation and near-peak heap profiles, text summaries, exact production patch, source, phase samples, validation logs and per-file manifest. Superseded partial timing runs are labeled and excluded. Databases and generated fixture repositories are not archived.
 
 Archive: 1,327,352 bytes; SHA256 `0f8f289c20d36669c27f0e41d8546c0277c53a53fe05eba6d1b4ea7b3e1e85d9`.
+
+## Shared provider paths — baseline 036d7d15b
+
+[Full report](/files/ce557305772b6ef9a736c5add78a67af?project_id=b184292efa07a415fc59967a5fc328d1) · [Raw measurements and profiles](/files/14bf6c874a8d73aff0c49bdfb914663c?project_id=b184292efa07a415fc59967a5fc328d1). Repository report: [SHARED_PROVIDER_PATHS_RESULTS.md](SHARED_PROVIDER_PATHS_RESULTS.md).
+
+Previous task branch versus shared request/history paths, not main. Same revisions and explicit context budget for all three providers. All 72 timing runs (2,376 turns), six diagnostic runs, and six candidate smoke runs passed. Includes every turn, RSS phases, before/after CPU/allocation/near-peak profiles, readable profile summaries, exact measured patch, separately tested recovery follow-up patch, final source, harness, revision/binary metadata, validation logs and SHA256 manifest. The recovery follow-up is not included in measured binary results; see report. Databases and generated fixture repositories are excluded.
+
+Archive: 4,931,481 bytes; SHA256 `d72899d49ff663f5494090b9d1d4bbacf354271b58ab40db26b5c44e71719510`.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"math"
 	"os"
 	"strconv"
@@ -386,7 +387,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		ctx = context.WithValue(ctx, recoveryMessagesKey{}, messages)
 	}
 	if llmcontracts.HistoryContinuationFromContext(ctx) {
-		messages := buildRecoveryHistory(req.ChatHistory)
+		messages := preparedhistory.Take(ctx, req.ChatHistory, buildRecoveryHistory)
 		// Service-side compaction stores its final summary as execution output.
 		// Claude reintroduces that summary as user context, not an assistant
 		// prefill (which Claude 4.6+ rejects). Keep ordinary history unchanged.
@@ -575,7 +576,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode, isTaskFollowup)
-	client.History = append(client.History, buildClientHistory(chatHistory)...)
+	client.History = append(client.History, preparedhistory.Take(ctx, chatHistory, buildClientHistory)...)
 
 	mcAttachments, err := convertAttachmentsContext(ctx, attachments)
 	if err != nil {
@@ -894,8 +895,12 @@ func SummaryHistory(history []models.Execution) []anthropicclient.Message {
 // EstimateHistoryTokens counts the messages actually reconstructed for Anthropic,
 // including environment changes, without counting durable replay copies twice.
 func EstimateHistoryTokens(history []models.Execution) int {
+	return EstimateHistoryTokensContext(context.Background(), history)
+}
+
+func EstimateHistoryTokensContext(ctx context.Context, history []models.Execution) int {
 	total := 0
-	for _, message := range buildRecoveryHistory(history) {
+	for _, message := range preparedhistory.Read(ctx, history, buildRecoveryHistory) {
 		if len(message.ContentBlocks) == 0 {
 			total += tokenestimate.FromText(message.Content)
 			continue

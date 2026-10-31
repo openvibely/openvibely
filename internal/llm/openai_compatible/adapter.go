@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"net/http"
 	"strings"
 	"time"
@@ -771,7 +772,7 @@ func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistor
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
 	// The service hydrates history before budgeting and compaction. Never reload
 	// from storage here: that would restore content deliberately discarded there.
-	return buildClientHistory(chatHistory), nil
+	return preparedhistory.Take(ctx, chatHistory, buildClientHistory), nil
 }
 
 func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
