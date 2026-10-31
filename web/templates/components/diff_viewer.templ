@@ -424,8 +424,11 @@ func langClass(path string) string {
 	}
 }
 
-templ DiffViewer(diffOutput string, taskID string, reviewComments []models.ReviewComment, initialView string) {
+templ DiffViewer(diffOutput string, taskID string, reviewComments []models.ReviewComment, initialView string, actions ...templ.Component) {
 	if diffOutput == "" {
+		for _, action := range actions {
+			@action
+		}
 		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
@@ -434,7 +437,7 @@ templ DiffViewer(diffOutput string, taskID string, reviewComments []models.Revie
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerWithReviewContent(progressiveDiffMetas(ParseDiffOutput(diffOutput), reviewComments), taskID, reviewComments, initialView, diffContentRevision(diffOutput, reviewComments))
+		@diffViewerWithReviewContent(progressiveDiffMetas(ParseDiffOutput(diffOutput), reviewComments), taskID, reviewComments, initialView, diffContentRevision(diffOutput, reviewComments), actions...)
 	}
 }
 
@@ -508,31 +511,32 @@ func lineNumForReview(line DiffLine) int {
 	return reviewTargetForDiffLine(line).LineNumber
 }
 
-templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string, revision string) {
+func diffTotalCounts(metas []DiffFileRenderMeta) diffStatCount {
+ total := diffStatCount{}
+ for _, meta := range metas {
+  counts := diffStatCounts(meta.File)
+  total.Adds += counts.Adds
+  total.Dels += counts.Dels
+ }
+ return total
+}
+
+templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string, revision string, actions ...templ.Component) {
+    {{ totals := diffTotalCounts(metas) }}
 	<div id="diff-viewer" data-diff-revision={ revision } hx-history="false" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
-		<div class="flex flex-wrap items-center gap-2 mb-4">
+		<div data-diff-toolbar class="flex flex-wrap items-center gap-2 mb-4" style="background-color: var(--board-page-bg, var(--ov-content-bg, var(--fallback-b1, oklch(var(--b1) / 1))));">
 			<div class="flex items-center gap-2 flex-1">
 				<span class="text-sm font-medium opacity-70">
 					{ fmt.Sprintf("%d", len(metas)) } file{ fileCountSuffix(len(metas)) } changed
 				</span>
-				if len(metas) > 1 {
-					<button
-						class="btn btn-xs btn-ghost opacity-60"
-                        onclick="toggleAllDiffFiles(true)"
-					>
-						Expand All
-					</button>
-					<button
-						class="btn btn-xs btn-ghost opacity-60"
-                        onclick="toggleAllDiffFiles(false)"
-					>
-						Collapse All
-					</button>
-				}
+                <span class="text-xs whitespace-nowrap" aria-label={ fmt.Sprintf("%d added lines, %d deleted lines", totals.Adds, totals.Dels) }>
+                    <span class="text-success">+{ fmt.Sprint(totals.Adds) }</span>
+                    <span class="text-error">-{ fmt.Sprint(totals.Dels) }</span>
+                </span>
+
 			</div>
 			<div class="flex flex-wrap items-center gap-2 ml-auto">
-				@ReviewToolbar(taskID, len(reviewComments))
 				<div class="join">
 					<button
 						class={ diffViewButtonClass("inline", initialView) }
@@ -549,6 +553,10 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 						Split
 					</button>
 				</div>
+                @ReviewToolbar(taskID, len(reviewComments))
+                for _, action := range actions {
+                    @action
+                }
 			</div>
 		</div>
         <div hidden data-diff-explorer-files>

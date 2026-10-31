@@ -2117,7 +2117,7 @@ func TestHandler_MergeTaskBranch_ChangesTabRecoverableFailureRendersRetryAndSucc
 	if first.Code != http.StatusOK {
 		t.Fatalf("expected recoverable failure to refresh Changes with 200, got %d: %s", first.Code, first.Body.String())
 	}
-	if body := first.Body.String(); !strings.Contains(body, "Worktree Changes") || !strings.Contains(body, "Merge commit") || !strings.Contains(body, "Fast-forward only") {
+	if body := first.Body.String(); !strings.Contains(body, "Worktree changes") || !strings.Contains(body, "Merge commit") || !strings.Contains(body, "Fast-forward only") {
 		t.Fatalf("expected failed merge response to retain retry actions, got %s", body)
 	}
 	failedTask, err := h.taskRepo.GetByID(ctx, task.ID)
@@ -2383,7 +2383,7 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 		t.Fatalf("expected conflict toast message, got %q", hxTrigger)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Worktree Changes", "AI Resolve Conflicts", "Abort Merge", "merge conflict is active"} {
+	for _, want := range []string{"Worktree changes", "AI Resolve Conflicts", "Abort Merge", "merge conflict is active"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected Changes conflict recovery content %q, got %s", want, body)
 		}
@@ -2766,7 +2766,7 @@ func TestHandler_MergeTaskBranch_RefreshesOwningSurfaceOnce(t *testing.T) {
 					t.Fatalf("unexpected merge success toast payload: %#v", toast)
 				}
 				body := rec.Body.String()
-				if source == "changes_tab" && !strings.Contains(body, "Worktree Changes") {
+				if source == "changes_tab" && !strings.Contains(body, "Worktree changes") {
 					t.Fatalf("expected changes-tab partial response, got %s", body)
 				}
 				if mergeType == "ff" && source == "changes_tab" && (strings.Contains(body, "/worktree/merge") || strings.Contains(body, "Fast-forward only")) {

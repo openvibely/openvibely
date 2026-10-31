@@ -19,7 +19,7 @@ import (
 func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "explorer-project", Name: "Explorer"}
-	task := &models.Task{ID: "explorer-task", ProjectID: project.ID, Title: "Explore changes", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+	task := &models.Task{ID: "explorer-task", ProjectID: project.ID, Title: "Explore changes", WorktreeBranch: "task/explorer", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 	diff := ""
 	for _, path := range []string{"src/first.go", "src/nested/second.go"} {
 		diff += fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,160 +1,160 @@\n", path, path, path, path)
@@ -82,7 +82,7 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
 			current := currentDiff()
-			if err := TaskChangesContent(current, task.ID, nil).Render(r.Context(), w); err != nil {
+			if err := TaskChangesWorktreeContent(current, task, nil, nil, nil, false, false).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/file":
@@ -158,13 +158,21 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.waitFor("second lazy diff loaded", `String(document.getElementById('diff-file-0').getBoundingClientRect().height>0 && document.getElementById('diff-file-1').getBoundingClientRect().height>0 && !!document.querySelector('#diff-file-1 .diff-line-content') && document.getElementById('diff-file-1').getBoundingClientRect().height>2000)`, "true")
 		b.evaluate(`document.getElementById('tab-changes').scrollTop=900;'scroll'`)
 		b.waitFor("long diff scrolled", `String(document.getElementById('tab-changes').scrollTop>500)`, "true")
+		b.waitFor("toolbar and file header stack while scrolling", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'), scroll=document.getElementById('tab-changes'), header=document.querySelector('#diff-file-1 .diff-file-header');return (Math.abs(bar.getBoundingClientRect().top-scroll.getBoundingClientRect().top)<2 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2) || JSON.stringify({bar:bar.getBoundingClientRect().toJSON(),scroll:scroll.getBoundingClientRect().toJSON(),header:header.getBoundingClientRect().toJSON(),offset:getComputedStyle(header).top,position:getComputedStyle(bar).position})})())`, "true")
+		b.evaluate(`document.querySelector('[popovertarget="changes-actions-menu"]').click();'actions'`)
+		b.waitFor("actions menu opens while scrolled", `String(document.getElementById('changes-actions-menu').matches(':popover-open'))`, "true")
+		b.evaluate(`document.getElementById('changes-actions-menu').hidePopover();'close actions'`)
+		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='360px';'narrow changes'`)
+		b.waitFor("wrapped toolbar updates sticky offset", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'),header=document.querySelector('#diff-file-1 .diff-file-header');return bar.getBoundingClientRect().height>60 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2})())`, "true")
+		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='';'restore changes width'`)
+		b.waitFor("toolbar returns to one row", `String((()=>{const height=document.querySelector('[data-diff-toolbar]').getBoundingClientRect().height;return height<60 && parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height'))===Math.ceil(height)})())`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/first.go"]').click();'select loaded file'`)
-		b.waitFor("loaded file starts at header", `String(!document.getElementById('diff-file-0').hidden && Math.abs(document.getElementById('diff-file-0').getBoundingClientRect().top-document.getElementById('tab-changes').getBoundingClientRect().top)<2)`, "true")
+		b.waitFor("loaded file starts at header", `String(!document.getElementById('diff-file-0').hidden && Math.abs(document.getElementById('diff-file-0').getBoundingClientRect().top-document.getElementById('tab-changes').getBoundingClientRect().top-parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height')))<2)`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'second'`)
 		b.evaluate(`switchDiffView('split',false);'split'`)
 		b.waitFor("split selection preserved", `String(['diff-file-split-0','diff-file-split-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0) && document.getElementById('diff-file-split-1').textContent.includes('second'))`, "true")
 		b.evaluate(`document.querySelector('[data-explorer-path="src/nested/second.go"]').click();'navigate split file'`)
-		b.waitFor("split file navigation reaches header without hiding other files", `String(Math.abs(document.getElementById('diff-file-split-1').getBoundingClientRect().top-document.getElementById('tab-changes').getBoundingClientRect().top)<2 && document.getElementById('diff-file-split-0').getBoundingClientRect().height>0)`, "true")
+		b.waitFor("split file navigation reaches header without hiding other files", `String((()=>{const card=document.getElementById('diff-file-split-1'),scroller=document.getElementById('tab-changes'),offset=parseFloat(document.getElementById('diff-viewer').style.getPropertyValue('--diff-toolbar-height'));return (Math.abs(card.getBoundingClientRect().top-scroller.getBoundingClientRect().top-offset)<2 && document.getElementById('diff-file-split-0').getBoundingClientRect().height>0) || JSON.stringify({card:card.getBoundingClientRect().top,scroll:scroller.getBoundingClientRect().top,offset:offset,height:card.getBoundingClientRect().height,scrollTop:scroller.scrollTop})})())`, "true")
 		b.evaluate(`var search=document.querySelector('.explorer-search');search.value='second';search.dispatchEvent(new Event('input'));'filter'`)
 		b.waitFor("filtered nested tree", `String(document.querySelectorAll('[data-explorer-path]').length===1 && document.querySelectorAll('.changes-explorer details').length===2)`, "true")
 		b.waitFor("filter only affects explorer", `String(['diff-file-split-0','diff-file-split-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0))`, "true")
