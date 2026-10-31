@@ -20,21 +20,25 @@ func diffGitOutput(ctx context.Context, dir string, args ...string) ([]byte, err
 	return cmd.Output()
 }
 
-// TryRLock avoids leaving a goroutine queued on a lifecycle lock after timeout.
+// Queue with RLock so back-to-back writers cannot starve the reader. On
+// cancellation the queued goroutine releases the lock as soon as it gets it.
 func diffReadLock(ctx context.Context, lock *sync.RWMutex) bool {
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if ctx.Err() != nil {
-			return false
-		}
-		if lock.TryRLock() {
-			return true
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-ticker.C:
-		}
+	if ctx.Err() != nil {
+		return false
+	}
+	acquired := make(chan struct{})
+	go func() {
+		lock.RLock()
+		close(acquired)
+	}()
+	select {
+	case <-acquired:
+		return true
+	case <-ctx.Done():
+		go func() {
+			<-acquired
+			lock.RUnlock()
+		}()
+		return false
 	}
 }
