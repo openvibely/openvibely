@@ -53,8 +53,8 @@ func EstimateContinuationTokens(history []models.Execution, nativeJSON string) (
 }
 
 func EstimateContinuationTokensContext(ctx context.Context, history []models.Execution, nativeJSON string) (historyTokens, nativeTokens int) {
-	var native []any
-	if json.Unmarshal([]byte(nativeJSON), &native) == nil {
+	native, err := preparedhistory.ReadState(ctx, strings.TrimSpace(nativeJSON), decodeNativeInput)
+	if err == nil {
 		nativeTokens = openaiclient.EstimateResponsesInputTokens(native)
 	}
 	for _, message := range preparedhistory.Read(ctx, history, buildClientHistory) {
@@ -163,4 +163,10 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 		}
 	}
 	return users
+}
+
+func decodeNativeInput(raw string) ([]any, error) {
+	var items []any
+	err := json.Unmarshal([]byte(raw), &items)
+	return items, err
 }

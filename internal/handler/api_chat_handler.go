@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/pkg/filecontent"
 	"io"
 	"mime/multipart"
@@ -452,7 +453,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	}
 
 	// Load chat history for conversation context
-	chatHistory, err := h.execRepo.ListChatHistory(c.Request().Context(), projectID, 50)
+	chatHistory, err := h.execRepo.ListChatHistory(persistence.WithModelHistory(c.Request().Context(), agent.Provider), projectID, 50)
 	if err != nil {
 		applog.Infof("[handler] APIChatMessage error loading chat history: %v", err)
 		chatHistory = []models.Execution{}

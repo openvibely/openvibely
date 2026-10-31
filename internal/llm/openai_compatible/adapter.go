@@ -728,21 +728,7 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Completio
 		replay := exec.ReplayMessages
 		if len(replay) > 0 {
 			for _, turn := range replay {
-				var transcript []openaiclient.CompletionsHistoryMessage
-				var decodeErr error
-				if turn.TranscriptJSON == "" && turn.Rows != nil && turn.Rows.Format == "array" {
-					transcript = make([]openaiclient.CompletionsHistoryMessage, 0, len(turn.Rows.Items))
-					for _, raw := range turn.Rows.Items {
-						message, err := openaiclient.DecodeCompletionsReplay(raw)
-						if err != nil {
-							decodeErr = err
-							break
-						}
-						transcript = append(transcript, message)
-					}
-				} else {
-					decodeErr = turn.DecodeTranscript(&transcript)
-				}
+				transcript, decodeErr := openaiclient.DecodeCompletionsHistory(turn)
 				if decodeErr == nil && len(transcript) > 0 {
 					messages = append(messages, transcript...)
 					continue

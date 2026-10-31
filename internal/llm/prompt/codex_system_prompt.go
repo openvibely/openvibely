@@ -3,7 +3,6 @@ package prompt
 import (
 	"embed"
 	"strings"
-	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -18,16 +17,12 @@ var codexPrompts embed.FS
 
 // Keys come only from the bundled model registry (unknown names use reserve),
 // so this cache cannot grow with arbitrary user-provided model names.
-var adaptedCodexPrompts sync.Map
+var adaptedCodexPrompts profileCache
 var codexToolNames = strings.NewReplacer("`apply_patch`", "`edit_file` or `write_file`", "exec_command", "shell")
 
 func CodexSystemPrompt(model string) string {
 	profile := codexProfile(model)
-	if cached, ok := adaptedCodexPrompts.Load(profile); ok {
-		return cached.(func() string)()
-	}
-	cached, _ := adaptedCodexPrompts.LoadOrStore(profile, sync.OnceValue(func() string { return adaptCodexTools(codexSnapshot(model)) }))
-	return cached.(func() string)()
+	return adaptedCodexPrompts.get(profile, func() string { return adaptCodexTools(codexSnapshot(model)) })
 }
 
 func codexProfile(model string) string {

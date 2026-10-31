@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -14,10 +15,8 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -1210,8 +1209,8 @@ func estimateAgenticResponseItemModelVisibleBytes(item any) int {
 
 func marshalAgenticItemAndImageAdjustment(item any) (int, int, int, bool, error) {
 	marshalFallback := func() (int, int, int, bool, error) {
-		serialized, err := json.Marshal(item)
-		return len(serialized), 0, 0, false, err
+		size, err := requestjson.Size(item)
+		return size, 0, 0, false, err
 	}
 	itemMap, ok := item.(map[string]any)
 	if !ok {
@@ -1259,31 +1258,31 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 	case string:
 		return agenticJSONEncodedStringSize(typed), 0, 0, 0, false, true
 	case float64:
-		floatSize, floatOK := agenticJSONFloatSize(typed, 64)
+		floatSize, floatOK := requestjson.FloatSize(typed, 64)
 		return floatSize, 0, 0, 0, false, floatOK
 	case float32:
-		floatSize, floatOK := agenticJSONFloatSize(float64(typed), 32)
+		floatSize, floatOK := requestjson.FloatSize(float64(typed), 32)
 		return floatSize, 0, 0, 0, false, floatOK
 	case int:
-		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+		return requestjson.IntegerSize(int64(typed)), 0, 0, 0, false, true
 	case int8:
-		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+		return requestjson.IntegerSize(int64(typed)), 0, 0, 0, false, true
 	case int16:
-		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+		return requestjson.IntegerSize(int64(typed)), 0, 0, 0, false, true
 	case int32:
-		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+		return requestjson.IntegerSize(int64(typed)), 0, 0, 0, false, true
 	case int64:
-		return agenticJSONIntegerSize(typed), 0, 0, 0, false, true
+		return requestjson.IntegerSize(typed), 0, 0, 0, false, true
 	case uint:
-		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+		return requestjson.UnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
 	case uint8:
-		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+		return requestjson.UnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
 	case uint16:
-		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+		return requestjson.UnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
 	case uint32:
-		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+		return requestjson.UnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
 	case uint64:
-		return agenticJSONUnsignedIntegerSize(typed), 0, 0, 0, false, true
+		return requestjson.UnsignedIntegerSize(typed), 0, 0, 0, false, true
 	case []any:
 		if typed == nil {
 			return len("null"), 0, 0, 0, false, true
@@ -1369,61 +1368,7 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 	}
 }
 
-func agenticJSONEncodedStringSize(value string) int {
-	size := 2 // surrounding quotes
-	for index := 0; index < len(value); {
-		char := value[index]
-		if char < utf8.RuneSelf {
-			index++
-			switch {
-			case char == '"' || char == '\\' || char == '\b' || char == '\f' || char == '\n' || char == '\r' || char == '\t':
-				size += 2
-			case char < 0x20 || char == '<' || char == '>' || char == '&':
-				size += 6
-			default:
-				size++
-			}
-			continue
-		}
-		runeValue, width := utf8.DecodeRuneInString(value[index:])
-		index += width
-		if runeValue == utf8.RuneError && width == 1 {
-			size += utf8.RuneLen(utf8.RuneError) // encoding/json replaces invalid UTF-8 with U+FFFD.
-		} else if runeValue == '\u2028' || runeValue == '\u2029' {
-			size += 6
-		} else {
-			size += width
-		}
-	}
-	return size
-}
-
-func agenticJSONIntegerSize(value int64) int {
-	var buffer [32]byte
-	return len(strconv.AppendInt(buffer[:0], value, 10))
-}
-
-func agenticJSONUnsignedIntegerSize(value uint64) int {
-	var buffer [32]byte
-	return len(strconv.AppendUint(buffer[:0], value, 10))
-}
-
-func agenticJSONFloatSize(value float64, bits int) (int, bool) {
-	if math.IsInf(value, 0) || math.IsNaN(value) {
-		return 0, false
-	}
-	format := byte('f')
-	absolute := math.Abs(value)
-	if absolute != 0 && ((bits == 64 && (absolute < 1e-6 || absolute >= 1e21)) || (bits == 32 && (float32(absolute) < 1e-6 || float32(absolute) >= 1e21))) {
-		format = 'e'
-	}
-	var buffer [64]byte
-	encoded := strconv.AppendFloat(buffer[:0], value, format, -1, bits)
-	if format == 'e' && len(encoded) >= 4 && encoded[len(encoded)-4] == 'e' && encoded[len(encoded)-3] == '-' && encoded[len(encoded)-2] == '0' {
-		encoded = encoded[:len(encoded)-1]
-	}
-	return len(encoded), true
-}
+func agenticJSONEncodedStringSize(value string) int { return requestjson.StringSize(value) }
 
 func agenticImageURLNeedsNoJSONEscaping(value, payload string) bool {
 	commaIndex := strings.IndexByte(value, ',')
@@ -1767,7 +1712,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	if len(reasoningPayload) > 0 {
 		payload["reasoning"] = reasoningPayload
 	}
-	body, err := json.Marshal(payload)
+	body, err := requestjson.MarshalArrayField(payload, "input")
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal compaction request: %w", err)
 	}
@@ -2797,7 +2742,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		return result, nil
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := requestjson.MarshalArrayField(payload, "input")
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -2901,6 +2846,24 @@ func (c *Client) parseAgenticEventsCapturingText(scanner *responsesEventIterator
 				emitter.Write(text.Delta)
 			}
 			continue
+		}
+		if typ == "response.function_call_arguments.delta" || typ == "response.reasoning_text.delta" || typ == "response.reasoning_summary_text.delta" {
+			var delta struct {
+				Delta string  `json:"delta"`
+				Index float64 `json:"output_index"`
+			}
+			if json.Unmarshal(data, &delta) == nil {
+				if typ == "response.function_call_arguments.delta" {
+					emitter.FlushBoundary()
+					if fc := fnCalls[int(delta.Index)]; fc != nil && delta.Delta != "" {
+						fc.args.WriteString(delta.Delta)
+					}
+				} else if onThinking != nil && delta.Delta != "" {
+					onThinking(delta.Delta)
+					sawThinking = true
+				}
+				continue
+			}
 		}
 		ev := decodeResponsesComplexEvent(data)
 		if ev == nil {

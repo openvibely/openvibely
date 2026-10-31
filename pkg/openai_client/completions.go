@@ -665,14 +665,19 @@ func completionsSupportsTemperature(model, reasoningEffort string) bool {
 }
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
-	originalToolCount := len(tools)
+	selected := make([]int, 0, len(tools))
+	for i := range tools {
+		selected = append(selected, i)
+	}
 	if opts.ToolFilter != nil {
 		permitted := make([]map[string]interface{}, 0, len(tools))
-		for _, tool := range tools {
+		selected = selected[:0]
+		for index, tool := range tools {
 			function, _ := tool["function"].(map[string]interface{})
 			name, _ := function["name"].(string)
 			if opts.ToolFilter(name) {
 				permitted = append(permitted, tool)
+				selected = append(selected, index)
 			}
 		}
 		tools = permitted
@@ -709,9 +714,13 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 	if opts.preparedMessages != nil {
 		payload["messages"] = nil
 		metadata := requestjson.Metadata{Value: payload, Fields: map[string]*requestjson.Field{}}
-		if len(tools) > 0 && len(tools) == originalToolCount && opts.preparedTools != nil {
+		if len(tools) > 0 && opts.preparedTools != nil {
 			delete(payload, "tools")
-			metadata.Fields["tools"] = opts.preparedTools
+			field, selectErr := opts.preparedTools.Select(selected, nil)
+			if selectErr != nil {
+				return nil, selectErr
+			}
+			metadata.Fields["tools"] = field
 		}
 		body, err = opts.preparedMessages.Marshal(metadata)
 	} else {

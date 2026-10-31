@@ -96,7 +96,7 @@ func TestCodexPromptConcurrentCachePreservesContent(t *testing.T) {
 	}
 	wg.Wait()
 	count := 0
-	adaptedCodexPrompts.Range(func(key, value any) bool { count++; return true })
+	adaptedCodexPrompts.entries.Range(func(key, value any) bool { count++; return true })
 	entries, err := codexPrompts.ReadDir("codex")
 	if err != nil {
 		t.Fatal(err)

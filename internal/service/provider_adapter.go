@@ -565,22 +565,7 @@ func estimateHistoryTokensContext(ctx context.Context, provider models.LLMProvid
 // Stored completion transcripts are message arrays, while provider admission
 // expects a request object. Normalize only that envelope and image content field.
 func estimateReplayTranscriptImageTokens(raw, imageType string, imageTokens int) (int, error) {
-	encoded := []byte(raw)
-	var messages []map[string]json.RawMessage
-	if json.Unmarshal(encoded, &messages) == nil && messages != nil {
-		for _, message := range messages {
-			if imageContent := message["image_content"]; len(imageContent) > 0 {
-				message["content"] = imageContent
-				delete(message, "image_content")
-			}
-		}
-		var err error
-		encoded, err = json.Marshal(map[string]any{"messages": messages})
-		if err != nil {
-			return 0, err
-		}
-	}
-	return tokenestimate.FromMessagesJSON(encoded, imageType, imageTokens)
+	return tokenestimate.FromLegacyTranscript([]byte(raw), imageType, imageTokens)
 }
 
 func historyNeedsCompaction(b requestBudget, triggerLimit int) bool {
@@ -730,7 +715,7 @@ func openAIContextWindow(model string) int {
 
 func estimateNativeStateTokens(req llmcontracts.AgentRequest) int {
 	if req.Agent.Provider == models.ProviderAnthropic {
-		return anthropicclient.EstimateNativeCompactionTokens(req.NativeCompactionStateJSON)
+		return anthropicclient.EstimateNativeCompactionTokensContext(req.Ctx, req.NativeCompactionStateJSON)
 	}
 	return estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 }

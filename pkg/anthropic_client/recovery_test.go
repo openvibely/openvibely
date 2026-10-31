@@ -40,8 +40,8 @@ func TestAnthropicFailedContinuationPreservesClaimedSteerAndToolResult(t *testin
 		t.Fatalf("missing conversation: %v", err)
 	}
 	for _, want := range []string{"original task", "write1", "file already written", "actually only review"} {
-		if !strings.Contains(failure.MessagesJSON, want) {
-			t.Fatalf("snapshot lost %q: %s", want, failure.MessagesJSON)
+		if !strings.Contains(failure.JSON(), want) {
+			t.Fatalf("snapshot lost %q: %s", want, failure.JSON())
 		}
 	}
 	if calls != 2 || tools != 1 || claims != 1 {
@@ -71,7 +71,7 @@ func TestAnthropicRecoveryUsesReplacementHistoryAndReturnsFailedRequest(t *testi
 	_, err := client.SendAgentic(context.Background(), "do not repeat original prompt", &AgenticOptions{Model: "claude-opus-4-6", DisableTools: true,
 		RecoveryMessages: []Message{{Role: "user", Content: "retained steer"}, {Role: "assistant", Content: "file already written"}}})
 	var failure *ConversationError
-	if !errors.As(err, &failure) || !strings.Contains(failure.MessagesJSON, "retained steer") || strings.Contains(failure.MessagesJSON, "stale history") {
+	if !errors.As(err, &failure) || !strings.Contains(failure.JSON(), "retained steer") || strings.Contains(failure.JSON(), "stale history") {
 		t.Fatalf("failed request not preserved: %v", err)
 	}
 }

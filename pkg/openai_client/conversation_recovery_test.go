@@ -37,10 +37,10 @@ func TestCompletionsRecoveryIncludesPriorHistoryAndCurrentToolResults(t *testing
 	require.ErrorIs(t, wrapped, err)
 	var snapshot *ConversationError
 	require.True(t, errors.As(wrapped, &snapshot))
-	require.Contains(t, snapshot.MessagesJSON, "PRIOR_REQUEST")
-	require.Contains(t, snapshot.MessagesJSON, "ALREADY_EDITED")
-	require.Contains(t, snapshot.MessagesJSON, "edit_file")
-	require.Contains(t, snapshot.MessagesJSON, base64.StdEncoding.EncodeToString([]byte("imagebytes")))
-	require.NotContains(t, snapshot.MessagesJSON, "image_content")
+	require.Contains(t, snapshot.JSON(), "PRIOR_REQUEST")
+	require.Contains(t, snapshot.JSON(), "ALREADY_EDITED")
+	require.Contains(t, snapshot.JSON(), "edit_file")
+	require.Contains(t, snapshot.JSON(), base64.StdEncoding.EncodeToString([]byte("imagebytes")))
+	require.NotContains(t, snapshot.JSON(), "image_content")
 	require.Equal(t, 2, calls)
 }

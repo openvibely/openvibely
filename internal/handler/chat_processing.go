@@ -515,24 +515,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Load deferred history before attachment recovery and lifecycle selection.
 	// Both need the same historical files that the model will receive.
 	if params.DeferHistoryLoad && params.IsTaskFollowup && params.Task != nil {
-		var priorExecs []models.Execution
-		var err error
-		reader, optimized := h.execRepo.(interface {
-			ListTaskResponsesHistory(context.Context, string, int) ([]models.Execution, error)
-		})
-		if optimized && params.Agent.Provider == models.ProviderOpenAI {
-			priorExecs, err = reader.ListTaskResponsesHistory(ctx, params.TaskID, taskThreadHistoryLimit)
-		} else if reader, ok := h.execRepo.(interface {
-			ListTaskAnthropicHistory(context.Context, string, int) ([]models.Execution, error)
-		}); ok && params.Agent.Provider == models.ProviderAnthropic {
-			priorExecs, err = reader.ListTaskAnthropicHistory(ctx, params.TaskID, taskThreadHistoryLimit)
-		} else if reader, ok := h.execRepo.(interface {
-			ListTaskCompletionsHistory(context.Context, string, int) ([]models.Execution, error)
-		}); ok && params.Agent.Provider == models.ProviderOpenAICompatible {
-			priorExecs, err = reader.ListTaskCompletionsHistory(ctx, params.TaskID, taskThreadHistoryLimit)
-		} else {
-			priorExecs, err = h.execRepo.ListByTaskChronologicalLimit(ctx, params.TaskID, taskThreadHistoryLimit)
-		}
+		priorExecs, err := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, params.Agent.Provider), params.TaskID, taskThreadHistoryLimit)
 		if err != nil {
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, "Load conversation history: "+err.Error(), 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
@@ -1742,7 +1725,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 			attachmentContext = fmt.Sprintf("⚠️ Attachment processing error: %v", attErr)
 		}
 	}
-	history, err := h.queuedChatHistory(ctx, input, exec.ID)
+	history, err := h.queuedChatHistory(persistence.WithModelHistory(ctx, agent.Provider), input, exec.ID)
 	if err != nil {
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
@@ -2053,7 +2036,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	}
 	h.resumeUserStoppedGoalForManualStart(ctx, taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
-	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimit)
+	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, agent.Provider), taskID, taskThreadHistoryLimit)
 	priorHistory := filterRetryChatHistory(priorExecs, exec.ID, failed.ID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
@@ -2222,7 +2205,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	}
 	h.resumeUserStoppedGoalForManualStart(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
-	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, exec.TaskID, taskThreadHistoryLimit)
+	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(persistence.WithModelHistory(ctx, agent.Provider), exec.TaskID, taskThreadHistoryLimit)
 	priorHistory := filterRetryChatHistory(priorExecs, exec.ID, input.RetrySourceExecutionID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {

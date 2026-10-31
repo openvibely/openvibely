@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
@@ -336,18 +337,22 @@ func hasLeadingCompactionMessage(messages []agenticMessage) bool {
 // EstimateNativeCompactionTokens budgets the decoded continuation, including
 // images acquired after compaction, using the same image cost as live requests.
 func EstimateNativeCompactionTokens(raw string) int {
+	return EstimateNativeCompactionTokensContext(context.Background(), raw)
+}
+
+func EstimateNativeCompactionTokensContext(ctx context.Context, raw string) int {
 	if strings.TrimSpace(raw) == "" {
 		return 0
 	}
-	messages, err := decodeNativeCompactionState(raw)
+	messages, err := preparedhistory.ReadState(ctx, strings.TrimSpace(raw), decodeNativeCompactionState)
 	if err != nil {
 		return tokenestimate.FromText(raw)
 	}
-	encoded, err := json.Marshal(map[string]any{"messages": messages})
+	encoded, err := json.Marshal(messages)
 	if err != nil {
 		return tokenestimate.FromText(raw)
 	}
-	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+	tokens, err := tokenestimate.FromMessageArray(encoded, "image", 2000)
 	if err != nil {
 		return tokenestimate.FromText(raw)
 	}
@@ -370,15 +375,17 @@ func hasLeadingCompactionMessageWithRole(messages []agenticMessage, role string)
 }
 
 func contentBlocksJSON(content any) ([]json.RawMessage, error) {
+	if raw, ok := content.(json.RawMessage); ok {
+		return requestjson.Array(raw)
+	}
+	if blocks, ok := content.([]json.RawMessage); ok {
+		return blocks, nil
+	}
 	raw, err := json.Marshal(content)
 	if err != nil {
 		return nil, err
 	}
-	var blocks []json.RawMessage
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return nil, err
-	}
-	return blocks, nil
+	return requestjson.Array(raw)
 }
 
 // agenticRequest is the API request body for agentic sends.
@@ -463,11 +470,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.
 	messages := make([]agenticMessage, 0, len(c.History)+2)
 	if state := strings.TrimSpace(opts.NativeCompactionStateJSON); state != "" {
-		checkpointMessages, err := decodeNativeCompactionState(state)
+		checkpointMessages, err := preparedhistory.TakeState(ctx, state, decodeNativeCompactionState)
 		if err != nil {
 			return nil, fmt.Errorf("decode Anthropic native compaction state: %w", err)
 		}
 		messages = append(messages, checkpointMessages...)
+	} else {
+		preparedhistory.ForgetState[[]agenticMessage](ctx)
 	}
 	for _, msg := range c.History {
 		messages = appendHistoryMessage(messages, msg)
@@ -1280,7 +1289,7 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	prepared := opts.preparedMessages
 	if prepared == nil {
 		var err error
-		prepared, err = requestjson.Prepare("messages", messages)
+		prepared, err = prepareAgenticMessages(messages)
 		if err != nil {
 			return err
 		}
@@ -1315,13 +1324,13 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 }
 
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
-	prepared, err := requestjson.Prepare("messages", messages)
+	prepared, err := prepareAgenticMessages(messages)
 	if err != nil {
 		return nil, err
 	}
 	preparedOpts := *opts
 	preparedOpts.preparedMessages = prepared
-	if len(tools) > 0 {
+	{
 		preparedOpts.preparedTools, err = requestjson.Prepare("tools", tools)
 		if err != nil {
 			return nil, err
@@ -1374,8 +1383,16 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
-	originalToolCount := len(tools)
-	tools = filterToolDefinitions(append([]ToolDefinition(nil), tools...), opts.ToolFilter)
+	selected := make([]int, 0, len(tools))
+	permitted := make([]ToolDefinition, 0, len(tools))
+	for i, t := range tools {
+		if opts.ToolFilter == nil || opts.ToolFilter(strings.TrimSpace(t.Name)) {
+			selected = append(selected, i)
+			permitted = append(permitted, t)
+		}
+	}
+	tools = permitted
+	var nativeTools []any
 	compactionStrategy, nativeCompactionEnabled := NativeCompactionStrategy(opts.Model)
 	nativeCompactionEnabled = opts.AutoCompaction && nativeCompactionEnabled
 
@@ -1425,11 +1442,14 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		}
 		for _, st := range serverTools {
 			mixed = append(mixed, st)
+			nativeTools = append(nativeTools, st)
 		}
-		raw, err := json.Marshal(mixed)
-		if err == nil {
-			req.rawTools = raw
-			req.Tools = nil // rawTools takes precedence
+		if opts.preparedTools == nil {
+			raw, err := json.Marshal(mixed)
+			if err == nil {
+				req.rawTools = raw
+				req.Tools = nil
+			}
 		}
 	}
 
@@ -1486,9 +1506,14 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	if opts.preparedMessages != nil {
 		req.Messages = nil
 		metadata := requestjson.Metadata{Fields: map[string]*requestjson.Field{}}
-		if len(tools) > 0 && len(tools) == originalToolCount && !opts.WebSearchEnabled && opts.preparedTools != nil {
+		if (len(tools) > 0 || len(nativeTools) > 0) && opts.preparedTools != nil {
 			req.Tools = nil
-			metadata.Fields["tools"] = opts.preparedTools
+			field, selectErr := opts.preparedTools.Select(selected, nativeTools)
+			if selectErr != nil {
+				return nil, selectErr
+			}
+			req.rawTools = nil
+			metadata.Fields["tools"] = field
 		}
 		metadata.Value = req
 		body, err = opts.preparedMessages.Marshal(metadata)
@@ -1671,7 +1696,27 @@ func (c *Client) parseAgenticStreamCapturing(
 			Error        json.RawMessage `json:"error,omitempty"`
 			RequestID    string          `json:"request_id,omitempty"`
 		}
-		if err := json.Unmarshal(data, &event); err != nil {
+		if err := requestjson.Object(data, func(key string, raw json.RawMessage) error {
+			switch strings.ToLower(key) {
+			case "type":
+				return json.Unmarshal(raw, &event.Type)
+			case "index":
+				return json.Unmarshal(raw, &event.Index)
+			case "request_id":
+				return json.Unmarshal(raw, &event.RequestID)
+			case "content_block":
+				event.ContentBlock = raw
+			case "delta":
+				event.Delta = raw
+			case "message":
+				event.Message = raw
+			case "usage":
+				event.Usage = raw
+			case "error":
+				event.Error = raw
+			}
+			return nil
+		}); err != nil {
 			continue
 		}
 
@@ -2059,4 +2104,31 @@ func anthropicProviderResultContentRaw(textValue, rawValue string) json.RawMessa
 		return nil
 	}
 	return json.RawMessage(raw)
+}
+
+// Preserve restored native content while encoding the small message envelope.
+func prepareAgenticMessages(messages []agenticMessage) (*requestjson.Field, error) {
+	if messages == nil {
+		return requestjson.PrepareItems("messages", nil)
+	}
+	items := make([]any, 0, len(messages))
+	for _, m := range messages {
+		raw, ok := m.Content.(json.RawMessage)
+		if !ok {
+			items = append(items, m)
+			continue
+		}
+		field, err := requestjson.PrepareRaw("content", raw)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := field.Marshal(struct {
+			Role string `json:"role"`
+		}{m.Role})
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, json.RawMessage(encoded))
+	}
+	return requestjson.PrepareItems("messages", items)
 }

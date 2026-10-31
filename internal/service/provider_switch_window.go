@@ -133,11 +133,12 @@ func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, 
 func recoveryExecutedTools(err error, input []json.RawMessage) bool {
 	var anthropic *anthropicclient.ConversationError
 	var compatible *openaiclient.ConversationError
-	var raw string
+	var messages []json.RawMessage
+	var decodeErr error
 	if errors.As(err, &anthropic) {
-		raw = anthropic.MessagesJSON
+		messages, decodeErr = anthropic.RecoveryRows()
 	} else if errors.As(err, &compatible) {
-		raw = compatible.MessagesJSON
+		messages, decodeErr = compatible.RecoveryRows()
 	} else {
 		return false
 	}
@@ -147,8 +148,7 @@ func recoveryExecutedTools(err error, input []json.RawMessage) bool {
 			known[id] = true
 		}
 	}
-	var messages []json.RawMessage
-	if json.Unmarshal([]byte(raw), &messages) != nil {
+	if decodeErr != nil {
 		return true
 	}
 	for _, message := range messages {

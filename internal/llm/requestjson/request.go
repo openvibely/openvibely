@@ -17,6 +17,10 @@ type Field struct {
 	mu  sync.Mutex
 	key string
 	raw []byte
+	// Item offsets survive Marshal moving raw into a new wire buffer.
+	itemOffsets  [][2]int
+	itemsIndexed bool
+	itemsError   error
 }
 
 func Prepare(key string, value any) (*Field, error) {

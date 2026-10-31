@@ -18,16 +18,20 @@ var AnthropicAgentSystemPrompt string
 //go:embed *.md
 var anthropicPrompts embed.FS
 
+var anthropicSnapshots profileCache
+
 func anthropicSnapshot(model string) string {
 	profile := models.PromptProfileClaudeCode
 	if spec, ok := models.LookupModel(models.ProviderAnthropic, model); ok && spec.PromptProfile != "" {
 		profile = spec.PromptProfile
 	}
-	data, err := anthropicPrompts.ReadFile(string(profile))
-	if err != nil {
-		panic(err)
-	}
-	return string(data)
+	return anthropicSnapshots.get(string(profile), func() string {
+		data, err := anthropicPrompts.ReadFile(string(profile))
+		if err != nil {
+			panic(err)
+		}
+		return string(data)
+	})
 }
 
 func BuildAnthropicAgentSystemPrompt(model, projectInstructions string, workDir ...string) string {

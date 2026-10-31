@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"strings"
 	"sync"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -123,27 +125,41 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 	if state == nil {
 		return
 	}
-	var raw string
+	var original []json.RawMessage
+	var decodeErr error
 	var anthropicFailure *anthropicclient.ConversationError
 	var completionsFailure *openaiclient.ConversationError
 	if errors.As(err, &anthropicFailure) {
-		raw = anthropicFailure.MessagesJSON
+		original, decodeErr = anthropicFailure.RecoveryRows()
 	} else if errors.As(err, &completionsFailure) {
-		raw = completionsFailure.MessagesJSON
+		original, decodeErr = completionsFailure.RecoveryRows()
 	} else {
 		return
 	}
-	var messages []struct {
-		Role      string          `json:"role"`
-		Content   json.RawMessage `json:"content"`
-		ToolCalls json.RawMessage `json:"tool_calls"`
-	}
-	if json.Unmarshal([]byte(raw), &messages) != nil {
+	if decodeErr != nil {
 		return
 	}
-	var original []json.RawMessage
-	if json.Unmarshal([]byte(raw), &original) != nil {
-		return
+	type recoveryMessage struct {
+		Role               string
+		Content, ToolCalls json.RawMessage
+	}
+	messages := make([]recoveryMessage, 0, len(original))
+	for _, raw := range original {
+		var m recoveryMessage
+		if err := jsonview.Object(raw, func(k string, v json.RawMessage) error {
+			switch strings.ToLower(k) {
+			case "role":
+				return json.Unmarshal(v, &m.Role)
+			case "content":
+				m.Content = v
+			case "tool_calls":
+				m.ToolCalls = v
+			}
+			return nil
+		}); err != nil {
+			return
+		}
+		messages = append(messages, m)
 	}
 	history := make([]models.Execution, 0, len(messages))
 	for i, message := range messages {

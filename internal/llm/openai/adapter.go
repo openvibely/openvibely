@@ -923,7 +923,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	defer releaseTransport()
 
-	client.SetCompletionsHistory(buildCompletionsHistory(chatHistory))
+	client.SetCompletionsHistory(preparedhistory.Take(ctx, chatHistory, buildCompletionsHistory))
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	if !isTaskFollowup {
@@ -1225,10 +1225,11 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 func nativeCompactionInputItems(ctx context.Context) []any {
 	raw := strings.TrimSpace(llmcontracts.NativeCompactionStateJSONFromContext(ctx))
 	if raw == "" {
+		preparedhistory.ForgetState[[]any](ctx)
 		return nil
 	}
-	var items []any
-	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+	items, err := preparedhistory.TakeState(ctx, raw, decodeNativeInput)
+	if err != nil {
 		applog.Infof("[openai-adapter] ignoring invalid native compaction checkpoint: %v", err)
 		return nil
 	}

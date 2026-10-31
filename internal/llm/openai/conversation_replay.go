@@ -72,8 +72,8 @@ func buildCompletionsHistory(history []models.Execution) []openaiclient.Completi
 				restored = true
 				continue
 			}
-			var messages []openaiclient.CompletionsHistoryMessage
-			if replay.DecodeTranscript(&messages) == nil && len(messages) > 0 {
+			messages, decodeErr := openaiclient.DecodeCompletionsHistory(replay)
+			if decodeErr == nil && len(messages) > 0 {
 				result = append(result, messages...)
 				restored = true
 			}

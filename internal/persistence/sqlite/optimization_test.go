@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/transcript"
 	"github.com/stretchr/testify/require"
 	"strings"
@@ -166,4 +167,54 @@ func TestStreamOffsetLookupUsesCoveringIndex(t *testing.T) {
 	}
 	require.NoError(t, rows.Err())
 	require.True(t, found)
+}
+
+func TestModelHistoryProjectionIsScoped(t *testing.T) {
+	db, repo, owner := conversationTestRepo(t)
+	ctx := context.Background()
+	original, err := repo.GetByID(ctx, owner.ExecutionID)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE tasks SET category='chat' WHERE id=?`, original.TaskID)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO email_task_context(task_id,email_from,email_message_id,email_session_key) VALUES(?,'sender@example.test','message','session')`, original.TaskID)
+	require.NoError(t, err)
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+		t.Run(string(provider), func(t *testing.T) {
+			scoped := persistence.WithModelHistory(ctx, provider)
+			format, key, _ := persistence.ModelHistoryFormat(scoped)
+			ex := &models.Execution{TaskID: original.TaskID, Status: models.ExecRunning}
+			require.NoError(t, repo.Create(ctx, ex))
+			require.NoError(t, transcript.NewRecorder(repo, models.ConversationOwner{ExecutionID: ex.ID}).Save(ctx, transcript.ReplayHeader{Format: format, ItemsKey: key}, []any{map[string]any{"role": "assistant", "content": "answer"}}))
+			require.NoError(t, repo.Complete(ctx, ex.ID, models.ExecCompleted, "display", "", 0, 0))
+			for _, read := range []func(context.Context) ([]models.Execution, error){
+				func(c context.Context) ([]models.Execution, error) {
+					return repo.ListByTaskChronological(c, original.TaskID)
+				},
+				func(c context.Context) ([]models.Execution, error) {
+					return repo.ListByTaskChronologicalLimit(c, original.TaskID, 100)
+				},
+				func(c context.Context) ([]models.Execution, error) { return repo.ListChatHistory(c, "default", 100) },
+				func(c context.Context) ([]models.Execution, error) {
+					return repo.ListEmailChatHistory(c, "default", "session", 100)
+				},
+			} {
+				for _, c := range []context.Context{ctx, scoped} {
+					rows, err := read(c)
+					require.NoError(t, err)
+					found := false
+					for _, r := range rows {
+						if r.ID == ex.ID {
+							found = true
+							if c == ctx {
+								require.Equal(t, "display", r.Output)
+							} else {
+								require.Empty(t, r.Output)
+							}
+						}
+					}
+					require.True(t, found)
+				}
+			}
+		})
+	}
 }

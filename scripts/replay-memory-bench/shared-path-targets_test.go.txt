@@ -1,0 +1,49 @@
+// Copy into internal/llm/requestjson in an isolated candidate checkout.
+// These isolate encoding stages; they do not measure HTTP transport or permissions.
+package requestjson
+
+import (
+ "encoding/json"
+ "reflect"
+ "strings"
+ "testing"
+)
+
+func BenchmarkSharedRawHTTPEncoding(b *testing.B) {
+ items := make([]any, 20)
+ for i := range items {
+  raw, err := json.Marshal(map[string]any{"role":"assistant", "content":strings.Repeat("text<&\n", 8192)})
+  if err != nil { b.Fatal(err) }
+  items[i] = json.RawMessage(raw)
+ }
+ payload := map[string]any{"model":"fixture", "input":items, "stream":true}
+ old, err := json.Marshal(payload); if err != nil { b.Fatal(err) }
+ next, err := MarshalArrayField(payload,"input"); if err != nil { b.Fatal(err) }
+ var a, c any
+ if err = json.Unmarshal(old,&a); err != nil { b.Fatal(err) }
+ if err = json.Unmarshal(next,&c); err != nil { b.Fatal(err) }
+ if !reflect.DeepEqual(a,c) { b.Fatal("encoding changed") }
+ b.Run("marshal",func(b *testing.B) { b.ReportAllocs(); for b.Loop() { if _,err:=json.Marshal(payload);err!=nil {b.Fatal(err)} } })
+ b.Run("shared_raw",func(b *testing.B) { b.ReportAllocs(); for b.Loop() { if _,err:=MarshalArrayField(payload,"input");err!=nil {b.Fatal(err)} } })
+}
+
+func BenchmarkSharedFilteredNativeSchemas(b *testing.B) {
+ tools := make([]any, 32)
+ indices := make([]int, 0, 16)
+ filtered := make([]any, 0, 17)
+ for i := range tools {
+  tools[i] = map[string]any{"name":strings.Repeat("x", i+1), "description":strings.Repeat("description<&\n",512), "input_schema":map[string]any{"type":"object"}}
+  if i%2==0 { indices=append(indices,i); filtered=append(filtered,tools[i]) }
+ }
+ native := []any{map[string]any{"type":"web_search", "name":"search"}}
+ filtered=append(filtered,native...)
+ prepared,err:=PrepareItems("tools",tools); if err!=nil {b.Fatal(err)}
+ selected,err:=prepared.Select(indices,native); if err!=nil {b.Fatal(err)}
+ old,err:=json.Marshal(filtered); if err!=nil {b.Fatal(err)}
+ var a,c any
+ if err=json.Unmarshal(old,&a);err!=nil {b.Fatal(err)}
+ if err=json.Unmarshal(selected.JSON(),&c);err!=nil {b.Fatal(err)}
+ if !reflect.DeepEqual(a,c) {b.Fatal("selection changed")}
+ b.Run("marshal",func(b *testing.B) {b.ReportAllocs();for b.Loop(){if _,err:=json.Marshal(filtered);err!=nil{b.Fatal(err)}}})
+ b.Run("shared_selection",func(b *testing.B) {b.ReportAllocs();for b.Loop(){if _,err:=prepared.Select(indices,native);err!=nil{b.Fatal(err)}}})
+}

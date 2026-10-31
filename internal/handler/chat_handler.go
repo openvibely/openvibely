@@ -371,7 +371,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 
 	// Load recent chat history and filter for conversation context
-	chatHistory, err := h.execRepo.ListChatHistory(c.Request().Context(), projectID, chatHistoryLimit)
+	chatHistory, err := h.execRepo.ListChatHistory(persistence.WithModelHistory(c.Request().Context(), agent.Provider), projectID, chatHistoryLimit)
 	if err != nil {
 		applog.Infof("[handler] ChatSend error loading chat history: %v", err)
 		chatHistory = []models.Execution{}

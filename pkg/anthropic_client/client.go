@@ -13,12 +13,12 @@
 package anthropicclient
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
 	"net/http"
 	"os"
@@ -501,25 +501,23 @@ func (c *Client) handleResponse(body io.Reader) (*Response, error) {
 }
 
 func (c *Client) handleStream(body io.Reader, onDelta func(string)) (*Response, error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	scanner := streamdecode.Scanner(body, 1024*1024)
 	var collected strings.Builder
 	var result Response
 	terminal := false
 
 	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := streamdecode.Data(scanner.Bytes(), true)
+		if !ok {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
+		if bytes.Equal(data, []byte("[DONE]")) {
 			terminal = true
 			break
 		}
 
 		var event StreamEvent
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
+		if err := json.Unmarshal(data, &event); err != nil {
 			continue
 		}
 

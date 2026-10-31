@@ -980,7 +980,7 @@ func (r *ExecutionRepo) ListEmailChatHistory(ctx context.Context, projectID, ses
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT `+executionSelectColumnsAliasLight+`
+	rows, err := r.db.QueryContext(ctx, `SELECT `+modelHistoryQuery(ctx, executionSelectColumnsAliasLight, true)+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 JOIN email_task_context etc ON etc.task_id = t.id
@@ -999,7 +999,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 	}
 	query, args := chatHistoryPageSQL(projectID, beforeExecID, limit)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, modelHistoryQuery(ctx, query, true), args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing chat history: %w", err)
 	}
@@ -1077,7 +1077,7 @@ func scanTaskThreadExecutions(rows *sql.Rows, capacity int) ([]models.Execution,
 // ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).
 func (r *ExecutionRepo) ListByTaskChronological(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC`, taskID)
+		`SELECT `+modelHistoryQuery(ctx, executionSelectColumnsLight, false)+` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions chronological: %w", err)
 	}
@@ -1122,7 +1122,7 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 	}
 	query, args := taskExecutionPageSQL(taskID, beforeExecID, limit)
 
-	rows, err := r.db.QueryContext(ctx, query, args...)
+	rows, err := r.db.QueryContext(ctx, modelHistoryQuery(ctx, query, false), args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions chronological page: %w", err)
 	}
@@ -1672,22 +1672,33 @@ func (r *ExecutionRepo) ListTaskCompletionsHistory(ctx context.Context, taskID s
 }
 
 func (r *ExecutionRepo) listTaskNativeHistory(ctx context.Context, taskID string, limit int, format, itemsKey string) ([]models.Execution, error) {
-	if limit <= 0 {
-		return []models.Execution{}, nil
+	provider := models.ProviderOpenAICompatible
+	if itemsKey == "responses_input" {
+		provider = models.ProviderOpenAI
 	}
-	projection := `CASE WHEN status='completed' AND EXISTS (
- SELECT 1 FROM conversation_items c WHERE c.execution_id=executions.id
+	if itemsKey == "messages" {
+		provider = models.ProviderAnthropic
+	}
+	return r.listTaskExecutionPage(persistence.WithModelHistory(ctx, provider), taskID, "", limit)
+}
+
+func modelHistoryQuery(ctx context.Context, query string, alias bool) string {
+	format, itemsKey, ok := persistence.ModelHistoryFormat(ctx)
+	if !ok {
+		return query
+	}
+	owner, output := "executions", executionOutputSelect
+	if alias {
+		owner, output = "e", executionOutputSelectAlias
+	}
+	// Format and key are fixed constants from ModelHistoryFormat, never input SQL.
+	projection := `CASE WHEN ` + owner + `.status='completed' AND EXISTS (
+ SELECT 1 FROM conversation_items c WHERE c.execution_id=` + owner + `.id
  AND c.generation=0 AND c.is_current=1 AND c.operation='put' AND c.lane='metadata'
  AND c.item_id LIKE 'replay:%:header'
- AND json_extract(c.payload,'$.format')=?
- AND COALESCE(json_extract(c.payload,'$.items_key'),'')=?
+ AND json_extract(c.payload,'$.format')='` + format + `'
+ AND COALESCE(json_extract(c.payload,'$.items_key'),'')='` + itemsKey + `'
  AND json_extract(c.payload,'$.item_count')>0
- ) THEN '' ELSE ` + executionOutputSelect + ` END`
-	columns := strings.Replace(executionSelectColumnsLight, executionOutputSelect, projection, 1)
-	rows, err := r.db.QueryContext(ctx, `SELECT `+columns+` FROM executions WHERE task_id=? ORDER BY started_at DESC,rowid DESC LIMIT ?`, format, itemsKey, taskID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanExecutionsNewestFirstAsChronological(rows)
+ ) THEN '' ELSE ` + output + ` END`
+	return strings.Replace(query, output, projection, 1)
 }

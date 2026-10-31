@@ -754,7 +754,7 @@ func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload m
 	delete(payload, "type")
 	delete(payload, "client_metadata")
 	payload["stream"] = true
-	body, err := json.Marshal(payload)
+	body, err := requestjson.MarshalArrayField(payload, "input")
 	if err != nil {
 		return nil, fmt.Errorf("marshal Responses HTTP request: %w", err)
 	}

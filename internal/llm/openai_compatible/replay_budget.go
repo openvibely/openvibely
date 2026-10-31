@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
-	"unicode/utf8"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 // EstimateHistoryTokens uses the same replay representation as the adapter,
@@ -37,11 +38,19 @@ func EstimateHistoryTokensContext(ctx context.Context, history []models.Executio
 			if reasoning != "" {
 				message.ReasoningContent = "x"
 			}
+			argumentBytes := 0
+			if len(message.ToolCalls) > 0 {
+				message.ToolCalls = append([]openaiclient.CompletionsToolCall(nil), message.ToolCalls...)
+				for i := range message.ToolCalls {
+					argumentBytes += requestjson.StringSize(message.ToolCalls[i].Function.Arguments) - 2
+					message.ToolCalls[i].Function.Arguments = ""
+				}
+			}
 			raw, err := json.Marshal(message)
 			if err != nil {
 				return 0
 			}
-			size += len(raw) + jsonStringBytes(content) - 2
+			size += len(raw) + argumentBytes + jsonStringBytes(content) - 2
 			if reasoning != "" {
 				size += jsonStringBytes(reasoning) - 3
 			}
@@ -58,39 +67,4 @@ func EstimateHistoryTokensContext(ctx context.Context, history []models.Executio
 
 // Match encoding/json's default string escaping, including HTML, invalid UTF-8,
 // and JavaScript line separators. Count bytes without allocating escaped text.
-func jsonStringBytes(s string) int {
-	n := 2
-	for i := 0; i < len(s); {
-		c := s[i]
-		if c < utf8.RuneSelf {
-			switch c {
-			case '"', '\\', '\b', '\f', '\n', '\r', '\t':
-				n += 2
-			case '<', '>', '&':
-				n += 6
-			default:
-				if c < 0x20 {
-					n += 6
-				} else {
-					n++
-				}
-			}
-			i++
-			continue
-		}
-		r, width := utf8.DecodeRuneInString(s[i:])
-		if width == 1 {
-			// Let the encoder normalize malformed UTF-8; its replacement spelling
-			// can differ between JSON implementations. Valid text stays allocation-free.
-			raw, _ := json.Marshal(s)
-			return len(raw)
-		}
-		if r == '\u2028' || r == '\u2029' {
-			n += 6
-		} else {
-			n += width
-		}
-		i += width
-	}
-	return n
-}
+func jsonStringBytes(s string) int { return requestjson.StringSize(s) }

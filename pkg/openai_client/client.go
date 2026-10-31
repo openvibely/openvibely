@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"net/http"
 	"net/url"
@@ -646,7 +647,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return result, nil
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := requestjson.MarshalArrayField(payload, "input")
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -942,6 +943,12 @@ func parseStreamingEvents(scanner *responsesEventIterator, onDelta func(string),
 				} else {
 					emit(text.Delta)
 				}
+			}
+			continue
+		}
+		if typ == "response.function_call_arguments.delta" && json.Valid(data) {
+			if emitter != nil {
+				emitter.FlushBoundary()
 			}
 			continue
 		}

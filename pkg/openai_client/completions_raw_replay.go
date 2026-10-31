@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"github.com/openvibely/openvibely/internal/models"
 	"reflect"
 )
 
@@ -71,4 +72,23 @@ func (m CompletionsHistoryMessage) wireReplay() json.RawMessage {
 		return nil
 	}
 	return cached.raw
+}
+
+// DecodeCompletionsHistory applies native immutable-row reuse to either adapter;
+// legacy serialized histories keep their existing decoding behavior.
+func DecodeCompletionsHistory(replay models.ExecutionReplayMessage) ([]CompletionsHistoryMessage, error) {
+	if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "array" {
+		out := make([]CompletionsHistoryMessage, 0, len(replay.Rows.Items))
+		for _, raw := range replay.Rows.Items {
+			m, err := DecodeCompletionsReplay(raw)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, m)
+		}
+		return out, nil
+	}
+	var out []CompletionsHistoryMessage
+	err := replay.DecodeTranscript(&out)
+	return out, err
 }

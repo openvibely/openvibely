@@ -534,7 +534,7 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 		}
 		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
 	}
-	priorExecs, _ := opts.ExecRepo.ListByTaskChronological(ctx, task.ID)
+	priorExecs, _ := opts.ExecRepo.ListByTaskChronological(persistence.WithModelHistory(ctx, agent.Provider), task.ID)
 	priorHistory := priorExecs
 	if opts.FilterHistory != nil {
 		priorHistory = opts.FilterHistory(priorExecs, exec.ID)
@@ -1068,7 +1068,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	history := []models.Execution{}
 	if opts.ListChatHistory != nil {
 		var err error
-		history, err = opts.ListChatHistory(ctx, opts.ProjectID)
+		history, err = opts.ListChatHistory(persistence.WithModelHistory(ctx, opts.Agent.Provider), opts.ProjectID)
 		if err != nil {
 			history = []models.Execution{}
 		}

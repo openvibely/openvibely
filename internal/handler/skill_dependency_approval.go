@@ -450,7 +450,7 @@ func (h *Handler) startInstallationContinuation(ctx context.Context, record pers
 		// Reuse the direct task runner's context preparation after worker admission.
 		params.DeferHistoryLoad = true
 	} else {
-		history, e := h.execRepo.ListChatHistory(ctx, task.ProjectID, chatHistoryLimit)
+		history, e := h.execRepo.ListChatHistory(persistence.WithModelHistory(ctx, agent.Provider), task.ProjectID, chatHistoryLimit)
 		if e != nil {
 			return fail(e)
 		}

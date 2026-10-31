@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"io"
 	"strings"
 )
@@ -14,16 +15,24 @@ import (
 // content are inspected; tools, text, and arbitrary tool arguments remain text.
 // The serialized request is never modified.
 func FromMessagesJSON(encoded []byte, imageType string, imageTokens int) (int, error) {
-	var request struct {
-		Messages []struct {
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
+	if bytes.Equal(bytes.TrimSpace(encoded), []byte("null")) {
+		return FromByteCount(len(encoded)), nil
 	}
-	if err := json.Unmarshal(encoded, &request); err != nil {
+	var messages json.RawMessage
+	err := jsonview.Object(encoded, func(k string, v json.RawMessage) error {
+		if strings.EqualFold(k, "messages") {
+			messages = v
+		}
+		return nil
+	})
+	if err != nil {
 		return 0, err
 	}
-	adjustment := messageImageAdjustment(request.Messages, imageType, imageTokens)
-	return FromByteCount(len(encoded) + adjustment), nil
+	if len(messages) == 0 {
+		return FromByteCount(len(encoded)), nil
+	}
+	adjustment, err := MessageArrayAdjustment(messages, imageType, imageTokens)
+	return FromByteCount(len(encoded) + adjustment), err
 }
 
 // MessageArrayAdjustment returns the image byte adjustment for a prepared
@@ -104,6 +113,9 @@ func contentFields(raw []byte, block bool) (content []byte, kind string, err err
 }
 
 func contentImageAdjustment(content []byte, imageType string, imageTokens int) int {
+	return contentImageAdjustmentSized(content, imageType, imageTokens, false)
+}
+func contentImageAdjustmentSized(content []byte, imageType string, imageTokens int, normalize bool) int {
 	d := jsontext.NewDecoder(bytes.NewBuffer(content), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
 	token, err := d.ReadToken()
 	if err != nil || token.Kind() != '[' {
@@ -120,9 +132,15 @@ func contentImageAdjustment(content []byte, imageType string, imageTokens int) i
 			continue
 		}
 		if kind == imageType {
-			adjustment += ByteBudget(imageTokens) - len(block)
+			size := len(block)
+			if normalize {
+				if n, err := jsonview.EncodedSize(block); err == nil {
+					size = n
+				}
+			}
+			adjustment += ByteBudget(imageTokens) - size
 		} else if kind == "tool_result" {
-			adjustment += contentImageAdjustment(nested, imageType, imageTokens)
+			adjustment += contentImageAdjustmentSized(nested, imageType, imageTokens, normalize)
 		}
 	}
 	return adjustment
@@ -176,4 +194,57 @@ func FromContentBlocks(encoded []byte, imageType string, imageTokens int) int {
 	}
 	adjustment := contentImageAdjustment(encoded, imageType, imageTokens)
 	return FromByteCount(len(encoded) + len(`{"messages":[{"content":}]}`) + adjustment)
+}
+
+// FromLegacyTranscript preserves the old image_content normalization and
+// request-envelope size, while borrowing message fields instead of copying and
+// re-encoding the entire stored transcript.
+func FromLegacyTranscript(raw []byte, imageType string, imageTokens int) (int, error) {
+	rows, err := jsonview.Array(raw)
+	if err != nil || rows == nil {
+		return FromMessagesJSON(raw, imageType, imageTokens)
+	}
+	size := len(`{"messages":[]}`)
+	adjustment := 0
+	for i, row := range rows {
+		if i > 0 {
+			size++
+		}
+		if bytes.Equal(bytes.TrimSpace(row), []byte("null")) {
+			size += 4
+			continue
+		}
+		fields := map[string]json.RawMessage{}
+		if err := jsonview.Object(row, func(k string, v json.RawMessage) error { fields[k] = v; return nil }); err != nil {
+			return 0, err
+		}
+		if value := fields["image_content"]; len(value) > 0 {
+			fields["content"] = value
+			delete(fields, "image_content")
+		}
+		size += 2
+		j := 0
+		// The legacy encoder sorts map keys; its case-insensitive content decoder
+		// consequently selects the last spelling. Match that choice for adjustment.
+		selected := ""
+		var content json.RawMessage
+		for k, v := range fields {
+			if j > 0 {
+				size++
+			}
+			j++
+			key, _ := json.Marshal(k)
+			n, err := jsonview.EncodedSize(v)
+			if err != nil {
+				return 0, err
+			}
+			size += len(key) + 1 + n
+			if strings.EqualFold(k, "content") && (content == nil || k > selected) {
+				selected = k
+				content = v
+			}
+		}
+		adjustment += contentImageAdjustmentSized(content, imageType, imageTokens, true)
+	}
+	return FromByteCount(size + adjustment), nil
 }
