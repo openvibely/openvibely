@@ -11,6 +11,9 @@ templ diffFileIndexScript() {
    var key = viewer.dataset.stateKey || 'default';
    return window._diffFileState[key] || (window._diffFileState[key] = {});
   }
+  window._diffCardPath = function(card) {
+   return card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
+  };
   window._diffFileIndex = function(viewer) {
    if (!viewer._fileIndex) viewer._fileIndex = Array.from(viewer.querySelectorAll('[data-diff-explorer-files] [data-diff-index]')).map(function(node) {
     return {index:Number(node.dataset.diffIndex), path:node.dataset.diffPath, revision:node.dataset.fileRevision, codeRevision:node.dataset.codeRevision,
@@ -66,7 +69,7 @@ templ diffFileIndexScript() {
     window._prepareDiffPanel(next,panel);
     var slots = new Map(Array.from(panel.children, function(slot) { return [slot.dataset.diffFilePath,slot]; }));
     oldPanel.querySelectorAll('.diff-file-card').forEach(function(card) {
-     var path = card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
+     var path = window._diffCardPath(card);
      var slot = slots.get(path);
      if (!slot || !card.dataset.fileRevision || card.dataset.fileRevision !== slot.dataset.fileRevision) return;
      var index = Number(slot.id.replace('diff-file-','').replace('split-',''));

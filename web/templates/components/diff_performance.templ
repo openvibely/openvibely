@@ -27,7 +27,7 @@ templ diffViewerPerformanceScript() {
     var top = scroller.getBoundingClientRect().top;
     var snapshot = {heights:new Map(), anchor:null};
     panel.querySelectorAll('.diff-file-card, .diff-file-slot').forEach(function(card) {
-     var path = card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
+     var path = window._diffCardPath(card);
      if (!path) return;
      var rect = card.getBoundingClientRect();
      snapshot.heights.set(path, rect.height);
@@ -59,7 +59,7 @@ templ diffViewerPerformanceScript() {
     if (!panel || !scroller) return;
     var target = null;
     panel.querySelectorAll('.diff-file-card, .diff-file-slot').forEach(function(card) {
-     var path = card.dataset.diffFilePath || (card.querySelector('[data-copy-path]') || {}).dataset?.copyPath;
+     var path = window._diffCardPath(card);
      if (!path) return;
      if (reserve && card.hasAttribute('data-diff-lazy-url') && !card.hasAttribute('data-collapsed') && !card.querySelector('[data-collapsed]')) {
       var height = snapshot.heights.get(path);
