@@ -167,7 +167,7 @@ window.addEventListener('DOMContentLoaded',function(){
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, r)
 			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte(strings.Replace(rec.Body.String(), "</body>", runner+"</body>", 1)))
+			_, _ = w.Write([]byte(strings.Replace(strings.Replace(rec.Body.String(), "<head>", `<head><script>try{localStorage.setItem('openvibely.outputDetail','full')}catch(_){}</script>`, 1), "</body>", runner+"</body>", 1)))
 			return
 		}
 		e.ServeHTTP(w, r)

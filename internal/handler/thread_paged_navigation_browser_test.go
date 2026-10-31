@@ -284,6 +284,7 @@ func testTaskPagedCachedNavigation(t *testing.T, mode string) {
 			// DOMContentLoaded-only listeners miss the error that caused a lazy
 			// transcript never to mount, leaving only an unhelpful timeout.
 			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>
+try{localStorage.setItem('openvibely.outputDetail','full')}catch(_){}
 window._pagedStartupErrors=[];
 window.addEventListener('error',function(event){
  const target=event.target;
