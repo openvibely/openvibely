@@ -19,6 +19,9 @@ import (
 	"github.com/openvibely/openvibely/web/static"
 )
 
+// Bare fixtures omit the app layout, which owns workspace navigation.
+const lifecycleWorkspaceNavigationStub = "<script>window.workspaceNavigation={commit:function(){},registerTask:function(){return function(){};}};</script>"
+
 func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 
@@ -392,7 +395,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	// The page string is populated after the handler closure is created; requests
 	// cannot arrive before the browser is started below.
@@ -578,7 +581,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-refresh-failure.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -766,7 +769,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-full-refresh-failure.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -971,7 +974,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-anchor.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -1143,7 +1146,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -1345,7 +1348,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed-failure.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -1580,7 +1583,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-reconnect.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -1779,7 +1782,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-older-failure.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -1987,7 +1990,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-swap.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -2194,7 +2197,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{height:80px!important;min-height:80px!important;box-sizing:border-box;}#lifecycle-activity-list [data-lifecycle-execution-id=\"event-new\"]{height:240px!important;}#task-detail-content.replacement #lifecycle-activity-list [data-lifecycle-execution-id=\"event-4\"]{height:200px!important;} .hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{height:80px!important;min-height:80px!important;box-sizing:border-box;}#lifecycle-activity-list [data-lifecycle-execution-id=\"event-new\"]{height:240px!important;}#task-detail-content.replacement #lifecycle-activity-list [data-lifecycle-execution-id=\"event-4\"]{height:200px!important;} .hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-anchor.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -2420,7 +2423,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:80px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:80px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-retained-finalization.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -2563,7 +2566,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-none{flex:none}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.card-body>p{flex-grow:1}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\">" + lifecycleWorkspaceNavigationStub + "<style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-none{flex:none}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.card-body>p{flex-grow:1}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-fill.stderr")
 	stderrFile, err := os.Create(stderrPath)
