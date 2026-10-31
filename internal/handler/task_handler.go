@@ -1961,7 +1961,7 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 	}
 	// Code snapshots are cached; annotations are always read fresh.
 	comments := h.loadTaskReviewComments(ctx, taskID)
-	return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, comments, chunk, len(chunks), prepared.revision))
+	return render(c, http.StatusOK, components.DiffChunk(chunks, prepared.index, view, taskID, comments, chunk, prepared.revision))
 }
 
 // GetTaskChangesLive returns only the diff viewer fragment for realtime updates.

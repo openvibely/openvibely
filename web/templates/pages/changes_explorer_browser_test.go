@@ -99,7 +99,7 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 				http.Error(w, "invalid chunk", 400)
 				return
 			}
-			if err := components.DiffChunk(chunks[chunk], index, view, task.ID, nil, chunk, len(chunks), components.DiffFileRevision(files[index], nil)).Render(r.Context(), w); err != nil {
+			if err := components.DiffChunk(chunks, index, view, task.ID, nil, chunk, components.DiffFileRevision(files[index], nil)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/summary":

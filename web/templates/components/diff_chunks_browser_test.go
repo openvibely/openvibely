@@ -75,6 +75,8 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
  assert(panel().querySelectorAll('[data-chunk-index]').length>=150,'large file did not become chunked');
  assert(panel().querySelectorAll('tr.diff-review-line').length<=600,'initial DOM unbounded');
  const first=panel().querySelector('[data-chunk-index="0"]');
+ const loadedHeight=first.getBoundingClientRect().height,chunkSlots=panel().querySelectorAll('[data-chunk-index]');
+ assert(Math.abs(parseFloat(chunkSlots[1].style.minHeight)-loadedHeight)<=2,'unloaded chunk height does not match a loaded chunk');
  const distant=panel().querySelector('[data-chunk-index="10"]');
  distant.scrollIntoView();
  await wait(()=>distant.querySelector('tr[data-new-line="2001"]'));
@@ -284,7 +286,7 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 				http.Error(w, "invalid", 400)
 				return
 			}
-			if err := DiffChunk(chunks[chunk], 0, view, "chunk-task", comments, chunk, len(chunks), DiffCodeRevision(file)).Render(r.Context(), w); err != nil {
+			if err := DiffChunk(chunks, 0, view, "chunk-task", comments, chunk, DiffCodeRevision(file)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		default:
