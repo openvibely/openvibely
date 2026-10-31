@@ -1,5 +1,15 @@
 # Archived benchmark evidence
 
+## Current main versus optimized branch — main 85d0755c1, branch 611d5107f
+
+[Repository report](MAIN_CURRENT_RESULTS.md) · [Download report](/files/8b0a285d41f11e6007c7fc6995c92acc?project_id=b184292efa07a415fc59967a5fc328d1) · [Raw measurements and reusable profiles](/files/b067fb7b0bce03a3c223a06a8c214f47?project_id=b184292efa07a415fc59967a5fc328d1).
+
+Controlled main-versus-branch comparison across all three providers: 72 measured runs (2,376 turns), 12 smoke runs and six separate diagnostics passed. Two attempts overlapping unrelated Go tests were excluded and retried. The report separately compares the previous saved final candidate with this branch; that historical comparison does not isolate the later code changes or machine variation. The flow harness, mock peer sources and compiler version match the previous experiment.
+
+Allocation volume and median process RSS fell in every scenario versus main; compatible single-task text CPU increased slightly. Delivery-gap, elapsed-time and storage tradeoffs are reported. Profiles, six-turn tables, per-run ranges, phase attribution, binary/source metadata, exact main-to-branch patch and SHA-256 file manifest are archived. App databases, fixtures and binaries are omitted. Frozen binaries were hash-verified after measurement; the baseline source checkout was already absent at final cleanup, and the remaining clean candidate checkout was removed.
+
+Archive: 5,783,873 bytes; SHA256 `dd747b6c808cd7bec600153e65e6d90aaf2b8a391e9a115e5b9ee62a21345b7c`.
+
 ## Anthropic retained replay fix
 
 Previous task branch `df2b9bf49` versus the same branch with corrected text-only output, native-history display omission and single replay decoding. This is not main versus branch. Twelve timing runs (396 turns), two separate heap diagnostic runs and two smoke scenarios passed.
