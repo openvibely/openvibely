@@ -35,6 +35,34 @@ func TestDiffReadLockCancellation(t *testing.T) {
 	lock.RUnlock()
 }
 
+func TestDiffReadLockNotStarvedByQueuedWriter(t *testing.T) {
+	var lock sync.RWMutex
+	lock.Lock()
+	done := make(chan bool, 1)
+	go func() { done <- diffReadLock(context.Background(), &lock) }()
+	time.Sleep(20 * time.Millisecond)
+	nextWriter := make(chan struct{})
+	go func() {
+		lock.Lock()
+		close(nextWriter)
+		lock.Unlock()
+	}()
+	time.Sleep(20 * time.Millisecond)
+	lock.Unlock()
+	select {
+	case acquired := <-done:
+		if !acquired {
+			t.Fatal("reader gave up")
+		}
+	case <-nextWriter:
+		t.Fatal("later writer acquired the lock before the queued reader")
+	case <-time.After(time.Second):
+		t.Fatal("queued reader starved by later writer")
+	}
+	lock.RUnlock()
+	<-nextWriter
+}
+
 func TestDiffFileGitCancellation(t *testing.T) {
 	for _, stage := range []string{"canonical", "diff"} {
 		t.Run(stage, func(t *testing.T) {
