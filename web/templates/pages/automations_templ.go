@@ -6112,7 +6112,7 @@ func automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectI
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var313), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var313), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6181,7 +6181,7 @@ func automationBuilderMoreActions(page models.AutomationBuilderPage, currentProj
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var315), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var315), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
