@@ -33,8 +33,7 @@ func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
 func progressiveDiffMetas(files []DiffFile, comments []models.ReviewComment) []DiffFileRenderMeta {
 	result := make([]DiffFileRenderMeta, 0, len(files))
 	for index, file := range files {
-		lines, chars := diffFileMetrics(file)
-		result = append(result, DiffFileRenderMeta{Index: index, File: file, LineCount: lines, CharCount: chars, AutoLoad: true, Revision: DiffFileRevision(file, comments), CodeRevision: DiffCodeRevision(file)})
+		result = append(result, DiffFileRenderMeta{Index: index, File: file, Revision: DiffFileRevision(file, comments), CodeRevision: DiffCodeRevision(file)})
 	}
 	return result
 }

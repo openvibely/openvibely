@@ -69,7 +69,7 @@ func worktreeActionsFixture(t *testing.T, runner string, results chan string) *h
 			return
 		}
 		if r.URL.Path == "/tasks/layer-task/changes/file" {
-			if err := components.LoadDiffFileCard(diff, 0, r.URL.Query().Get("view"), task.ID, nil, true).Render(r.Context(), w); err != nil {
+			if err := components.DiffChunk(components.ParseDiffOutput(diff)[0], 0, r.URL.Query().Get("view"), task.ID, nil, true, 0, 1, components.DiffCodeRevision(components.ParseDiffOutput(diff)[0])).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 			return

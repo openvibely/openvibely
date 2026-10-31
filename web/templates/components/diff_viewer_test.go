@@ -655,30 +655,6 @@ func TestFileCountSuffix(t *testing.T) {
 	}
 }
 
-func TestShouldDefaultExpand(t *testing.T) {
-	tests := []struct {
-		name      string
-		fileCount int
-		want      bool
-	}{
-		{"0 files expanded", 0, true},
-		{"1 file expanded", 1, true},
-		{"2 files expanded", 2, true},
-		{"3 files expanded", 3, true},
-		{"4 files expanded", 4, true},
-		{"10 files expanded", 10, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := shouldDefaultExpand(tt.fileCount)
-			if got != tt.want {
-				t.Errorf("shouldDefaultExpand(%d) = %v, want %v", tt.fileCount, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestDiffViewer_EmptyDiff(t *testing.T) {
 	var buf bytes.Buffer
 	err := DiffViewer("", "", nil, "inline").Render(context.Background(), &buf)
@@ -1149,7 +1125,7 @@ func TestDiffViewerWithReview_WithComments(t *testing.T) {
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := LoadDiffFileCard(diff, 0, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1335,7 +1311,7 @@ func TestDiffViewerWithReview_SplitViewHasAddCommentButtons(t *testing.T) {
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := LoadDiffFileCard(diff, 0, view, "task123", nil, true).Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", nil, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1500,7 +1476,7 @@ func TestDiffViewerWithReview_InlineCommentRowsSupportEditAndDelete(t *testing.T
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := LoadDiffFileCard(diff, 0, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1538,94 +1514,6 @@ func TestDiffViewerWithReview_InlineCommentRowsSupportEditAndDelete(t *testing.T
 	}
 	if strings.Contains(body, `comment.ReviewedBy`) || strings.Contains(body, `comment.FilePath`) {
 		t.Error("should not show user or line metadata inside yellow comment box")
-	}
-}
-
-func TestBuildDiffRenderMetas_AutoLoadVsDeferred(t *testing.T) {
-	autoFile := DiffFile{
-		Path: "small.txt",
-		Hunks: []DiffHunk{
-			{Header: "@@ -1,1 +1,2 @@", Lines: make([]DiffLine, autoLoadFileDiffLines-10)},
-		},
-	}
-	deferredFile := DiffFile{
-		Path: "large.txt",
-		Hunks: []DiffHunk{
-			{Header: "@@ -1,1 +1,2 @@", Lines: make([]DiffLine, autoLoadFileDiffLines+50)},
-		},
-	}
-
-	metas := buildDiffRenderMetas([]DiffFile{autoFile, deferredFile})
-	if len(metas) != 2 {
-		t.Fatalf("expected 2 metas, got %d", len(metas))
-	}
-	if !metas[0].AutoLoad {
-		t.Fatal("expected first file to auto-load")
-	}
-	if !metas[1].CanLoadOnDemand {
-		t.Fatal("expected second file to be deferred and loadable on demand")
-	}
-}
-
-func TestBuildDiffRenderMetas_SingleFileHardLimitBlocksLoad(t *testing.T) {
-	tooBig := DiffFile{
-		Path: "huge.txt",
-		Hunks: []DiffHunk{
-			{Header: "@@ -1,1 +1,2 @@", Lines: make([]DiffLine, maxLoadableFileDiffLines+10)},
-		},
-	}
-
-	metas := buildDiffRenderMetas([]DiffFile{tooBig})
-	if len(metas) != 1 {
-		t.Fatalf("expected 1 meta, got %d", len(metas))
-	}
-	if metas[0].AutoLoad || metas[0].CanLoadOnDemand {
-		t.Fatal("expected oversized single file to be blocked")
-	}
-	if !strings.Contains(metas[0].BlockedReason, "single-file limit") {
-		t.Fatal("expected blocked reason to mention single-file limit")
-	}
-}
-
-func TestBuildDiffRenderMetas_TotalLimitBlocksLaterFiles(t *testing.T) {
-	first := DiffFile{
-		Path: "first.txt",
-		Hunks: []DiffHunk{
-			{Header: "@@ -1,1 +1,2 @@", Lines: make([]DiffLine, 15000)},
-		},
-	}
-	second := DiffFile{
-		Path: "second.txt",
-		Hunks: []DiffHunk{
-			{Header: "@@ -1,1 +1,2 @@", Lines: make([]DiffLine, 7000)},
-		},
-	}
-
-	metas := buildDiffRenderMetas([]DiffFile{first, second})
-	if len(metas) != 2 {
-		t.Fatalf("expected 2 metas, got %d", len(metas))
-	}
-	if metas[1].CanLoadOnDemand || metas[1].AutoLoad {
-		t.Fatal("expected second file to be blocked by total limit")
-	}
-	if !strings.Contains(metas[1].BlockedReason, "Total diff load limit") {
-		t.Fatal("expected blocked reason to mention total diff load limit")
-	}
-}
-
-func TestBuildDiffRenderMetas_MaxFiles300(t *testing.T) {
-	files := make([]DiffFile, maxDiffFiles+5)
-	for i := range files {
-		files[i] = DiffFile{
-			Path: fmt.Sprintf("f%d.txt", i),
-			Hunks: []DiffHunk{
-				{Header: "@@ -1,1 +1,1 @@", Lines: []DiffLine{{Type: "add", Content: "x"}}},
-			},
-		}
-	}
-	metas := buildDiffRenderMetas(files)
-	if len(metas) != maxDiffFiles {
-		t.Fatalf("expected %d metas, got %d", maxDiffFiles, len(metas))
 	}
 }
 
@@ -1704,7 +1592,7 @@ func TestDiffViewerWithReview_RendersSharedReviewCommentRows(t *testing.T) {
 	// File bodies arrive through the per-file endpoint; assert its markup
 	// alongside the initial viewer controls and review scripts.
 	for _, view := range []string{"inline", "split"} {
-		if err := LoadDiffFileCard(diff, 0, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(ParseDiffOutput(diff)[0], 0, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1738,7 +1626,7 @@ func TestDiffViewerWithReview_RendersSharedReviewCommentRows(t *testing.T) {
 }
 
 func TestDiffViewerWithReview_LargeFileLoadsProgressively(t *testing.T) {
-	diff := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,1000 @@\n" + strings.Repeat("+line\n", autoLoadFileDiffLines+20)
+	diff := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,1000 @@\n" + strings.Repeat("+line\n", 420)
 
 	var buf bytes.Buffer
 	if err := DiffViewer(diff, "task123", nil, "inline").Render(context.Background(), &buf); err != nil {
@@ -1761,26 +1649,7 @@ func TestDiffViewerWithReview_LargeFileLoadsProgressively(t *testing.T) {
 
 }
 
-func TestLoadDiffFileCard_RendersRequestedView(t *testing.T) {
-	diff := `diff --git a/main.go b/main.go
---- a/main.go
-+++ b/main.go
-@@ -1,1 +1,2 @@
--package main
-+package main
-+import "fmt"
-`
-	var buf bytes.Buffer
-	if err := LoadDiffFileCard(diff, 0, "split", "task123", nil, true).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render failed: %v", err)
-	}
-	body := buf.String()
-	if !strings.Contains(body, `id="diff-file-split-0"`) {
-		t.Error("expected split card to render for requested file")
-	}
-}
-
-func TestLoadDiffFileCardMeta_MatchesFullParseForReviewInlineAndSplit(t *testing.T) {
+func TestDiffRenderMetaByIndex_MatchesFullParseForReviewInlineAndSplit(t *testing.T) {
 	diff := `diff --git a/ignored.txt b/ignored.txt
 --- a/ignored.txt
 +++ b/ignored.txt
@@ -1798,15 +1667,12 @@ diff --git a/src/review.go b/src/review.go
  unchanged
 +added tail
 `
-	fullMeta, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diff), 1)
-	if !ok {
-		t.Fatal("expected full parse metadata")
-	}
+	fullMeta := DiffFileRenderMeta{Index: 1, File: ParseDiffOutput(diff)[1]}
 	targetedMeta, ok := DiffRenderMetaByIndex(diff, 1)
 	if !ok {
 		t.Fatal("expected targeted metadata")
 	}
-	if fullMeta.File.Path != targetedMeta.File.Path || fullMeta.File.Status != targetedMeta.File.Status || fullMeta.LineCount != targetedMeta.LineCount || fullMeta.CharCount != targetedMeta.CharCount {
+	if fullMeta.File.Path != targetedMeta.File.Path || fullMeta.File.Status != targetedMeta.File.Status {
 		t.Fatalf("targeted metadata differs from full parse: full=%#v targeted=%#v", fullMeta, targetedMeta)
 	}
 	if len(fullMeta.File.Hunks) != len(targetedMeta.File.Hunks) || len(fullMeta.File.Hunks[0].Lines) != len(targetedMeta.File.Hunks[0].Lines) {
@@ -1826,7 +1692,7 @@ diff --git a/src/review.go b/src/review.go
 	}
 	for _, view := range []string{"inline", "split"} {
 		var buf bytes.Buffer
-		if err := LoadDiffFileCardMeta(targetedMeta, true, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+		if err := DiffChunk(targetedMeta.File, targetedMeta.Index, view, "task123", comments, true, 0, 1, "").Render(context.Background(), &buf); err != nil {
 			t.Fatalf("render %s failed: %v", view, err)
 		}
 		body := buf.String()
@@ -1842,10 +1708,7 @@ diff --git a/src/review.go b/src/review.go
 	}
 }
 
-func TestDiffRenderMetaByIndex_PreservesSpecialStatusesAndLimits(t *testing.T) {
-	tooLarge := strings.Repeat("+oversized line\n", maxLoadableFileDiffLines+1)
-	totalLimitFillerLines := maxLoadableTotalDiffLines - 2
-	totalLimitFiller := strings.Repeat("+filler line\n", totalLimitFillerLines)
+func TestDiffRenderMetaByIndex_PreservesSpecialStatuses(t *testing.T) {
 	diff := `diff --git a/untracked.txt b/untracked.txt
 new file mode 100644
 --- /dev/null
@@ -1865,35 +1728,18 @@ deleted file mode 100644
 diff --git a/image.bin b/image.bin
 new file mode 100644
 Binary files /dev/null and b/image.bin differ
-diff --git a/huge.txt b/huge.txt
---- a/huge.txt
-+++ b/huge.txt
-@@ -1 +1,` + fmt.Sprintf("%d", maxLoadableFileDiffLines+1) + ` @@
-` + tooLarge + `diff --git a/filler.txt b/filler.txt
---- a/filler.txt
-+++ b/filler.txt
-@@ -1 +1,` + fmt.Sprintf("%d", totalLimitFillerLines) + ` @@
-` + totalLimitFiller + `diff --git a/after-total.txt b/after-total.txt
---- a/after-total.txt
-+++ b/after-total.txt
-@@ -1 +1,2 @@
- keep
-+blocked by total
 `
 
 	cases := []struct {
-		index   int
-		path    string
-		status  string
-		binary  bool
-		blocked string
+		index  int
+		path   string
+		status string
+		binary bool
 	}{
 		{index: 0, path: "untracked.txt", status: "added"},
 		{index: 1, path: "new-name.txt", status: "renamed"},
 		{index: 2, path: "deleted.txt", status: "deleted"},
 		{index: 3, path: "image.bin", status: "added", binary: true},
-		{index: 4, path: "huge.txt", status: "modified", blocked: "single-file limit"},
-		{index: 6, path: "after-total.txt", status: "modified", blocked: "Total diff load limit"},
 	}
 	for _, tc := range cases {
 		meta, ok := DiffRenderMetaByIndex(diff, tc.index)
@@ -1903,12 +1749,8 @@ diff --git a/huge.txt b/huge.txt
 		if meta.File.Path != tc.path || meta.File.Status != tc.status || meta.File.IsBinary != tc.binary {
 			t.Fatalf("index %d metadata mismatch: %#v", tc.index, meta.File)
 		}
-		if tc.blocked != "" && !strings.Contains(meta.BlockedReason, tc.blocked) {
-			t.Fatalf("index %d expected blocked reason containing %q, got %q", tc.index, tc.blocked, meta.BlockedReason)
-		}
 	}
 }
-
 func TestDiffRenderMetaByIndex_LargeDiffProbeBoundsParsedBytes(t *testing.T) {
 	diff := buildMixedLargeDiff(200)
 	const targetIndex = 9
@@ -1937,7 +1779,7 @@ func buildMixedLargeDiff(fileCount int) string {
 		path := fmt.Sprintf("generated/file-%03d.txt", i)
 		lineCount := 6
 		if (i+1)%10 == 0 {
-			lineCount = autoLoadFileDiffLines + 50
+			lineCount = 450
 		}
 		b.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,1 +1,%d @@\n-old\n", path, path, path, path, lineCount))
 		for j := 0; j < lineCount; j++ {
@@ -1945,18 +1787,6 @@ func buildMixedLargeDiff(fileCount int) string {
 		}
 	}
 	return b.String()
-}
-
-func TestLoadDiffFileCard_BlockedFileShowsReason(t *testing.T) {
-	diff := "diff --git a/huge.txt b/huge.txt\n--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,25000 @@\n" + strings.Repeat("+line\n", maxLoadableFileDiffLines+5)
-	var buf bytes.Buffer
-	if err := LoadDiffFileCard(diff, 0, "inline", "task123", nil, true).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render failed: %v", err)
-	}
-	body := buf.String()
-	if !strings.Contains(body, "single-file limit") {
-		t.Error("expected blocked load reason for oversized single file")
-	}
 }
 
 func TestDiffViewerExposesFilesToExplorerWithoutBadges(t *testing.T) {
@@ -2112,9 +1942,9 @@ func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) 
 	if strings.Contains(initial.String(), `class="diff-file-card `) {
 		t.Fatal("initial response must not render cards for either layout")
 	}
-	for _, meta := range buildDiffRenderMetas(ParseDiffOutput(diff)) {
+	for _, meta := range progressiveDiffMetas(ParseDiffOutput(diff), nil) {
 		for _, view := range []string{"inline", "split"} {
-			if err := LoadDiffFileCardMeta(meta, true, view, "large-task", nil, true).Render(context.Background(), &eager); err != nil {
+			if err := DiffChunk(meta.File, meta.Index, view, "large-task", nil, true, 0, 1, "").Render(context.Background(), &eager); err != nil {
 				t.Fatal(err)
 			}
 		}

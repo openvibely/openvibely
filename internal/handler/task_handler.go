@@ -1888,7 +1888,7 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 	return render(c, http.StatusOK, pages.TaskChangesContentWithView(state.DiffOutput, task.ID, reviewComments, diffView))
 }
 
-// GetTaskChangesFile returns a single diff file card for per-file lazy loading.
+// GetTaskChangesFile returns one row chunk of a diff file.
 func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 	taskID := c.Param("taskId")
 
@@ -1913,67 +1913,56 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 	reviewMode := strings.EqualFold(c.QueryParam("review"), "true")
 	ctx := c.Request().Context()
 	expectedPath, expectedRevision := c.QueryParam("file_path"), c.QueryParam("revision")
-	if raw := c.QueryParam("chunk"); raw != "" {
-		chunk, err := strconv.Atoi(raw)
-		if err != nil || chunk < 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid chunk")
-		}
-		oldLine, newLine := 0, 0
-		for name, value := range map[string]*int{"anchor_old_line": &oldLine, "anchor_new_line": &newLine} {
-			if raw := c.QueryParam(name); raw != "" {
-				parsed, err := strconv.Atoi(raw)
-				if err != nil || parsed < 0 {
-					return echo.NewHTTPError(http.StatusBadRequest, "invalid line anchor")
-				}
-				*value = parsed
-			}
-		}
-		prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, reviewMode, expectedRevision, func(loadCtx context.Context) (*preparedDiffChunks, error) {
-			meta, exists := h.resolveTaskChangesFileMeta(loadCtx, task, fileIndex)
-			if err := loadCtx.Err(); err != nil {
-				return nil, err
-			}
-			if !exists {
-				return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
-			}
-			revision := components.DiffCodeRevision(meta.File)
-			if expectedRevision != "" && expectedRevision != revision {
-				return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
-			}
-			return prepareDiffChunks(meta, revision), nil
-		})
-		if err != nil {
-			return err
-		}
-		if expectedPath != "" && expectedPath != prepared.path {
-			return echo.NewHTTPError(http.StatusConflict, "diff files changed; reload the Changes view")
-		}
-		chunks := prepared.inline
-		if view == "split" {
-			chunks = prepared.split
-		}
-		if index, found := components.DiffChunkContainingLine(chunks, oldLine, newLine); found {
-			chunk = index
-		}
-		if chunk >= len(chunks) {
-			return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
-		}
-		// Code snapshots are cached; annotations are always read fresh.
-		var comments []models.ReviewComment
-		if reviewMode {
-			comments = h.loadTaskReviewComments(ctx, taskID)
-		}
-		return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, comments, reviewMode, chunk, len(chunks), prepared.revision))
+	chunk, err := strconv.Atoi(c.QueryParam("chunk"))
+	if err != nil || chunk < 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid chunk")
 	}
-	var reviewComments []models.ReviewComment
-	if reviewMode {
-		reviewComments = h.loadTaskReviewComments(ctx, taskID)
+	oldLine, newLine := 0, 0
+	for name, value := range map[string]*int{"anchor_old_line": &oldLine, "anchor_new_line": &newLine} {
+		if raw := c.QueryParam(name); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 0 {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid line anchor")
+			}
+			*value = parsed
+		}
 	}
-	meta, exists := h.resolveTaskChangesFileMeta(ctx, task, fileIndex)
-	if expectedPath != "" && (!exists || meta.File.Path != expectedPath) {
+	prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, reviewMode, expectedRevision, func(loadCtx context.Context) (*preparedDiffChunks, error) {
+		meta, exists := h.resolveTaskChangesFileMeta(loadCtx, task, fileIndex)
+		if err := loadCtx.Err(); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
+		}
+		revision := components.DiffCodeRevision(meta.File)
+		if expectedRevision != "" && expectedRevision != revision {
+			return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
+		}
+		return prepareDiffChunks(meta, revision), nil
+	})
+	if err != nil {
+		return err
+	}
+	if expectedPath != "" && expectedPath != prepared.path {
 		return echo.NewHTTPError(http.StatusConflict, "diff files changed; reload the Changes view")
 	}
-	return render(c, http.StatusOK, components.LoadDiffFileCardMeta(meta, exists, view, taskID, reviewComments, reviewMode))
+	chunks := prepared.inline
+	if view == "split" {
+		chunks = prepared.split
+	}
+	if index, found := components.DiffChunkContainingLine(chunks, oldLine, newLine); found {
+		chunk = index
+	}
+	if chunk >= len(chunks) {
+		return echo.NewHTTPError(http.StatusBadRequest, "chunk out of range")
+	}
+	// Code snapshots are cached; annotations are always read fresh.
+	var comments []models.ReviewComment
+	if reviewMode {
+		comments = h.loadTaskReviewComments(ctx, taskID)
+	}
+	return render(c, http.StatusOK, components.DiffChunk(chunks[chunk], prepared.index, view, taskID, comments, reviewMode, chunk, len(chunks), prepared.revision))
 }
 
 // GetTaskChangesLive returns only the diff viewer fragment for realtime updates.
