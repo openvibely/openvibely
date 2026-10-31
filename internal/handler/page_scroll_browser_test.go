@@ -73,10 +73,14 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
      // Use a per-request source, like the app's navigation helper, and wait
      // for HTMX's settle lifecycle before changing the new page's geometry.
      const source=document.createElement('a'); source.href=path; document.body.appendChild(source);
-     let onSettle;
-     const settled=new Promise(resolve=>{onSettle=e=>{if(e.detail.target?.id==='main-content')resolve()};document.body.addEventListener('htmx:afterSettle',onSettle)});
+     // Settings navigation can retarget the response to #settings-content.
+     // Match this request's XHR, not a particular target or a background swap.
+     let onSettle, navigationXHR;
+     const onRequest=e=>{if(e.detail.elt===source)navigationXHR=e.detail.xhr};
+     document.body.addEventListener('htmx:beforeRequest',onRequest);
+     const settled=new Promise(resolve=>{onSettle=e=>{if(navigationXHR && e.detail.xhr===navigationXHR)resolve()};document.body.addEventListener('htmx:afterSettle',onSettle)});
      try { await bounded(Promise.all([htmx.ajax('GET',path,{source,target:'#main-content',swap:'innerHTML'}),settled]),'navigation and settle '+path); }
-     finally { document.body.removeEventListener('htmx:afterSettle',onSettle);source.remove(); }
+     finally { document.body.removeEventListener('htmx:beforeRequest',onRequest);document.body.removeEventListener('htmx:afterSettle',onSettle);source.remove(); }
    }
    await stage('check scroll range '+path);
    current=path;
@@ -114,7 +118,7 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
  }
  clearInterval(window.__scrollTestHeartbeat);
  await fetch('/browser-result?status=pass');
- })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(e.stack||String(e))));</script>`
+ })().catch(e=>fetch('/browser-result?status='+encodeURIComponent(String(e)+(e.stack?'\n'+e.stack:''))));</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/browser-diagnostic" && r.URL.Path != "/browser-stage" {
 			record("HTTP " + r.Method + " " + r.URL.Path)
