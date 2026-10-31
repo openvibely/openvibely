@@ -67,7 +67,17 @@ func TestTaskLazyCachedNavigationInChrome(t *testing.T) {
 	testTaskCachedNavigationRefresh(t, true)
 }
 
-func testTaskCachedNavigationRefresh(t *testing.T, large bool) {
+func TestTaskCompactCachedNavigationInChrome(t *testing.T) {
+	for _, large := range []bool{false, true} {
+		t.Run(fmt.Sprintf("large=%t", large), func(t *testing.T) { testTaskCachedNavigationRefresh(t, large, "compact") })
+	}
+}
+
+func testTaskCachedNavigationRefresh(t *testing.T, large bool, modes ...string) {
+	outputMode := "full"
+	if len(modes) > 0 {
+		outputMode = modes[0]
+	}
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -124,16 +134,33 @@ window.addEventListener('DOMContentLoaded',function(){
  },true);
 
  const toggle=()=>document.querySelector('.stream-tool-output-toggle');
+ const compact=document.documentElement.dataset.outputDetail==='compact';
+ const foldStates=new Map();let foldChecks=0;
  async function checkToggle(){
+   let fold;
+   if(compact){
+     await until(()=>typeof document.querySelector('.stream-activity-summary')?.onclick==='function','activity summary hydrated');
+     fold=document.querySelector('.stream-activity-summary');
+     const key=fold.parentElement.dataset.toolDisclosureKey;
+     assert(fold.getAttribute('aria-expanded')===String(foldStates.get(key)||false),'activity expansion choice lost during navigation');
+     if(fold.getAttribute('aria-expanded')!=='true')fold.click();
+   }
    await until(()=>toggle() && toggle().isConnected,'tool hydration');
    await until(()=>document.querySelector('.chat-stream-content')._renderedRevision,'render revision');
    // Rendering is followed by layout settling before the transcript is revealed.
    await until(()=>getComputedStyle(document.getElementById('task-thread-messages')).visibility==='visible','transcript reveal');
    const button=toggle(), expanded=button.getAttribute('aria-expanded');
    button.click(); assert(button.getAttribute('aria-expanded')!==expanded,'tool toggle lost its handler');
+   assert(button.closest('.stream-tool').textContent.includes('line of tool output'),'wrong tool output after navigation');
+   if(fold){
+     const expanded=++foldChecks %% 2===1;
+     if(!expanded)fold.click();
+     assert(fold.getAttribute('aria-expanded')===String(expanded),'activity choice not applied');
+     foldStates.set(fold.parentElement.dataset.toolDisclosureKey,expanded);
+   }
  }
  (async function(){
-   await until(()=>view() && toggle(),'initial lazy thread');
+   await until(()=>view() && (compact?document.querySelector('.stream-activity-summary'):toggle()),'initial thread');
    await checkToggle();
    assert(document.querySelectorAll('.stream-tool').length<40,'initial task page rendered offscreen tools');
    await window.materializeVirtualChatRows(view(),{renderLazy:false});
@@ -272,9 +299,9 @@ window.addEventListener('DOMContentLoaded',function(){
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, r)
 			w.Header().Set("Content-Type", "text/html")
-			// These scenarios exercise individual tool output controls and rows.
+			// Exercise the selected output mode independently of app defaults.
 			// Set the preference before layout and transcript scripts initialize.
-			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>localStorage.setItem('openvibely.outputDetail','full');</script>`, 1)
+			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>localStorage.setItem('openvibely.outputDetail',`+fmt.Sprintf("%q", outputMode)+`);</script>`, 1)
 			_, _ = w.Write([]byte(strings.Replace(html, "</body>", runner+"</body>", 1)))
 			return
 		}
