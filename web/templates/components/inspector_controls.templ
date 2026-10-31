@@ -1,0 +1,97 @@
+package components
+
+// Inspector controls share presentation and interaction, leaving persistence to each page.
+type InspectorTab struct { Key, Label string }
+
+templ InspectorStyles() {
+ <style>
+ .inspector-tabs { display:flex; flex-wrap:nowrap; overflow-x:auto; flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px var(--ov-border-subtle); box-shadow:inset 0 -1px color-mix(in srgb,currentColor 20%,transparent); }
+ .inspector-tabs > [role=tab] { outline:none !important; box-shadow:none !important; background:none; flex:1; white-space:nowrap; color:inherit; opacity:.6; font-weight:400; line-height:20px; padding:6px 12px; border-bottom:2px solid transparent !important; }
+ .inspector-tabs > [aria-selected=true] { opacity:1; border-bottom-color:currentColor !important; }
+ [data-ov-theme-layer="custom"] .inspector-tabs { box-shadow:inset 0 -1px var(--ov-subtle-border); }
+ [data-ov-theme-layer="custom"] .inspector-tabs > [role=tab] { color:var(--ov-text-muted) !important; opacity:1; }
+ [data-ov-theme-layer="custom"] .inspector-tabs > [aria-selected=true] { color:var(--ov-text) !important; }
+ .inspector-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; font-size:14px; }
+ .inspector-property-row > span { min-width:0; overflow-wrap:anywhere; }
+ .inspector-property-row:hover:not(:disabled), .inspector-summary:hover:not(:disabled) { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
+ .inspector-summary { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
+ .inspector-summary:disabled { cursor:default; }
+ .inspector-picker { position:fixed; display:none; margin:0; width:280px; max-width:calc(100vw - 24px); }
+ .inspector-picker:popover-open { display:block; }
+ .inspector-picker[data-openvibely-picker-open=true] { display:block; z-index:1000; }
+ .inspector-picker [hidden] { display:none !important; }
+ .inspector-picker button[data-value] { outline:none; }
+ [data-picker-return-focus] { outline:none; }
+ </style>
+}
+
+templ InspectorTabs(idPrefix, panelPrefix, label string, tabs []InspectorTab) {
+ @InspectorStyles()
+ <div role="tablist" aria-label={ label } class="inspector-tabs">
+  for _, tab := range tabs {
+   <button type="button" role="tab" id={ idPrefix + tab.Key } data-tab={ tab.Key } aria-controls={ panelPrefix + tab.Key } aria-selected="false" tabindex="-1">{ tab.Label }</button>
+  }
+ </div>
+}
+
+templ InspectorPropertyContent(label, text string) {
+ <span class="opacity-60">{ label + ":" }</span><span data-property-label>{ text }</span><span aria-hidden="true">›</span>
+}
+
+templ InspectorSummary(title, timing, context string, attrs templ.Attributes, readOnly bool) {
+ <button type="button" class="inspector-summary" disabled?={ readOnly } { attrs... }>
+  <span><span class="block text-sm font-semibold" data-summary-title>{ title }</span><span class="block text-sm opacity-60 mt-1" data-summary-timing>{ timing }</span><span class="block text-sm opacity-60 mt-1" data-summary-context>{ context }</span></span>
+  if !readOnly {
+   <span aria-hidden="true">›</span>
+  }
+ </button>
+}
+
+templ InspectorDialog(id, title string, attributes ...templ.Attributes) {
+ {{ attrs := templ.Attributes{}; if len(attributes) > 0 { attrs = attributes[0] } }}
+ <dialog id={ id } class="modal" aria-labelledby={ id + "-title" } { attrs... }>
+  <div class="modal-box">
+   <button type="button" class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2" aria-label="Close editor" onclick="this.closest('dialog').close()">×</button>
+   <h3 id={ id + "-title" } class="font-semibold text-lg mb-4 pr-10" data-editor-title>{ title }</h3>
+   { children... }
+  </div>
+  <form method="dialog" class="modal-backdrop"><button type="submit" aria-label="Dismiss editor">close</button></form>
+ </dialog>
+}
+
+templ InspectorPicker(id string) {
+ @InspectorStyles()
+ @InspectorPickerScript()
+ <div id={ id } popover="auto" role="dialog" aria-label="Choose property" class="inspector-picker ov-menu p-0">
+  <div class="ov-menu-search"><input type="search" aria-label="Search options" placeholder="Search…"/></div>
+  <div class="ov-menu-list ov-menu-scroll" style="max-height:240px">{ children... }</div>
+  <p data-property-error role="alert" class="text-error text-sm"></p>
+ </div>
+}
+
+templ InspectorPickerScript() {
+ <script>
+ window.createInspectorPicker = window.createInspectorPicker || function(root, picker, isBusy) {
+  var current=null, active=null, closingRow=null, abort=new AbortController();
+  var nativePopover=typeof picker.showPopover==='function', search=picker.querySelector('input');
+  function on(el,name,fn){el.addEventListener(name,fn,{signal:abort.signal});}
+  function isOpen(){return nativePopover?picker.matches(':popover-open'):picker.hasAttribute('data-openvibely-picker-open');}
+  function hide(){if(nativePopover && isOpen())picker.hidePopover();picker.removeAttribute('data-openvibely-picker-open');}
+  function returnFocus(row){if(!row||!row.isConnected)return;row.setAttribute('data-picker-return-focus','');row.focus({preventScroll:true});row.addEventListener('blur',function(){row.removeAttribute('data-picker-return-focus');},{once:true});}
+  function options(){return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(b){return !b.disabled;});}
+  function highlight(option){if(active===option&&(!option||option.hasAttribute('data-active')))return;active=option;picker.querySelectorAll('button[data-value]').forEach(function(b){b.toggleAttribute('data-active',b===option);});}
+  if(!nativePopover){picker.removeAttribute('popover');function dismiss(e){if(isOpen()&&!picker.contains(e.target)&&!(current&&current.contains(e.target)))hide();}on(document,'pointerdown',dismiss);on(document,'focusin',dismiss);}
+  on(root,'pointerdown',function(e){closingRow=current&&current.contains(e.target)&&isOpen()?current:null;});
+  on(root,'pointercancel',function(){closingRow=null;});
+  function open(row){if(row===closingRow||(row===current&&isOpen())){closingRow=null;hide();returnFocus(row);return;}closingRow=null;current=row;search.value='';picker.querySelector('[data-property-error]').textContent='';picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=false;b.setAttribute('aria-pressed',String(b.dataset.value===row.dataset.value));});highlight(options().find(function(b){return b.dataset.value===row.dataset.value;})||options()[0]);picker.style.visibility='hidden';if(nativePopover)picker.showPopover();else picker.setAttribute('data-openvibely-picker-open','true');var r=row.getBoundingClientRect();picker.style.left=Math.max(12,Math.min(r.left,innerWidth-picker.offsetWidth-12))+'px';picker.style.top=Math.max(12,Math.min(r.bottom,innerHeight-picker.offsetHeight-12))+'px';picker.style.visibility='';search.focus();}
+  on(search,'input',function(){picker.querySelectorAll('button[data-value]').forEach(function(b){b.hidden=!b.textContent.toLowerCase().includes(search.value.toLowerCase());});if(!options().includes(active))highlight(options()[0]);});
+  on(picker,'pointermove',function(e){var b=e.target.closest('button[data-value]');if(b&&!b.disabled)highlight(b);});
+  on(picker,'focusin',function(e){if(e.target.matches('button[data-value]'))highlight(e.target);});
+  on(picker, 'keydown', function(e) {
+   if(e.defaultPrevented||e.isComposing||e.keyCode===229)return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();hide();returnFocus(current);return;}if((isBusy&&isBusy())||e.altKey||e.ctrlKey||e.metaKey||!['ArrowDown','ArrowUp','Enter'].includes(e.key))return;var items=options();if(!items.length)return;e.preventDefault();var i=items.indexOf(active);if(e.key==='Enter'){(items[i]||items[0]).click();return;}i=i<0?(e.key==='ArrowDown'?0:items.length-1):(i+(e.key==='ArrowDown'?1:items.length-1))%items.length;items[i].focus();items[i].scrollIntoView({block:'nearest'});
+  });
+  on(root,'htmx:beforeCleanupElement',function(e){if(e.target===root){hide();abort.abort();}});
+  return {open:open,close:hide,isOpen:isOpen,returnFocus:returnFocus};
+ };
+ </script>
+}

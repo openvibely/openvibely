@@ -3,6 +3,7 @@ package pages
 import "github.com/openvibely/openvibely/web/templates/components"
 
 templ automationNodePanelHeader(readOnly bool) {
+ @automationInspectorEditors(readOnly)
 	<div class="flex shrink-0 items-center justify-between gap-3 border-b border-base-300 px-6 py-4">
 		<div>
 			<h2 class="font-semibold">Node details</h2>
@@ -16,10 +17,14 @@ templ automationNodePanelHeader(readOnly bool) {
 		</div>
 		<button type="button" class="btn btn-ghost btn-sm btn-square" data-automation-node-close aria-label="Close node details">×</button>
 	</div>
+    @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{"details", "Details"}, {"schedule", "Schedule"}, {"connections", "Connections"}})
+
 }
 
 templ automationNodePanelScript() {
 	@components.SidePanelScript()
+ @components.InspectorPickerScript()
+ @automationInspectorScript()
 	<style>
 		#automation-node-panel [hidden] { display:none !important; }
 		#automation-node-panel .input, #automation-node-panel .select, #automation-node-panel .textarea { width:100%; min-width:0; }
@@ -31,6 +36,7 @@ templ automationNodePanelScript() {
 		var panel = root.querySelector('#automation-node-panel');
 		var closeButton = panel.querySelector('[data-automation-node-close]');
 		var selected = '', connectionSignature = '';
+        var inspector = window.createAutomationInspector(root, panel, function(key) { open(key, true); });
 		var svg = root.querySelector('[data-automation-canvas]');
 		var controller = window.createSidePanel({root:root, panel:panel,
 			storageKey:'automation-inspector-width', escapeDocked:true, onClose:close,
@@ -43,6 +49,7 @@ templ automationNodePanelScript() {
 			panel.querySelectorAll('[data-automation-edge-detail], [data-automation-live-edge-detail]').forEach(function(section) {
 				section.hidden = section.dataset.from !== selected && section.dataset.to !== selected;
 			});
+            inspector.select(selected);
 			svg.querySelectorAll('[data-node-key]').forEach(function(node) { node.dataset.selected = String(node.dataset.nodeKey === selected); });
 		}
 		function open(key, focus) {
@@ -51,7 +58,7 @@ templ automationNodePanelScript() {
 			selected = key; showSelection(); controller.setOpen(true);
 			if (onSelect) onSelect(key);
 			if (focus || panel.dataset.overlay === 'true') {
-				var target = section.querySelector('input:not([type="hidden"]), textarea, select') || closeButton;
+				var target = panel.querySelector('[role="tab"][aria-selected="true"]') || closeButton;
 				target.focus({preventScroll:true});
 			}
 		}
@@ -99,7 +106,7 @@ templ automationNodePanelScript() {
 			if (selected && !(candidate.nodes || []).some(function(node) { return node.key === selected; })) close();
 			showSelection();
 		}
-		return {open:open, close:close, selected:function() { return selected; }, updateConnections:updateConnections};
+		return {open:open, close:close, editName:inspector.editName, selected:function() { return selected; }, updateConnections:updateConnections};
 	};
 	</script>
 }

@@ -4,13 +4,14 @@ import (
  "fmt"
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
+ "github.com/openvibely/openvibely/web/templates/components"
 )
 
 func detailPointerValue(value *string) string { if value == nil { return "" }; return *value }
 
 templ TaskPropertyRow(label, field, value, text string) {
- <button type="button" class="task-property-row" data-detail-property={ field } data-value={ value } aria-haspopup="dialog">
-  <span class="opacity-60">{ label + ":" }</span><span data-property-label>{ text }</span><span aria-hidden="true">›</span>
+ <button type="button" class="task-property-row inspector-property-row" data-detail-property={ field } data-value={ value } aria-haspopup="dialog">
+  @components.InspectorPropertyContent(label, text)
  </button>
 }
 
@@ -37,9 +38,7 @@ templ TaskAutoMergePanel(task *models.Task) {
 }
 
 templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []persistence.AgentTaskUIOption) {
- <div id="task-property-picker" popover="auto" role="dialog" aria-label="Choose task property" class="ov-menu p-0">
-  <div class="ov-menu-search"><input type="search" aria-label="Search options" placeholder="Search…"/></div>
-  <div class="ov-menu-list ov-menu-scroll" style="max-height:240px">
+ @components.InspectorPicker("task-property-picker") {
    <div data-options="agent_id">
     <button type="button" data-value="default" class="ov-menu-option w-full">Default</button>
     <button type="button" data-value="" class="ov-menu-option w-full">Auto</button>
@@ -70,83 +69,23 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ option.Value } class="ov-menu-option w-full">{ option.Label }</button>
     }
    </div>
-  </div>
-  <p data-property-error role="alert" class="text-error text-sm"></p>
- </div>
- <dialog id="task-detail-text-editor" class="modal">
-  <div class="modal-box">
-   @ModalCloseButton("document.getElementById('task-detail-text-editor')", "Close task property editor")
-   <h3 class="font-semibold mb-3 pr-10" data-editor-title></h3>
+ }
+ @components.InspectorDialog("task-detail-text-editor", "") {
    <form method="post">
     <textarea aria-label="Value" class="textarea textarea-bordered w-full h-48" required></textarea>
     <p data-editor-error role="alert" class="text-error text-sm"></p>
     <div class="modal-action"><button type="button" class="btn btn-ghost" data-goal-action="pause" hidden>Pause</button><button type="button" class="btn btn-ghost" data-goal-action="resume" hidden>Resume</button><button type="button" class="btn btn-outline btn-error" data-goal-action="clear" hidden>Clear goal</button><button type="button" class="btn btn-ghost" data-editor-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
    </form>
-  </div>
-  <form method="dialog" class="modal-backdrop"><button type="submit" aria-label="Dismiss task property editor">close</button></form>
- </dialog>
- <style>
-  #task-property-picker { position:fixed; display:none; margin:0; width:280px; max-width:calc(100vw - 24px); }
-  #task-property-picker:popover-open { display:block; }
-  #task-property-picker[data-openvibely-picker-open="true"] { display:block; z-index:1000; }
-  #task-property-picker [hidden] { display:none; }
-  #task-property-picker button[data-value] { outline:none; }
-  .task-property-row[data-picker-return-focus] { outline:none; }
- </style>
+ }
  <script>
  (function() {
   var root = document.getElementById('task-detail-content');
   var picker = root.querySelector('#task-property-picker'), dialog = root.querySelector('#task-detail-text-editor');
   var current = null, field = '', busy = false, revision = 0;
-  var nativePopover = typeof picker.showPopover === 'function';
-  function pickerOpen() {
-   return nativePopover ? picker.matches(':popover-open') : picker.hasAttribute('data-openvibely-picker-open');
-  }
-  function showPicker() {
-   picker.style.visibility = 'hidden';
-   if (nativePopover) picker.showPopover();
-   else picker.setAttribute('data-openvibely-picker-open', 'true');
-  }
-  function hidePicker() {
-   picker.style.visibility = '';
-   if (nativePopover) picker.hidePopover();
-   picker.removeAttribute('data-openvibely-picker-open');
-  }
-  if (!nativePopover) {
-   picker.removeAttribute('popover');
-   function dismissPicker(event) {
-    if (pickerOpen() && !picker.contains(event.target) && !(current && current.contains(event.target))) hidePicker();
-   }
-   document.addEventListener('pointerdown', dismissPicker);
-   document.addEventListener('focusin', dismissPicker);
-   root.addEventListener('htmx:beforeCleanupElement', function(event) {
-    if (event.detail.elt !== root) return;
-    document.removeEventListener('pointerdown', dismissPicker);
-    document.removeEventListener('focusin', dismissPicker);
-   });
-  }
+  var pickerUI = window.createInspectorPicker(root, picker, function() { return busy; });
+  var pickerOpen = pickerUI.isOpen, hidePicker = pickerUI.close, returnToRow = pickerUI.returnFocus;
   root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
-  var search = picker.querySelector('input'), activeOption = null;
-  function visibleOptions() { return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(option) { return !option.disabled; }); }
-  function highlight(option) {
-   if (activeOption === option && (!option || option.hasAttribute('data-active'))) return;
-   activeOption = option;
-   picker.querySelectorAll('button[data-value]').forEach(function(item) { item.toggleAttribute('data-active', item === option); });
-  }
-  function returnToRow(row) {
-   if (!row) return;
-   row.setAttribute('data-picker-return-focus', '');
-   row.focus({preventScroll:true});
-   row.addEventListener('blur', function() { row.removeAttribute('data-picker-return-focus'); }, {once:true});
-  }
-  picker.addEventListener('pointermove', function(event) {
-   var option = event.target.closest('button[data-value]');
-   if (option && !option.disabled) highlight(option);
-  });
-  picker.addEventListener('focusin', function(event) {
-   if (event.target.matches('button[data-value]')) highlight(event.target);
-  });
   function composerModel(value, label) {
    var input = root.querySelector('#task-thread-form-agent-id'), button = root.querySelector('#task-thread-form-agent-select');
    if (input) input.value = value || 'auto';
@@ -176,34 +115,13 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    catch (error) { input.checked = !input.checked; panel.querySelector('[data-auto-merge-error]').textContent = error.message; }
    finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }
   });
-  // Capture before native popover light-dismiss closes the picker on pointerup.
-  var closingRow = null;
-  root.addEventListener('pointerdown', function(event) {
-   var row = event.target.closest('[data-detail-property]');
-   closingRow = row && row === current && pickerOpen() ? row : null;
-  });
-  root.addEventListener('pointercancel', function() { closingRow = null; });
   root.addEventListener('click', function(event) {
-   var dismissRow = closingRow;
-   closingRow = null;
    if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }
    var row = event.target.closest('[data-detail-property]');
    if (row) {
-    if (row === dismissRow || (row === current && pickerOpen())) {
-     hidePicker(); returnToRow(row); return;
-    }
     current = row; field = row.dataset.detailProperty;
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
-    picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = false; option.setAttribute('aria-pressed', String(option.dataset.value === row.dataset.value)); });
-    picker.querySelector('[data-property-error]').textContent = ''; search.value = '';
-    highlight(visibleOptions().find(function(option) { return option.dataset.value === row.dataset.value; }) || visibleOptions()[0]);
-    showPicker(); var rect = row.getBoundingClientRect();
-    var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-    var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    picker.style.left = Math.max(12, Math.min(rect.left, viewportWidth - picker.offsetWidth - 12)) + 'px';
-    picker.style.top = Math.max(12, Math.min(rect.bottom, viewportHeight - picker.offsetHeight - 12)) + 'px';
-    picker.style.visibility = '';
-    search.focus(); return;
+    pickerUI.open(row); return;
    }
    var editor = event.target.closest('[data-detail-editor]');
    if (!editor) return;
@@ -217,20 +135,6 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    });
    dialog.querySelector('[data-editor-error]').textContent = '';
    dialog.showModal(); dialog.querySelector('textarea').focus();
-  });
-  search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); var options = visibleOptions(); if (!options.includes(activeOption)) highlight(options[0]); });
-  picker.addEventListener('keydown', function(event) {
-   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
-   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hidePicker(); returnToRow(current); return; }
-   if (busy || event.altKey || event.metaKey || event.ctrlKey || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
-   var options = visibleOptions();
-   if (!options.length) return;
-   event.preventDefault();
-   var index = options.indexOf(activeOption);
-   if (event.key === 'Enter') { (options[index] || options[0]).click(); return; }
-   index = index < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length;
-   options[index].focus();
-   options[index].scrollIntoView({block:'nearest'});
   });
   picker.addEventListener('click', async function(event) {
    var option = event.target.closest('button[data-value]'); if (!option || busy) return;

@@ -233,7 +233,7 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	mainContent := detailBody[mainContentStart:]
 	mainContentEnd := strings.Index(mainContent, `</main>`)
 	require.GreaterOrEqual(t, mainContentEnd, 0, "automation detail must close the main content container")
-	require.NotContains(t, mainContent[:mainContentEnd], `aria-selected="true"`)
+	require.NotRegexp(t, `<button[^>]*role="tab"[^>]*aria-selected="true"`, mainContent[:mainContentEnd])
 	require.Contains(t, detail.Body.String(), `id="delete-automation-modal"`)
 	require.Contains(t, detail.Body.String(), "Delete automation")
 	require.Contains(t, detail.Body.String(), "Automation-owned trigger tasks and schedules will be deleted")

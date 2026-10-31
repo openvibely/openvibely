@@ -42,69 +42,11 @@ func TaskDetailPanel() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div role=\"tablist\" aria-label=\"Task details\" class=\"tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap\">")
+			templ_7745c5c3_Err = components.InspectorTabs("inspector-tab-", "tab-", "Task details", []components.InspectorTab{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Files"}, {"lifecycle", "Lifecycle"}}).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Files"}, {"lifecycle", "Lifecycle"}} {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<button type=\"button\" role=\"tab\" class=\"tab\" id=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var3 string
-				templ_7745c5c3_Var3, templ_7745c5c3_Err = templruntime.NewAttributeExpression("inspector-tab-" + tab.Key).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 10, Col: 80}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" data-tab=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var4 string
-				templ_7745c5c3_Var4, templ_7745c5c3_Err = templruntime.NewAttributeExpression(tab.Key).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 10, Col: 101}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" aria-controls=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templruntime.NewAttributeExpression("tab-" + tab.Key).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 10, Col: 136}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" aria-selected=\"false\" tabindex=\"-1\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var6 string
-				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(tab.Label)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 10, Col: 186}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</button>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div><div id=\"task-inspector-body\" class=\"flex flex-col flex-1 min-h-0 overflow-y-auto p-3\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"task-inspector-body\" class=\"flex flex-col flex-1 min-h-0 overflow-y-auto p-3\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -112,7 +54,7 @@ func TaskDetailPanel() templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -122,7 +64,7 @@ func TaskDetailPanel() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<style>\n\t\t/* Prevent scroll-boundary gestures from bouncing the app shell independently\n\t\t   of the fixed inspector. The thread and panel retain their own scrolling. */\n\t\thtml:has(#task-detail-content), body:has(#task-detail-content), #main-content:has(#task-detail-content) { overscroll-behavior-y:none; }\n\t\t#task-detail-content > [data-page-header] > nav { flex-shrink:1; flex-wrap:nowrap; }\n\t\t#task-details-opener, #task-workspace-back { flex-shrink:0; }\n\t\t#task-workspace-back:not([hidden]) + #task-details-opener { margin-left:-4px; }\n\t\t#task-breadcrumb-changes { font-size:16px; line-height:22px; }\n\t\t#task-breadcrumb-toolbar button:focus-visible { outline:1px solid oklch(var(--bc) / .5); outline-offset:2px; border-radius:6px; }\n\t\t#task-breadcrumb-changes[hidden] { display:none; }\n\t\t#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }\n\t\t#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }\n\t\t#tab-changes { overflow:auto; }\n\t\t/* Changes owns its scrollport; no page-padding offset is needed. */\n\t\t#tab-changes .diff-file-header { top:0; }\n\t\t\t#task-detail-content[data-inspector-overlay=\"true\"] #task-details-opener { position:fixed; top:var(--side-panel-top,0px); right:0; z-index:61; }\n\t\t#task-details-panel > [role=\"tablist\"] { flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px var(--ov-border-subtle); box-shadow:inset 0 -1px color-mix(in srgb, currentColor 20%, transparent); }\n\t\t#task-details-panel > [role=\"tablist\"] > .tab { outline:none !important; box-shadow:none !important; height:auto; color:inherit; opacity:.6; font-weight:400; line-height:20px; padding-top:6px; padding-bottom:6px; border-bottom:2px solid transparent !important; }\n\t\t#task-details-panel > [role=\"tablist\"] > .tab[aria-selected=\"true\"] { color:inherit; opacity:1; font-weight:400; border-bottom-color:currentColor !important; }\n\t\t[data-ov-theme-layer=\"custom\"] #task-details-panel > [role=\"tablist\"] { box-shadow:inset 0 -1px var(--ov-subtle-border); }\n\t\t[data-ov-theme-layer=\"custom\"] #task-details-panel > [role=\"tablist\"] > .tab { color:var(--ov-text-muted) !important; opacity:1; }\n\t\t[data-ov-theme-layer=\"custom\"] #task-details-panel > [role=\"tablist\"] > .tab[aria-selected=\"true\"] { color:var(--ov-text) !important; }\n\t\t#task-detail-actions { margin-bottom:max(0px, calc(var(--task-actions-bottom, 24px) - 12px)); }\n\t\t/* Keep gutters local to each tab, independent of active-tab visibility.\n\t\t   Existing Details owns a separate scrollport and applies its gutter there. */\n\t\t#task-inspector-body { padding-inline:0; overflow-x:hidden; }\n\t\t#task-inspector-body > .task-tab-panel { min-height:0; padding-inline:24px; }\n\t\t#task-inspector-body > .task-details-scroll-panel { padding-inline:0; }\n\t\t#task-detail-view, #task-detail-edit { min-width:0; padding-inline:24px; overflow-x:hidden; overflow-wrap:anywhere; }\n\t\t#tab-details { min-width:0; }\n\t\t#tab-details #task-detail-actions { margin-inline:24px; flex-wrap:wrap; }\n\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<style>\n\t\t/* Prevent scroll-boundary gestures from bouncing the app shell independently\n\t\t   of the fixed inspector. The thread and panel retain their own scrolling. */\n\t\thtml:has(#task-detail-content), body:has(#task-detail-content), #main-content:has(#task-detail-content) { overscroll-behavior-y:none; }\n\t\t#task-detail-content > [data-page-header] > nav { flex-shrink:1; flex-wrap:nowrap; }\n\t\t#task-details-opener, #task-workspace-back { flex-shrink:0; }\n\t\t#task-workspace-back:not([hidden]) + #task-details-opener { margin-left:-4px; }\n\t\t#task-breadcrumb-changes { font-size:16px; line-height:22px; }\n\t\t#task-breadcrumb-toolbar button:focus-visible { outline:1px solid oklch(var(--bc) / .5); outline-offset:2px; border-radius:6px; }\n\t\t#task-breadcrumb-changes[hidden] { display:none; }\n\t\t#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }\n\t\t#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }\n\t\t#tab-changes { overflow:auto; }\n\t\t/* Changes owns its scrollport; no page-padding offset is needed. */\n\t\t#tab-changes .diff-file-header { top:0; }\n\t\t\t#task-detail-content[data-inspector-overlay=\"true\"] #task-details-opener { position:fixed; top:var(--side-panel-top,0px); right:0; z-index:61; }\n\n\t\t#task-detail-actions { margin-bottom:max(0px, calc(var(--task-actions-bottom, 24px) - 12px)); }\n\t\t/* Keep gutters local to each tab, independent of active-tab visibility.\n\t\t   Existing Details owns a separate scrollport and applies its gutter there. */\n\t\t#task-inspector-body { padding-inline:0; overflow-x:hidden; }\n\t\t#task-inspector-body > .task-tab-panel { min-height:0; padding-inline:24px; }\n\t\t#task-inspector-body > .task-details-scroll-panel { padding-inline:0; }\n\t\t#task-detail-view, #task-detail-edit { min-width:0; padding-inline:24px; overflow-x:hidden; overflow-wrap:anywhere; }\n\t\t#tab-details { min-width:0; }\n\t\t#tab-details #task-detail-actions { margin-inline:24px; flex-wrap:wrap; }\n\n\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

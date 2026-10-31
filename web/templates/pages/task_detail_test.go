@@ -339,7 +339,7 @@ func TestTaskDetailContent_TabsRemainScrollableOnMobile(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `aria-label="Task details" class="tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap"`) {
+	if !strings.Contains(output, `aria-label="Task details" class="inspector-tabs"`) {
 		t.Fatal("expected inspector tabs to scroll horizontally")
 	}
 	for _, label := range []string{"Details", "Schedule", "Chaining", "Files", "Lifecycle"} {
@@ -1109,7 +1109,7 @@ func TestTaskSchedulePanelModalControls(t *testing.T) {
 			}
 		}
 
-		if !strings.Contains(out, `class="block text-sm font-semibold">Every 30 minutes`) || !strings.Contains(out, `class="label cursor-pointer justify-start gap-2 mt-2"><input`) || !strings.Contains(out, `toggle toggle-sm toggle-primary shrink-0`) {
+		if !strings.Contains(out, `class="block text-sm font-semibold" data-summary-title>Every 30 minutes`) || !strings.Contains(out, `class="label cursor-pointer justify-start gap-2 mt-2"><input`) || !strings.Contains(out, `toggle toggle-sm toggle-primary shrink-0`) {
 			t.Fatal("schedule title and leading switch must match Details typography and toggle styling")
 		}
 		if !enabled && !strings.Contains(out, "Paused") {

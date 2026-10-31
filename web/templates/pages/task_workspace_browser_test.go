@@ -783,13 +783,13 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/schedule-task?tab=schedules", "schedule-modal", func(b *composerFocusCDP) {
 		b.waitFor("schedule card", `String(!!document.getElementById('schedule-card-saved'))`, "true")
-		b.waitFor("schedule highlight clears panel edges", `(function(){var row=document.querySelector('.task-schedule-edit').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
-		b.waitFor("schedule text shares heading gutter", `(function(){var heading=document.querySelector('#task-schedule-panel h3').getBoundingClientRect(),text=document.querySelector('.task-schedule-edit .font-semibold').getBoundingClientRect();return String(Math.abs(heading.left-text.left)<1)})()`, "true")
-		b.waitFor("schedule arrow centered", `(function(){var button=document.querySelector('.task-schedule-edit').getBoundingClientRect(),arrow=document.querySelector('.task-schedule-edit > [aria-hidden]').getBoundingClientRect();return String(Math.abs((button.top+button.bottom-arrow.top-arrow.bottom)/2)<1)})()`, "true")
+		b.waitFor("schedule highlight clears panel edges", `(function(){var row=document.querySelector('.inspector-summary').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
+		b.waitFor("schedule text shares heading gutter", `(function(){var heading=document.querySelector('#task-schedule-panel h3').getBoundingClientRect(),text=document.querySelector('.inspector-summary .font-semibold').getBoundingClientRect();return String(Math.abs(heading.left-text.left)<1)})()`, "true")
+		b.waitFor("schedule arrow centered", `(function(){var button=document.querySelector('.inspector-summary').getBoundingClientRect(),arrow=document.querySelector('.inspector-summary > [aria-hidden]').getBoundingClientRect();return String(Math.abs((button.top+button.bottom-arrow.top-arrow.bottom)/2)<1)})()`, "true")
 		b.click("#inspector-tab-details")
 		b.evaluate(`window.detailsHeading=document.querySelector('#task-detail-metrics h3').getBoundingClientRect().top; window.detailsRow=document.querySelector('.task-property-row').getBoundingClientRect().top; 'measured'`)
 		b.click("#inspector-tab-schedules")
-		b.waitFor("schedule vertical alignment matches Details", `(function(){return String(Math.abs(document.querySelector('#task-schedule-panel h3').getBoundingClientRect().top-window.detailsHeading)<1 && Math.abs(document.querySelector('.task-schedule-edit').getBoundingClientRect().top-window.detailsRow)<1)})()`, "true")
+		b.waitFor("schedule vertical alignment matches Details", `(function(){return String(Math.abs(document.querySelector('#task-schedule-panel h3').getBoundingClientRect().top-window.detailsHeading)<1 && Math.abs(document.querySelector('.inspector-summary').getBoundingClientRect().top-window.detailsRow)<1)})()`, "true")
 
 		b.click(`[data-schedule-open="task-schedule-saved"]`)
 		b.waitFor("schedule modal open", `String(document.getElementById('task-schedule-saved').open)`, "true")
