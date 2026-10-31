@@ -126,7 +126,6 @@ templ TaskListPanel(currentProjectID string) {
         .settings-nav-children { display: flex; flex-direction: column; margin-left: 17px; padding-left: 8px; border-left: 1px solid var(--ov-border-subtle, rgba(166, 173, 187, .2)); }
         .settings-nav-child { width: 100%; }
         .settings-mobile-nav .settings-nav-group { flex: 0 0 100%; }
-        html.appearance-settings:not(.changes-explorer-active) #task-list-header { visibility: hidden; }
         .settings-mobile-nav { display: none; }
         html.appearance-settings .settings-mobile-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px; max-height: 40vh; overflow-y: auto; flex-shrink: 0; }
         .settings-mobile-nav .settings-back { width: 100%; padding: 8px 10px; }
@@ -261,14 +260,23 @@ templ TaskListPanel(currentProjectID string) {
 			}
 			window.syncTaskListToggle = syncToggle;
 			function setCollapsed(collapsed) {
-                if (root.classList.contains("appearance-settings") && !root.classList.contains("changes-explorer-active")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
-				if (!root.classList.contains('changes-explorer-active')) {
+				if (!root.classList.contains('appearance-settings')) {
 					try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
 				}
 				syncToggle();
 			}
 			function openSearch(open) {
+                if (root.classList.contains('appearance-settings') && !root.classList.contains('changes-explorer-active')) {
+                    var back = document.querySelector('#appearance-settings-nav [data-settings-back]');
+                    if (back && window.htmx) {
+                        htmx.ajax('GET', back.getAttribute('href'), {source: back, target: '#main-content', swap: 'innerHTML'}).then(function() {
+                            window.syncAppearanceSettings();
+                            openSearch(true);
+                        });
+                    }
+                    return;
+                }
                 if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) {
                     window.taskWorkspace.openThread();
                     open = true;
