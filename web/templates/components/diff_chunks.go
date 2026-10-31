@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -37,11 +38,18 @@ func DiffCodeRevision(file DiffFile) string {
 
 // File revisions include review annotations so unchanged cards can survive refreshes.
 func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
+	return diffFileRevision(file, comments, DiffFileTooLarge(file))
+}
+
+func diffFileRevision(file DiffFile, comments []models.ReviewComment, tooLarge bool) string {
 	relevant := make([]models.ReviewComment, 0)
 	for _, comment := range comments {
 		if comment.FilePath == file.Path {
 			relevant = append(relevant, comment)
 		}
+	}
+	if tooLarge {
+		return streamedDiffFileRevision(file, relevant)
 	}
 	data, _ := json.Marshal(struct {
 		File     DiffFile
@@ -50,10 +58,37 @@ func DiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
+// Oversized files are hashed line by line so a page load never builds a JSON copy of them.
+func streamedDiffFileRevision(file DiffFile, comments []models.ReviewComment) string {
+	h := sha256.New()
+	header, _ := json.Marshal(struct {
+		Path, OldPath, Status string
+		IsBinary              bool
+		SimilarityIndex       int
+		Comments              []models.ReviewComment
+	}{file.Path, file.OldPath, file.Status, file.IsBinary, file.SimilarityIndex, comments})
+	h.Write(header)
+	for _, hunk := range file.Hunks {
+		fmt.Fprintf(h, "\x00h%d:%s", len(hunk.Header), hunk.Header)
+		for _, line := range hunk.Lines {
+			fmt.Fprintf(h, "\x00%s:%d:%d:%d:", line.Type, line.OldNum, line.NewNum, len(line.Content))
+			io.WriteString(h, line.Content)
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 func progressiveDiffMetas(files []DiffFile, comments []models.ReviewComment) []DiffFileRenderMeta {
 	result := make([]DiffFileRenderMeta, 0, len(files))
 	for index, file := range files {
-		result = append(result, DiffFileRenderMeta{Index: index, File: file, Revision: DiffFileRevision(file, comments), CodeRevision: DiffCodeRevision(file)})
+		tooLarge := DiffFileTooLarge(file)
+		result = append(result, DiffFileRenderMeta{
+			Index:        index,
+			File:         file,
+			Revision:     diffFileRevision(file, comments, tooLarge),
+			CodeRevision: diffFileRevision(file, nil, tooLarge),
+			TooLarge:     tooLarge,
+		})
 	}
 	return result
 }

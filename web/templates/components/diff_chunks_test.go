@@ -189,17 +189,35 @@ func TestDiffViewerMarksOversizedFiles(t *testing.T) {
 	diff := "diff --git a/small.txt b/small.txt\n--- a/small.txt\n+++ b/small.txt\n@@ -0,0 +1 @@\n+ok\n" +
 		"diff --git a/huge.txt b/huge.txt\n--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,50001 @@\n" + strings.Repeat("+x\n", maxDiffFileLines+1)
 	metas := progressiveDiffMetas(ParseDiffOutput(diff), nil)
-	for _, taskID := range []string{"task", ""} {
-		var output strings.Builder
-		if err := diffViewerWithReviewContent(metas, taskID, nil, "inline", "rev").Render(context.Background(), &output); err != nil {
-			t.Fatal(err)
-		}
-		body := output.String()
-		if strings.Count(body, `data-diff-too-large="true"`) != map[string]int{"task": 1, "": 3}[taskID] {
-			t.Fatalf("taskID=%q: unexpected too-large markers", taskID)
-		}
-		if taskID == "" && (!strings.Contains(body, "Diff too large to display") || strings.Contains(body, ">+x<")) {
-			t.Fatal("inline fallback rendered oversized content")
-		}
+	if metas[0].TooLarge || !metas[1].TooLarge {
+		t.Fatal("wrong too-large flags")
+	}
+	var output strings.Builder
+	if err := diffViewerWithReviewContent(metas, "task", nil, "inline", "rev").Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(output.String(), `data-diff-too-large="true"`) != 1 {
+		t.Fatal("expected one too-large marker")
+	}
+}
+
+func TestOversizedDiffFileRevisionTracksContent(t *testing.T) {
+	file := DiffFile{Path: "huge.txt", Hunks: []DiffHunk{{Header: "@@", Lines: make([]DiffLine, maxDiffFileLines+1)}}}
+	for i := range file.Hunks[0].Lines {
+		file.Hunks[0].Lines[i] = DiffLine{Type: "add", Content: "x", NewNum: i + 1}
+	}
+	meta := progressiveDiffMetas([]DiffFile{file}, nil)[0]
+	if meta.CodeRevision != DiffCodeRevision(file) {
+		t.Fatal("page and chunk handler disagree on revision")
+	}
+	withComment := progressiveDiffMetas([]DiffFile{file}, []models.ReviewComment{{FilePath: "huge.txt", CommentText: "c"}})[0]
+	if withComment.CodeRevision != meta.CodeRevision || withComment.Revision == meta.Revision {
+		t.Fatal("review comments must change only the card revision")
+	}
+	changed := file
+	changed.Hunks = []DiffHunk{{Header: "@@", Lines: append([]DiffLine(nil), file.Hunks[0].Lines...)}}
+	changed.Hunks[0].Lines[7].Content = "y"
+	if DiffCodeRevision(changed) == meta.CodeRevision {
+		t.Fatal("content change kept the same revision")
 	}
 }

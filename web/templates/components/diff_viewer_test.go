@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -479,7 +480,7 @@ rename from old.txt
 rename to new.txt
 `
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -512,7 +513,7 @@ index 8616c68..0000000
 -to-delete
 `
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -535,7 +536,7 @@ index 2f80ba2..0000000
 Binary files a/img.bin and /dev/null differ
 `
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -561,7 +562,7 @@ index 0000000..a1ea743
 +fresh file
 `
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -657,7 +658,7 @@ func TestFileCountSuffix(t *testing.T) {
 
 func TestDiffViewer_EmptyDiff(t *testing.T) {
 	var buf bytes.Buffer
-	err := DiffViewer("", "", nil, "inline").Render(context.Background(), &buf)
+	err := DiffViewer("", "task", nil, "inline").Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -687,7 +688,7 @@ diff --git a/file2.go b/file2.go
  }
 `
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -738,7 +739,7 @@ diff --git a/d.go b/d.go
 +// d
 `
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -874,7 +875,7 @@ Binary files a/img.bin and b/img.bin differ
 func assertDiffViewerHeaderStats(t *testing.T, diff, wantAdd, wantDel, wantLabel string) string {
 	t.Helper()
 	var buf bytes.Buffer
-	err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf)
+	err := renderDiffViewerWithCards(diff, &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -954,7 +955,7 @@ func TestDiffViewer_FileHeaderRendersCopyPathButton(t *testing.T) {
 `, longPath, longPath, longPath, longPath)
 
 	var buf bytes.Buffer
-	if err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf); err != nil {
+	if err := renderDiffViewerWithCards(diff, &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	body := buf.String()
@@ -995,7 +996,7 @@ rename to new/name.go
 `
 
 	var buf bytes.Buffer
-	if err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf); err != nil {
+	if err := renderDiffViewerWithCards(diff, &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	body := buf.String()
@@ -1883,41 +1884,6 @@ func TestDiffViewerToolbar_ResponsiveNonOverlappingLayout(t *testing.T) {
 		}
 	})
 
-	t.Run("DiffViewer (no review) toolbar uses gap-2 not gap-y-2", func(t *testing.T) {
-		var buf bytes.Buffer
-		if err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf); err != nil {
-			t.Fatalf("render failed: %v", err)
-		}
-		body := buf.String()
-		if strings.Contains(body, `class="flex flex-wrap items-center gap-y-2 mb-4"`) {
-			t.Error("toolbar outer container must not use gap-y-2; use gap-2 for horizontal and vertical gap")
-		}
-		if !strings.Contains(body, `class="flex flex-wrap items-center gap-2 mb-4"`) {
-			t.Error("toolbar outer container must use gap-2")
-		}
-	})
-
-	t.Run("DiffViewer (no review) left group does not use min-w-0", func(t *testing.T) {
-		var buf bytes.Buffer
-		if err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf); err != nil {
-			t.Fatalf("render failed: %v", err)
-		}
-		body := buf.String()
-		if strings.Contains(body, `flex-1 min-w-0`) {
-			t.Error("toolbar left group must not use min-w-0: allows the group to shrink to 0 px causing overlap")
-		}
-	})
-
-	t.Run("DiffViewer (no review) join div does not use flex-shrink-0 ml-auto", func(t *testing.T) {
-		var buf bytes.Buffer
-		if err := DiffViewer(diff, "", nil, "inline").Render(context.Background(), &buf); err != nil {
-			t.Fatalf("render failed: %v", err)
-		}
-		body := buf.String()
-		if strings.Contains(body, `flex-shrink-0 ml-auto`) {
-			t.Error("toolbar join div must not use flex-shrink-0 ml-auto: causes overlap on narrow viewports")
-		}
-	})
 }
 
 func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) {
@@ -1960,4 +1926,17 @@ func TestDiffViewerWithReview_LargeDiffDefersRowsAndTracksContent(t *testing.T) 
 	if diffContentRevision(diff, nil) == diffContentRevision(diff, comments) {
 		t.Fatal("review edit did not change revision")
 	}
+}
+
+// Task viewers load cards through DiffChunk; render both so markup checks see the full page.
+func renderDiffViewerWithCards(diff string, w io.Writer) error {
+	if err := DiffViewer(diff, "task", nil, "inline").Render(context.Background(), w); err != nil {
+		return err
+	}
+	for index, file := range ParseDiffOutput(diff) {
+		if err := DiffChunk(file, index, "inline", "task", nil, true, 0, 1, DiffCodeRevision(file)).Render(context.Background(), w); err != nil {
+			return err
+		}
+	}
+	return nil
 }

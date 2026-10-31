@@ -81,6 +81,7 @@ type DiffFileRenderMeta struct {
 	Revision     string
 	CodeRevision string
 	File         DiffFile
+	TooLarge     bool
 }
 
 // ParseDiffOutput parses unified diff output into structured DiffFile data.
@@ -495,24 +496,6 @@ func lineNumForReview(line DiffLine) int {
 	return reviewTargetForDiffLine(line).LineNumber
 }
 
-templ diffFileTooLargeCard(m DiffFileRenderMeta, split bool) {
-	<div id={ diffFileTooLargeID(m.Index, split) } class="diff-file-card bg-base-200 rounded-lg px-4 py-2" data-diff-file-path={ m.File.Path } data-file-revision={ m.Revision } data-diff-too-large="true">
-		<div class="flex items-center gap-2 text-sm">
-			<span class="font-mono truncate">{ m.File.Path }</span>
-			<span class="text-success">+{ fmt.Sprint(diffStatCounts(m.File).Adds) }</span>
-			<span class="text-error">-{ fmt.Sprint(diffStatCounts(m.File).Dels) }</span>
-		</div>
-		<div class="text-sm opacity-60 mt-1">Diff too large to display</div>
-	</div>
-}
-
-func diffFileTooLargeID(index int, split bool) string {
-	if split {
-		return fmt.Sprintf("diff-file-split-%d", index)
-	}
-	return fmt.Sprintf("diff-file-%d", index)
-}
-
 templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string, revision string) {
 	<div id="diff-viewer" data-diff-revision={ revision } hx-history="false" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
@@ -558,32 +541,12 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 		</div>
         <div hidden data-diff-explorer-files>
             for _, m := range metas {
-                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path } data-file-revision={ m.Revision } data-code-revision={ m.CodeRevision } data-diff-adds={ fmt.Sprint(diffStatCounts(m.File).Adds) } data-diff-dels={ fmt.Sprint(diffStatCounts(m.File).Dels) } if DiffFileTooLarge(m.File) { data-diff-too-large="true" }></span>
+                <span data-diff-index={ fmt.Sprint(m.Index) } data-diff-path={ m.File.Path } data-file-revision={ m.Revision } data-code-revision={ m.CodeRevision } data-diff-adds={ fmt.Sprint(diffStatCounts(m.File).Adds) } data-diff-dels={ fmt.Sprint(diffStatCounts(m.File).Dels) } if m.TooLarge { data-diff-too-large="true" }></span>
             }
         </div>
         <!-- File cards are fetched only for the visible layout and viewport. -->
-        <div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
-            if taskID == "" {
-                for _, m := range metas {
-                    if DiffFileTooLarge(m.File) {
-                        @diffFileTooLargeCard(m, false)
-                    } else {
-                        @inlineDiffFileWithReview(m.File, m.Index, true, taskID, buildCommentMap(reviewComments))
-                    }
-                }
-            }
-        </div>
-        <div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
-            if taskID == "" {
-                for _, m := range metas {
-                    if DiffFileTooLarge(m.File) {
-                        @diffFileTooLargeCard(m, true)
-                    } else {
-                        @splitDiffFileWithReview(m.File, m.Index, true, taskID, buildCommentMap(reviewComments))
-                    }
-                }
-            }
-        </div>
+        <div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }></div>
+        <div id="diff-content-split" class={ diffViewContentClass("split", initialView) }></div>
         @diffFileIndexScript()
 		<!-- Inline review JavaScript -->
 		@diffFileStateScript()
