@@ -96,7 +96,7 @@ func ParseDiffOutput(diffOutput string) []DiffFile {
 	}
 
 	var files []DiffFile
-	lines := strings.Split(diffOutput, "\n")
+	lines := strings.Split(strings.TrimSuffix(diffOutput, "\n"), "\n")
 	var currentFile *DiffFile
 	var currentHunk *DiffHunk
 	oldLine, newLine := 0, 0
