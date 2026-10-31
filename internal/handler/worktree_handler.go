@@ -79,7 +79,7 @@ func taskCardMergeModeEligibility(task *models.Task, state taskMergeActionState,
 		return false, "Rebase is not available for the current branch state."
 	}
 	if mergeType == "ff" && task.WorktreePath != "" {
-		status, err := service.GitStatusPorcelain(task.WorktreePath)
+		status, err := service.GitStatusPorcelain(context.Background(), task.WorktreePath)
 		if err != nil || strings.TrimSpace(status) != "" {
 			return false, "Fast-forward requires a clean task worktree."
 		}
@@ -246,7 +246,7 @@ func (h *Handler) loadTaskBranchMutation(ctx context.Context, taskID, projectID 
 // callback so Merge and Rebase retain their distinct gates.
 func (h *Handler) refreshTaskBranchMutation(ctx context.Context, preflight *taskBranchMutationPreflight, options taskBranchMutationOptions) {
 	h.recoverTaskWorktreeState(ctx, preflight.task, preflight.project)
-	preflight.branchAlreadyMerged = taskBranchAlreadyMergedForProject(preflight.task, preflight.project)
+	preflight.branchAlreadyMerged = taskBranchAlreadyMergedForProject(ctx, preflight.task, preflight.project)
 	preflight.eligibility = taskMergeEligibility{}
 	preflight.cardReason = ""
 	preflight.operationEligible = true

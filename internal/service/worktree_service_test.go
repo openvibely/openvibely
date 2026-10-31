@@ -2369,7 +2369,7 @@ func TestMergeBranchRevalidatesWhileRepositoryLeaseIsHeld(t *testing.T) {
 			t.Fatal("lease-held validation ran without the repository lease")
 		}
 		runGit("update-ref", "refs/heads/"+target, branchTip)
-		if !IsBranchTipMergedInto(repoDir, branchName, target) {
+		if !IsBranchTipMergedInto(context.Background(), repoDir, branchName, target) {
 			t.Fatal("fixture did not make the task branch merged before mutation")
 		}
 		return validateErr
@@ -3234,7 +3234,7 @@ func TestMergeBranch_FastForward(t *testing.T) {
 	if !result.Success {
 		t.Errorf("expected ff merge success: %s", result.ErrorMessage)
 	}
-	if !IsBranchTipMergedInto(repoDir, branchName, defaultBranch) {
+	if !IsBranchTipMergedInto(context.Background(), repoDir, branchName, defaultBranch) {
 		t.Fatalf("expected task branch tip to be merged into %s after app fast-forward merge", defaultBranch)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "ff_feature.txt")); err != nil {
@@ -5838,7 +5838,7 @@ func TestWorktreeDiffWaitsForCleanup(t *testing.T) {
 					if reader == "stats" {
 						done <- fmt.Sprint(GetWorktreeFileStatsWithUncommitted(repoDir, branch, "main", worktreePath))
 					} else if reader == "file" {
-						diff, _ := GetWorktreeDiffFileWithUncommitted(repoDir, branch, "main", worktreePath, 0)
+						diff, _ := GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, branch, "main", worktreePath, 0)
 						done <- diff
 					} else {
 						done <- GetWorktreeDiffWithUncommitted(repoDir, branch, "main", worktreePath)
@@ -5881,7 +5881,7 @@ func TestWorktreeReviewReadsDoNotWaitForRepositoryWriter(t *testing.T) {
 		done := make(chan bool, 1)
 		go func() {
 			diff := GetWorktreeDiffWithUncommitted(repoDir, branch, "main", worktreePath)
-			file, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branch, "main", worktreePath, 0)
+			file, ok := GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, branch, "main", worktreePath, 0)
 			stats := GetWorktreeFileStatsWithUncommitted(repoDir, branch, "main", worktreePath)
 			done <- strings.Contains(diff, "+task output") && ok && strings.Contains(file, "+task output") && len(stats) == 1 && stats[0].Path == "task.txt"
 		}()
@@ -6048,7 +6048,7 @@ func TestGetWorktreeDiffFileWithUncommittedTargetsOneChangedFile(t *testing.T) {
 	}
 
 	mergeBase := runGitTest(t, worktreePath, "merge-base", targetBranch, "HEAD")
-	targets, err := worktreeDiffFileTargets(worktreePath, mergeBase)
+	targets, err := worktreeDiffFileTargets(context.Background(), worktreePath, mergeBase)
 	if err != nil {
 		t.Fatalf("targets: %v", err)
 	}
@@ -6072,7 +6072,7 @@ func TestGetWorktreeDiffFileWithUncommittedTargetsOneChangedFile(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing target %s in %#v", tc.path, targets)
 		}
-		diff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, idx)
+		diff, ok := GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, branchName, targetBranch, worktreePath, idx)
 		if !ok {
 			t.Fatalf("expected diff for %s", tc.path)
 		}
@@ -6085,7 +6085,7 @@ func TestGetWorktreeDiffFileWithUncommittedTargetsOneChangedFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing rename target in %#v", targets)
 	}
-	renameDiff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, renameIdx)
+	renameDiff, ok := GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, branchName, targetBranch, worktreePath, renameIdx)
 	if !ok || !strings.Contains(renameDiff, "rename-new.txt") || strings.Contains(renameDiff, "only this untracked file") {
 		t.Fatalf("unexpected rename targeted diff:\n%s", renameDiff)
 	}
@@ -6132,7 +6132,7 @@ func TestGetWorktreeDiffFileWithUncommittedUsesPathScopedGitDiff(t *testing.T) {
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	diff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, 123)
+	diff, ok := GetWorktreeDiffFileWithUncommitted(context.Background(), repoDir, branchName, targetBranch, worktreePath, 123)
 	if !ok {
 		t.Fatal("expected targeted diff")
 	}

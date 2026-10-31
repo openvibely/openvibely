@@ -46,14 +46,14 @@ func repositoryWriterLock(key string) *sync.Mutex {
 var worktreeLifecycleLocks sync.Map // canonical Git common directory -> *sync.RWMutex
 
 func worktreeLifecycleLock(repoDir string) *sync.RWMutex {
-	value, _ := worktreeLifecycleLocks.LoadOrStore(canonicalRepositoryMutationKey(repoDir), &sync.RWMutex{})
+	value, _ := worktreeLifecycleLocks.LoadOrStore(canonicalRepositoryMutationKey(context.Background(), repoDir), &sync.RWMutex{})
 	return value.(*sync.RWMutex)
 }
 
 // WithRepositoryMutation serializes every repository-scoped Git writer using
 // the same canonical common-directory identity as merge/rebase recovery leases.
 func WithRepositoryMutation(repoDir string, mutate func() error) error {
-	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
+	lock := repositoryWriterLock(canonicalRepositoryMutationKey(context.Background(), repoDir))
 	lock.Lock()
 	defer lock.Unlock()
 	return mutate()
@@ -163,11 +163,7 @@ func GetCurrentBranch(repoDir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func GitStatusPorcelain(repoDir string) (string, error) {
-	return GitStatusPorcelainContext(context.Background(), repoDir)
-}
-
-func GitStatusPorcelainContext(ctx context.Context, repoDir string) (string, error) {
+func GitStatusPorcelain(ctx context.Context, repoDir string) (string, error) {
 	cmd := diffGitCommand(ctx, "status", "--porcelain")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
@@ -410,7 +406,7 @@ func (ws *WorktreeService) shouldReuseStoredFollowupWorktree(task *models.Task, 
 	if _, err := os.Stat(task.WorktreePath); err != nil {
 		return false
 	}
-	status, err := GitStatusPorcelain(task.WorktreePath)
+	status, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
 	if err != nil {
 		return false
 	}
@@ -504,7 +500,7 @@ func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, 
 	if task == nil || task.MergeStatus != models.MergeStatusConflict || task.WorktreePath == "" || ws.taskRepo == nil {
 		return
 	}
-	status, err := GitStatusPorcelain(task.WorktreePath)
+	status, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
 	if err != nil || strings.TrimSpace(status) != "" || worktreeHasActiveMerge(task.WorktreePath) || worktreeHasConflictFiles(task.WorktreePath) {
 		return
 	}
@@ -1187,7 +1183,7 @@ func CommitWorktreeChanges(worktreePath string, message string) error {
 	}
 
 	// Check for changes
-	out, err := GitStatusPorcelain(worktreePath)
+	out, err := GitStatusPorcelain(context.Background(), worktreePath)
 	if err != nil {
 		return fmt.Errorf("checking git status: %w", err)
 	}
@@ -1248,14 +1244,10 @@ func SameRepositoryMutationScope(first, second string) bool {
 	if strings.TrimSpace(first) == "" || strings.TrimSpace(second) == "" {
 		return false
 	}
-	return canonicalRepositoryMutationKey(first) == canonicalRepositoryMutationKey(second)
+	return canonicalRepositoryMutationKey(context.Background(), first) == canonicalRepositoryMutationKey(context.Background(), second)
 }
 
-func canonicalRepositoryMutationKey(repoDir string) string {
-	return canonicalRepositoryMutationKeyContext(context.Background(), repoDir)
-}
-
-func canonicalRepositoryMutationKeyContext(ctx context.Context, repoDir string) string {
+func canonicalRepositoryMutationKey(ctx context.Context, repoDir string) string {
 	key := filepath.Clean(repoDir)
 	if absolute, err := filepath.Abs(key); err == nil {
 		key = absolute
@@ -1285,7 +1277,7 @@ func canonicalRepositoryMutationKeyContext(ctx context.Context, repoDir string) 
 }
 
 func beginRepositoryMutation(repoDir string) (string, bool) {
-	key := canonicalRepositoryMutationKey(repoDir)
+	key := canonicalRepositoryMutationKey(context.Background(), repoDir)
 	value, _ := repositoryMutationLeases.LoadOrStore(key, &atomic.Bool{})
 	if !value.(*atomic.Bool).CompareAndSwap(false, true) {
 		return key, false
@@ -1533,7 +1525,7 @@ func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.
 		return &RebaseResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	statusOut, err := GitStatusPorcelain(task.WorktreePath)
+	statusOut, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
 	if err != nil {
 		return &RebaseResult{ErrorMessage: fmt.Sprintf("checking task worktree status: %s", err.Error())}, fmt.Errorf("checking task worktree status: %w", err)
 	}
@@ -1601,7 +1593,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	statusOut, err := GitStatusPorcelain(task.WorktreePath)
+	statusOut, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
 	if err != nil {
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		return &MergeResult{ErrorMessage: fmt.Sprintf("checking task worktree status: %s", err.Error())}, fmt.Errorf("checking task worktree status: %w", err)
@@ -2390,10 +2382,10 @@ func (ws *WorktreeService) cleanupWorktreeUnlocked(ctx context.Context, task *mo
 // it diverged from the target branch. This matches Git's three-dot/PR diff
 // semantics, so target-only commits do not appear as reverse changes.
 func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) string {
-	if branchName == "" || targetBranch == "" || !isGitRepoDir(repoDir) {
+	if branchName == "" || targetBranch == "" || !isGitRepoDir(context.Background(), repoDir) {
 		return ""
 	}
-	if !gitRefExists(repoDir, branchName) || !gitRefExists(repoDir, targetBranch) {
+	if !gitRefExists(context.Background(), repoDir, branchName) || !gitRefExists(context.Background(), repoDir, targetBranch) {
 		return ""
 	}
 	cmd := exec.Command("git", "diff", targetBranch+"..."+branchName)
@@ -2418,7 +2410,7 @@ func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBra
 	if targetBranch == "" {
 		return ""
 	}
-	if worktreePath != "" && isGitWorktreeDir(worktreePath) {
+	if worktreePath != "" && isGitRepoDir(context.Background(), worktreePath) {
 		trackedDiff, trackedDiffOK := captureWorktreeDiffAgainstTarget(worktreePath, targetBranch)
 		if trackedDiffOK {
 			untrackedDiff := captureWorktreeUntracked(worktreePath)
@@ -2438,12 +2430,8 @@ func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBra
 // for the same target-to-current-worktree view as GetWorktreeDiffWithUncommitted.
 // It resolves the changed-file order from compact name-status/untracked output,
 // then runs a path-scoped git diff or synthesizes one untracked-file diff.
-func GetWorktreeDiffFileWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
-	return GetWorktreeDiffFileWithUncommittedContext(context.Background(), repoDir, branchName, targetBranch, worktreePath, fileIndex)
-}
-
-func GetWorktreeDiffFileWithUncommittedContext(ctx context.Context, repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
-	key := canonicalRepositoryMutationKeyContext(ctx, repoDir)
+func GetWorktreeDiffFileWithUncommitted(ctx context.Context, repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
+	key := canonicalRepositoryMutationKey(ctx, repoDir)
 	if ctx.Err() != nil {
 		return "", false
 	}
@@ -2456,27 +2444,27 @@ func GetWorktreeDiffFileWithUncommittedContext(ctx context.Context, repoDir stri
 	if fileIndex < 0 || targetBranch == "" {
 		return "", false
 	}
-	if worktreePath != "" && isGitRepoDirContext(ctx, worktreePath) && gitRefExistsContext(ctx, worktreePath, targetBranch) {
+	if worktreePath != "" && isGitRepoDir(ctx, worktreePath) && gitRefExists(ctx, worktreePath, targetBranch) {
 		mergeBaseOut, err := diffGitOutput(ctx, worktreePath, "merge-base", targetBranch, "HEAD")
 		if err == nil {
 			mergeBase := strings.TrimSpace(string(mergeBaseOut))
 			if mergeBase != "" {
-				return captureWorktreeDiffFileAgainstMergeBaseContext(ctx, worktreePath, mergeBase, fileIndex)
+				return captureWorktreeDiffFileAgainstMergeBase(ctx, worktreePath, mergeBase, fileIndex)
 			}
 		}
 	}
 
-	if branchName == "" || targetBranch == "" || !isGitRepoDirContext(ctx, repoDir) || !gitRefExistsContext(ctx, repoDir, branchName) || !gitRefExistsContext(ctx, repoDir, targetBranch) {
+	if branchName == "" || targetBranch == "" || !isGitRepoDir(ctx, repoDir) || !gitRefExists(ctx, repoDir, branchName) || !gitRefExists(ctx, repoDir, targetBranch) {
 		return "", false
 	}
-	return captureCommittedDiffFileContext(ctx, repoDir, targetBranch+"..."+branchName, fileIndex)
+	return captureCommittedDiffFile(ctx, repoDir, targetBranch+"..."+branchName, fileIndex)
 }
 
 // captureWorktreeDiffAgainstTarget captures tracked changes between the
 // target/HEAD merge base and the worktree's current working tree, including
 // staged and unstaged changes.
 func captureWorktreeDiffAgainstTarget(worktreePath, targetBranch string) (string, bool) {
-	if worktreePath == "" || targetBranch == "" || !isGitWorktreeDir(worktreePath) || !gitRefExists(worktreePath, targetBranch) {
+	if worktreePath == "" || targetBranch == "" || !isGitRepoDir(context.Background(), worktreePath) || !gitRefExists(context.Background(), worktreePath, targetBranch) {
 		return "", false
 	}
 	mergeBaseOut, err := gitOutput(worktreePath, "merge-base", targetBranch, "HEAD")
@@ -2497,11 +2485,7 @@ func captureWorktreeDiffAgainstTarget(worktreePath, targetBranch string) (string
 	return string(out), true
 }
 
-func isGitRepoDir(dir string) bool {
-	return isGitRepoDirContext(context.Background(), dir)
-}
-
-func isGitRepoDirContext(ctx context.Context, dir string) bool {
+func isGitRepoDir(ctx context.Context, dir string) bool {
 	if dir == "" {
 		return false
 	}
@@ -2515,15 +2499,7 @@ func isGitRepoDirContext(ctx context.Context, dir string) bool {
 	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
-func isGitWorktreeDir(dir string) bool {
-	return isGitRepoDir(dir)
-}
-
-func gitRefExists(repoDir, ref string) bool {
-	return gitRefExistsContext(context.Background(), repoDir, ref)
-}
-
-func gitRefExistsContext(ctx context.Context, repoDir, ref string) bool {
+func gitRefExists(ctx context.Context, repoDir, ref string) bool {
 	if repoDir == "" || ref == "" {
 		return false
 	}
@@ -2538,12 +2514,8 @@ type worktreeDiffFileTarget struct {
 	Untracked bool
 }
 
-func captureWorktreeDiffFileAgainstMergeBase(worktreePath string, mergeBase string, fileIndex int) (string, bool) {
-	return captureWorktreeDiffFileAgainstMergeBaseContext(context.Background(), worktreePath, mergeBase, fileIndex)
-}
-
-func captureWorktreeDiffFileAgainstMergeBaseContext(ctx context.Context, worktreePath string, mergeBase string, fileIndex int) (string, bool) {
-	targets, err := worktreeDiffFileTargetsContext(ctx, worktreePath, mergeBase)
+func captureWorktreeDiffFileAgainstMergeBase(ctx context.Context, worktreePath string, mergeBase string, fileIndex int) (string, bool) {
+	targets, err := worktreeDiffFileTargets(ctx, worktreePath, mergeBase)
 	if err != nil || fileIndex < 0 || fileIndex >= len(targets) {
 		return "", false
 	}
@@ -2552,14 +2524,10 @@ func captureWorktreeDiffFileAgainstMergeBaseContext(ctx context.Context, worktre
 		diff := generateNewFileDiffForWorktree(worktreePath, target.Path)
 		return diff, diff != ""
 	}
-	return captureTrackedDiffFileContext(ctx, worktreePath, mergeBase, target.Pathspecs)
+	return captureTrackedDiffFile(ctx, worktreePath, mergeBase, target.Pathspecs)
 }
 
-func worktreeDiffFileTargets(worktreePath string, mergeBase string) ([]worktreeDiffFileTarget, error) {
-	return worktreeDiffFileTargetsContext(context.Background(), worktreePath, mergeBase)
-}
-
-func worktreeDiffFileTargetsContext(ctx context.Context, worktreePath string, mergeBase string) ([]worktreeDiffFileTarget, error) {
+func worktreeDiffFileTargets(ctx context.Context, worktreePath string, mergeBase string) ([]worktreeDiffFileTarget, error) {
 	trackedCmd := diffGitCommand(ctx, "diff", "--name-status", mergeBase)
 	trackedCmd.Dir = worktreePath
 	trackedOut, err := trackedCmd.Output()
@@ -2625,11 +2593,7 @@ func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
 	return targets
 }
 
-func captureTrackedDiffFile(worktreePath string, base string, pathspecs []string) (string, bool) {
-	return captureTrackedDiffFileContext(context.Background(), worktreePath, base, pathspecs)
-}
-
-func captureTrackedDiffFileContext(ctx context.Context, worktreePath string, base string, pathspecs []string) (string, bool) {
+func captureTrackedDiffFile(ctx context.Context, worktreePath string, base string, pathspecs []string) (string, bool) {
 	if len(pathspecs) == 0 {
 		return "", false
 	}
@@ -2644,11 +2608,7 @@ func captureTrackedDiffFileContext(ctx context.Context, worktreePath string, bas
 	return string(out), strings.TrimSpace(string(out)) != ""
 }
 
-func captureCommittedDiffFile(repoDir string, revision string, fileIndex int) (string, bool) {
-	return captureCommittedDiffFileContext(context.Background(), repoDir, revision, fileIndex)
-}
-
-func captureCommittedDiffFileContext(ctx context.Context, repoDir string, revision string, fileIndex int) (string, bool) {
+func captureCommittedDiffFile(ctx context.Context, repoDir string, revision string, fileIndex int) (string, bool) {
 	targetsCmd := diffGitCommand(ctx, "diff", "--name-status", revision)
 	targetsCmd.Dir = repoDir
 	targetsOut, err := targetsCmd.Output()
@@ -2771,7 +2731,7 @@ func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targ
 	lock := worktreeLifecycleLock(repoDir)
 	lock.RLock()
 	defer lock.RUnlock()
-	if worktreePath == "" || targetBranch == "" || !isGitWorktreeDir(worktreePath) || !gitRefExists(worktreePath, targetBranch) {
+	if worktreePath == "" || targetBranch == "" || !isGitRepoDir(context.Background(), worktreePath) || !gitRefExists(context.Background(), worktreePath, targetBranch) {
 		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
 	}
 
@@ -2927,11 +2887,7 @@ func IsBranchMergedContext(ctx context.Context, repoDir string, branchName strin
 // merged into the target). Unlike IsBranchMerged, a missing branch returns
 // false so UI reconciliation does not falsely hide merge actions for tasks
 // whose worktree branch was never actually created.
-func IsBranchTipMergedInto(repoDir string, branchName string, targetBranch string) bool {
-	return IsBranchTipMergedIntoContext(context.Background(), repoDir, branchName, targetBranch)
-}
-
-func IsBranchTipMergedIntoContext(ctx context.Context, repoDir string, branchName string, targetBranch string) bool {
+func IsBranchTipMergedInto(ctx context.Context, repoDir string, branchName string, targetBranch string) bool {
 	if branchName == "" || targetBranch == "" {
 		return false
 	}
@@ -3061,7 +3017,7 @@ func (ws *WorktreeService) validateAutomaticMerge(ctx context.Context, taskID st
 	}
 	*task = *fresh
 	if ws.isBranchTipMergedIntoTarget(repoDir, fresh.WorktreeBranch, fresh.MergeTargetBranch) {
-		status, statusErr := GitStatusPorcelain(fresh.WorktreePath)
+		status, statusErr := GitStatusPorcelain(context.Background(), fresh.WorktreePath)
 		if statusErr != nil {
 			return fmt.Errorf("%w: task worktree status is unavailable", ErrMergeEligibilityChanged)
 		}

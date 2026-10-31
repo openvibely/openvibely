@@ -61,7 +61,7 @@ esac
 			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 			defer cancel()
 			start := time.Now()
-			_, ok := GetWorktreeDiffFileWithUncommittedContext(ctx, dir, "task", "main", dir, 0)
+			_, ok := GetWorktreeDiffFileWithUncommitted(ctx, dir, "task", "main", dir, 0)
 			if ok || ctx.Err() != context.DeadlineExceeded {
 				t.Fatalf("expected timeout, ok=%v err=%v", ok, ctx.Err())
 			}
