@@ -75,9 +75,9 @@ templ ThemesContent(catalog []themes.Theme) {
 		</style>
 		<section class="mb-8" data-display-prefs data-settings-section="layout" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl mb-6">
-				@displayToggle("surfaces", "Surfaces", "Choose the background colors used for the outer frame, page and cards.", "default", "Default", "layered", "Layered")
-				@displayToggle("layout", "Task list", "Float the task list beside the page with a gap, or join them into one surface.", "floating", "Floating", "unified", "Unified")
-				@displayToggle("tabs", "Project tabs", "Keep project tabs separate from the page, or connect the active tab to it.", "detached", "Detached", "attached", "Attached")
+				@displayToggle("surfaces", "Surfaces", "Choose the background colors used for the outer frame, page and cards.", "default", "Default", "layered", "Layered", "Use the theme’s standard backgrounds for the frame, page and cards.", "Separate the frame, page and cards with distinct background shades.")
+				@displayToggle("layout", "Task list", "Float the task list beside the page with a gap, or join them into one surface.", "floating", "Floating", "unified", "Unified", "Keep a gap between the task list and the main page.", "Join the task list and main page into one continuous surface.")
+				@displayToggle("tabs", "Project tabs", "Keep project tabs separate from the page, or connect the active tab to it.", "detached", "Detached", "attached", "Attached", "Keep project tabs separate from the page below.", "Connect the active project tab to the page below.")
 			</div>
 			<h3 class="text-sm font-medium mt-6 mb-2">Task board columns</h3>
 			<p class="text-xs opacity-60 mb-2">How the Backlog, Active and Completed drop zones are marked on the Tasks page.</p>
@@ -90,10 +90,10 @@ templ ThemesContent(catalog []themes.Theme) {
 		</section>
 		<section data-display-prefs data-settings-section="chat" hidden>
 			<div class="flex flex-col gap-3 max-w-2xl">
-				@displayToggle("output", "Tool output", "Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.", "full", "Full", "compact", "Compact")
-				@displayToggle("thread", "Width", "Use the available width for conversations, or center them in a narrower column for easier reading.", "full", "Full width", "focused", "Focused")
-				@displayToggle("bubbles", "Assistant bubbles", "Show assistant messages directly on the page, or give them a filled bubble background.", "off", "Off", "on", "On")
-				@displayToggle("step", "Bubble and composer color step", "Lift chat bubbles and the composer one shade above cards.", "off", "Off", "on", "On")
+				@displayToggle("output", "Tool output", "Compact folds consecutive tool activity into a single expandable row. Assistant messages stay visible.", "full", "Full", "compact", "Compact", "Show tool calls and their results directly in the conversation.", "Fold consecutive tools and thinking into expandable groups. Assistant text stays visible.")
+				@displayToggle("thread", "Width", "Use the available width for conversations, or center them in a narrower column for easier reading.", "full", "Full width", "focused", "Focused", "Let conversations fill the available page width.", "Center conversations in a narrower column for easier reading.")
+				@displayToggle("bubbles", "Assistant bubbles", "Show assistant messages directly on the page, or give them a filled bubble background.", "off", "Off", "on", "On", "Show assistant messages directly on the page.", "Place assistant messages inside filled bubbles.")
+				@displayToggle("step", "Bubble and composer color step", "Lift chat bubbles and the composer one shade above cards.", "off", "Off", "on", "On", "Use the card background shade for bubbles and the composer.", "Lift bubbles and the composer one shade above cards.")
 			</div>
 		</section>
 		<section data-settings-section="themes">
@@ -298,12 +298,12 @@ func previewSyntaxStyle(theme themes.Theme, key string) string {
 	return "color:" + previewColor(theme, "syntax", key, previewColor(theme, "syntax", "foreground", "#d4d4d4"))
 }
 
-templ displayToggle(pref, label, description, firstValue, firstLabel, secondValue, secondLabel string) {
+templ displayToggle(pref, label, description, firstValue, firstLabel, secondValue, secondLabel, firstDescription, secondDescription string) {
 	<fieldset>
 		<legend class="text-sm font-medium mb-2">{ label }</legend>
 		<p class="text-xs opacity-60 mb-2">{ description }</p>
 		<div class="grid grid-cols-2 gap-3">
-			for _, opt := range [][2]string{{firstValue, firstLabel}, {secondValue, secondLabel}} {
+			for _, opt := range [][3]string{{firstValue, firstLabel, firstDescription}, {secondValue, secondLabel, secondDescription}} {
 				<button type="button" class="display-option card bg-base-100 border border-base-300 p-3 text-left hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" data-display-pref={ pref } data-display-option={ opt[0] } aria-pressed="false" onclick="window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay(this.getAttribute('data-display-pref'), this.getAttribute('data-display-option'))">
 					<span class="flex justify-between items-center gap-2 mb-3"><span class="text-sm font-medium">{ opt[1] }</span><span class="badge badge-primary badge-sm hidden" data-display-active>Active</span></span>
 					<div class="display-preview" data-kind={ pref } data-variant={ opt[0] } aria-hidden="true">
@@ -336,6 +336,7 @@ templ displayToggle(pref, label, description, firstValue, firstLabel, secondValu
 							<div class="dp-conversation"><div class="dp-user"><i></i></div><div class="dp-assistant"><i></i><i></i><i></i></div><div class="dp-composer"><i></i></div></div>
 						}
 					</div>
+					<p class="text-xs opacity-70 mt-3">{ opt[2] }</p>
 				</button>
 			}
 		</div>
