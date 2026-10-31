@@ -71,6 +71,27 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
  draft.remove();first.scrollIntoView();
  switchDiffView('split',false);main.scrollTop=0;
  await wait(()=>document.querySelector('#diff-content-split [data-chunk-index="0"] tr[data-new-line="1"]'));
+ const splitFirst=document.querySelector('#diff-content-split [data-chunk-index="0"]');
+ const splitDistant=document.querySelector('#diff-content-split [data-chunk-index="10"]');
+ splitDistant.scrollIntoView();
+ await wait(()=>splitDistant.querySelector('[data-comment-id="existing"]'));
+ splitFirst.scrollIntoView();
+ await wait(()=>splitFirst.querySelector('tr[data-new-line="1"]') && distant._saved && splitDistant._saved);
+ const inlineTable=distant._saved.querySelector('table'),splitTable=splitDistant._saved.querySelector('table');
+ const list=(text,id)=>'<div class="review-comment-item" data-comment-id="'+id+'" data-file-path="big.txt" data-line-number="2001" data-line-type="new"><p>'+text+'</p></div>';
+ syncReviewCommentsFromListHtml(list('edited review','existing'));
+ [distant,splitDistant].forEach(chunk=>assert(chunk._saved.querySelectorAll('tr.review-inline-comment').length===1 && chunk._saved.querySelector('.review-comment-text').textContent==='edited review','detached comment edit was not synchronized'));
+ syncReviewCommentsFromListHtml(list('edited review','existing')+list('added review','added'));
+ [distant,splitDistant].forEach(chunk=>assert(chunk._saved.querySelectorAll('tr.review-inline-comment').length===2,'detached comment addition was not synchronized'));
+ syncReviewCommentsFromListHtml('');
+ assert(distant._saved.querySelector('table')===inlineTable && splitDistant._saved.querySelector('table')===splitTable,'comment refresh discarded cached code');
+ splitDistant.scrollIntoView();
+ await wait(()=>splitDistant.querySelector('tr[data-new-line="2001"]'));
+ assert(!splitDistant.querySelector('tr.review-inline-comment'),'deleted comments reappeared in split view');
+ switchDiffView('inline',false);distant.scrollIntoView();
+ await wait(()=>distant.querySelector('tr[data-new-line="2001"]'));
+ assert(!distant.querySelector('tr.review-inline-comment'),'deleted comments reappeared in inline view');
+
  fetch('/result?status=pass');
  } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
  });</script>`
