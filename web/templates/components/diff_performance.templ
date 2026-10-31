@@ -253,6 +253,7 @@ templ diffViewerPerformanceScript() {
    }
    function load(card, restore) {
     var abort = new AbortController();
+    var reviewCommentsAtStart = viewer._diffReviewComments;
     pending.set(card, abort); inFlight++;
     if (restore) restore.abort = abort;
     if (card.classList.contains('diff-file-slot') && !card.querySelector('[data-diff-load-status]')) {
@@ -286,6 +287,13 @@ templ diffViewerPerformanceScript() {
       var response = content.content.querySelector('[data-diff-chunk-response]');
       var replacement = response ? response.querySelector('.diff-file-card') : content.content.firstElementChild;
       if (!replacement || (!response && replacement.id !== card.id)) throw new Error('Diff changed; reload the Changes view');
+      // A comment refresh may have completed while this HTML was in flight.
+      // Reconcile before mounting, without overwriting newer server comments
+      // on requests that started after the latest local refresh.
+      if (viewer._diffReviewComments && viewer._diffReviewComments !== reviewCommentsAtStart && window.applyDiffReviewComments) {
+       window.applyDiffReviewComments(replacement, viewer._diffReviewComments);
+       if (!response) html = content.innerHTML;
+      }
       // Swap only this card. HTMX preserves its normal cleanup, processing,
       // and afterSwap/afterSettle hooks, including saved collapse state.
       var scroll = restore ? restore.snapshot : window._captureDiffScroll();

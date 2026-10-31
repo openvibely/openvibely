@@ -1097,6 +1097,22 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				}
 			}
 
+			function applyDiffReviewComments(root, grouped) {
+				root.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {
+					formRow.remove();
+				});
+				root.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {
+					commentRow.remove();
+				});
+				root.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {
+					lineRow.classList.remove('diff-review-line-open');
+					var key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);
+					(grouped[key] || []).forEach(function(comment) {
+						insertInlineCommentRow(lineRow, comment);
+					});
+				});
+			}
+
 			function syncReviewCommentsFromListHtml(html) {
 				var viewer = document.getElementById('diff-viewer');
 				if (!viewer) return;
@@ -1114,21 +1130,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				viewer.querySelectorAll('[data-chunk-index]').forEach(function(chunk) {
 					if (chunk._saved) roots.push(chunk._saved);
 				});
-				roots.forEach(function(root) {
-					root.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {
-						formRow.remove();
-					});
-					root.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {
-						commentRow.remove();
-					});
-					root.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {
-						lineRow.classList.remove('diff-review-line-open');
-						var key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);
-						(grouped[key] || []).forEach(function(comment) {
-							insertInlineCommentRow(lineRow, comment);
-						});
-					});
-				});
+				viewer._diffReviewComments = grouped;
+				roots.forEach(function(root) { applyDiffReviewComments(root, grouped); });
 
 				setReviewToolbarEnabled(comments.length > 0);
 			}
