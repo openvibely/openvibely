@@ -2,6 +2,10 @@ package service
 
 import (
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"strings"
 
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
@@ -19,22 +23,22 @@ func summaryHistoryInput(provider models.LLMProvider, history []models.Execution
 		}
 	}
 	history = normalizeSummaryReplay(provider, history)
-	var messages any
 	switch provider {
 	case models.ProviderOpenAI:
-		messages = llmopenai.HistoryInputItems(history)
+		return summaryRows(llmopenai.HistoryInputItems(history))
 	case models.ProviderAnthropic:
-		messages = llmanthropic.SummaryHistory(history)
+		return summaryRows(llmanthropic.SummaryHistory(history))
 	default:
-		messages = compatible.SummaryHistory(history)
+		return summaryRows(compatible.SummaryHistory(history))
 	}
-	raw, err := json.Marshal(messages)
+}
+
+func summaryRows[T any](messages []T) ([]json.RawMessage, error) {
+	snapshot, err := recovery.Capture(messages, func(m T) ([]byte, error) { return json.Marshal(m) })
 	if err != nil {
 		return nil, err
 	}
-	var input []json.RawMessage
-	err = json.Unmarshal(raw, &input)
-	return input, err
+	return snapshot.Rows("")
 }
 
 func estimateSummaryInputTokens(provider models.LLMProvider, input []json.RawMessage) int {
@@ -48,29 +52,14 @@ func estimateSummaryInputTokens(provider models.LLMProvider, input []json.RawMes
 		}
 		return openaiclient.EstimateResponsesInputTokens(items)
 	}
-	// Normalize the provider's content field before using the image-aware
-	// estimator. Base64 bytes are not text tokens.
-	var messages []map[string]json.RawMessage
-	for _, raw := range input {
-		var message map[string]json.RawMessage
-		if json.Unmarshal(raw, &message) != nil {
-			continue
-		}
-		if blocks := message["content_blocks"]; len(blocks) > 0 {
-			message["content"] = blocks
-			delete(message, "content_blocks")
-		}
-		messages = append(messages, message)
-	}
-	if len(messages) == 0 {
+	if len(input) == 0 {
 		return 0
 	}
-	raw, _ := json.Marshal(messages)
 	imageType := "image_url"
 	if provider == models.ProviderAnthropic {
 		imageType = "image"
 	}
-	tokens, _ := estimateReplayTranscriptImageTokens(string(raw), imageType, 2000)
+	tokens, _ := tokenestimate.FromRows(input, imageType, 2000, "content_blocks", "image_content")
 	return tokens
 }
 
@@ -132,7 +121,29 @@ func summaryToolIDs(raw json.RawMessage) []string {
 		Content       json.RawMessage   `json:"content"`
 		ContentBlocks []json.RawMessage `json:"content_blocks"`
 	}
-	if json.Unmarshal(raw, &item) != nil {
+	if jsonview.Object(raw, func(k string, v json.RawMessage) error {
+		switch strings.ToLower(k) {
+		case "content":
+			item.Content = v
+		case "content_blocks":
+			var err error
+			item.ContentBlocks, err = jsonview.Array(v)
+			return err
+		case "type":
+			return json.Unmarshal(v, &item.Type)
+		case "id":
+			return json.Unmarshal(v, &item.ID)
+		case "call_id":
+			return json.Unmarshal(v, &item.CallID)
+		case "tool_call_id":
+			return json.Unmarshal(v, &item.ToolCallID)
+		case "tool_use_id":
+			return json.Unmarshal(v, &item.ToolUseID)
+		case "tool_calls":
+			return json.Unmarshal(v, &item.ToolCalls)
+		}
+		return nil
+	}) != nil {
 		return nil
 	}
 	var ids []string
@@ -149,8 +160,7 @@ func summaryToolIDs(raw json.RawMessage) []string {
 			ids = append(ids, call.ID)
 		}
 	}
-	var content []json.RawMessage
-	_ = json.Unmarshal(item.Content, &content)
+	content, _ := jsonview.Array(item.Content)
 	for _, block := range append(content, item.ContentBlocks...) {
 		ids = append(ids, summaryToolIDs(block)...)
 	}

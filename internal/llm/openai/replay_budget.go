@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"strings"
 
@@ -57,7 +58,7 @@ func EstimateContinuationTokensContext(ctx context.Context, history []models.Exe
 	if err == nil {
 		nativeTokens = openaiclient.EstimateResponsesInputTokens(native)
 	}
-	for _, message := range preparedhistory.Read(ctx, history, buildClientHistory) {
+	for _, message := range preparedhistory.Read(ctx, history, buildPreparedHistory) {
 		if len(message.ResponsesInputItems) > 0 {
 			nativeTokens = 0
 			historyTokens = openaiclient.EstimateResponsesInputTokens(message.ResponsesInputItems)
@@ -78,7 +79,7 @@ func HistoryInputItems(history []models.Execution) []any {
 // chat sending does. The cache must not retain a second decoded representation.
 func TakeHistoryInputItems(ctx context.Context, history []models.Execution) []any {
 	var items []any
-	for _, message := range preparedhistory.Take(ctx, history, buildClientHistory) {
+	for _, message := range preparedhistory.Take(ctx, history, buildPreparedHistory) {
 		if len(message.ResponsesInputItems) > 0 {
 			items = append([]any(nil), message.ResponsesInputItems...)
 		} else {
@@ -166,7 +167,16 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 }
 
 func decodeNativeInput(raw string) ([]any, error) {
-	var items []any
-	err := json.Unmarshal([]byte(raw), &items)
-	return items, err
+	rows, err := jsonview.Array([]byte(raw))
+	if err != nil {
+		return nil, err
+	}
+	items := make([]any, len(rows))
+	for i, row := range rows {
+		items[i], err = jsonview.ToolOutput(row)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }

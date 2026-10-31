@@ -196,9 +196,15 @@ func TestProviderSwitchPersistsOnlySuccessfulWindow(t *testing.T) {
 				require.Equal(t, "provider_recovery", saved.Strategy)
 				require.Equal(t, "tail", saved.SourceExecutionID)
 				require.Empty(t, saved.ProviderStateJSON)
-				require.Equal(t, accepted, saved.History)
+				expectedJSON, e := json.Marshal(accepted)
+				require.NoError(t, e)
+				savedJSON, e := json.Marshal(saved.History)
+				require.NoError(t, e)
+				require.JSONEq(t, string(expectedJSON), string(savedJSON))
 				restored := svc.restoreCompactionCheckpoint(req)
-				require.Equal(t, accepted, restored.ChatHistory, "next followup must use the accepted window")
+				restoredJSON, e := json.Marshal(restored.ChatHistory)
+				require.NoError(t, e)
+				require.JSONEq(t, string(expectedJSON), string(restoredJSON), "next followup must use the accepted window")
 			})
 		}
 	}

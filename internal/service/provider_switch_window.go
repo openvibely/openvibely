@@ -16,12 +16,11 @@ func recoveryWindowHistory(provider models.LLMProvider, input []json.RawMessage)
 	if input == nil {
 		input = []json.RawMessage{}
 	}
-	var value any = input
+	key := ""
 	if provider == models.ProviderAnthropic {
-		value = map[string]any{"messages": input}
+		key = "messages"
 	}
-	raw, _ := json.Marshal(value)
-	return []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_truncated", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}}}
+	return []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_truncated", ReplayMessages: []models.ExecutionReplayMessage{models.ReplayFromRows(key, input)}}}
 }
 
 // Grow a chronological suffix backwards. A boundary may not split any linked

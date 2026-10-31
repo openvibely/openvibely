@@ -51,6 +51,7 @@ Return only the summary text.`
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
+	compactionTools *requestjson.Field // prepared immutable schemas, scoped to compaction only
 	// responseText is owned by one sampling turn. The parser and failure recovery
 	// share this builder instead of accumulating the same delivered text twice.
 	responseText *strings.Builder
@@ -1683,7 +1684,15 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
 	}
 
-	trimmedInput, err := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model, opts.ContextWindow)
+	preparedTools, err := requestjson.Prepare("tools", tools)
+	if err != nil {
+		return nil, "", err
+	}
+	overhead := approxOpenAITokenCount(instructions)
+	if len(tools) > 0 {
+		overhead += approxOpenAITokensFromByteCount(len(preparedTools.JSON()))
+	}
+	trimmedInput, err := trimCompactionInputWithOverhead(inputItems, overhead, opts.Model, opts.ContextWindow)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1692,14 +1701,15 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	}
 
 	if useRemoteV2 {
-		return c.compactAgenticInputItemsViaResponsesV2(ctx, trimmedInput, tools, opts)
+		compactionOpts := *opts
+		compactionOpts.compactionTools = preparedTools
+		return c.compactAgenticInputItemsViaResponsesV2(ctx, trimmedInput, tools, &compactionOpts)
 	}
 
 	payload := map[string]any{
 		"model":               opts.Model,
 		"input":               trimmedInput,
 		"instructions":        instructions,
-		"tools":               tools,
 		"parallel_tool_calls": len(tools) > 0,
 	}
 	reasoningPayload := map[string]any{}
@@ -1712,7 +1722,12 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	if len(reasoningPayload) > 0 {
 		payload["reasoning"] = reasoningPayload
 	}
-	body, err := requestjson.MarshalArrayField(payload, "input")
+	delete(payload, "input")
+	preparedInput, err := requestjson.PrepareItems("input", trimmedInput)
+	if err != nil {
+		return nil, "", err
+	}
+	body, err := preparedInput.Marshal(requestjson.Metadata{Value: payload, Fields: map[string]*requestjson.Field{"tools": preparedTools}})
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal compaction request: %w", err)
 	}
@@ -1988,6 +2003,9 @@ func compactionInstructions(opts *AgenticOptions) string {
 }
 
 func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string, configuredContextWindow ...int) ([]any, error) {
+	return trimCompactionInputWithOverhead(inputItems, compactionRequestFixedTokenOverhead(tools, instructions), model, configuredContextWindow...)
+}
+func trimCompactionInputWithOverhead(inputItems []any, overhead int, model string, configuredContextWindow ...int) ([]any, error) {
 	contextWindow := 0
 	if len(configuredContextWindow) > 0 {
 		contextWindow = configuredContextWindow[0]
@@ -2008,7 +2026,7 @@ func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDe
 	}
 
 	itemTokens := make([]int, len(inputItems))
-	totalTokens := compactionRequestFixedTokenOverhead(tools, instructions)
+	totalTokens := overhead
 	for i, item := range inputItems {
 		itemTokens[i] = estimateAgenticInputItemTokens(item)
 		totalTokens += itemTokens[i]
@@ -2687,6 +2705,10 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 	// Only supported on the direct API (api.openai.com), not the ChatGPT OAuth endpoint.
 	if !isChatGPTOAuth {
 		payload["truncation"] = "auto"
+	}
+
+	if opts.compactionTools != nil && !opts.WebSearchEnabled && len(tools) > 0 {
+		payload["tools"] = json.RawMessage(opts.compactionTools.JSON())
 	}
 
 	if c.supportsResponsesWebsockets {

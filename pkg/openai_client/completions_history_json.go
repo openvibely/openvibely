@@ -2,6 +2,7 @@ package openaiclient
 
 import (
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"strings"
 )
@@ -9,7 +10,7 @@ import (
 // Persist the API's content union, while accepting older image_content records.
 func (m CompletionsHistoryMessage) MarshalJSON() ([]byte, error) {
 	type plain CompletionsHistoryMessage
-	var content any = m.Content
+	var content any = m.contentValue()
 	if len(m.ImageContent) > 0 {
 		content = m.ImageContent
 	}
@@ -56,4 +57,21 @@ func (m *CompletionsHistoryMessage) UnmarshalJSON(data []byte) error {
 		*m = next
 	}
 	return err
+}
+
+// contentValue is used only by immutable prepared histories. Public history
+// decoding still populates Content normally.
+func (m CompletionsHistoryMessage) contentValue() any {
+	if m.rawContent != nil && m.Content == "" {
+		return *m.rawContent
+	}
+	return m.Content
+}
+func (m CompletionsHistoryMessage) contentText() string {
+	if view, ok := m.contentValue().(jsonview.Value); ok {
+		var text string
+		_ = view.Decode(&text)
+		return text
+	}
+	return m.Content
 }

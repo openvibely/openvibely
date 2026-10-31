@@ -204,6 +204,12 @@ func FromLegacyTranscript(raw []byte, imageType string, imageTokens int) (int, e
 	if err != nil || rows == nil {
 		return FromMessagesJSON(raw, imageType, imageTokens)
 	}
+	return FromRows(rows, imageType, imageTokens, "image_content")
+}
+
+// FromRows budgets immutable messages directly. Aliases are normalized in order
+// without constructing another complete JSON transcript.
+func FromRows(rows []json.RawMessage, imageType string, imageTokens int, aliases ...string) (int, error) {
 	size := len(`{"messages":[]}`)
 	adjustment := 0
 	for i, row := range rows {
@@ -218,9 +224,11 @@ func FromLegacyTranscript(raw []byte, imageType string, imageTokens int) (int, e
 		if err := jsonview.Object(row, func(k string, v json.RawMessage) error { fields[k] = v; return nil }); err != nil {
 			return 0, err
 		}
-		if value := fields["image_content"]; len(value) > 0 {
-			fields["content"] = value
-			delete(fields, "image_content")
+		for _, alias := range aliases {
+			if value := fields[alias]; len(value) > 0 {
+				fields["content"] = value
+				delete(fields, alias)
+			}
 		}
 		size += 2
 		j := 0

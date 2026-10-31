@@ -289,7 +289,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		if err != nil {
 			return "", llmusage.FromTotal(0), err
 		}
-		client.SetCompletionsHistory(history)
+		client.SetPreparedCompletionsHistory(history[0])
 	}
 	if req.SummaryInput != nil {
 		var history []openaiclient.CompletionsHistoryMessage
@@ -368,7 +368,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		if err != nil {
 			return "", "", llmusage.FromTotal(0), err
 		}
-		client.SetCompletionsHistory(history)
+		client.SetPreparedCompletionsHistory(history[0])
 	}
 
 	extraHeaders, extraBody, err := compatibleRequestExtras(req.Agent)
@@ -435,7 +435,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
-	client.SetCompletionsHistory(history)
+	client.SetPreparedCompletionsHistory(history[0])
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate && !req.Followup {
@@ -767,10 +767,10 @@ func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistor
 	return buildClientHistory(history)
 }
 
-func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
+func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.PreparedCompletionsHistory, error) {
 	// The service hydrates history before budgeting and compaction. Never reload
 	// from storage here: that would restore content deliberately discarded there.
-	return preparedhistory.Take(ctx, chatHistory, buildClientHistory), nil
+	return preparedhistory.Take(ctx, chatHistory, buildPreparedClientHistory), nil
 }
 
 func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
@@ -917,4 +917,24 @@ func (a *Adapter) conversationRecorder(ctx context.Context, execID string) *conv
 		return nil
 	}
 	return conversation.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
+}
+
+func buildPreparedClientHistory(history []models.Execution) []openaiclient.PreparedCompletionsHistory {
+	var result openaiclient.PreparedCompletionsHistory
+	for _, exec := range history {
+		if len(exec.ReplayMessages) == 0 {
+			result = result.Append(openaiclient.PreparedCompletionsMessages(buildClientHistory([]models.Execution{exec})))
+			continue
+		}
+		for _, replay := range exec.ReplayMessages {
+			prepared, err := openaiclient.PrepareCompletionsHistory(replay)
+			if err != nil || prepared.Empty() {
+				copy := exec
+				copy.ReplayMessages = []models.ExecutionReplayMessage{replay}
+				prepared = openaiclient.PreparedCompletionsMessages(buildClientHistory([]models.Execution{copy}))
+			}
+			result = result.Append(prepared)
+		}
+	}
+	return []openaiclient.PreparedCompletionsHistory{result}
 }

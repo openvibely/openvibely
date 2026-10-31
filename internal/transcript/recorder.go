@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 )
@@ -255,6 +256,9 @@ func equalReplayValue(a, b any) bool {
 			}
 		}
 		return true
+	case jsonview.Value:
+		y, ok := b.(jsonview.Value)
+		return ok && bytes.Equal(x.Raw(), y.Raw())
 	case json.RawMessage:
 		y, ok := b.(json.RawMessage)
 		return ok && (x == nil) == (y == nil) && bytes.Equal(x, y)
@@ -267,7 +271,7 @@ func equalReplayValue(a, b any) bool {
 // iteration. The fallback preserves concrete provider DTO/custom marshaler types.
 func freezeReplayValue(value any) any {
 	switch v := value.(type) {
-	case nil, string, bool, float64, int, json.Number:
+	case nil, string, bool, float64, int, json.Number, jsonview.Value:
 		return value
 	case map[string]any:
 		if v == nil {

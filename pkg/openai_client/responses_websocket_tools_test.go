@@ -129,7 +129,15 @@ func TestResponsesLiteTools_GenericFallbackPreservesExtensions(t *testing.T) {
 		map[string]any{"type": "image_generation", "name": "image"},
 	}
 
-	got := responsesLiteTools(tools)
+	prepared := responsesLiteTools(tools)
+	var got []any
+	wire, err := json.Marshal(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(wire, &got); err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("filtered tools = %#v, want 2 retained tools", got)
 	}

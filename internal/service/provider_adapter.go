@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"os"
 	"path/filepath"
@@ -460,21 +461,30 @@ func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 }
 
 func estimateDefaultProviderToolTokens(provider models.LLMProvider) int {
-	var defs any
 	switch provider {
 	case models.ProviderAnthropic:
-		defs = anthropicclient.DefaultTools()
+		return anthropicDefaultToolTokens()
 	case models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
-		defs = openaiclient.DefaultTools()
+		return openAIDefaultToolTokens()
 	default:
 		return 0
 	}
-	encoded, err := json.Marshal(defs)
+}
+
+var anthropicDefaultToolTokens = sync.OnceValue(func() int {
+	field, err := requestjson.Prepare("tools", anthropicclient.DefaultTools())
 	if err != nil {
 		return 0
 	}
-	return estimatedUTF8Tokens(string(encoded))
-}
+	return tokenestimate.FromByteCount(len(field.JSON()))
+})
+var openAIDefaultToolTokens = sync.OnceValue(func() int {
+	field, err := requestjson.Prepare("tools", openaiclient.DefaultTools())
+	if err != nil {
+		return 0
+	}
+	return tokenestimate.FromByteCount(len(field.JSON()))
+})
 
 func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	budget := requestBudgetForAgent(req.Agent)
@@ -525,7 +535,7 @@ func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment
 func estimateExecutionTokens(exec models.Execution) int {
 	total := estimatedUTF8Tokens(exec.PromptSent) + estimatedUTF8Tokens(exec.Output) + estimatedUTF8Tokens(exec.ErrorMessage) + estimatedUTF8Tokens(exec.ReasoningContent)
 	for _, replay := range exec.ReplayMessages {
-		total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + estimatedUTF8Tokens(replay.FullTranscriptJSON())
+		total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + tokenestimate.FromByteCount(replay.TranscriptBytes())
 	}
 	return total
 }
@@ -552,7 +562,11 @@ func estimateHistoryTokensContext(ctx context.Context, provider models.LLMProvid
 			if provider == models.ProviderAnthropic {
 				imageType = "image"
 			}
-			if raw := replay.FullTranscriptJSON(); raw != "" {
+			if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "array" && !replay.Rows.NullItems {
+				if tokens, err := tokenestimate.FromRows(replay.Rows.Items, imageType, imageTokens, "content_blocks", "image_content"); err == nil {
+					total += tokens - tokenestimate.FromByteCount(replay.TranscriptBytes())
+				}
+			} else if raw := replay.FullTranscriptJSON(); raw != "" {
 				if tokens, err := estimateReplayTranscriptImageTokens(raw, imageType, imageTokens); err == nil {
 					total += tokens - estimatedUTF8Tokens(raw)
 				}
@@ -1924,11 +1938,9 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 	// Task/direct adapters do not take ChatHistory. Supply the same recovered
 	// conversation through their native input field without changing tool mode.
 	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && !requestUsesChatStreaming(req) && !req.RawDirectPrompt {
-		raw, err := json.Marshal(llmopenai.TakeHistoryInputItems(req.Ctx, req.ChatHistory))
-		if err != nil {
-			return llmcontracts.AgentResult{}, err
-		}
-		req.NativeCompactionStateJSON = string(raw)
+		items := llmopenai.TakeHistoryInputItems(req.Ctx, req.ChatHistory)
+		req.Ctx = preparedhistory.WithTransfer(req.Ctx, items)
+		req.NativeCompactionStateJSON = ""
 	}
 	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, req.NativeCompactionStateJSON)
 	req.Ctx = llmcontracts.WithProviderSessionStateJSON(req.Ctx, req.ProviderSessionStateJSON)

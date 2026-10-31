@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"net/http"
@@ -160,6 +161,7 @@ type CompletionsToolCall struct {
 // providers that require reasoning content to be replayed verbatim.
 type CompletionsHistoryMessage struct {
 	rawReplay        *immutableCompletionsReplay
+	rawContent       *jsonview.Value
 	ImageContent     []map[string]interface{} `json:"-"`
 	Role             string                   `json:"role"`
 	Content          string                   `json:"content"`
@@ -1137,7 +1139,16 @@ func openAILocalShellCommand(item map[string]any) string {
 }
 
 func openAIExtractToolOutputText(raw any) string {
+	if v, ok := raw.(jsonview.Value); ok {
+		raw = v.Raw()
+	}
 	switch v := raw.(type) {
+	case json.RawMessage:
+		var decoded any
+		if json.Unmarshal(v, &decoded) != nil {
+			return ""
+		}
+		return openAIExtractToolOutputText(decoded)
 	case string:
 		return strings.TrimSpace(v)
 	case []any:

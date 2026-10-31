@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -22,17 +23,17 @@ func restoreCompactedApplicationContext(req llmcontracts.AgentRequest, history [
 	for _, source := range original {
 		messages, _ := summaryHistoryInput(req.Agent.Provider, source)
 		for _, raw := range messages {
-			var message struct {
-				Role          string
-				Content       json.RawMessage
-				ContentBlocks json.RawMessage `json:"content_blocks"`
-			}
-			if json.Unmarshal(raw, &message) != nil || message.Role != "user" {
+			fields, err := jsonview.FoldedFields(raw)
+			if err != nil {
 				continue
 			}
-			content := message.Content
-			if len(message.ContentBlocks) > 0 {
-				content = message.ContentBlocks
+			var role string
+			if json.Unmarshal(fields["role"], &role) != nil || role != "user" {
+				continue
+			}
+			content := fields["content"]
+			if len(fields["content_blocks"]) > 0 {
+				content = fields["content_blocks"]
 			}
 			var text string
 			if json.Unmarshal(content, &text) != nil {

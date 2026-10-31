@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/streamdecode"
@@ -296,7 +297,46 @@ type nativeCompactionState struct {
 
 func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
 	var state nativeCompactionState
-	if err := json.Unmarshal([]byte(raw), &state); err == nil && state.Version == nativeCompactionStateVersion {
+	var encodedMessages json.RawMessage
+	decodeErr := requestjson.Object([]byte(raw), func(k string, v json.RawMessage) error {
+		switch strings.ToLower(k) {
+		case "version":
+			return json.Unmarshal(v, &state.Version)
+		case "messages":
+			encodedMessages = v
+		}
+		return nil
+	})
+	if decodeErr == nil && state.Version == nativeCompactionStateVersion {
+		rows, err := requestjson.Array(encodedMessages)
+		if err != nil {
+			return nil, err
+		}
+		state.Messages = make([]agenticMessage, 0, len(rows))
+		for _, row := range rows {
+			var m agenticMessage
+			err := requestjson.Object(row, func(k string, v json.RawMessage) error {
+				switch strings.ToLower(k) {
+				case "role":
+					return json.Unmarshal(v, &m.Role)
+				case "content":
+					if len(v) > 0 && v[0] == '"' {
+						var text string
+						if err := json.Unmarshal(v, &text); err != nil {
+							return err
+						}
+						m.Content = text
+					} else {
+						m.Content = v
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			state.Messages = append(state.Messages, m)
+		}
 		if hasLeadingCompactionMessage(state.Messages) {
 			return state.Messages, nil
 		}
@@ -348,14 +388,24 @@ func EstimateNativeCompactionTokensContext(ctx context.Context, raw string) int 
 	if err != nil {
 		return tokenestimate.FromText(raw)
 	}
-	encoded, err := json.Marshal(messages)
-	if err != nil {
-		return tokenestimate.FromText(raw)
+	size := len(`{"messages":[]}`)
+	if messages == nil {
+		size += 2
+	} else if len(messages) > 0 {
+		size += len(messages) - 1
 	}
-	tokens, err := tokenestimate.FromMessageArray(encoded, "image", 2000)
-	if err != nil {
-		return tokenestimate.FromText(raw)
+	for _, m := range messages {
+		n, err := requestjson.Size(map[string]any{"role": m.Role, "content": m.Content})
+		if err != nil {
+			return tokenestimate.FromText(raw)
+		}
+		adjustment, err := tokenestimate.ContentAdjustment(m.Content, "image", 2000)
+		if err != nil {
+			return tokenestimate.FromText(raw)
+		}
+		size += n + adjustment
 	}
+	tokens := tokenestimate.FromByteCount(size)
 	return tokens
 }
 
@@ -809,8 +859,7 @@ func normalizeAnthropicToolInput(input json.RawMessage) json.RawMessage {
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return json.RawMessage(`{}`)
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &obj); err != nil {
+	if err := requestjson.Object(raw, func(string, json.RawMessage) error { return nil }); err != nil {
 		return json.RawMessage(`{}`)
 	}
 	return json.RawMessage(raw)
@@ -910,18 +959,17 @@ func inferProviderToolUseInput(name string, content json.RawMessage) json.RawMes
 		return json.RawMessage(`{}`)
 	}
 
-	var generic interface{}
-	if err := json.Unmarshal(content, &generic); err != nil {
+	if !json.Valid(content) {
 		return json.RawMessage(`{}`)
 	}
 
 	switch name {
 	case "web_fetch":
-		if url, ok := findNestedStringField(generic, "url"); ok {
+		if url, ok := jsonview.FindString(content, "url"); ok {
 			return rawJSONMapWithString("url", url)
 		}
 	case "web_search":
-		if q, ok := findNestedStringField(generic, "query"); ok {
+		if q, ok := jsonview.FindString(content, "query"); ok {
 			return rawJSONMapWithString("query", q)
 		}
 	}
@@ -963,12 +1011,11 @@ func inferProviderResultToolName(content json.RawMessage) string {
 		return ""
 	}
 
-	var generic interface{}
-	if err := json.Unmarshal(raw, &generic); err != nil {
+	if !json.Valid(raw) {
 		return ""
 	}
 
-	typ, ok := findNestedStringField(generic, "type")
+	typ, ok := jsonview.FindString(raw, "type")
 	if !ok {
 		return ""
 	}
@@ -2106,6 +2153,20 @@ func anthropicProviderResultContentRaw(textValue, rawValue string) json.RawMessa
 	return json.RawMessage(raw)
 }
 
+// marshalAgenticMessage preserves immutable content for both sending and recovery.
+func marshalAgenticMessage(m agenticMessage) ([]byte, error) {
+	if raw, ok := m.Content.(json.RawMessage); ok {
+		field, err := requestjson.PrepareRaw("content", raw)
+		if err != nil {
+			return nil, err
+		}
+		return field.Marshal(struct {
+			Role string `json:"role"`
+		}{m.Role})
+	}
+	return json.Marshal(m)
+}
+
 // Preserve restored native content while encoding the small message envelope.
 func prepareAgenticMessages(messages []agenticMessage) (*requestjson.Field, error) {
 	if messages == nil {
@@ -2113,22 +2174,11 @@ func prepareAgenticMessages(messages []agenticMessage) (*requestjson.Field, erro
 	}
 	items := make([]any, 0, len(messages))
 	for _, m := range messages {
-		raw, ok := m.Content.(json.RawMessage)
-		if !ok {
-			items = append(items, m)
-			continue
-		}
-		field, err := requestjson.PrepareRaw("content", raw)
+		raw, err := marshalAgenticMessage(m)
 		if err != nil {
 			return nil, err
 		}
-		encoded, err := field.Marshal(struct {
-			Role string `json:"role"`
-		}{m.Role})
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, json.RawMessage(encoded))
+		items = append(items, json.RawMessage(raw))
 	}
 	return requestjson.PrepareItems("messages", items)
 }

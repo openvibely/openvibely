@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"io"
@@ -175,12 +176,20 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	if existingCompletionsHistory != nil {
 		for _, msg := range existingCompletionsHistory {
-			var content interface{} = msg.Content
+			var content interface{} = msg.contentValue()
 			if len(msg.ImageContent) > 0 {
 				content = msg.ImageContent
 			}
 			if msg.Role == "tool" {
-				content = truncateToolOutputForModelInput(msg.Content, opts.ToolOutputTokenLimit)
+				if view, ok := content.(jsonview.Value); ok {
+					length, err := view.DecodedStringBytes()
+					limit := normalizedToolOutputTokenLimit(opts.ToolOutputTokenLimit)
+					if err != nil || (limit > 0 && length > tokenestimate.ByteBudget(limit)) {
+						content = truncateToolOutputForModelInput(msg.contentText(), opts.ToolOutputTokenLimit)
+					}
+				} else {
+					content = truncateToolOutputForModelInput(msg.Content, opts.ToolOutputTokenLimit)
+				}
 			}
 			raw := msg.rawReplay
 			if text, ok := content.(string); !ok || text != msg.Content {
@@ -934,6 +943,20 @@ func prepareCompletionsMessages(messages []completionsMessage) (*requestjson.Fie
 		}
 		if len(raw) > 0 {
 			items[i] = raw
+		} else if requestjson.HasRawValue(m.Content) {
+			// Keep provider envelope rules here; the shared encoder borrows the
+			// large content value without a custom-marshaler round trip.
+			fields := map[string]any{"role": m.Role, "content": m.Content}
+			if m.ReasoningContent != "" {
+				fields["reasoning_content"] = m.ReasoningContent
+			}
+			if len(m.ToolCalls) > 0 {
+				fields["tool_calls"] = m.ToolCalls
+			}
+			if m.ToolCallID != "" {
+				fields["tool_call_id"] = m.ToolCallID
+			}
+			items[i] = fields
 		} else {
 			items[i] = m
 		}

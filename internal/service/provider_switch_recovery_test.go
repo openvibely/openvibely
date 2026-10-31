@@ -169,7 +169,7 @@ func TestReadableCompactionRecoveryPreservesLaterStructuredTurns(t *testing.T) {
 	recovered, err := readableCompactedHistory(history)
 	require.NoError(t, err)
 	require.Equal(t, later, recovered[1])
-	require.Contains(t, recovered[0].ReplayMessages[0].TranscriptJSON, "OLD_FACT")
+	require.Contains(t, recovered[0].ReplayMessages[0].FullTranscriptJSON(), "OLD_FACT")
 	require.Contains(t, history[0].ReplayMessages[0].TranscriptJSON, "encrypted_content")
 }
 

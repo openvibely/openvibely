@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -42,19 +43,18 @@ func SplitReplay(message models.ExecutionReplayMessage) (ReplayHeader, []json.Ra
 	}
 	if raw[0] == '[' {
 		h.Format = "array"
-		var items []json.RawMessage
-		err := json.Unmarshal(raw, &items)
+		items, err := jsonview.Array(raw)
 		return h, items, err
 	}
 	if raw[0] == '{' {
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &envelope); err != nil {
+		envelope := map[string]json.RawMessage{}
+		if err := jsonview.Object(raw, func(k string, v json.RawMessage) error { envelope[k] = v; return nil }); err != nil {
 			return h, nil, err
 		}
 		for _, key := range []string{"responses_input", "messages"} {
 			if value, ok := envelope[key]; ok {
-				var items []json.RawMessage
-				if err := json.Unmarshal(value, &items); err != nil {
+				items, err := jsonview.Array(value)
+				if err != nil {
 					return h, nil, fmt.Errorf("replay %s: %w", key, err)
 				}
 				h.NullItems = bytes.Equal(bytes.TrimSpace(value), []byte("null"))

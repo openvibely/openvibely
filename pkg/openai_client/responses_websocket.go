@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"io"
 	"net/http"
@@ -243,20 +244,24 @@ func responsesLiteTools(tools any) []any {
 	if err != nil {
 		return []any{}
 	}
-	var decoded []any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
+	rows, err := requestjson.Array(encoded)
+	if err != nil {
 		return []any{}
 	}
-	filtered := decoded[:0]
-	for _, raw := range decoded {
-		tool, _ := raw.(map[string]any)
-		if isResponsesLiteHostedToolType(stringFromAny(tool["type"])) {
+	filtered := make([]any, 0, len(rows))
+	for _, raw := range rows {
+		fields, err := jsonview.Fields(raw)
+		if err != nil {
+			filtered = append(filtered, raw)
 			continue
 		}
-		// Responses Lite does not implement the standard Responses async tool
-		// protocol. Never forward async metadata into a Lite request.
-		delete(tool, "async")
-		filtered = append(filtered, raw)
+		var typ string
+		_ = json.Unmarshal(fields["type"], &typ)
+		if isResponsesLiteHostedToolType(typ) {
+			continue
+		}
+		delete(fields, "async")
+		filtered = append(filtered, fields)
 	}
 	return filtered
 }
@@ -717,7 +722,7 @@ func marshalResponsesWebsocketPayload(wire map[string]any) ([]byte, error) {
 	// Decoded map histories are best encoded together, without per-item buffers.
 	hasRaw := false
 	for _, item := range input {
-		if _, ok := item.(json.RawMessage); ok {
+		if requestjson.HasRawValue(item) {
 			hasRaw = true
 			break
 		}

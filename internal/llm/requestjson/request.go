@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-	"unicode/utf8"
 )
 
 // Field is immutable after preparation. It can be reused across retry attempts
@@ -54,8 +53,8 @@ func (f *Field) envelope(metadata any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var fields map[string]json.RawMessage
-	if err = json.Unmarshal(b, &fields); err != nil {
+	fields := map[string]json.RawMessage{}
+	if err = Object(b, func(k string, v json.RawMessage) error { fields[k] = v; return nil }); err != nil {
 		return nil, err
 	}
 	if fields == nil {
@@ -145,9 +144,18 @@ func MarshalItems(metadata any, key string, items []any) ([]byte, error) {
 		return nil, err
 	}
 	size := len(head) + 2
-	for _, item := range items {
-		if raw, ok := item.(json.RawMessage); ok {
-			size += len(raw) + 1
+	// Encode non-raw rows once before allocating the final body. Omitting their
+	// sizes can force a second full-history allocation for a tiny overflow.
+	encoded := make([][]byte, len(items))
+	for i, item := range items {
+		if HasRawValue(item) {
+			size += rawSizeHint(item) + 1
+		} else {
+			encoded[i], err = json.Marshal(item)
+			if err != nil {
+				return nil, err
+			}
+			size += len(encoded[i]) + 1
 		}
 	}
 	out := make([]byte, 0, size)
@@ -157,15 +165,14 @@ func MarshalItems(metadata any, key string, items []any) ([]byte, error) {
 		if i > 0 {
 			out = append(out, ',')
 		}
-		if raw, ok := item.(json.RawMessage); ok && len(raw) > 0 && utf8.Valid(raw) && json.Valid(raw) {
-			out = append(out, raw...)
+		if encoded[i] != nil {
+			out = append(out, encoded[i]...)
 			continue
 		}
-		raw, err := json.Marshal(item)
+		out, err = appendValue(out, item)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, raw...)
 	}
 	return append(out, ']', '}'), nil
 }

@@ -160,7 +160,7 @@ func TestAnthropicToolResultImageConversion(t *testing.T) {
 				history := []models.Execution{{Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}}}
 				converted := normalizeProviderReplay(provider, history, summary)
 				var messages []openaiclient.CompletionsHistoryMessage
-				require.NoError(t, json.Unmarshal([]byte(converted[0].ReplayMessages[0].TranscriptJSON), &messages))
+				require.NoError(t, converted[0].ReplayMessages[0].DecodeTranscript(&messages))
 				require.Len(t, messages, 5)
 				require.Len(t, messages[0].ToolCalls, 2)
 				require.Equal(t, "tool", messages[1].Role)

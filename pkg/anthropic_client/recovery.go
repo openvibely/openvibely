@@ -17,7 +17,7 @@ func (e *ConversationError) Error() string { return e.Err.Error() }
 func (e *ConversationError) Unwrap() error { return e.Err }
 
 func conversationError(err error, messages []agenticMessage) error {
-	snapshot, marshalErr := recovery.Capture(messages, func(m agenticMessage) ([]byte, error) { return json.Marshal(m) })
+	snapshot, marshalErr := recovery.Capture(messages, marshalAgenticMessage)
 	if marshalErr != nil {
 		return err
 	}

@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -56,12 +58,12 @@ func portableRecoveryParts(history []models.Execution) (int, []models.Execution)
 				var tail []models.Execution
 				prefix := repairConvertedToolResults(llmopenai.ResponsesSummaryMessages(saved.Input[:k]))
 				if len(prefix) > 0 {
-					raw, _ := json.Marshal(prefix)
-					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_prefix", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
+					snapshot, _ := models.EncodeReplayRows("", prefix)
+					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_prefix", ReplayMessages: []models.ExecutionReplayMessage{snapshot}})
 				}
 				if len(messages) > 0 {
-					raw, _ := json.Marshal(messages)
-					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_tail", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
+					snapshot, _ := models.EncodeReplayRows("", messages)
+					tail = append(tail, models.Execution{Status: models.ExecCompleted, ContextKind: "provider_recovery_tail", ReplayMessages: []models.ExecutionReplayMessage{snapshot}})
 				}
 				if j+1 < len(history[i].ReplayMessages) {
 					remaining := history[i]
@@ -89,8 +91,8 @@ func readableCompactedHistory(history []models.Execution) ([]models.Execution, e
 			continue
 		}
 		text := "Recovered execution background (may overlap later messages; output does not locate steering within the run).\nStarting user message:\n" + exec.PromptSent + "\nAssistant and tool output:\n" + exec.Output
-		raw, _ := json.Marshal([]openaiclient.CompletionsHistoryMessage{{Role: "user", Content: text}})
-		out = append(out, models.Execution{ID: exec.ID, Status: models.ExecCompleted, ContextKind: recoveryBackgroundKind, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}})
+		snapshot, _ := models.EncodeReplayRows("", []openaiclient.CompletionsHistoryMessage{{Role: "user", Content: text}})
+		out = append(out, models.Execution{ID: exec.ID, Status: models.ExecCompleted, ContextKind: recoveryBackgroundKind, ReplayMessages: []models.ExecutionReplayMessage{snapshot}})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("cannot switch providers: readable history for native OpenAI compaction is unavailable")
@@ -236,70 +238,96 @@ func (s *LLMService) recoverPortableProviderHistory(req llmcontracts.AgentReques
 // portableAnthropicCheckpoint preserves the native summary and continuation
 // without carrying compaction blocks or signed reasoning into another session.
 func portableAnthropicCheckpoint(raw string) ([]models.Execution, error) {
-	var envelope struct {
-		Version  int `json:"version"`
-		Messages []struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+
+	fields, err := jsonview.FoldedFields(json.RawMessage(raw))
+	if err != nil {
 		return nil, err
 	}
-	if envelope.Version != 1 {
-		var block struct {
-			Type    string
-			Content *string
+	var version int
+	_ = json.Unmarshal(fields["version"], &version)
+	var rows []json.RawMessage
+	if version == 1 {
+		rows, err = jsonview.Array(fields["messages"])
+		if err != nil {
+			return nil, err
 		}
-		if err := json.Unmarshal([]byte(raw), &block); err != nil || block.Type != "compaction" || block.Content == nil {
+	} else {
+		var typ string
+		var text *string
+		_ = json.Unmarshal(fields["type"], &typ)
+		_ = json.Unmarshal(fields["content"], &text)
+		if typ != "compaction" || text == nil {
 			return nil, fmt.Errorf("invalid Anthropic checkpoint")
 		}
-		envelope.Messages = append(envelope.Messages, struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		}{Role: "assistant", Content: json.RawMessage("[" + raw + "]")})
+		row, err := json.Marshal(map[string]any{"role": "assistant", "content": []json.RawMessage{json.RawMessage(raw)}})
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, row)
 	}
 	var messages []anthropicclient.Message
 	foundSummary := false
-	for _, message := range envelope.Messages {
-		var text string
-		if json.Unmarshal(message.Content, &text) == nil {
-			messages = append(messages, anthropicclient.Message{Role: message.Role, Content: text})
-			continue
-		}
-		var blocks []map[string]any
-		if err := json.Unmarshal(message.Content, &blocks); err != nil {
+	for _, row := range rows {
+		fields, err := jsonview.FoldedFields(row)
+		if err != nil {
 			return nil, err
 		}
-		var portable []map[string]any
+		var role string
+		if err := json.Unmarshal(fields["role"], &role); err != nil {
+			return nil, err
+		}
+		content := fields["content"]
+		var text string
+		if json.Unmarshal(content, &text) == nil {
+			messages = append(messages, anthropicclient.Message{Role: role, Content: text})
+			continue
+		}
+		var portable []json.RawMessage
+		blocks, err := jsonview.Array(content)
+		if err != nil {
+			return nil, err
+		}
 		for _, block := range blocks {
-			switch block["type"] {
-			case "compaction":
-				summary, ok := block["content"].(string)
-				if ok && strings.TrimSpace(summary) != "" {
-					foundSummary = true
-					portable = append(portable, map[string]any{"type": "text", "text": "Conversation summary:\n" + summary})
-				}
+			fields, err := jsonview.FoldedFields(block)
+			if err != nil {
+				return nil, err
+			}
+			var typ string
+			_ = json.Unmarshal(fields["type"], &typ)
+			switch typ {
 			case "thinking", "redacted_thinking":
-				// These signatures belong to the original provider session.
+			case "compaction":
+				var summary string
+				if json.Unmarshal(fields["content"], &summary) == nil && strings.TrimSpace(summary) != "" {
+					foundSummary = true
+					encoded, err := json.Marshal(map[string]string{"type": "text", "text": "Conversation summary:\n" + summary})
+					if err != nil {
+						return nil, err
+					}
+					portable = append(portable, encoded)
+				}
 			default:
 				portable = append(portable, block)
 			}
 		}
 		if len(portable) > 0 {
-			encoded, err := json.Marshal(portable)
+			items := make([]any, len(portable))
+			for i, b := range portable {
+				items[i] = b
+			}
+			field, err := requestjson.PrepareItems("content", items)
 			if err != nil {
 				return nil, err
 			}
-			messages = append(messages, anthropicclient.Message{Role: message.Role, ContentBlocks: encoded})
+			messages = append(messages, anthropicclient.Message{Role: role, ContentBlocks: field.JSON()})
 		}
 	}
 	if !foundSummary {
 		return nil, fmt.Errorf("Anthropic checkpoint has no readable summary")
 	}
-	encoded, err := json.Marshal(map[string]any{"messages": messages})
+	snapshot, err := models.EncodeReplayRows("messages", messages)
 	if err != nil {
 		return nil, err
 	}
-	return []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_recovery", ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(encoded)}}}}, nil
+	return []models.Execution{{Status: models.ExecCompleted, ContextKind: "provider_recovery", ReplayMessages: []models.ExecutionReplayMessage{snapshot}}}, nil
 }

@@ -772,8 +772,9 @@ func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
 
 func TestReasoningReplayForAllCompatibleModels(t *testing.T) {
 	for _, model := range []string{"kimi-k3", "glm-5", "deepseek-reasoner", "custom-model"} {
-		history, err := New(nil, nil).prepareClientHistory(context.Background(), models.LLMConfig{Model: model}, []models.Execution{{Output: "answer", ReasoningContent: "original reasoning", Status: models.ExecCompleted}})
+		historyPrepared, err := New(nil, nil).prepareClientHistory(context.Background(), models.LLMConfig{Model: model}, []models.Execution{{Output: "answer", ReasoningContent: "original reasoning", Status: models.ExecCompleted}})
 		require.NoError(t, err)
+		history := historyPrepared[0].DecodedMessages()
 		require.Equal(t, "original reasoning", history[0].ReasoningContent)
 	}
 }
@@ -914,13 +915,15 @@ func TestPrepareClientHistoryUsesSuppliedReasoning(t *testing.T) {
 	lightHistory[0].ReasoningContent = "private thought"
 
 	adapter := New(execRepo, nil)
-	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
+	kimiHistoryPrepared, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
 	require.NoError(t, err)
+	kimiHistory := kimiHistoryPrepared[0].DecodedMessages()
 	require.Len(t, kimiHistory, 2)
 	require.Equal(t, "private thought", kimiHistory[1].ReasoningContent)
 
-	glmHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
+	glmHistoryPrepared, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
 	require.NoError(t, err)
+	glmHistory := glmHistoryPrepared[0].DecodedMessages()
 	require.Len(t, glmHistory, 2)
 	require.Equal(t, "private thought", glmHistory[1].ReasoningContent)
 }
@@ -970,8 +973,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 	lightHistory[0].ReplayMessages = replay[execution.ID]
 	adapter := New(execRepo, nil)
 
-	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
+	kimiHistoryPrepared, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
 	require.NoError(t, err)
+	kimiHistory := kimiHistoryPrepared[0].DecodedMessages()
 	require.Equal(t, []openaiclient.CompletionsHistoryMessage{
 		{Role: "user", Content: "first question"},
 		{Role: "assistant", Content: "first answer", ReasoningContent: "first thought"},
@@ -979,8 +983,9 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 		{Role: "assistant", Content: "second answer", ReasoningContent: "second thought"},
 	}, kimiHistory)
 
-	glmHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
+	glmHistoryPrepared, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
 	require.NoError(t, err)
+	glmHistory := glmHistoryPrepared[0].DecodedMessages()
 	require.Equal(t, []openaiclient.CompletionsHistoryMessage{
 		{Role: "user", Content: "first question"},
 		{Role: "assistant", Content: "first answer", ReasoningContent: "first thought"},
@@ -1039,8 +1044,9 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 	require.NoError(t, err)
 	lightHistory[0].ReplayMessages = replay[execution.ID]
 	adapter := New(execRepo, nil)
-	got, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
+	gotPrepared, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
 	require.NoError(t, err)
+	got := gotPrepared[0].DecodedMessages()
 	require.Equal(t, want, got)
 }
 

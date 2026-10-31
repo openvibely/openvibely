@@ -7,6 +7,7 @@ import (
 	contracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/skilldeps"
+	"github.com/openvibely/openvibely/internal/transcript"
 	"reflect"
 	"strings"
 )
@@ -88,14 +89,13 @@ func (s *LLMService) completeInstallationTranscript(req contracts.AgentRequest) 
 	matched := false
 	var pendingAnswer error
 	for i := range source.ReplayMessages {
-		raw, found, e := completeSkillToolTranscript(source.ReplayMessages[i].FullTranscriptJSON(), answer.QuestionID, answer.Arguments, answer.Output, answer.IsError, answer.ToolCallID)
+		updated, found, e := completeSkillToolReplay(source.ReplayMessages[i], answer.QuestionID, answer.Arguments, answer.Output, answer.IsError, answer.ToolCallID)
 		if e != nil && !found {
 			return req, e
 		}
 		if found {
 			pendingAnswer = e
-			source.ReplayMessages[i].TranscriptJSON = raw
-			source.ReplayMessages[i].Rows = nil
+			source.ReplayMessages[i] = updated
 			matched = true
 			break
 		}
@@ -135,25 +135,38 @@ func (s *LLMService) completeInstallationTranscript(req contracts.AgentRequest) 
 // survive unchanged. Only the requested tool result is replaced or inserted;
 // other messages, images, and tool exchanges are retained.
 func completeSkillToolTranscript(raw, question string, args json.RawMessage, output string, isError bool, callIDs ...string) (string, bool, error) {
-	var root any
-	if decodeSkillTranscriptJSON(raw, &root) != nil {
-		return raw, false, nil
+	replay := models.ExecutionReplayMessage{TranscriptJSON: raw}
+	updated, found, err := completeSkillToolReplay(replay, question, args, output, isError, callIDs...)
+	if !found {
+		return raw, false, err
 	}
-	key := ""
-	var items []any
-	switch v := root.(type) {
-	case []any:
-		items = v
-	case map[string]any:
-		for _, k := range []string{"responses_input", "messages"} {
-			if a, ok := v[k].([]any); ok {
-				key, items = k, a
-				break
-			}
+	return updated.FullTranscriptJSON(), found, err
+}
+
+func completeSkillToolReplay(replay models.ExecutionReplayMessage, question string, args json.RawMessage, output string, isError bool, callIDs ...string) (models.ExecutionReplayMessage, bool, error) {
+	header, rawRows, err := transcript.SplitReplay(replay)
+	rows := models.ReplayRows{Format: header.Format, ItemsKey: header.ItemsKey, NullItems: header.NullItems, Envelope: header.Envelope, Items: rawRows}
+	if err != nil || (rows.Format != "array" && rows.Format != "envelope") {
+		return replay, false, nil
+	}
+	key := rows.ItemsKey
+	if rows.Format == "envelope" && key != "responses_input" && key != "messages" {
+		return replay, false, nil
+	}
+	items := make([]any, len(rows.Items))
+	originals := map[uintptr]json.RawMessage{}
+	dirty := map[uintptr]bool{}
+	mark := func(m map[string]any) { dirty[reflect.ValueOf(m).Pointer()] = true }
+	for i, row := range rows.Items {
+		if err := decodeSkillTranscriptJSON(string(row), &items[i]); err != nil {
+			return replay, false, nil
+		}
+		if m, ok := items[i].(map[string]any); ok {
+			originals[reflect.ValueOf(m).Pointer()] = row
 		}
 	}
 	if len(items) == 0 {
-		return raw, false, nil
+		return replay, false, nil
 	}
 	type call struct {
 		id        string
@@ -201,7 +214,7 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 	}
 	var expected any
 	if err := decodeSkillTranscriptJSON(string(args), &expected); err != nil {
-		return raw, false, err
+		return replay, false, err
 	}
 	var matches []call
 	for _, c := range calls {
@@ -216,10 +229,10 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 		}
 	}
 	if len(matches) == 0 {
-		return raw, false, nil
+		return replay, false, nil
 	}
 	if len(matches) != 1 || matches[0].id == "" {
-		return raw, false, fmt.Errorf("ambiguous original skill_view tool call")
+		return replay, false, fmt.Errorf("ambiguous original skill_view tool call")
 	}
 	target := matches[0]
 	pending := map[string]int{}
@@ -262,6 +275,7 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 			}
 			delete(pending, id)
 			if id == target.id {
+				mark(m)
 				m["output"] = output
 				replaced = true
 			}
@@ -273,6 +287,7 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 			}
 			delete(pending, id)
 			if id == target.id {
+				mark(m)
 				m["content"] = output
 				replaced = true
 			}
@@ -286,6 +301,7 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 				}
 				delete(pending, id)
 				if id == target.id {
+					mark(m)
 					b["content"] = output
 					b["is_error"] = isError
 					replaced = true
@@ -309,6 +325,7 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 			if callIndex+1 < len(items) {
 				next := asMap(items[callIndex+1])
 				if next["role"] == "user" && next["content_blocks"] != nil {
+					mark(next)
 					next["content_blocks"] = append([]any{block}, blocks(next)...)
 					return
 				}
@@ -351,16 +368,31 @@ func completeSkillToolTranscript(raw, question string, args json.RawMessage, out
 		}
 		items = completed
 	}
-	if key != "" {
-		root.(map[string]any)[key] = items
-	} else {
-		root = items
+
+	encoded := make([]json.RawMessage, len(items))
+	for i, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			ptr := reflect.ValueOf(m).Pointer()
+			if raw, exists := originals[ptr]; exists && !dirty[ptr] {
+				encoded[i] = raw
+				continue
+			}
+		}
+		raw, e := json.Marshal(item)
+		if e != nil {
+			return replay, false, e
+		}
+		encoded[i] = raw
 	}
-	encoded, err := json.Marshal(root)
-	if err == nil && awaitingSibling {
-		err = fmt.Errorf("another tool call is still awaiting an answer")
+	copyRows := rows
+	copyRows.Items = encoded
+	replay.Rows = &copyRows
+	replay.TranscriptJSON = ""
+	var resultErr error
+	if awaitingSibling {
+		resultErr = fmt.Errorf("another tool call is still awaiting an answer")
 	}
-	return string(encoded), true, err
+	return replay, true, resultErr
 }
 
 // Preserve provider-native numeric arguments without float64 rounding.

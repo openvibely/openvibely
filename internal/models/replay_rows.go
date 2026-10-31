@@ -83,6 +83,10 @@ func decodeReplayItems(dst reflect.Value, items []json.RawMessage, null bool) er
 	}
 	out := reflect.MakeSlice(dst.Type(), len(items), len(items))
 	for i, raw := range items {
+		if dst.Type().Elem() == reflect.TypeFor[json.RawMessage]() && json.Valid(raw) {
+			out.Index(i).Set(reflect.ValueOf(raw))
+			continue
+		}
 		if err := json.Unmarshal(raw, out.Index(i).Addr().Interface()); err != nil {
 			return err
 		}
@@ -149,4 +153,45 @@ func (m ExecutionReplayMessage) FullTranscriptJSON() string {
 func (m ExecutionReplayMessage) MarshalJSON() ([]byte, error) {
 	type wire struct{ UserContent, AssistantContent, ReasoningContent, TranscriptJSON string }
 	return json.Marshal(wire{m.UserContent, m.AssistantContent, m.ReasoningContent, m.FullTranscriptJSON()})
+}
+
+// TranscriptBytes counts the compatibility representation without constructing it.
+func (m ExecutionReplayMessage) TranscriptBytes() int {
+	if m.TranscriptJSON != "" || m.Rows == nil {
+		return len(m.TranscriptJSON)
+	}
+	r := m.Rows
+	switch r.Format {
+	case "none":
+		return 0
+	case "opaque":
+		if len(r.Items) > 0 {
+			return len(r.Items[0])
+		}
+		return 0
+	}
+	n := 2
+	if r.NullItems && len(r.Items) == 0 {
+		n = 4
+	} else {
+		for i, item := range r.Items {
+			n += len(item)
+			if i > 0 {
+				n++
+			}
+		}
+	}
+	if r.Format == "envelope" {
+		raw, _ := json.Marshal(r.Envelope)
+		if len(raw) == 0 || string(raw) == "null" {
+			raw = []byte("{}")
+		}
+		n += len(raw)
+		if len(raw) > 2 {
+			n++
+		}
+		key, _ := json.Marshal(r.ItemsKey)
+		n += len(key) + 1
+	}
+	return n
 }

@@ -100,11 +100,11 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 	if !recorded {
 		return req
 	}
-	raw, err := json.Marshal(map[string]any{"responses_input": items})
+	snapshot, err := models.EncodeReplayRows("responses_input", items)
 	if err != nil {
 		return req
 	}
-	req.ChatHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}}}
+	req.ChatHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{snapshot}}}
 	// The recorded history already includes the prompt and its attachments.
 	req.Message = ""
 	req.Attachments = nil
@@ -205,19 +205,19 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 		}
 		// Keep the provider's message shape for summary requests. The execution's
 		// text fields retain user instructions and support text-only fallback paths.
-		transcript := "[" + string(original[i]) + "]"
+		snapshot := models.ReplayFromRows("", []json.RawMessage{original[i]})
 		if anthropicFailure != nil {
 			replay := anthropicclient.Message{Role: message.Role}
 			if json.Unmarshal(message.Content, &replay.Content) != nil {
 				replay.ContentBlocks = message.Content
 			}
-			encoded, encodeErr := json.Marshal(map[string]any{"messages": []anthropicclient.Message{replay}})
+			var encodeErr error
+			snapshot, encodeErr = models.EncodeReplayRows("messages", []anthropicclient.Message{replay})
 			if encodeErr != nil {
 				return
 			}
-			transcript = string(encoded)
 		}
-		execution.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: transcript}}
+		execution.ReplayMessages = []models.ExecutionReplayMessage{snapshot}
 		history = append(history, execution)
 	}
 	// Recovery contains the conversation through the active execution. Record

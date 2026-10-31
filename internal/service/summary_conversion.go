@@ -77,14 +77,14 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 					}
 				}
 			}
-			var raw []byte
+			var next models.ExecutionReplayMessage
 			if provider == models.ProviderAnthropic {
-				raw, _ = json.Marshal(map[string]any{"messages": completionsAnthropicSummaryMessages(messages)})
+				next, _ = models.EncodeReplayRows("messages", completionsAnthropicSummaryMessages(messages))
 			} else {
-				raw, _ = json.Marshal(messages)
+				next, _ = models.EncodeReplayRows("", messages)
 			}
-			out[i].ReplayMessages[j].TranscriptJSON = string(raw)
-			out[i].ReplayMessages[j].Rows = nil
+			out[i].ReplayMessages[j].TranscriptJSON = ""
+			out[i].ReplayMessages[j].Rows = next.Rows
 			converted = true
 		}
 		if converted && provider == models.ProviderAnthropic {
@@ -102,8 +102,8 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 					}
 				}
 			}
-			raw, _ := json.Marshal(map[string]any{"messages": merged})
-			out[i].ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: string(raw)}}
+			next, _ := models.EncodeReplayRows("messages", merged)
+			out[i].ReplayMessages = []models.ExecutionReplayMessage{next}
 		}
 	}
 	return out

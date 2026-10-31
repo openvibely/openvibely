@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"strings"
 	"sync"
@@ -698,7 +699,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	// Replay must be loaded before service-level budgeting and compaction.
 	// Reloading it here would undo an intentionally trimmed request.
-	client.History = append(client.History, preparedhistory.Take(ctx, chatHistory, buildClientHistory)...)
+	client.History = append(client.History, preparedhistory.Take(ctx, chatHistory, buildPreparedHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	if !isTaskFollowup {
@@ -1175,6 +1176,12 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 }
 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
+	return buildHistory(chatHistory, false)
+}
+func buildPreparedHistory(chatHistory []models.Execution) []openaiclient.Message {
+	return buildHistory(chatHistory, true)
+}
+func buildHistory(chatHistory []models.Execution, borrow bool) []openaiclient.Message {
 	var messages []openaiclient.Message
 	for _, exec := range chatHistory {
 		if len(exec.RetainedUserMessage) > 0 {
@@ -1187,11 +1194,9 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 		}
 		checkpoint := false
 		for _, replay := range exec.ReplayMessages {
-			var saved struct {
-				ResponsesInput []any `json:"responses_input"`
-			}
-			if replay.DecodeTranscript(&saved) == nil && len(saved.ResponsesInput) > 0 {
-				messages = []openaiclient.Message{{ResponsesInputItems: saved.ResponsesInput}}
+			items, err := responsesReplayItems(replay, borrow)
+			if err == nil && len(items) > 0 {
+				messages = []openaiclient.Message{{ResponsesInputItems: items}}
 				checkpoint = true
 			} else if items := completionsReplayMessageInput(replay); len(items) > 0 {
 				// Completions records contain this execution only; preserve the prefix.
@@ -1223,6 +1228,10 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 }
 
 func nativeCompactionInputItems(ctx context.Context) []any {
+	if items, ok := preparedhistory.TakeTransfer[[]any](ctx); ok {
+		preparedhistory.ForgetState[[]any](ctx)
+		return items
+	}
 	raw := strings.TrimSpace(llmcontracts.NativeCompactionStateJSONFromContext(ctx))
 	if raw == "" {
 		preparedhistory.ForgetState[[]any](ctx)
@@ -1472,4 +1481,26 @@ func webSearchSecondaryFromInput(m map[string]interface{}) string {
 		return url
 	}
 	return ""
+}
+
+func responsesReplayItems(replay models.ExecutionReplayMessage, borrow bool) ([]any, error) {
+	var saved struct {
+		Input []json.RawMessage `json:"responses_input"`
+	}
+	if err := replay.DecodeTranscript(&saved); err != nil {
+		return nil, err
+	}
+	out := make([]any, len(saved.Input))
+	for i, raw := range saved.Input {
+		var err error
+		if borrow {
+			out[i], err = jsonview.ToolOutput(raw)
+		} else {
+			err = json.Unmarshal(raw, &out[i])
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
