@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/pkg/knowledgecache"
 	"io"
@@ -433,7 +434,11 @@ func stopUpdateCoordinatorChecks(coordinator updateCoordinatorStarter) {
 }
 
 // Options supplies optional platform integrations before HTTP serving starts.
+// ErrDatabaseUpgraded asks desktop startup to relaunch before workers start.
+var ErrDatabaseUpgraded = errors.New("database upgraded; restart required")
+
 type Options struct {
+	RestartAfterUpgrade bool
 	ProjectFolderPicker handler.ProjectFolderPicker
 	DesktopFileSaver    handler.DesktopFileSaver
 }
@@ -506,6 +511,16 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 	closeDatabase := func() { _ = backend.Close() }
+	for _, option := range options {
+		if option.RestartAfterUpgrade {
+			if upgraded, ok := backend.(interface{ UpgradedOnOpen() bool }); ok && upgraded.UpgradedOnOpen() {
+				if err := backend.Close(); err != nil {
+					return nil, fmt.Errorf("closing upgraded database: %w", err)
+				}
+				return nil, ErrDatabaseUpgraded
+			}
+		}
+	}
 	applog.Infof("database initialized")
 	databaseSchema, err := backend.SchemaVersion(ctx)
 	if err != nil {

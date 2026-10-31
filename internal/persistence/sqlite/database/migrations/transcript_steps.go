@@ -9,6 +9,8 @@ import (
 )
 
 func ApplyTranscriptDevelopmentStep(ctx context.Context, tx *sql.Tx, version int64, up bool) error {
+	_, finish := migrationProgress(fmt.Sprintf("transcript step %d up=%t", version, up))
+	defer finish()
 	if version == 217 {
 		if up {
 			return upConversationItems217(ctx, tx)

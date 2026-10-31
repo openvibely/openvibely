@@ -563,3 +563,25 @@ func TestDesktopProxyMarksNativeWindowRequests(t *testing.T) {
 		t.Fatal("direct browser request must not have native marker")
 	}
 }
+
+func TestMigrationRelaunchPreservesArgumentsAndReplacesGuard(t *testing.T) {
+	command := migrationRelaunchCommand("/a path/desktop", []string{"argument with spaces"}, []string{"DATABASE_PATH=/test/db", "OPENVIBELY_MIGRATION_RELAUNCHED=0"})
+	if len(command.Args) != 2 || command.Args[1] != "argument with spaces" {
+		t.Fatalf("arguments: %q", command.Args)
+	}
+	guards := 0
+	for _, entry := range command.Env {
+		if strings.HasPrefix(entry, "OPENVIBELY_MIGRATION_RELAUNCHED=") {
+			guards++
+			if entry != "OPENVIBELY_MIGRATION_RELAUNCHED=1" {
+				t.Fatal(entry)
+			}
+		}
+	}
+	if guards != 1 || command.Env[0] != "DATABASE_PATH=/test/db" {
+		t.Fatalf("environment: %q", command.Env)
+	}
+	if command.Stdout != os.Stdout || command.Stderr != os.Stderr {
+		t.Fatal("restart lost logs")
+	}
+}

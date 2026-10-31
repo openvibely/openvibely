@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/persistence/sqlite/database/migrations"
@@ -20,8 +22,9 @@ const (
 )
 
 type Connections struct {
-	Reader *sql.DB
-	Writer *sql.DB
+	Upgraded bool // Existing on-disk schema was successfully upgraded during open.
+	Reader   *sql.DB
+	Writer   *sql.DB
 }
 
 func (c *Connections) Close() error {
@@ -41,7 +44,12 @@ func (c *Connections) Close() error {
 }
 
 func NewReadWrite(dsn string) (*Connections, error) {
-	writer, err := New(dsn)
+	upgraded := false
+	writer, err := newSQLiteDatabase(dsn, func(db *sql.DB) error {
+		var err error
+		upgraded, err = initializeSQLiteReport(db)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +82,7 @@ func NewReadWrite(dsn string) (*Connections, error) {
 		_ = writer.Close()
 		return nil, fmt.Errorf("opening read database connection: %w", err)
 	}
-	return &Connections{Reader: reader, Writer: writer}, nil
+	return &Connections{Reader: reader, Writer: writer, Upgraded: upgraded}, nil
 }
 
 func New(dsn string) (*sql.DB, error) {
@@ -110,28 +118,75 @@ func newSQLiteDatabase(dsn string, initialize func(*sql.DB) error) (*sql.DB, err
 }
 
 func initializeSQLite(db *sql.DB) error {
+	_, err := initializeSQLiteReport(db)
+	return err
+}
+
+func initializeSQLiteReport(db *sql.DB) (upgraded bool, err error) {
+	started := time.Now()
+	log.Printf("[migration] checking database; startup waits for upgrades")
+	done, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				log.Printf("[migration] database initialization still running elapsed=%s", time.Since(started).Round(time.Second))
+			}
+		}
+	}()
+	defer func() {
+		close(done)
+		<-stopped
+		if err != nil {
+			log.Printf("[migration] failed elapsed=%s: %v", time.Since(started), err)
+		} else {
+			log.Printf("[migration] complete upgraded=%t elapsed=%s", upgraded, time.Since(started))
+		}
+	}()
 	// WAL permits readers on other physical connections while SQLite's single
 	// writer commits. Connection-local settings are enforced by the DSN below.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return fmt.Errorf("setting journal mode: %w", err)
+		return false, fmt.Errorf("setting journal mode: %w", err)
 	}
 
 	if err := enableIncrementalVacuum(db); err != nil {
-		return err
-	}
-
-	if err := migrations.NormalizeTranscriptDevelopmentVersions(context.Background(), db); err != nil {
-		return fmt.Errorf("adopting development transcript migrations: %w", err)
+		return false, err
 	}
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		return fmt.Errorf("setting dialect: %w", err)
+		return false, err
 	}
+	before, err := goose.GetDBVersion(db)
+	if err != nil {
+		return false, err
+	}
+	var appliedBefore int
+	if err := db.QueryRow("SELECT COUNT(*) FROM goose_db_version WHERE is_applied=1").Scan(&appliedBefore); err != nil {
+		return false, err
+	}
+	log.Printf("[migration] applying pending upgrades from version=%d", before)
+	if err := migrations.NormalizeTranscriptDevelopmentVersions(context.Background(), db); err != nil {
+		return false, fmt.Errorf("adopting development transcript migrations: %w", err)
+	}
+
 	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
-		return fmt.Errorf("running migrations: %w", err)
+		return false, fmt.Errorf("running migrations: %w", err)
 	}
-	return nil
+	var appliedAfter int
+	if err := db.QueryRow("SELECT COUNT(*) FROM goose_db_version WHERE is_applied=1").Scan(&appliedAfter); err != nil {
+		return false, err
+	}
+	after, err := goose.GetDBVersion(db)
+	if err != nil {
+		return false, err
+	}
+	return before > 0 && (after != before || appliedAfter != appliedBefore), nil
 }
 
 func configureSQLiteDSN(dsn string) (configured string, inMemory bool, err error) {

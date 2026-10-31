@@ -126,6 +126,8 @@ func insertMigratedItem217(ctx context.Context, tx *sql.Tx, executionID, scopeTy
 
 // Process one frame at a time, including multi-frame steering executions.
 func migrateReplayItems217(ctx context.Context, tx *sql.Tx) error {
+	advance, finish := migrationProgress("replay frames")
+	defer finish()
 	rows, err := tx.QueryContext(ctx, `SELECT execution_id,sequence,user_content,assistant_content,reasoning_content,transcript_json FROM execution_replay_messages ORDER BY execution_id,sequence`)
 	if err != nil {
 		return err
@@ -159,6 +161,7 @@ func migrateReplayItems217(ctx context.Context, tx *sql.Tx) error {
 				return err
 			}
 		}
+		advance()
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -171,6 +174,8 @@ func migrateReplayItems217(ctx context.Context, tx *sql.Tx) error {
 }
 
 func migrateCheckpointItems217(ctx context.Context, tx *sql.Tx) error {
+	advance, finish := migrationProgress("checkpoints")
+	defer finish()
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE chat_compaction_checkpoints ADD COLUMN native_state_exists INTEGER NOT NULL DEFAULT 0 CHECK(native_state_exists IN (0,1))`); err != nil {
 		return err
 	}
@@ -210,6 +215,7 @@ func migrateCheckpointItems217(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE chat_compaction_checkpoints SET native_state_exists=? WHERE scope_type=? AND scope_id=?`, strings.TrimSpace(native) != "", scope, id); err != nil {
 			return err
 		}
+		advance()
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -226,6 +232,8 @@ func migrateCheckpointItems217(ctx context.Context, tx *sql.Tx) error {
 }
 
 func migrateDisplayItems217(ctx context.Context, tx *sql.Tx) error {
+	advance, finish := migrationProgress("execution output")
+	defer finish()
 	rows, err := tx.QueryContext(ctx, `SELECT id,COALESCE(output,'') || COALESCE((SELECT group_concat(output,'') FROM (SELECT output FROM execution_output_chunks WHERE execution_id=executions.id ORDER BY id)),'') FROM executions WHERE COALESCE(output,'')!='' OR EXISTS(SELECT 1 FROM execution_output_chunks WHERE execution_id=executions.id)`)
 	if err != nil {
 		return err
@@ -245,6 +253,7 @@ func migrateDisplayItems217(ctx context.Context, tx *sql.Tx) error {
 				return err
 			}
 		}
+		advance()
 	}
 	if err := rows.Err(); err != nil {
 		return err
