@@ -191,7 +191,7 @@ func (ws *WorktreeService) SetupFollowupWorktree(ctx context.Context, task *mode
 		return "", "", false, fmt.Errorf("not a git repository: %s", repoDir)
 	}
 
-	if ws.shouldReuseStoredFollowupWorktree(task, repoDir) {
+	if ws.shouldReuseStoredFollowupWorktree(ctx, task, repoDir) {
 		applog.Infof("[worktree] reusing stored follow-up worktree task=%s path=%s branch=%s", task.ID, task.WorktreePath, task.WorktreeBranch)
 		if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, task.WorktreePath, task.WorktreeBranch); updateErr != nil {
 			applog.Infof("[worktree] error updating stored follow-up worktree info: %v", updateErr)
@@ -399,14 +399,14 @@ func (ws *WorktreeService) shouldContinueFollowupFromCurrentTarget(task *models.
 	return task.WorktreeBranch != "" && ws.isBranchTipMergedIntoTarget(repoDir, task.WorktreeBranch, task.MergeTargetBranch)
 }
 
-func (ws *WorktreeService) shouldReuseStoredFollowupWorktree(task *models.Task, repoDir string) bool {
+func (ws *WorktreeService) shouldReuseStoredFollowupWorktree(ctx context.Context, task *models.Task, repoDir string) bool {
 	if task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" || !strings.Contains(task.WorktreeBranch, "-followup-") {
 		return false
 	}
 	if _, err := os.Stat(task.WorktreePath); err != nil {
 		return false
 	}
-	status, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
+	status, err := GitStatusPorcelain(ctx, task.WorktreePath)
 	if err != nil {
 		return false
 	}
@@ -500,7 +500,7 @@ func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, 
 	if task == nil || task.MergeStatus != models.MergeStatusConflict || task.WorktreePath == "" || ws.taskRepo == nil {
 		return
 	}
-	status, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
+	status, err := GitStatusPorcelain(ctx, task.WorktreePath)
 	if err != nil || strings.TrimSpace(status) != "" || worktreeHasActiveMerge(task.WorktreePath) || worktreeHasConflictFiles(task.WorktreePath) {
 		return
 	}
@@ -1525,7 +1525,7 @@ func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.
 		return &RebaseResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	statusOut, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
+	statusOut, err := GitStatusPorcelain(ctx, task.WorktreePath)
 	if err != nil {
 		return &RebaseResult{ErrorMessage: fmt.Sprintf("checking task worktree status: %s", err.Error())}, fmt.Errorf("checking task worktree status: %w", err)
 	}
@@ -1593,7 +1593,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	statusOut, err := GitStatusPorcelain(context.Background(), task.WorktreePath)
+	statusOut, err := GitStatusPorcelain(ctx, task.WorktreePath)
 	if err != nil {
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		return &MergeResult{ErrorMessage: fmt.Sprintf("checking task worktree status: %s", err.Error())}, fmt.Errorf("checking task worktree status: %w", err)
@@ -3017,7 +3017,7 @@ func (ws *WorktreeService) validateAutomaticMerge(ctx context.Context, taskID st
 	}
 	*task = *fresh
 	if ws.isBranchTipMergedIntoTarget(repoDir, fresh.WorktreeBranch, fresh.MergeTargetBranch) {
-		status, statusErr := GitStatusPorcelain(context.Background(), fresh.WorktreePath)
+		status, statusErr := GitStatusPorcelain(ctx, fresh.WorktreePath)
 		if statusErr != nil {
 			return fmt.Errorf("%w: task worktree status is unavailable", ErrMergeEligibilityChanged)
 		}

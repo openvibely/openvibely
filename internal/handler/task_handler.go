@@ -1487,11 +1487,11 @@ func (h *Handler) recoverTaskWorktreeState(ctx context.Context, task *models.Tas
 	return changed
 }
 
-func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
-	return h.taskRebaseAvailableWithLocks(task, project, branchAlreadyMerged, nil)
+func (h *Handler) taskRebaseAvailable(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool) bool {
+	return h.taskRebaseAvailableWithLocks(ctx, task, project, branchAlreadyMerged, nil)
 }
 
-func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *models.Project, branchAlreadyMerged bool, worktreeLocks map[string]bool) bool {
+func (h *Handler) taskRebaseAvailableWithLocks(ctx context.Context, task *models.Task, project *models.Project, branchAlreadyMerged bool, worktreeLocks map[string]bool) bool {
 	if task == nil || project == nil || project.RepoPath == "" || task.WorktreeBranch == "" || task.WorktreePath == "" {
 		return false
 	}
@@ -1501,7 +1501,7 @@ func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *model
 	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || taskCardWorktreeLocked(project, task, worktreeLocks) {
 		return false
 	}
-	if status, err := service.GitStatusPorcelain(context.Background(), task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
+	if status, err := service.GitStatusPorcelain(ctx, task.WorktreePath); err != nil || strings.TrimSpace(status) != "" {
 		return false
 	}
 	targetBranch := task.MergeTargetBranch
@@ -1570,7 +1570,7 @@ func (h *Handler) resolveTaskMergeActionStateForProjectWithLocks(ctx context.Con
 	}
 	state.UseWorktreeContent = true
 	state.BranchAlreadyMerged = taskBranchAlreadyMergedForProject(ctx, task, project)
-	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(task, project, state.BranchAlreadyMerged, worktreeLocks)
+	state.RebaseAvailable = h.taskRebaseAvailableWithLocks(ctx, task, project, state.BranchAlreadyMerged, worktreeLocks)
 	return state
 }
 
