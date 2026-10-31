@@ -941,6 +941,7 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph, currentProjec
 		<div class="space-y-4" data-automation-live-node-details>
 			for _, node := range graph.Nodes {
 				<section data-automation-live-node-detail={ node.NodeKey } hidden>
+                    <h3 class="text-sm font-semibold mb-3" data-inspector-type-heading>{ automationNodeTypeLabel(node.NodeType) }</h3>
 
                     if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
                         <a class="btn btn-outline btn-sm mb-4" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-node-task>Open task</a>
@@ -993,6 +994,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 			<div class="space-y-4" data-automation-node-details>
 				for _, node := range page.Result.Candidate.Nodes {
 					<section data-automation-node-detail={ node.Key } hidden>
+                        <h3 class="text-sm font-semibold mb-3" data-inspector-type-heading>{ automationNodeTypeLabel(node.Type) }</h3>
                         if notice := maintainedVisionSourceNotice(page.Result, node.Key); notice != "" {
                             <p class="mb-3 text-xs text-base-content/70" data-automation-vision-source={ node.Key }>{ notice }</p>
                         }
