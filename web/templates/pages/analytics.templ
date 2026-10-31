@@ -1890,7 +1890,7 @@ templ analyticsContent(currentProject *models.Project) {
                                                             const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);query.set('refresh','true');
                                                             try{const limits=await fetchJSON('/api/analytics/usage?'+query.toString());const temporary=document.createElement('div');renderAccountUsageCards(limits.account_limits||[],temporary);const body=temporary.querySelector('.card-body');if(body&&card.isConnected){card.replaceChildren(body);body.appendChild(section);}}catch(e){if(e.name==='AbortError')return;}
                                                             await refreshResets();if(section.isConnected){message.textContent=text;section.appendChild(message);}
-                                                        }catch(e){message.textContent=e.message;button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}
+                                                        }catch(e){message.textContent=e.message;if(window.showToast)window.showToast('Usage reset failed: '+e.message, 'error');button.textContent='Retry reset';buttons.forEach((b,i)=>b.disabled=disabledBefore[i]);}
                                                     },{signal:eventSignal});
                                                     row.append(details,button);section.appendChild(row);
                                                 });
