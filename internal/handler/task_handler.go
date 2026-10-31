@@ -1922,8 +1922,11 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 				*value = parsed
 			}
 		}
-		prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, reviewMode, expectedRevision, func() (*preparedDiffChunks, error) {
-			meta, exists := h.resolveTaskChangesFileMeta(ctx, task, fileIndex)
+		prepared, err := h.diffChunks.get(ctx, taskID, fileIndex, reviewMode, expectedRevision, func(loadCtx context.Context) (*preparedDiffChunks, error) {
+			meta, exists := h.resolveTaskChangesFileMeta(loadCtx, task, fileIndex)
+			if err := loadCtx.Err(); err != nil {
+				return nil, err
+			}
 			if !exists {
 				return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
 			}
