@@ -1867,11 +1867,11 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = automationLiveMoreActions(graph, currentProjectID, deleteAvailable).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""}).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = automationLiveMoreActions(graph, currentProjectID, deleteAvailable).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -4158,11 +4158,11 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = automationBuilderMoreActions(page, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""}).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""}).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = automationBuilderMoreActions(page, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

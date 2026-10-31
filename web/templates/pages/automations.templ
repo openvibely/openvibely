@@ -482,8 +482,8 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<button class="btn btn-outline btn-sm ov-secondary-action" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit</button>
 						if graph.Automation.LifecycleState == models.AutomationActive {
 							<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run</button>					}
-					@automationLiveMoreActions(graph, currentProjectID, deleteAvailable)
 					@components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""})
+					@automationLiveMoreActions(graph, currentProjectID, deleteAvailable)
 				</div>
 			</div>
 						<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas data-automation-view-root>						<div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions>
@@ -1105,8 +1105,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
 							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
 							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" name="save_changes" value="true" data-automation-builder-save>Save</button>
-							@automationBuilderMoreActions(page, currentProjectID)
-					@components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""})
+							@components.SidePanelToggle("automation-details-opener", "automation-node-panel", templ.Attributes{"data-automation-node-close": ""})
+					@automationBuilderMoreActions(page, currentProjectID)
 						</div>
 					} else {
 						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
