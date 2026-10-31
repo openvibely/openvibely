@@ -72,7 +72,7 @@ func TestBrowserFunctional_ByteWindowScrollAndCache(t *testing.T) {
 
 // Opt-in measurement of the loading policy in the same browser build. Repository
 // comparisons against main are separate; this isolates full vs bounded source.
-func TestBrowserByteWindowMeasurement(t *testing.T) {
+func TestBrowserPerformance_ByteWindowMeasurement(t *testing.T) {
 	path := os.Getenv("OV_BROWSER_OUTPUT")
 	if path == "" {
 		t.Skip("set OV_BROWSER_OUTPUT to a display fixture")
