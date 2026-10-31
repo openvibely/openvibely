@@ -207,6 +207,8 @@ func TestBrowserFunctional_MermaidRendersAfterLiveChatCompletion(t *testing.T) {
 				browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('message',` + string(j) + `);return 'ok';})()`)
 			}
 			emit("Intro\n\n[Thinking]\nPlan:\n\n```mermaid\nflowchart TD\n A[Start] --> B[End]\n")
+			browser.waitFor("thinking summary", `String(typeof `+pair+`.querySelector('.stream-activity-summary')?.onclick === 'function')`, "true")
+			browser.evaluate(`(function(){` + pair + `.querySelector('.stream-activity-summary').click();return 'ok';})()`)
 			browser.waitFor("open fence shown as code", `String(!!`+pair+`.querySelector('code.language-mermaid'))`, "true")
 			if got := browser.evaluateAwait(`(async function(){await new Promise(r=>setTimeout(r,500));var p=` + pair + `;return !!p.querySelector('.chat-mermaid')+':'+!!p.querySelector('[data-mermaid-error]')})()`); got != "false:false" {
 				t.Fatalf("open fence in thinking rendered or errored (diagram:error) = %s", got)
