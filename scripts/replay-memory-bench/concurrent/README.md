@@ -1,8 +1,6 @@
 # Concurrent streaming resource checks
 
-Latest experiment: [remaining provider optimization parity](../PROVIDER_PARITY_RESULTS.md), previous task branch versus the shared optimization candidate. Earlier experiment: [shared provider paths across all three providers](../SHARED_PROVIDER_PATHS_RESULTS.md). Earlier focused experiment: [compatible retention fix](../COMPATIBLE_RETENTION_RESULTS.md).
 
-Provider comparison: [Anthropic and OpenAI-compatible results](../PROVIDER_RESULTS.md). Earlier OpenAI Responses measurements: [results](../RESULTS.md). Historical reports, profiles, raw data, and build metadata are in the [evidence archive](../EVIDENCE.md). Keep raw outputs outside this worktree.
 
 This extends the frozen app-flow workload; sequential/browser measurements remain separate. No UI changes. One real app/service/database process runs either one task or ten tasks concurrently. Every task starts empty and completes its response before its next follow-up. Six turns per task. A round barrier launches each wave together, deliberately stressing simultaneous initialization and completion. This is not ten independent app processes.
 
@@ -41,7 +39,7 @@ No GC is forced at the peak: profiles identify sampled allocation sites but Go's
 
 ## Diagnostics and limitations
 
-Use `phases.py` for preparation/streaming/completion intervals, `reclamation.py` for natural frees and live counts, and `timeline.py` for individual timelines. `allocation_attribution.py` uses the `profile_sites.go.txt` helper and full-sampling profiles; consult `--help` and archived reconstruction scripts. Diagnostic timing/GC/heap results must not enter ordinary performance tables. Frees can reclaim objects from earlier turns.
+Use `phases.py` for preparation/streaming/completion intervals, `reclamation.py` for natural frees and live counts, and `timeline.py` for individual timelines. `allocation_attribution.py` uses the `profile_sites.go.txt` helper and full-sampling profiles; consult `--help`. Diagnostic timing/GC/heap results must not enter ordinary performance tables. Frees can reclaim objects from earlier turns.
 
 Each run exercises only its selected provider, with one subscriber per task, not ten browser views. Reports keep providers separate. Anthropic and compatible runs set the same explicit 2,000,000-token context budget on both revisions (compaction threshold 1,500,000) to measure growing history without compaction; this is a benchmark setting, not a claim about vendor model limits. The fixture emits text and one real read_file tool round per turn, without thinking/reasoning, images, OAuth, retries, or vendor prompt-cache behavior. Barriers deliberately synchronize tasks, and fixed accelerated pacing is not remote-model latency. Six turns do not establish endurance or leak freedom. Process RSS includes setup and final integrity checks; Go heap excludes native SQLite memory. Record source revisions, compiler, host, harness hashes, and rejected runs with each new result.
 
@@ -52,7 +50,3 @@ Use `--provider anthropic` or `--provider openai-compatible` and distinct output
 For the full large-workload comparison, use `--profiles large --modes text-only,tool-use --workers 1,10 --runs 3` for each provider. This is 48 fresh app/database processes and 1,584 completed turns across the two providers and revisions. Run the two providers sequentially with no builds/tests/profiling alongside them. `summarize.py` accepts both output directories and groups by provider as well as mode, size, and concurrency. Turn 0 is the initial request; turn 5 is the fifth follow-up. Process CPU and allocations cover the whole concurrent wave.
 
 Integrity gates check exact request counts (no hidden retry or extra tool round), prior-turn context, protocol identity, actual tool-result messages, complete stored answers, persistence/live events, and overlapping streams. The mock understands each provider's real tool-call/result schema; it does not route these providers through the OpenAI Responses client.
-
-Phase investigation and the tested estimator optimization: [memory follow-up report](../PROVIDER_MEMORY_FOLLOWUP.md).
-
-Anthropic ownership tracing and repeated retention-fix measurements: [retention results](../ANTHROPIC_RETENTION_RESULTS.md).

@@ -1,6 +1,6 @@
 # Separate text-only and tool-use app benchmarks
 
-Latest summary: [results](../RESULTS.md). [Archived evidence](../EVIDENCE.md) contains all historical reports and exact build metadata. Keep new output outside this worktree. Text-only and tool-use are separate benchmarks; never combine them into one score.
+Keep generated output outside this worktree. Text-only and tool-use are separate benchmarks; never combine them into one score.
 
 ## Each run
 
@@ -72,4 +72,4 @@ python3 scripts/replay-memory-bench/app-flow/summarize.py \
   --output /tmp/report/text-only --metadata /path/to/build-metadata.json
 ```
 
-Repeat using `tool-use` instead of `text-only`. Report generation rejects mixed modes, missing/extra normal model requests, tools in the text-only baseline, missing tool exchanges, missing prior context outside compaction, output-budget violations, missing compaction continuation, and missing cache hits. Remove temporary installed tests afterward. Archived JSON contains all repetitions, not only medians.
+Repeat using `tool-use` instead of `text-only`. Report generation rejects mixed modes, missing/extra normal model requests, tools in the text-only baseline, missing tool exchanges, missing prior context outside compaction, output-budget violations, missing compaction continuation, and missing cache hits. Remove temporary installed tests afterward.
