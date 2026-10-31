@@ -188,6 +188,9 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
 	runIncrementalChatBrowser(t, `
  const full = document.createElement('div'); document.body.appendChild(full);
+ // Disclosure keys are scoped to their transcript. Compare both renderers
+ // within the same scope without giving two DOM elements the same ID.
+ full._chatToolStateKey = stream.id;
  stream.classList.add('whitespace-pre-wrap');
  const prose = ('A completed paragraph with **bold** and inline '+String.fromCharCode(96)+'code'+String.fromCharCode(96)+'.\n\n').repeat(180);
  let text = prose + '[Thinking]\nInspecting.\n[/Thinking]\n[Using tool: bash | echo example]\n[Tool bash done]\nresult\n[/Tool]\n' + 'Explanation. '.repeat(20) + '\n';
@@ -216,7 +219,11 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  const actual = stream.cloneNode(true), expected = full.cloneNode(true);
  actual.querySelectorAll('details').forEach(el=>el.removeAttribute('open'));
  expected.querySelectorAll('details').forEach(el=>el.removeAttribute('open'));
- assert(actual.innerHTML === expected.innerHTML, 'authoritative markup differs');
+ if (actual.innerHTML !== expected.innerHTML) {
+  const a = actual.innerHTML, e = expected.innerHTML;
+  let offset = 0; while (offset < Math.min(a.length, e.length) && a[offset] === e[offset]) offset++;
+  throw Error('authoritative markup differs at '+offset+'; actual='+JSON.stringify(a.slice(Math.max(0,offset-100),offset+300))+'; expected='+JSON.stringify(e.slice(Math.max(0,offset-100),offset+300)));
+ }
  assert(!stream._incrementalChat, 'terminal render kept provisional state');
  // Morph/reload: serialized content has no JS parser state. A fresh stream rebuilds once.
  const replacement = stream.cloneNode(true); stream.replaceWith(replacement);
