@@ -181,20 +181,62 @@
  function prepareStream(fragment,previous){
   const saved=new Map();
   const key=link=>link.href+'\n'+link.textContent;
-  previous.querySelectorAll('a[data-file-link-bound][data-image-gallery-item],a[data-file-link-bound][data-file-preview]').forEach(link=>{
+  const links=Array.from(previous.querySelectorAll('a[data-file-link-bound][data-image-gallery-item],a[data-file-link-bound][data-file-preview]'));
+  for(let owner=previous.parentElement;owner;owner=owner.parentElement)if(owner._filePreviewPool)links.push(...owner._filePreviewPool.querySelectorAll('a[data-file-link-bound]'));
+  links.forEach(link=>{
    const identity=key(link);if(!saved.has(identity))saved.set(identity,[]);saved.get(identity).push(link);
   });
   fragment.querySelectorAll('a[href]').forEach(link=>{
    const retained=saved.get(key(link))?.shift();if(!retained)return;
    const canvas=retained.nextElementSibling?.classList.contains('file-html-canvas')?retained.nextElementSibling:null;
    link.replaceWith(retained);
-   if(canvas)retained.after(canvas);
+   if(canvas){
+    if(previous.isConnected&&canvas.isConnected&&previous.moveBefore){
+     const marker=document.createComment('HTML preview');retained.after(marker);
+     (fragment._fileStreamMoves ||= []).push([marker,canvas]);
+    }else retained.after(canvas);
+   }
    const scope=retained.closest('.chat-markdown')||retained.parentElement;
    scope.dataset.imageGalleryGroup='';
    if(dialog.open&&retained===opener)group=scope;
   });
  }
- window.OVFileViewer={open,mode,prepareStream};
+ // Attach destinations before moving browsing contexts; ordinary DOM insertion
+ // reloads an iframe even when the exact same element is reused.
+ function commitStream(fragment,previous){
+  const old=Array.from(previous.childNodes);
+  previous.append(fragment);
+  for(const [marker,node] of fragment._fileStreamMoves||[]){
+   const pool=node.parentElement?.hasAttribute('data-chat-preview-pool')?node.parentElement:null;
+   if(marker.parentNode.moveBefore&&node.isConnected&&marker.isConnected)marker.parentNode.moveBefore(node,marker);
+   else marker.before(node);
+   marker.remove();
+   if(pool&&!pool.childNodes.length){
+    const owner=pool.parentElement;
+    if(owner?._filePreviewPool===pool){delete owner._filePreviewPool;delete owner._filePreviewSource}
+    pool.remove();
+   }
+  }
+  const retained=new Set((fragment._fileStreamMoves||[]).map(entry=>entry[1]));
+  old.forEach(node=>{if(node.parentNode===previous&&!retained.has(node))node.remove()});
+ }
+ function retainVirtual(owner,source,reused){
+  if(!owner.isConnected||!owner.moveBefore)return;
+  let pool=owner._filePreviewPool;
+  if(pool&&!(typeof source==='string'&&source.startsWith(owner._filePreviewSource))){pool.remove();pool=null}
+  const links=Array.from(owner.querySelectorAll('a[data-file-link-bound][data-file-preview]')).filter(link=>
+   !pool?.contains(link)&&!reused.some(node=>node.contains(link))&&link.nextElementSibling?.classList.contains('file-html-canvas')&&
+   typeof source==='string'&&source.includes(link.getAttribute('href')));
+  if(links.length){
+   if(!pool){pool=document.createElement('div');pool.hidden=true;pool.setAttribute('data-chat-preview-pool','');owner.append(pool)}
+   for(const link of links){const canvas=link.nextElementSibling;pool.moveBefore(link,null);pool.moveBefore(canvas,null)}
+  }
+  if(pool&&!pool.childNodes.length){pool.remove();pool=null}
+  if(pool){owner._filePreviewPool=pool;owner._filePreviewSource=source}
+  else{delete owner._filePreviewPool;delete owner._filePreviewSource}
+  return pool;
+ }
+ window.OVFileViewer={open,mode,prepareStream,commitStream,retainVirtual};
  // Events missed while disconnected are not replayed by the live stream.
  window.addEventListener('sse-live-connected',event=>{
   if(!event.detail?.reconnected)return;

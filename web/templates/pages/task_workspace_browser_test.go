@@ -831,7 +831,7 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 	})
 }
 
-func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *testing.T) {
+func TestBrowserFunctional_BreadcrumbStationaryPointerDistinguishesSelection(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{ID: "hover-task", ProjectID: "hover-project", Title: "Current task", Category: models.CategoryBacklog}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -877,7 +877,8 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
 		b.waitFor("keyboard reopened", `String(document.querySelector('[data-breadcrumb-selector-dialog]').open)`, "true")
 		b.waitFor("stationary pointer remains over second option", `String(document.querySelectorAll('[data-breadcrumb-selector-option]')[1].matches(':hover'))`, "true")
-		b.waitFor("one highlight under stationary pointer", `String(Array.from(document.querySelectorAll('[data-breadcrumb-selector-option]')).filter(function(el){return getComputedStyle(el).backgroundColor!=='rgba(0, 0, 0, 0)'}).length)`, "1")
+		// Selection remains visible while a different option is hovered.
+		b.waitFor("distinct selection and hover under stationary pointer", `(function(){var options=document.querySelectorAll('[data-breadcrumb-selector-option]');var selected=options[0],hovered=options[1];var selectionColor=getComputedStyle(selected).backgroundColor,hoverColor=getComputedStyle(hovered).backgroundColor;return String(selected.getAttribute('aria-selected')==='true' && hovered.getAttribute('aria-selected')!=='true' && selectionColor!=='rgba(0, 0, 0, 0)' && hoverColor!=='rgba(0, 0, 0, 0)' && selectionColor!==hoverColor && document.querySelectorAll('[data-breadcrumb-selector-option][data-selector-active]').length===1)})()`, "true")
 		fmt.Sscan(b.evaluate(`(function(){var r=document.querySelectorAll('[data-breadcrumb-selector-option]')[1].getBoundingClientRect();return (r.left+32)+' '+(r.top+r.height/2)})()`), &point.X, &point.Y)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 		b.waitFor("pointer updates active item", `String(document.querySelectorAll('[data-breadcrumb-selector-option]')[1].hasAttribute('data-selector-active'))`, "true")

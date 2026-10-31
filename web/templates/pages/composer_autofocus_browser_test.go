@@ -370,10 +370,6 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	browser.call("Runtime.enable", map[string]any{}, nil)
 	browser.call("Log.enable", map[string]any{}, nil)
 	browser.call("Page.enable", map[string]any{}, nil)
-	if profileName != "tool-output-pref" {
-		// Fixtures assert full tool output; the app default is compact.
-		browser.call("Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": `try{if(!localStorage.getItem('openvibely.outputDetail'))localStorage.setItem('openvibely.outputDetail','full')}catch(_){}`}, nil)
-	}
 	// A busy Chrome lists a command-line URL before the tab starts loading it, so load the fixture through this session.
 	var navigation struct {
 		ErrorText string `json:"errorText"`

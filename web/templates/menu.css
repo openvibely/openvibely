@@ -57,11 +57,24 @@
 .ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
 .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
 .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]) {
-  background: oklch(var(--bc) / .06);
+  background: var(--ov-menu-active);
+}
+@supports (color: oklch(0 0 0)) {
+  .ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
+  .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
+  .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]) {
+    background: oklch(var(--bc) / .06);
+  }
 }
 .ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
 .ov-menu .ov-mp-row[data-selected="true"] {
-  background: var(--shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent));
+  background: var(--ov-menu-active);
+}
+@supports (color: color-mix(in srgb, oklch(0 0 0) 10%, transparent)) {
+  .ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
+  .ov-menu .ov-mp-row[data-selected="true"] {
+    background: var(--shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent));
+  }
 }
 .ov-menu .ov-menu-option:focus-visible { outline: none; }
 .ov-menu-actions > li > :is(a, button, summary) > svg { width: 16px; height: 16px; flex-shrink: 0; }
