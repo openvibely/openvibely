@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -161,6 +163,24 @@ func DiffFileChunks(file DiffFile, view string) []DiffFile {
 		chunks = append(chunks, file)
 	}
 	return chunks
+}
+
+// Table rows per chunk, including hunk headers, so unloaded chunks reserve their own height.
+func diffChunkRowCounts(chunks []DiffFile, view string) string {
+	counts := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		rows := 0
+		for _, hunk := range chunk.Hunks {
+			rows++
+			if view == "split" {
+				rows += len(splitHunkLines(hunk))
+			} else {
+				rows += len(hunk.Lines)
+			}
+		}
+		counts[i] = strconv.Itoa(rows)
+	}
+	return strings.Join(counts, ",")
 }
 
 // Preserve exact alignment when a chunk cuts through unequal replacement runs.

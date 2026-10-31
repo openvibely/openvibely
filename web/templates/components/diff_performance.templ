@@ -328,15 +328,23 @@ templ diffViewerPerformanceScript() {
         loadObserver.unobserve(card); observed.delete(card);
         if (!card.dataset.chunkUrl) {
          destination.replaceChildren();
+         var rowCounts = (response.dataset.chunkRows || '').split(',').map(Number);
+         var rowHeight = 20;
          for (var i=0; i<count; i++) {
           var chunk = document.createElement('div');
           chunk.dataset.chunkIndex = String(i);
           chunk.dataset.diffLazyUrl = card.dataset.diffLazyUrl;
           chunk.dataset.diffFilePath = card.dataset.diffFilePath;
           if (i === selectedChunk) { while (body.firstChild) chunk.appendChild(body.firstChild); }
-          else { chunk.style.minHeight = '4000px'; chunk.setAttribute('aria-label', 'Diff lines load when visible'); }
+          else chunk.setAttribute('aria-label', 'Diff lines load when visible');
           destination.appendChild(chunk);
          }
+         var loadedChunk = destination.children[selectedChunk];
+         var loadedHeight = loadedChunk ? loadedChunk.getBoundingClientRect().height : 0;
+         if (loadedHeight > 0 && rowCounts[selectedChunk] > 0) rowHeight = loadedHeight / rowCounts[selectedChunk];
+         Array.from(destination.children).forEach(function(chunk, i) {
+          if (i !== selectedChunk) chunk.style.minHeight = Math.round((rowCounts[i] || 200) * rowHeight) + 'px';
+         });
          card.dataset.chunkUrl = card.dataset.diffLazyUrl;
          delete card.dataset.diffLazyUrl;
         } else {

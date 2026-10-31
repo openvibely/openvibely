@@ -100,9 +100,9 @@ func TestChunkReviewAtBoundary(t *testing.T) {
 	comments := []models.ReviewComment{{ID: "boundary-review", FilePath: file.Path, LineNumber: 201, LineType: "new", CommentText: "Keep this review"}}
 	for _, view := range []string{"inline", "split"} {
 		chunks := DiffFileChunks(file, view)
-		for index, chunk := range chunks {
+		for index := range chunks {
 			var out bytes.Buffer
-			if err := DiffChunk(chunk, 0, view, "task", comments, index, len(chunks), DiffFileRevision(file, comments)).Render(context.Background(), &out); err != nil {
+			if err := DiffChunk(chunks, 0, view, "task", comments, index, DiffFileRevision(file, comments)).Render(context.Background(), &out); err != nil {
 				t.Fatal(err)
 			}
 			if strings.Contains(out.String(), "boundary-review") != (index == 1) {
@@ -219,5 +219,32 @@ func TestOversizedDiffFileRevisionTracksContent(t *testing.T) {
 	changed.Hunks[0].Lines[7].Content = "y"
 	if DiffCodeRevision(changed) == meta.CodeRevision {
 		t.Fatal("content change kept the same revision")
+	}
+}
+
+func TestDiffChunkRowCountsMatchRenderedRows(t *testing.T) {
+	file := DiffFile{Path: "rows.go", Hunks: []DiffHunk{{Header: "@@ -1,250 +1,237 @@"}}}
+	for i := 1; i <= 250; i++ {
+		file.Hunks[0].Lines = append(file.Hunks[0].Lines, DiffLine{Type: "del", Content: "old", OldNum: i})
+	}
+	for i := 1; i <= 237; i++ {
+		file.Hunks[0].Lines = append(file.Hunks[0].Lines, DiffLine{Type: "add", Content: "new", NewNum: i})
+	}
+	for _, view := range []string{"inline", "split"} {
+		chunks := DiffFileChunks(file, view)
+		counts := strings.Split(diffChunkRowCounts(chunks, view), ",")
+		if len(counts) != len(chunks) || len(chunks) < 2 {
+			t.Fatalf("%s: %d counts for %d chunks", view, len(counts), len(chunks))
+		}
+		for index := range chunks {
+			var out bytes.Buffer
+			if err := DiffChunk(chunks, 0, view, "task", nil, index, "").Render(context.Background(), &out); err != nil {
+				t.Fatal(err)
+			}
+			rows := strings.Count(out.String(), "<tr")
+			if fmt.Sprint(rows) != counts[index] {
+				t.Fatalf("%s chunk %d: rendered %d rows, reported %s", view, index, rows, counts[index])
+			}
+		}
 	}
 }
