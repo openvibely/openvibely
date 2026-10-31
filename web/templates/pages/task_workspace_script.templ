@@ -294,7 +294,7 @@ templ TaskWorkspaceScript() {
 			}
 		});
 		function destroy() { if (unregisterView) unregisterView(); abort.abort(); clearTimeout(timer); sidePanel.destroy(); }
-		on(document, 'htmx:beforeSwap', function(event) { var target = event.detail.target; if (target === root || (target && target.contains(root))) destroy(); });
+		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root) destroy(); });
 		window.taskWorkspace = {
 			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },
 			closePanel: closePanel, togglePanel: function() { if (panel.hidden) openPanel(); else closePanel(); }, destroy: destroy

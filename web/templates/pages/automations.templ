@@ -986,6 +986,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-details-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="builder_source" value={ page.Source }/>
+			<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/>
 			<input type="hidden" name="save_changes" value="true"/>
 			<input type="hidden" name="automation_name" value={ page.Result.Candidate.Name } data-automation-details-name/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) }/>
@@ -1219,7 +1220,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							}
 						</div>
 					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content">
-						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="automation_yaml" value={ page.YAML } data-automation-yaml-submission/><input type="hidden" name="builder_action" value="create_node"/>
+						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/>
+						<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/><input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="automation_yaml" value={ page.YAML } data-automation-yaml-submission/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
 							<option value="schedule">Schedule</option>
 							<option value="task">Task</option>
@@ -1321,6 +1323,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
 				<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<input type="hidden" name="builder_source" value={ page.Source }/>
+					<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/>
 				</form>			<input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 			<script>
 			(function() {
@@ -1329,7 +1332,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				var svg = root && root.querySelector('[data-automation-canvas]');
 				var source = builder && builder.querySelector('[data-candidate-json]');
 				if (!root || !builder || !svg || !source) return;
-					var nodePanel = window.createAutomationNodePanel(builder);
+					var nodePanel = window.createAutomationNodePanel(builder, function(key) {
+						builder.querySelectorAll('[data-automation-selected-node]').forEach(function(input) { input.value = key; });
+					});
 					var candidate;
 					try { candidate = JSON.parse(source.value); } catch (_) { return; }
 					var edgePalette = [];				try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
@@ -2098,10 +2103,7 @@ yamlViewport.scrollTop = 0;
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
 					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
-					builder.addEventListener('submit', function(event) {
-                        var selection = event.target.querySelector('[name="selected_node"]');
-                        if (!selection) { selection = document.createElement('input'); selection.type = 'hidden'; selection.name = 'selected_node'; event.target.appendChild(selection); }
-                        selection.value = nodePanel.selected();
+					builder.addEventListener('submit', function() {
 						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
 							var submittedYAML = automationYAMLValue();
 							setYAMLEditorDisplay(submittedYAML);
@@ -2145,7 +2147,7 @@ yamlViewport.scrollTop = 0;
                                     candidate: candidate,
                                     yaml: automationYAMLValue(),
                                     name: automationName ? automationName.value : '',
-                                    details: detailsForm ? Array.from(new FormData(detailsForm).entries()) : []
+                                    details: detailsForm ? Array.from(new FormData(detailsForm).entries()).filter(function(entry) { return entry[0] !== 'selected_node'; }) : []
                                 });
                             }
                             var initialAutomationEditSnapshot = automationEditSnapshot();

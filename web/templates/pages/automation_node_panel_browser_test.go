@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		}, Edges: []models.AutomationDraftEdge{{Key: "handoff", From: "first", To: "second"}},
 	}
 	saved := make(chan models.AutomationDraftCandidate, 1)
+	var rejectNextSave atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -62,9 +64,14 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 				return
 			}
 			if r.FormValue("save_changes") == "true" {
-				saved <- current
-				w.WriteHeader(http.StatusNoContent)
-				return
+				if rejectNextSave.Swap(false) {
+					page.SelectedNodeKey = r.FormValue("selected_node")
+					page.Error = "Validation rejected this save"
+				} else {
+					saved <- current
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
 			}
 			if r.FormValue("builder_action") == "create_node" {
 				current.Nodes = append(current.Nodes, models.AutomationDraftNode{Key: "new_task", Name: r.FormValue("node_name"), Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "New prompt", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}})
@@ -89,17 +96,27 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.waitFor("builder ready", `String(typeof document.getElementById('automation-builder')?.hasUnsavedAutomationChanges==='function')`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("initially closed", `String(document.getElementById('automation-node-panel').hidden)`, "true")
-		b.click(`[data-node-key="first"] rect`)
+		b.evaluate(`document.querySelector('[data-node-key="first"]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));'opened'`)
 		b.waitFor("first node docked", `String(!document.getElementById('automation-node-panel').hidden && document.getElementById('automation-node-panel').dataset.overlay==='false' && !document.querySelector('[data-automation-node-detail="first"]').hidden && document.querySelector('[data-automation-node-detail="second"]').hidden)`, "true")
 		b.waitFor("graph alongside panel", `String(document.querySelector('[data-automation-graph-panel]').getBoundingClientRect().right <= document.getElementById('automation-node-panel').getBoundingClientRect().left)`, "true")
+		b.waitFor("selection alone is not dirty", `String(document.getElementById('automation-builder').hasUnsavedAutomationChanges())`, "false")
 		b.evaluate(`var prompt=document.querySelector('[name="node_first_prompt"]');prompt.value='Preserve this edited prompt';prompt.dispatchEvent(new Event('input',{bubbles:true}));'edited'`)
 		b.click(`[data-node-key="second"] rect`)
 		b.waitFor("switch selected node", `String(!document.querySelector('[data-automation-node-detail="second"]').hidden && document.querySelector('[data-automation-node-detail="first"]').hidden)`, "true")
+		b.evaluate(`window.failedRequestDone=false;htmx.ajax('GET','/missing',{target:'#automation-builder'}).catch(function(){}).finally(function(){window.failedRequestDone=true;});'requested'`)
+		b.waitFor("failed request completed", `String(window.failedRequestDone)`, "true")
 		b.click("#automation-node-divider")
 		b.evaluate(`document.getElementById('automation-node-divider').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true,cancelable:true}));'resized'`)
 		b.waitFor("shared keyboard resize", `localStorage.getItem('automation-inspector-width')`, "440")
-		b.click("[data-automation-node-close]")
+		b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));'closed'`)
 		b.waitFor("focus returned", `document.activeElement.dataset.nodeKey`, "second")
+		b.click(`[data-node-key="second"] rect`)
+		rejectNextSave.Store(true)
+		b.evaluate(`window.previousBuilder=document.getElementById('automation-builder');'remembered'`)
+		b.click("[data-automation-builder-save]")
+		b.waitFor("validation rerender restores selected panel", `String(document.getElementById('automation-builder') !== window.previousBuilder && document.getElementById('automation-builder').dataset.selectedNode==='second' && !document.getElementById('automation-node-panel').hidden)`, "true")
+		b.waitFor("validation rerender preserves edits", `document.querySelector('[name="node_first_prompt"]').value`, "Preserve this edited prompt")
+		b.click("[data-automation-node-close]")
 		b.click("[data-automation-add-node-open]")
 		b.evaluate(`document.querySelector('[name="node_kind"]').value='task';document.querySelector('[name="node_name"]').value='Validate work';'named'`)
 		b.click("[data-automation-create-node]")
@@ -125,6 +142,11 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.waitFor("preview ready", `String(!!document.querySelector('[data-automation-live-node]'))`, "true")
 		b.evaluate(`document.querySelector('[data-automation-live-node]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));'opened'`)
 		b.waitFor("preview is read-only", `String(!document.getElementById('automation-node-panel').hidden && !document.getElementById('automation-node-panel').querySelector('input,textarea,select') && document.getElementById('automation-node-panel').textContent.includes('Review the code'))`, "true")
+		b.evaluate(`window.rejectedPreview=document.getElementById('automation-live');window.rejectedRefreshDone=false;htmx.ajax('GET','/preview',{target:'#automation-live',swap:'outerHTML'}).finally(function(){window.rejectedRefreshDone=true;});'requested'`)
+		b.waitFor("stale refresh rejected", `String(window.rejectedRefreshDone && document.getElementById('automation-live')===window.rejectedPreview)`, "true")
+		b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));'closed'`)
+		b.waitFor("rejected refresh leaves Escape working", `String(document.getElementById('automation-node-panel').hidden && !document.querySelector('[data-automation-graph-panel]').inert)`, "true")
+		b.evaluate(`document.querySelector('[data-automation-live-node]').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));'opened'`)
 		b.evaluate(`window.previousPreview = document.getElementById('automation-live'); window.openVibelyAutomationLiveRefresh('GET', '/preview?project_id=panel-project'); 'refreshing'`)
 		b.waitFor("preview refresh preserves selected node", `String(document.getElementById('automation-live') !== window.previousPreview && !document.getElementById('automation-node-panel').hidden && document.querySelector('[data-automation-live-node-detail="first"]').hidden === false)`, "true")
 

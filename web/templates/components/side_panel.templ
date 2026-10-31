@@ -103,8 +103,8 @@ templ SidePanelScript() {
 			abort.abort(); observer.disconnect();
 			(options.background || []).forEach(function(element) { element.inert = false; });
 		}
-		on(document, 'htmx:beforeSwap', function(event) { var target = event.detail.target; if (target === root || (target && target.contains(root))) destroy(); });
-		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root) destroy(); });
+		// Failed requests and rejected refreshes leave the current panel alive.
+		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root || event.target === panel) destroy(); });
 		resize(read(options.storageKey));
 		return {resize: resize, width: function() { return width; }, setOpen: setOpen, destroy: destroy};
 	};

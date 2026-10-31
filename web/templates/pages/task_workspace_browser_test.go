@@ -494,6 +494,8 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.evaluate(`document.getElementById('desktop-project-titlebar').style.height=''; 'restored'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("titlebar offset restored", `String(document.getElementById('task-details-panel').getBoundingClientRect().top)`, "46")
+		b.evaluate(`window.failedPanelRequestDone=false;htmx.ajax('GET','/missing',{target:'#task-detail-content'}).catch(function(){}).finally(function(){window.failedPanelRequestDone=true;});'requested'`)
+		b.waitFor("failed task request completed", `String(window.failedPanelRequestDone)`, "true")
 		b.click("#task-panel-divider")
 		key := func(key string) {
 			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key}, nil)
