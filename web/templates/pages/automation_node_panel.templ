@@ -4,12 +4,7 @@ import "github.com/openvibely/openvibely/web/templates/components"
 
 templ automationNodePanelHeader(readOnly bool) {
  @automationInspectorEditors(readOnly)
- <div class="flex shrink-0 items-start">
-  <div class="min-w-0 flex-1">
-   @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{"details", "Details"}, {"schedule", "Schedule"}, {"connections", "Connections"}})
-  </div>
-  <button type="button" class="btn btn-ghost btn-sm btn-square mt-2 mr-2" data-automation-node-close aria-label="Close node details">×</button>
- </div>
+ @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{"details", "Details"}, {"schedule", "Schedule"}, {"connections", "Connections"}})
 
 }
 
@@ -18,6 +13,7 @@ templ automationNodePanelScript() {
  @components.InspectorPickerScript()
  @automationInspectorScript()
 	<style>
+		[data-side-panel-root][data-inspector-overlay="true"] #automation-details-opener { position:fixed; top:var(--side-panel-top,0px); right:0; z-index:61; }
 		#automation-node-panel [hidden] { display:none !important; }
 		#automation-node-panel .input, #automation-node-panel .select, #automation-node-panel .textarea { width:100%; min-width:0; }
 		#automation-node-panel .form-control { min-width:0; }
@@ -26,11 +22,11 @@ templ automationNodePanelScript() {
 	<script>
 	window.createAutomationNodePanel = function(root, onSelect) {
 		var panel = root.querySelector('#automation-node-panel');
-		var closeButton = panel.querySelector('[data-automation-node-close]');
-		var selected = '', connectionSignature = '';
+		var closeButton = root.querySelector('#automation-details-opener');
+		var selected = '', lastSelected = '', connectionSignature = '';
         var inspector = window.createAutomationInspector(root, panel, function(key) { open(key, true); });
 		var svg = root.querySelector('[data-automation-canvas]');
-		var controller = window.createSidePanel({root:root, panel:panel,
+		var controller = window.createSidePanel({root:root, panel:panel, opener:closeButton,
 			storageKey:'automation-inspector-width', escapeDocked:true, onClose:close,
 			background:Array.from(root.querySelectorAll('[data-automation-graph-panel], [data-automation-yaml-panel], [data-automation-view-switcher], [data-automation-node-tool]'))});
 		function group(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
@@ -47,7 +43,7 @@ templ automationNodePanelScript() {
 		function open(key, focus) {
 			var section = panel.querySelector('[data-automation-node-detail="' + CSS.escape(key) + '"], [data-automation-live-node-detail="' + CSS.escape(key) + '"]');
 			if (!section || !group(key)) return;
-			selected = key; showSelection(); controller.setOpen(true);
+			selected = key; lastSelected = key; showSelection(); controller.setOpen(true);
 			if (onSelect) onSelect(key);
 			if (focus || panel.dataset.overlay === 'true') {
 				var target = panel.querySelector('[role="tab"][aria-selected="true"]') || closeButton;
@@ -63,7 +59,12 @@ templ automationNodePanelScript() {
 				target.focus({preventScroll:true});
 			}
 		}
-		closeButton.addEventListener('click', function() { close(); });
+		if (closeButton) closeButton.addEventListener('click', function() {
+            if (!panel.hidden) { close(false); closeButton.focus({preventScroll:true}); return; }
+            var previous = lastSelected && group(lastSelected), first = svg.querySelector('[data-node-key]');
+            var target = previous || first;
+            if (target) open(target.dataset.nodeKey, true);
+        });
 		// Rebuild connection fields only when graph structure changes, preserving
 		// field focus and drafts while typing in the inspector.
 		function updateConnections(candidate) {
