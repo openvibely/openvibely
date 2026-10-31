@@ -148,10 +148,6 @@ func initializeSQLite(db *sql.DB) (err error) {
 		return err
 	}
 
-	if err := migrations.NormalizeTranscriptDevelopmentVersions(context.Background(), db); err != nil {
-		return fmt.Errorf("adopting development transcript migrations: %w", err)
-	}
-
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("setting dialect: %w", err)

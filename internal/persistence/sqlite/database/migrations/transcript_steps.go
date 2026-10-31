@@ -1,7 +1,7 @@
 package migrations
 
-// These unregistered SQL steps support the single transcript migration and
-// upgrades of development databases that used its unpublished intermediate IDs.
+// These unregistered SQL steps implement the single transcript migration.
+// Tests also exercise the individual conversion and downgrade stages.
 import (
 	"context"
 	"database/sql"
