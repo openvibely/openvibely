@@ -120,7 +120,15 @@ templ diffViewerPerformanceScript() {
     var index = retained.indexOf(chunk);
     if (index >= 0) retained.splice(index, 1);
     retained.push(chunk);
-    while (retained.length > 20) retained.shift()._saved = null;
+    while (retained.length > 20) {
+     var evicted = retained.shift();
+     if (evicted._saved) {
+      evicted._saved = null;
+      // Eviction also discards the Retry button. Allow a fresh request when
+      // this placeholder becomes visible again instead of leaving it blank.
+      delete evicted.dataset.diffLoadFailed;
+     }
+    }
    }
    function protectedContent(node) {
     var selection = window.getSelection();
