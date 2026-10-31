@@ -817,7 +817,7 @@ func (w *WorkerService) failRunningExecutionsAfterPanic(ctx context.Context, tas
 	if execRepo == nil {
 		return
 	}
-	execs, err := execRepo.ListByTask(ctx, taskID)
+	execs, err := execRepo.ListByTask(persistence.WithExecutionMetadata(ctx), taskID)
 	if err != nil {
 		applog.Infof("[worker] task=%s execution lookup after panic failed: %v", taskID, err)
 		return

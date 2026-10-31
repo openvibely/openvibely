@@ -107,7 +107,7 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 		return err
 	}
 	for _, dispatch := range terminal {
-		execution, err := r.executionRepo.GetByID(ctx, dispatch.ExecutionID)
+		execution, err := r.executionRepo.GetByID(persistence.WithExecutionPayload(ctx, persistence.ExecutionError), dispatch.ExecutionID)
 		if err != nil {
 			return err
 		}

@@ -83,7 +83,7 @@ func scanTaskThreadExecutionRow(scanner interface {
 
 func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models.Execution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+executionSelectColumnsLight+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
+		`SELECT `+modelHistoryQuery(ctx, executionSelectColumnsLight, false)+` FROM executions WHERE task_id = ? ORDER BY started_at DESC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions: %w", err)
 	}

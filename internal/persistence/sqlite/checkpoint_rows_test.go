@@ -59,3 +59,44 @@ func TestExecutionPayloadProjection(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "display must not load", full.Output)
 }
+
+func TestExecutionListPayloadProjectionPreservesMetadata(t *testing.T) {
+	db, repo, owner := conversationTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.FinalizeOutput(ctx, owner.ExecutionID, "retained display"))
+	_, err := db.Exec(`UPDATE executions SET prompt_sent='prompt',reasoning_content='reason',error_message='error',cli_session_id='session',diff_output='diff',tokens_used=123,duration_ms=456 WHERE id=?`, owner.ExecutionID)
+	require.NoError(t, err)
+	full, err := repo.GetByID(ctx, owner.ExecutionID)
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		name string
+		ctx  context.Context
+		want models.Execution
+	}{
+		{name: "ordinary", ctx: ctx, want: func() models.Execution {
+			want := *full
+			want.ReasoningContent, want.DiffOutput = "", ""
+			return want
+		}()},
+		{name: "metadata", ctx: persistence.WithExecutionMetadata(ctx), want: func() models.Execution {
+			want := *full
+			want.Output, want.DiffOutput, want.PromptSent, want.ReasoningContent, want.ErrorMessage, want.CliSessionID = "", "", "", "", "", ""
+			return want
+		}()},
+		{name: "error only", ctx: persistence.WithExecutionPayload(ctx, persistence.ExecutionError), want: func() models.Execution {
+			want := *full
+			want.Output, want.DiffOutput, want.PromptSent, want.ReasoningContent, want.CliSessionID = "", "", "", "", ""
+			return want
+		}()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rows, err := repo.ListByTask(test.ctx, full.TaskID)
+			require.NoError(t, err)
+			require.Equal(t, []models.Execution{test.want}, rows)
+			missing, err := repo.ListByTask(test.ctx, "different-task")
+			require.NoError(t, err)
+			require.Empty(t, missing)
+		})
+	}
+}
