@@ -99,7 +99,7 @@ func ThemesContent(catalog []themes.Theme) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 id=\"appearance-section-title\" class=\"text-2xl font-bold\">Themes</h2></div><style>\n            .theme-thumbnail { --tp-frame: var(--tp-default-frame); --tp-page: var(--tp-default-page); --tp-rail: var(--tp-default-rail); --tp-card: var(--tp-default-card); background: var(--tp-frame); padding-top: 8px; }\n            html[data-surface-style=\"layered\"] .theme-thumbnail { --tp-frame: var(--tp-layered-frame); --tp-page: var(--tp-layered-page); --tp-rail: var(--tp-layered-card); --tp-card: var(--tp-layered-card); }\n            .theme-thumbnail-rail { background: var(--tp-rail); }\n            .theme-thumbnail-page { background: var(--tp-page); }\n            .theme-thumbnail-card { background: var(--tp-card); border: 1px solid var(--tp-default-border, transparent); border-radius: 4px; padding: 4px; }\n            html[data-surface-style=\"layered\"] .theme-thumbnail-card { border-color: var(--tp-layered-border, var(--tp-frame)); }\n\n\t\t\t.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }\n            .display-preview[data-preview-surfaces=\"default\"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-rail); --dp-surface-card: var(--surface-default-card); }\n            .display-preview[data-preview-surfaces=\"layered\"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }\n            .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }\n            [data-preview-surfaces=\"default\"] .dp-surface-card { border-color: var(--ov-surface-default-border, transparent); }\n            [data-preview-surfaces=\"layered\"] .dp-surface-card { border-color: var(--dp-frame); }\n\t\t\t.display-preview[data-kind=\"output\"] { height: 184px; }\n\t\t\t.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }\n\t\t\t.display-preview i:last-child { width: 55%; margin-bottom: 0; }\n\t\t\t.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }\n\t\t\t.dp-tabs span { width: 42%; height: 14px; border-radius: 5px; background: var(--dp-page); }\n\t\t\t.dp-tabs span + span { opacity: .4; }\n\t\t\t.dp-workspace { display: flex; height: 70px; }\n\t\t\t.dp-list { flex: 0 0 30%; padding: 12px 6px; background: var(--dp-rail); border-right: 1px solid oklch(var(--bc) / .12); border-radius: 7px 0 0 0; }\n\t\t\t.dp-page { flex: 1; padding: 12px; background: var(--dp-page); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] { --dp-gap: 7px; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] { --dp-tab-inset: 6px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"][data-preview-tabs=\"attached\"] { --dp-tab-inset: 13px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] .dp-workspace { gap: var(--dp-gap); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] :is(.dp-list,.dp-page) { border-radius: 7px 7px 0 0; border: 0; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child { height: 18px; border-radius: 7px 7px 0 0; position: relative; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::after { content: \"\"; position: absolute; width: 6px; height: 6px; right: -6px; bottom: 0; background: radial-gradient(circle at 100% 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::before { content: \"\"; position: absolute; width: 6px; height: 6px; left: -6px; bottom: 0; background: radial-gradient(circle at 0 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.dp-conversation { height: 100%; background: var(--dp-page); padding: 6px; }\n\t\t\t.dp-user, .dp-assistant, .dp-composer { padding: 6px; border-radius: 5px; }\n\t\t\t.dp-user { margin-left: 45%; background: var(--dp-card); margin-bottom: 4px; }\n\t\t\t.dp-composer { background: var(--dp-card); margin-top: 4px; }\n\t\t\t.display-preview[data-preview-thread=\"focused\"] .dp-conversation { padding-left: 22%; padding-right: 22%; }\n\t\t\t.display-preview[data-preview-bubbles=\"on\"] .dp-assistant { background: var(--dp-card); }\n\t\t\t.display-preview[data-preview-step=\"on\"] { --dp-card: var(--conversation-card-raised); }\n\t\t</style><section class=\"mb-8\" data-display-prefs data-settings-section=\"layout\" hidden><div class=\"flex flex-col gap-3 max-w-2xl mb-6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 id=\"appearance-section-title\" class=\"text-2xl font-bold\">Themes</h2></div><style>\n            .theme-thumbnail { --tp-frame: var(--tp-default-frame); --tp-page: var(--tp-default-page); --tp-rail: var(--tp-default-rail); --tp-card: var(--tp-default-card); background: var(--tp-frame); padding-top: 8px; }\n            html[data-surface-style=\"layered\"] .theme-thumbnail { --tp-frame: var(--tp-layered-frame); --tp-page: var(--tp-layered-page); --tp-rail: var(--tp-layered-card); --tp-card: var(--tp-layered-card); }\n            .theme-thumbnail-rail { background: var(--tp-rail); }\n            .theme-thumbnail-page { background: var(--tp-page); }\n            .theme-thumbnail-card { background: var(--tp-card); border: 1px solid var(--tp-default-border, transparent); border-radius: 4px; padding: 4px; }\n            html[data-surface-style=\"layered\"] .theme-thumbnail-card { border-color: var(--tp-layered-border, var(--tp-frame)); }\n\n\t\t\t.display-preview { --dp-page: var(--shell-page, oklch(var(--b2))); --dp-card: var(--conversation-card-base); background: var(--dp-frame); height: 104px; border-radius: 8px; overflow: hidden; padding: 8px; width: 100%; }\n            .display-preview[data-preview-surfaces=\"default\"] { --dp-frame: var(--surface-default-frame); --dp-page: var(--surface-default-page); --dp-rail: var(--surface-default-rail); --dp-surface-card: var(--surface-default-card); }\n            .display-preview[data-preview-surfaces=\"layered\"] { --dp-frame: var(--surface-layered-frame); --dp-page: var(--surface-layered-page); --dp-rail: var(--surface-layered-card); --dp-surface-card: var(--surface-layered-card); }\n            .dp-surface-card { padding: 6px; background: var(--dp-surface-card); border: 1px solid transparent; border-radius: 4px; }\n            [data-preview-surfaces=\"default\"] .dp-surface-card { border-color: var(--ov-surface-default-border, transparent); }\n            [data-preview-surfaces=\"layered\"] .dp-surface-card { border-color: var(--dp-frame); }\n\t\t\t.display-preview[data-kind=\"output\"] { height: auto; min-height: 144px; flex: 1; }\n\t\t\t.display-preview i { display: block; height: 4px; border-radius: 2px; background: currentColor; opacity: .3; margin-bottom: 6px; width: 80%; }\n\t\t\t.display-preview i:last-child { width: 55%; margin-bottom: 0; }\n\t\t\t.dp-tabs { height: 18px; display: flex; gap: 5px; padding-left: calc(30% + var(--dp-gap, 0px) + var(--dp-tab-inset, 0px)); }\n\t\t\t.dp-tabs span { width: 42%; height: 14px; border-radius: 5px; background: var(--dp-page); }\n\t\t\t.dp-tabs span + span { opacity: .4; }\n\t\t\t.dp-workspace { display: flex; height: 70px; }\n\t\t\t.dp-list { flex: 0 0 30%; padding: 12px 6px; background: var(--dp-rail); border-right: 1px solid oklch(var(--bc) / .12); border-radius: 7px 0 0 0; }\n\t\t\t.dp-page { flex: 1; padding: 12px; background: var(--dp-page); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] { --dp-gap: 7px; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] { --dp-tab-inset: 6px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"][data-preview-tabs=\"attached\"] { --dp-tab-inset: 13px; }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] .dp-workspace { gap: var(--dp-gap); }\n\t\t\t.display-preview[data-preview-layout=\"floating\"] :is(.dp-list,.dp-page) { border-radius: 7px 7px 0 0; border: 0; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child { height: 18px; border-radius: 7px 7px 0 0; position: relative; }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::after { content: \"\"; position: absolute; width: 6px; height: 6px; right: -6px; bottom: 0; background: radial-gradient(circle at 100% 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.display-preview[data-preview-tabs=\"attached\"] .dp-tabs span:first-child::before { content: \"\"; position: absolute; width: 6px; height: 6px; left: -6px; bottom: 0; background: radial-gradient(circle at 0 0, transparent 6px, var(--dp-page) 6px); }\n\t\t\t.dp-conversation { height: 100%; background: var(--dp-page); padding: 6px; }\n\t\t\t.dp-user, .dp-assistant, .dp-composer { padding: 6px; border-radius: 5px; }\n\t\t\t.dp-user { margin-left: 45%; background: var(--dp-card); margin-bottom: 4px; }\n\t\t\t.dp-composer { background: var(--dp-card); margin-top: 4px; }\n\t\t\t.display-preview[data-preview-thread=\"focused\"] .dp-conversation { padding-left: 22%; padding-right: 22%; }\n\t\t\t.display-preview[data-preview-bubbles=\"on\"] .dp-assistant { background: var(--dp-card); }\n\t\t\t.display-preview[data-preview-step=\"on\"] { --dp-card: var(--conversation-card-raised); }\n\t\t</style><section class=\"mb-8\" data-display-prefs data-settings-section=\"layout\" hidden><div class=\"flex flex-col gap-3 max-w-2xl mb-6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -773,7 +773,7 @@ func displayToggle(pref, label, description, firstValue, firstLabel, secondValue
 				return templ_7745c5c3_Err
 			}
 			if pref == "output" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"p-3 text-xs flex flex-col gap-2\"><span class=\"opacity-70\">I’ll check the files.</span><div class=\"border border-base-300 rounded p-2\"><span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"p-2 text-xs flex flex-col gap-2\"><span class=\"opacity-70\">I’ll check the files.</span><div class=\"border border-base-300 rounded p-2\"><span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -782,67 +782,62 @@ func displayToggle(pref, label, description, firstValue, firstLabel, secondValue
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<span>⌄</span> ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
 				}
 				if opt[0] == "compact" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "2 tool calls")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "2 tool calls")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "Read file")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "Read file")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if opt[0] == "full" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<div class=\"opacity-50 mt-2 font-mono\">IN · app.go<br>OUT · File contents…</div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<div class=\"opacity-50 mt-2 font-mono\">IN · app.go<br>OUT · File contents…</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</div><span class=\"opacity-70\">Here’s what I found.</span></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</div><span class=\"opacity-70\">Here’s what I found.</span></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else if pref == "surfaces" || pref == "layout" || pref == "tabs" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<div class=\"dp-tabs\"><span></span><span></span></div><div class=\"dp-workspace\"><div class=\"dp-list\"><i></i><i></i><i></i></div><div class=\"dp-page\"><div class=\"dp-surface-card\"><i></i><i></i></div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<div class=\"dp-tabs\"><span></span><span></span></div><div class=\"dp-workspace\"><div class=\"dp-list\"><i></i><i></i><i></i></div><div class=\"dp-page\"><div class=\"dp-surface-card\"><i></i><i></i></div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div class=\"dp-conversation\"><div class=\"dp-user\"><i></i></div><div class=\"dp-assistant\"><i></i><i></i><i></i></div><div class=\"dp-composer\"><i></i></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<div class=\"dp-conversation\"><div class=\"dp-user\"><i></i></div><div class=\"dp-assistant\"><i></i><i></i><i></i></div><div class=\"dp-composer\"><i></i></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</div><p class=\"text-xs opacity-70 mt-3\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</div><p class=\"text-xs opacity-70 mt-3\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(opt[2])
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 339, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 337, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</p></button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</p></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</div></fieldset>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</div></fieldset>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -867,79 +862,79 @@ func boardColumnsCard(id, name, description string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<button type=\"button\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary\" data-board-columns-card data-board-columns-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<button type=\"button\" class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary\" data-board-columns-card data-board-columns-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var42 string
 		templ_7745c5c3_Var42, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 351, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 349, Col: 28}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" aria-pressed=\"false\" onclick=\"window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay('columns', this.getAttribute('data-board-columns-id'))\"><div class=\"card-body gap-3 p-4\"><div class=\"flex items-center justify-between\"><span class=\"font-semibold\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" aria-pressed=\"false\" onclick=\"window.selectOpenVibelyDisplay && window.selectOpenVibelyDisplay('columns', this.getAttribute('data-board-columns-id'))\"><div class=\"card-body gap-3 p-4\"><div class=\"flex items-center justify-between\"><span class=\"font-semibold\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var43 string
 		templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 357, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 355, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</span> <span class=\"badge badge-primary badge-sm hidden\" data-board-columns-active-badge>Active</span></div><div class=\"board-columns-preview\" data-preview=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</span> <span class=\"badge badge-primary badge-sm hidden\" data-board-columns-active-badge>Active</span></div><div class=\"board-columns-preview\" data-preview=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templruntime.NewAttributeExpression(id).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 360, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 358, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" aria-hidden=\"true\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" aria-hidden=\"true\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i := 0; i < 3; i++ {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<div class=\"bcp-col\"><div class=\"bcp-head\"></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"bcp-col\"><div class=\"bcp-head\"></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if i != 1 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<div class=\"bcp-card\"></div><div class=\"bcp-card\"></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<div class=\"bcp-card\"></div><div class=\"bcp-card\"></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "</div><p class=\"text-xs opacity-70\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</div><p class=\"text-xs opacity-70\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var45 string
 		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 371, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/themes.templ`, Line: 369, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</p></div></button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "</p></div></button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
