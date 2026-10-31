@@ -126,7 +126,6 @@ templ TaskListPanel(currentProjectID string) {
         .settings-nav-children { display: flex; flex-direction: column; margin-left: 17px; padding-left: 8px; border-left: 1px solid var(--ov-border-subtle, rgba(166, 173, 187, .2)); }
         .settings-nav-child { width: 100%; }
         .settings-mobile-nav .settings-nav-group { flex: 0 0 100%; }
-        html.appearance-settings:not(.changes-explorer-active) #task-list-header { visibility: hidden; }
         .settings-mobile-nav { display: none; }
         html.appearance-settings .settings-mobile-nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px; max-height: 40vh; overflow-y: auto; flex-shrink: 0; }
         .settings-mobile-nav .settings-back { width: 100%; padding: 8px 10px; }
@@ -137,6 +136,136 @@ templ TaskListPanel(currentProjectID string) {
         (function() {
             var root = document.documentElement;
             var inSettings = false;
+            var retainedWorkspace = null;
+            var settingsPane = null;
+            var restoringWorkspace = false;
+            var retainedScroll = [];
+            var taskView = null;
+            var settingsRequest = null;
+            function isSettingsURL(value) {
+                var path = new URL(value, location.href).pathname;
+                return /^\/(themes|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(path);
+            }
+            window.isSettingsWorkspaceURL = isSettingsURL;
+            // Keep the workspace connected: its drafts, live subscriptions and
+            // virtual transcript remain owned by the original page.
+            document.addEventListener('htmx:beforeSwap', function(event) {
+                var detail = event.detail;
+                if (!detail.shouldSwap || detail.target?.id !== 'main-content') return;
+                var url = detail.xhr?.responseURL;
+                if (!url || !isSettingsURL(url)) return;
+                var main = detail.target;
+                if (!settingsPane && inSettings) return;
+                if (!settingsPane) {
+                    retainedScroll = [main].concat(Array.from(main.querySelectorAll('*'))).filter(function(el) {
+                        return el.scrollTop || el.scrollLeft;
+                    }).map(function(el) { return {el:el, top:el.scrollTop, left:el.scrollLeft}; });
+                    retainedWorkspace = document.createElement('div');
+                    retainedWorkspace.id = 'settings-retained-workspace';
+                    retainedWorkspace.hidden = true;
+                    retainedWorkspace.inert = true;
+                    retainedWorkspace.setAttribute('hx-history', 'false');
+                    while (main.firstChild) retainedWorkspace.appendChild(main.firstChild);
+                    main.appendChild(retainedWorkspace);
+                    settingsPane = document.createElement('div');
+                    settingsPane.id = 'settings-content';
+                    main.appendChild(settingsPane);
+                }
+                main.classList.remove('htmx-swapping', 'htmx-settling');
+                detail.target = settingsPane;
+            }, true);
+            window.restoreSettingsWorkspace = function(push) {
+                if (!retainedWorkspace || !settingsPane) return false;
+                if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
+                settingsRequest = null;
+                var main = document.getElementById('main-content');
+                if (push) window.workspaceNavigation.commit(workspaceURL);
+                // HTMX owns cleanup for the outgoing Settings content only.
+                restoringWorkspace = true;
+                htmx.swap(settingsPane, '', {swapStyle: 'innerHTML', settleDelay: 0});
+                settingsPane.remove();
+                while (retainedWorkspace.firstChild) main.insertBefore(retainedWorkspace.firstChild, retainedWorkspace);
+                retainedWorkspace.remove();
+                retainedWorkspace = null;
+                settingsPane = null;
+                restoringWorkspace = false;
+                window.syncAppearanceSettings();
+                retainedScroll.forEach(function(position) {
+                    if (position.el.isConnected) {
+                        position.el.scrollTop = position.top;
+                        position.el.scrollLeft = position.left;
+                    }
+                });
+                retainedScroll = [];
+                window.dispatchEvent(new Event('resize'));
+                document.body.dispatchEvent(new CustomEvent('htmx:afterSettle', {bubbles:true, detail:{target:main, elt:main}}));
+                return true;
+            };
+            // One history owner for mounted workspace views. Page-specific
+            // controllers register how to display their local view, not another
+            // popstate listener. Other destinations retain normal HTMX navigation.
+            function commitURL(url, replace) {
+                var next = new URL(url, location.href);
+                if (next.href !== location.href) history[replace ? 'replaceState' : 'pushState'](Object.assign({}, history.state, {htmx:true}), '', next);
+            }
+            function navigateWorkspace(url, push) {
+                var next = new URL(url, location.href);
+                if (next.origin !== location.origin) return false;
+                if (isSettingsURL(next.href)) {
+                    var source = document.createElement('a');
+                    source.hidden = true;
+                    source.setAttribute('hx-push-url', push ? next.pathname + next.search + next.hash : 'false');
+                    source.setAttribute('hx-replace-url', 'false');
+                    source.dataset.workspaceHistoryNavigation = push ? 'false' : 'true';
+                    document.body.appendChild(source);
+                    htmx.ajax('GET', next.pathname + next.search, {source:source, target:'#main-content', swap:'innerHTML'}).finally(function() {
+                        source.remove();
+                    }).catch(function() {});
+                    return true;
+                }
+                var localTask = taskView && taskView.matches(next);
+                var stored = new URL(workspaceURL, location.href);
+                var retained = retainedWorkspace && (localTask || next.href === stored.href);
+                if (!retained && (!localTask || retainedWorkspace)) return false;
+                if (settingsRequest && settingsRequest.readyState !== 4) settingsRequest.abort();
+                if (push) commitURL(next.href);
+                if (retained) window.restoreSettingsWorkspace(false);
+                if (localTask) taskView.show(next);
+                if (window.syncAppearanceSettings) window.syncAppearanceSettings();
+                if (window.syncOpenVibelyPageTitle) window.syncOpenVibelyPageTitle(document.getElementById('main-content'));
+                return true;
+            }
+            window.workspaceNavigation = {
+                navigate: navigateWorkspace,
+                back: function() { return retainedWorkspace ? navigateWorkspace(workspaceURL, true) : false; },
+                commit: commitURL,
+                registerTask: function(view) {
+                    taskView = view;
+                    return function() { if (taskView === view) taskView = null; };
+                }
+            };
+            document.addEventListener('click', function(event) {
+                var link = event.target.closest('a');
+                if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
+                if (!link.matches('[hx-target="#main-content"], [data-settings-back]')) return;
+                // Appearance section selection already updates its existing pane.
+                if (link.matches('[data-settings-link]') && document.getElementById('themes-container')) return;
+                var target = link.matches('[data-settings-back]') ? workspaceURL : link.href;
+                if (!navigateWorkspace(target, true)) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }, true);
+            window.addEventListener('popstate', function(event) {
+                if (navigateWorkspace(location.href, false)) event.stopImmediatePropagation();
+            }, true);
+            document.addEventListener('htmx:beforeCleanupElement', function(event) {
+                if (event.detail.elt === retainedWorkspace) {
+                    retainedScroll = [];
+                    retainedWorkspace = null;
+                    settingsPane = null;
+                }
+            });
+
             var inContextSidebar = false;
             var contextChanges = null;
             var wasCollapsed = false;
@@ -147,9 +276,13 @@ templ TaskListPanel(currentProjectID string) {
             function boardScrollKey(el) {
                 return el.id || JSON.stringify([el.getAttribute('data-project-id'), el.getAttribute('data-category'), el.getAttribute('data-status')]);
             }
+            document.addEventListener('htmx:afterRequest', function(e) {
+                if (e.detail.xhr === settingsRequest) settingsRequest = null;
+            });
             document.addEventListener('htmx:beforeRequest', function(e) {
+                if (e.detail.target?.id === 'main-content' && isSettingsURL(e.detail.requestConfig?.path || location.href)) settingsRequest = e.detail.xhr;
                 if (e.detail.target && e.detail.target.id === 'main-content' && !inSettings) {
-                    workspaceURL = location.pathname + location.search + location.hash;
+                    if (e.detail.elt?.dataset.workspaceHistoryNavigation !== 'true') workspaceURL = location.pathname + location.search + location.hash;
                     workspaceScroll = document.getElementById('main-content').scrollTop;
                     boardScroll.clear();
                     document.getElementById('main-content').querySelectorAll(boardScrollSelector).forEach(function(el) {
@@ -158,10 +291,11 @@ templ TaskListPanel(currentProjectID string) {
                 }
             });
             window.syncAppearanceSettings = function() {
+                if (restoringWorkspace) return;
                 var appearance = !!document.getElementById('themes-container');
                 var workers = !!document.getElementById('worker-settings-content');
                 var changes = document.getElementById('tab-changes');
-                var reviewing = !!changes && !changes.classList.contains('hidden');
+                var reviewing = !settingsPane && !!changes && !changes.classList.contains('hidden');
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
                 var settings = appearance || workers || !!document.querySelector('#main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #personality-container, #main-content #organization-container');
@@ -208,7 +342,7 @@ templ TaskListPanel(currentProjectID string) {
                     if (appearance && el.dataset.settingsLink === section) el.setAttribute('aria-current', 'page');
                     else el.removeAttribute('aria-current');
                 });
-                if (appearance) document.getElementById('appearance-section-title').textContent = {themes: 'Themes', layout: 'Layout', chat: 'Chat appearance'}[section];
+                if (appearance) document.getElementById('appearance-section-title').textContent = {themes: 'Themes', layout: 'Layout', chat: 'Chat'}[section];
                 document.querySelectorAll('[data-settings-back]').forEach(function(el) {
                     el.setAttribute('href', workspaceURL);
                     el.setAttribute('hx-get', workspaceURL);
@@ -261,14 +395,27 @@ templ TaskListPanel(currentProjectID string) {
 			}
 			window.syncTaskListToggle = syncToggle;
 			function setCollapsed(collapsed) {
-                if (root.classList.contains("appearance-settings") && !root.classList.contains("changes-explorer-active")) return;
 				root.classList.toggle('task-list-collapsed', collapsed);
-				if (!root.classList.contains('changes-explorer-active')) {
+				if (!root.classList.contains('appearance-settings')) {
 					try { localStorage.setItem(collapsedKey, String(collapsed)); } catch (_) {}
 				}
 				syncToggle();
 			}
 			function openSearch(open) {
+                if (root.classList.contains('appearance-settings') && !root.classList.contains('changes-explorer-active')) {
+                    if (window.workspaceNavigation && window.workspaceNavigation.back()) {
+                        openSearch(true);
+                        return;
+                    }
+                    var back = document.querySelector('#appearance-settings-nav [data-settings-back]');
+                    if (back && window.htmx) {
+                        htmx.ajax('GET', back.getAttribute('href'), {source: back, target: '#main-content', swap: 'innerHTML'}).then(function() {
+                            window.syncAppearanceSettings();
+                            if (!root.classList.contains('appearance-settings') || root.classList.contains('changes-explorer-active')) openSearch(true);
+                        }).catch(function() {});
+                    }
+                    return;
+                }
                 if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) {
                     window.taskWorkspace.openThread();
                     open = true;
@@ -558,7 +705,7 @@ templ SettingsLinks(currentProjectID string) {
 					<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8z"></path>
 					<path d="M8 10h8M8 14h5"></path>
 				</svg>
-				<span class="task-list-title">Chat appearance</span>
+				<span class="task-list-title">Chat</span>
 			</a>
 		</div>
 	</details>
