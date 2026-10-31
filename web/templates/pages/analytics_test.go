@@ -1687,7 +1687,7 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
 	fixture := `<main id="reconnect-result"></main><script>
  history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
  window.Chart=function(){this.destroy=function(){};};
- let redeemed=false,requests=[],finish;
+ let redeemed=false,requests=[],finish,toasts=[];window.showToast=(message,status)=>toasts.push({message,status});
  function response(data){return {ok:true,json:async()=>data};}
  window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
@@ -1705,10 +1705,59 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  assert(card.textContent.includes('Expires')&&card.textContent.includes('Does not expire'),'expiration labels missing');
  const buttons=card.querySelectorAll('button');assert(buttons.length===2,'individual reset actions missing');buttons[1].click();
  await wait();assert(requests.length===1&&requests[0].credit_id==='b'&&requests[0].account_key==='account','selected credit not redeemed directly');
- assert(requests[0].idempotency_key,'missing idempotency key');assert(buttons[1].textContent==='Retry reset','failed reset has no retry');buttons[1].click();await wait();assert(requests.length===2&&requests[1].idempotency_key===requests[0].idempotency_key,'retry changed logical attempt');assert(Array.from(buttons).every(b=>b.disabled),'duplicate submission allowed');
+ assert(toasts.length===1&&toasts[0].status==='error'&&toasts[0].message==='Usage reset failed: Temporary failure','failed reset missing red toast');assert(requests[0].idempotency_key,'missing idempotency key');assert(buttons[1].textContent==='Retry reset','failed reset has no retry');buttons[1].click();await wait();assert(requests.length===2&&requests[1].idempotency_key===requests[0].idempotency_key,'retry changed logical attempt');assert(Array.from(buttons).every(b=>b.disabled),'duplicate submission allowed');
  finish();for(let i=0;i<150&&!card.textContent.includes('Usage reset.');i++)await wait();
  assert(card.textContent.includes('Usage resets available: 1')&&card.textContent.includes('0.0%'),'credits and limits not refreshed');
- assert(!card.textContent.includes('My reset'),'redeemed credit still offered');result.dataset.testResult='pass';
+ assert(toasts.length===2&&toasts[1].message==='Usage reset.'&&toasts[1].status==='completed','successful retry missing green toast');assert(!card.textContent.includes('My reset'),'redeemed credit still offered');result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){};};
+ const toasts=[];let payload={},provider='openai';
+ window.showToast=(text,status)=>toasts.push({text,status});
+ const response=data=>({ok:true,json:async()=>data});
+ window.fetch=async function(url){
+ const u=new URL(url,location.href),p=u.searchParams;
+ if(u.pathname.endsWith('/resets/consume'))return response(payload);
+ if(u.pathname.endsWith('/resets'))return response({available_count:1,credits:[{id:'credit',title:'Reset',status:'available',usable:true}]});
+ if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider}]});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider,plan_type:'Pro',limits:[{label:'Weekly',used_percent:99}]}]});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});
+ };
+ window.addEventListener('load',async()=>{
+ const result=document.getElementById('reconnect-result');
+ const wait=()=>new Promise(r=>setTimeout(r,20));
+ const assert=(ok,message)=>{if(!ok)throw Error(message);};
+ const cases=[
+ [{status:'reset'},'completed','Usage reset.'],
+ [{outcome:'already_redeemed'},'completed','Usage reset.'],
+ [{result:'nothing_to_reset'},'info','Your usage does not need a reset right now.'],
+ [{status:'not_limited'},'info','Your usage does not need a reset right now.'],
+ [{outcome:'no_credit'},'error','That reset is no longer available.'],
+ [{result:'ineligible'},'error','This reset is not currently available.'],
+ [{status:'cooldown'},'error','Reset is on cooldown.'],
+ [{status:'unexpected',reason:'unrecognized_response'},'warning','Reset was not confirmed. unrecognized response']
+ ];
+ try{
+ const card=document.getElementById('accountUsageCards');
+ for(provider of ['openai','anthropic'])for(const [data,status,text] of cases){
+ for(let i=0;i<150&&(!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
+ payload=data;const before=toasts.length;card.querySelector('button').click();
+ for(let i=0;i<150&&(!card.textContent.includes(text)||toasts.length===before||!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
+ assert(toasts.length===before+1,'expected one toast per result');
+ assert(toasts[before].status===status&&toasts[before].text===text,'incorrect toast for '+JSON.stringify(data));
+ assert(card.textContent.includes(text),'inline result missing');
+ }
+ result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
  });</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)

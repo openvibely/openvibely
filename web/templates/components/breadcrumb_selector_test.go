@@ -173,6 +173,12 @@ func TestBrowserFunctional_BreadcrumbSelectorKeepsOpenResultsStableOnTaskSSEInCh
 	    var hovered=results.querySelectorAll('[data-breadcrumb-selector-option]')[1];
 	    hovered.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse'}));
 	    if(!hovered.hasAttribute('data-selector-active')) throw new Error('hover did not highlight other task');
+	    document.documentElement.style.setProperty('--bc','0.8 0 0');
+	    document.documentElement.style.setProperty('--shell-row-selected','rgb(40, 45, 55)');
+	    var selected=results.querySelector('[aria-selected="true"]');
+	    if(results.querySelector('.ov-menu-check')) throw new Error('obsolete checkmark spacing');
+	    if(!selected || getComputedStyle(selected).backgroundColor!=='rgb(40, 45, 55)' || getComputedStyle(hovered).backgroundColor===getComputedStyle(selected).backgroundColor) throw new Error('selection must use task-list color and differ from hover');
+
 	    var replacements=0;
 	    var observer=new MutationObserver(function(){ replacements++; });
 	    observer.observe(results, {childList:true});

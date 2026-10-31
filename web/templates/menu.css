@@ -52,6 +52,17 @@
 .ov-menu [data-options] > .ov-menu-option:is(:hover, :focus-visible) {
   background: var(--ov-menu-active);
 }
+/* Breadcrumb and model choices match the task list: selection remains
+   distinct from pointer/keyboard navigation, including on the selected row. */
+.ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
+.ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
+.ov-menu .ov-mp-provider:is(:hover, [data-picker-active]) {
+  background: oklch(var(--bc) / .06);
+}
+.ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
+.ov-menu .ov-mp-row[data-selected="true"] {
+  background: var(--shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent));
+}
 .ov-menu .ov-menu-option:focus-visible { outline: none; }
 .ov-menu-actions > li > :is(a, button, summary) > svg { width: 16px; height: 16px; flex-shrink: 0; }
 .ov-menu-check { width: 15px; flex-shrink: 0; color: var(--fallback-bc, oklch(var(--bc) / 1)); }
