@@ -1935,6 +1935,9 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		if !exists {
 			return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
 		}
+		if components.DiffFileTooLarge(meta.File) {
+			return nil, echo.NewHTTPError(http.StatusRequestEntityTooLarge, "diff file too large to display")
+		}
 		revision := components.DiffCodeRevision(meta.File)
 		if expectedRevision != "" && expectedRevision != revision {
 			return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")

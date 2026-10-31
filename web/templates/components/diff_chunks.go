@@ -10,6 +10,26 @@ import (
 
 const diffChunkRows = 200
 
+const (
+	maxDiffFileLines = 50000
+	maxDiffFileBytes = 5 * 1024 * 1024
+)
+
+// DiffFileTooLarge reports files that are listed but never parsed into chunks.
+func DiffFileTooLarge(file DiffFile) bool {
+	lines, bytes := 0, 0
+	for _, hunk := range file.Hunks {
+		lines += len(hunk.Lines)
+		for _, line := range hunk.Lines {
+			bytes += len(line.Content)
+		}
+		if lines > maxDiffFileLines || bytes > maxDiffFileBytes {
+			return true
+		}
+	}
+	return false
+}
+
 // DiffCodeRevision identifies only code; review mutations cannot invalidate chunk URLs.
 func DiffCodeRevision(file DiffFile) string {
 	return DiffFileRevision(file, nil)

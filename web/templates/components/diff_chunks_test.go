@@ -162,3 +162,44 @@ func TestDiffCodeRevisionExcludesReviewAnnotations(t *testing.T) {
 		t.Fatal("code changes must invalidate chunks")
 	}
 }
+
+func TestDiffFileTooLarge(t *testing.T) {
+	file := func(lines int, content string) DiffFile {
+		hunk := DiffHunk{}
+		for i := 0; i < lines; i++ {
+			hunk.Lines = append(hunk.Lines, DiffLine{Type: "add", Content: content})
+		}
+		return DiffFile{Path: "f", Hunks: []DiffHunk{hunk}}
+	}
+	if DiffFileTooLarge(file(maxDiffFileLines, "x")) {
+		t.Fatal("line limit should be inclusive")
+	}
+	if !DiffFileTooLarge(file(maxDiffFileLines+1, "x")) {
+		t.Fatal("over line limit not detected")
+	}
+	if DiffFileTooLarge(file(1, strings.Repeat("x", maxDiffFileBytes))) {
+		t.Fatal("byte limit should be inclusive")
+	}
+	if !DiffFileTooLarge(file(1, strings.Repeat("x", maxDiffFileBytes+1))) {
+		t.Fatal("over byte limit not detected")
+	}
+}
+
+func TestDiffViewerMarksOversizedFiles(t *testing.T) {
+	diff := "diff --git a/small.txt b/small.txt\n--- a/small.txt\n+++ b/small.txt\n@@ -0,0 +1 @@\n+ok\n" +
+		"diff --git a/huge.txt b/huge.txt\n--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,50001 @@\n" + strings.Repeat("+x\n", maxDiffFileLines+1)
+	metas := progressiveDiffMetas(ParseDiffOutput(diff), nil)
+	for _, taskID := range []string{"task", ""} {
+		var output strings.Builder
+		if err := diffViewerWithReviewContent(metas, taskID, nil, "inline", "rev").Render(context.Background(), &output); err != nil {
+			t.Fatal(err)
+		}
+		body := output.String()
+		if strings.Count(body, `data-diff-too-large="true"`) != map[string]int{"task": 1, "": 3}[taskID] {
+			t.Fatalf("taskID=%q: unexpected too-large markers", taskID)
+		}
+		if taskID == "" && (!strings.Contains(body, "Diff too large to display") || strings.Contains(body, ">+x<")) {
+			t.Fatal("inline fallback rendered oversized content")
+		}
+	}
+}
