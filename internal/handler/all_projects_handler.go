@@ -154,10 +154,6 @@ func (h *Handler) AllProjects(c echo.Context) error {
 		return err
 	}
 	data := pages.AllProjectsData{Projects: projects, Section: strings.TrimPrefix(c.Request().URL.Path, "/"), Search: strings.TrimSpace(c.QueryParam("search")), FilterProject: c.QueryParam("filter_project"), Range: c.QueryParam("range")}
-	if data.Section == "chat" {
-		// Desktop launch bootstrap; the shell restores the remembered page.
-		data.Section = "tasks"
-	}
 	projectID := models.AllProjectsID
 	if data.FilterProject != "" {
 		found := false

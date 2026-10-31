@@ -276,9 +276,6 @@ func (h *Handler) liveSubscriptionAllowed(ctx context.Context, cmd liveCommand) 
 	if cmd.ProjectID == models.AllProjectsID && cmd.Op == "live" {
 		// Authentication is instance-wide. The virtual scope receives project
 		// notifications, but execution streams still require their real owner.
-		if cmd.Op != "live" {
-			return false
-		}
 		if cmd.TaskID == "" {
 			return true
 		}
