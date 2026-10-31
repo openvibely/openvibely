@@ -20,6 +20,12 @@ import (
 )
 
 func TestThreadNavigationToListPagesInChrome(t *testing.T) {
+	testThreadNavigationToListPages(t, "full")
+}
+func TestCompactThreadNavigationToListPagesInChrome(t *testing.T) {
+	testThreadNavigationToListPages(t, "compact")
+}
+func testThreadNavigationToListPages(t *testing.T, outputMode string) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
 	}
@@ -60,6 +66,19 @@ window.addEventListener('DOMContentLoaded',function(){
  const wait=ms=>new Promise(r=>setTimeout(r,ms));
  const assert=(ok,message)=>{if(!ok)throw Error(message)};
  async function until(check,label){for(let i=0;i<400;i++){if(check())return;await wait(10)}throw Error('Timeout: '+label+' errors='+JSON.stringify(errors)+' requests='+JSON.stringify(requests)+' url='+location.href+' content='+document.getElementById('main-content').innerText.slice(0,1000))}
+ async function checkTools(root,label){
+   let fold;
+   if(document.documentElement.dataset.outputDetail==='compact'){
+     await until(()=>typeof root.querySelector('.stream-activity-summary')?.onclick==='function',label+' summary hydrated');
+     fold=root.querySelector('.stream-activity-summary');
+     assert(fold.getAttribute('aria-expanded')==='false',label+' lost collapsed state');
+     assert(!root.querySelector('.stream-tool'),label+' eagerly mounted collapsed tools');
+     fold.click();
+   }
+   await until(()=>root.querySelector('.stream-tool'),label+' tools');
+   assert(root.querySelector('.stream-tool').textContent.includes('line of tool output'),label+' incorrect output');
+   if(fold)fold.click();
+ }
  (async function(){
    await until(()=>document.querySelector('#task-thread-view'),'initial thread');
    for(let round=0;round<2;round++){
@@ -117,14 +136,14 @@ window.addEventListener('DOMContentLoaded',function(){
    assert(draft.isConnected && draft.value==='Keep this draft during question resolution','stale refresh lost draft');
    // swap:none must not let hx-preserve move live executions into the discarded response.
    assert(livePair.isConnected && chatRoot.contains(livePair),'stale refresh detached live execution');
-   await until(()=>livePair.querySelector('.stream-tool'),'live tool output after stale refresh');
+   await checkTools(livePair,'live tool output after stale refresh');
    assert(getComputedStyle(document.getElementById('chat-messages')).visibility==='visible','stale refresh hid transcript');
    // HTMX still needs to commit the correct outgoing history entry.
    history.back();
    await until(()=>document.querySelector('#tasks-page') && location.pathname==='/tasks','back after question resolution');
    history.forward();
    await until(()=>document.querySelector('#chat-page-root') && location.pathname==='/chat','forward after question resolution');
-   await until(()=>document.querySelector('#chat-messages .stream-tool'),'forward transcript rendered');
+   await checkTools(document.getElementById('chat-messages'),'forward transcript');
    await until(()=>getComputedStyle(document.getElementById('chat-messages')).visibility==='visible','forward transcript visible');
    assert(document.getElementById('chat-messages').innerText.includes('Read project chat output'),'forward lost user message');
    document.querySelector('[data-nav-base="/tasks"]').click();
@@ -167,9 +186,9 @@ window.addEventListener('DOMContentLoaded',function(){
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, r)
 			w.Header().Set("Content-Type", "text/html")
-			// These scenarios exercise individual tool output controls and rows.
+			// Exercise the selected output mode independently of app defaults.
 			// Set the preference before layout and transcript scripts initialize.
-			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>localStorage.setItem('openvibely.outputDetail','full');</script>`, 1)
+			html := strings.Replace(rec.Body.String(), "<head>", `<head><script>localStorage.setItem('openvibely.outputDetail',`+fmt.Sprintf("%q", outputMode)+`);</script>`, 1)
 			_, _ = w.Write([]byte(strings.Replace(html, "</body>", runner+"</body>", 1)))
 			return
 		}
