@@ -34,6 +34,26 @@ func TestParseDiffOutput_TrailingNewlineMatchesFullDiffRevision(t *testing.T) {
 	}
 }
 
+func TestParseDiffOutput_JoinSeparatorsMatchPerFileRevision(t *testing.T) {
+	tracked := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-x\n+y\n"
+	untrackedOne := "diff --git a/n1.go b/n1.go\nnew file mode 100644\n--- /dev/null\n+++ b/n1.go\n@@ -0,0 +1,1 @@\n+one\n"
+	untrackedTwo := "diff --git a/n2.go b/n2.go\nnew file mode 100644\n--- /dev/null\n+++ b/n2.go\n@@ -0,0 +1,1 @@\n+two\n"
+	full := tracked + "\n" + "\n" + untrackedOne + "\n" + untrackedTwo
+	files := ParseDiffOutput(full)
+	if len(files) != 3 {
+		t.Fatalf("expected 3 files, got %d", len(files))
+	}
+	for i, single := range []string{tracked, "\n" + untrackedOne, "\n" + untrackedTwo} {
+		meta, ok := DiffRenderMetaByIndex(single, 0)
+		if !ok {
+			t.Fatalf("file %d: expected meta", i)
+		}
+		if DiffCodeRevision(meta.File) != DiffCodeRevision(files[i]) {
+			t.Fatalf("file %d: per-file revision differs from full-diff revision", i)
+		}
+	}
+}
+
 func TestParseDiffOutput_SingleFile(t *testing.T) {
 	diff := `diff --git a/main.go b/main.go
 index abc1234..def5678 100644
