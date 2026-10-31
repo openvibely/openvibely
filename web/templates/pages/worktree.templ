@@ -214,7 +214,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 				}
 
 			// Diff viewer
-			@components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView)
+			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView)
 		</div>
 	</div>
 }

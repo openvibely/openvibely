@@ -64,7 +64,7 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 	}
 	comments := []models.ReviewComment{{ID: "note", TaskID: "lazy-task", FilePath: "file0.go", LineNumber: 1, LineType: "new", CommentText: "existing review"}}
 	var markup bytes.Buffer
-	if err := DiffViewerWithReview(diff.String(), "lazy-task", comments).Render(context.Background(), &markup); err != nil {
+	if err := DiffViewer(diff.String(), "lazy-task", comments, "inline").Render(context.Background(), &markup); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(markup.String(), `<tr`) {

@@ -58,7 +58,7 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 		}
 	}
 	var markup bytes.Buffer
-	if err := DiffViewerWithReview(diff, "chunk-task", comments).Render(context.Background(), &markup); err != nil {
+	if err := DiffViewer(diff, "chunk-task", comments, "inline").Render(context.Background(), &markup); err != nil {
 		t.Fatal(err)
 	}
 	result := make(chan string, 1)

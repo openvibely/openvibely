@@ -28,7 +28,7 @@ templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComment
 		<div class="card-body">
 			<h4 class="text-lg font-bold mb-3">File Changes</h4>
 			<div id="diff-viewer-container">
-				@components.DiffViewerWithReviewView(diffOutput, taskID, reviewComments, diffView)
+				@components.DiffViewer(diffOutput, taskID, reviewComments, diffView)
 			</div>
 		</div>
 	</div>

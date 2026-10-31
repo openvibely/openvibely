@@ -2009,7 +2009,7 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 			return err
 		}
 		diffView := h.uiDiffViewPreference(c.Request().Context())
-		if err := components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView).Render(ctx, w); err != nil {
+		if err := components.DiffViewer(diffOutput, task.ID, reviewComments, diffView).Render(ctx, w); err != nil {
 			return err
 		}
 		_, err := io.WriteString(w, `</div>`)

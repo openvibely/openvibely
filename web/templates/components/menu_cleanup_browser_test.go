@@ -73,9 +73,9 @@ func TestBrowserFunctional_DiffNavigationSkipsHistorySnapshot(t *testing.T) {
 		t.Run(fmt.Sprintf("review=%v", review), func(t *testing.T) {
 			var rendered bytes.Buffer
 			diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1 +1 @@\n-old\n+new\n"
-			component := DiffViewer(diff)
+			component := DiffViewer(diff, "", nil, "inline")
 			if review {
-				component = DiffViewerWithReview(diff, "task", nil)
+				component = DiffViewer(diff, "task", nil, "inline")
 			}
 			if err := component.Render(context.Background(), &rendered); err != nil {
 				t.Fatal(err)
