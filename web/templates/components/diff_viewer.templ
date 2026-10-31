@@ -534,7 +534,7 @@ func lineNumForReview(line DiffLine) int {
 templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string, revision string) {
 	<div id="diff-viewer" data-diff-revision={ revision } hx-history="false" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
-		<div class="flex flex-wrap items-center gap-2 mb-4">
+		<div data-diff-toolbar class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
 				<span class="text-sm font-medium opacity-70">
 					{ fmt.Sprintf("%d", len(metas)) } file{ fileCountSuffix(len(metas)) } changed
@@ -1676,7 +1676,7 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 templ diffViewerContent(metas []DiffFileRenderMeta, initialView string, revision string) {
 	<div id="diff-viewer" data-diff-revision={ revision } hx-history="false" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
-		<div class="flex flex-wrap items-center gap-2 mb-4">
+		<div data-diff-toolbar class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
 				<span class="text-sm font-medium opacity-70">
 					{ fmt.Sprintf("%d", len(metas)) } file{ fileCountSuffix(len(metas)) } changed

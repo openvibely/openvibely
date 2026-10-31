@@ -343,12 +343,12 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<div class=\"worktree-changes min-w-0 max-w-full\"><div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if task.WorktreeBranch != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-4 min-w-0 max-w-full\"><div class=\"min-w-0 max-w-full flex-1\"><h4 class=\"text-lg font-bold\">Worktree Changes</h4><p class=\"text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]\">Changes on branch <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs break-all\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<div class=\"relative z-[90] flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full\"><div class=\"min-w-0 max-w-full flex-1\"><h4 class=\"text-sm font-semibold mb-1\">Worktree changes</h4><p class=\"text-sm opacity-60 min-w-0 max-w-full break-words [overflow-wrap:anywhere]\">Comparing <code class=\"bg-base-200 px-1.5 py-0.5 rounded text-xs break-all\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -374,7 +374,7 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</code></p></div><div class=\"dropdown dropdown-end relative z-[60] flex-shrink-0\" id=\"changes-actions-dropdown\"><button type=\"button\" role=\"button\" popovertarget=\"changes-actions-menu\" class=\"btn btn-primary btn-sm whitespace-nowrap\">Actions <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg></button><ul id=\"changes-actions-menu\" popover=\"auto\" class=\"ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]\" style=\"position:fixed;inset:auto;margin:0;\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</code></p></div><div class=\"dropdown dropdown-end relative z-[60] flex-shrink-0\" id=\"changes-actions-dropdown\"><button type=\"button\" role=\"button\" popovertarget=\"changes-actions-menu\" class=\"btn btn-ghost btn-sm whitespace-nowrap\">Actions <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg></button><ul id=\"changes-actions-menu\" popover=\"auto\" class=\"ov-menu ov-menu-actions ov-menu-scroll menu w-52 max-w-[calc(100vw-2rem)]\" style=\"position:fixed;inset:auto;margin:0;\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -496,11 +496,15 @@ func TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fi
 				return templ_7745c5c3_Err
 			}
 		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<style>\n\t\t\t\t.worktree-changes #diff-viewer > [data-diff-toolbar] {\n\t\t\t\t\tpadding: 0.5rem 0 0.75rem;\n\t\t\t\t\tborder-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));\n\t\t\t\t}\n\t\t\t\t.worktree-changes #diff-viewer > [data-diff-toolbar] > :first-child {\n\t\t\t\t\tflex-wrap: wrap;\n\t\t\t\t}\n\t\t\t</style>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -597,7 +601,7 @@ func changesActionsPopoverScript() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<script>\n (() => {\n  if (window._changesActionsPopoverInstalled) return;\n  window._changesActionsPopoverInstalled = true;\n  const current = () => document.getElementById('changes-actions-menu');\n  const close = () => { const menu=current(); if(menu && menu.matches(':popover-open')) menu.hidePopover(); };\n  function position(menu) {\n   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;\n   const trigger=document.querySelector('[popovertarget=\"changes-actions-menu\"]');\n   if(!trigger) { menu.hidePopover(); return; }\n   const rect=trigger.getBoundingClientRect();\n   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }\n   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';\n   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';\n   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';\n  }\n  document.addEventListener('beforetoggle', event => {\n   // Native input can flush microtasks before the popover has entered the top\n   // layer. Measure on the next frame, after opening and before it is painted.\n   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));\n  }, true);\n  window.addEventListener('resize',()=>position(current()));\n  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);\n  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<script>\n (() => {\n  if (window._changesActionsPopoverInstalled) return;\n  window._changesActionsPopoverInstalled = true;\n  const current = () => document.getElementById('changes-actions-menu');\n  const close = () => { const menu=current(); if(menu && menu.matches(':popover-open')) menu.hidePopover(); };\n  function position(menu) {\n   if(!menu || !menu.isConnected || !menu.matches(':popover-open')) return;\n   const trigger=document.querySelector('[popovertarget=\"changes-actions-menu\"]');\n   if(!trigger) { menu.hidePopover(); return; }\n   const rect=trigger.getBoundingClientRect();\n   if(rect.bottom<=0 || rect.top>=innerHeight) { menu.hidePopover(); return; }\n   menu.style.maxHeight=Math.max(0,innerHeight-16)+'px';\n   menu.style.left=Math.max(8,Math.min(rect.right-menu.offsetWidth,innerWidth-menu.offsetWidth-8))+'px';\n   menu.style.top=Math.max(8,Math.min(rect.bottom+4,innerHeight-menu.offsetHeight-8))+'px';\n  }\n  document.addEventListener('beforetoggle', event => {\n   // Native input can flush microtasks before the popover has entered the top\n   // layer. Measure on the next frame, after opening and before it is painted.\n   if(event.target.id==='changes-actions-menu' && event.newState==='open') requestAnimationFrame(()=>position(event.target));\n  }, true);\n  window.addEventListener('resize',()=>position(current()));\n  document.addEventListener('scroll',event=>{const menu=current();if(menu && !menu.contains(event.target))position(menu);},true);\n  document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
