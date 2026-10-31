@@ -17,12 +17,13 @@
  // Virtualization keeps existing row DOM where possible. Save equations from
  // the discarded DOM separately, so lazy rows can adopt them without retaining
  // the old response (including potentially large tool outputs).
- window.retainChatMathForVirtualRows=function(owner,source){
+ window.retainChatMathForVirtualRows=function(owner,source,reused=[]){
   // Repeated refreshes (and append-only streaming) leave pending equations
   // valid. A replacement source must not retain the previous reuse pool.
   const unchanged=typeof source==='string'&&typeof owner._chatMathSource==='string'&&source.startsWith(owner._chatMathSource);
   const saved=unchanged&&owner._chatMathNodes?owner._chatMathNodes:new Map();
   owner.querySelectorAll('[data-math-ready="true"]').forEach(node=>{
+   if(reused.some(row=>row.contains(node)))return;
    const id=key(node);if(!saved.has(id))saved.set(id,[]);saved.get(id).push(node);
    node.remove();
   });

@@ -4980,8 +4980,9 @@ templ ChatAutoScrollScript() {
 					if (window.materializeVirtualChatRows) window.materializeVirtualChatRows(container, {renderLazy:false});
 					var tail = document.createElement('div');
 					tail.style.display = 'contents';
-					while (container.firstChild) tail.appendChild(container.firstChild);
-					container.replaceChildren(tail);
+					var children = Array.from(container.childNodes);
+                    container.appendChild(tail);
+                    children.forEach(function(child) { if (tail.moveBefore && child.isConnected) tail.moveBefore(child, null); else tail.appendChild(child); });
 					state = { source: '', offset: 0, renderOffset: 0, ordinal: 0, tail: tail, generation: 0 };
 					container._incrementalChat = state;
 				}
@@ -6125,8 +6126,12 @@ templ ChatAutoScrollScript() {
                 window.OVFileViewer?.prepareStream(renderFragment, container);
                 var focusedToggle = document.activeElement;
                 var focusedFoldKey = focusedToggle && container.contains(focusedToggle) && focusedToggle.matches('.stream-activity-summary') ? focusedToggle.parentElement.getAttribute('data-tool-disclosure-key') : null;
-				if (options?.virtualRow && window.preserveChatVirtualScroll) window.preserveChatVirtualScroll(container, function() { container.replaceChildren(renderFragment); container.style.minHeight = ''; });
-				else container.replaceChildren(renderFragment);
+				function commitContent() {
+                    if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(renderFragment, container);
+                    else container.replaceChildren(renderFragment);
+                }
+                if (options?.virtualRow && window.preserveChatVirtualScroll) window.preserveChatVirtualScroll(container, function() { commitContent(); container.style.minHeight = ''; });
+                else commitContent();
                 if (focusedFoldKey) {
                     var restoredFold = Array.from(container.querySelectorAll('[data-tool-disclosure-key]')).find(function(fold) { return fold.getAttribute('data-tool-disclosure-key') === focusedFoldKey; });
                     if (restoredFold) restoredFold.querySelector('.stream-activity-summary').focus({preventScroll:true});
