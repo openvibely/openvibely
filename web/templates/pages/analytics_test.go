@@ -1687,7 +1687,7 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
 	fixture := `<main id="reconnect-result"></main><script>
  history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
  window.Chart=function(){this.destroy=function(){};};
- let redeemed=false,requests=[],finish;
+ let redeemed=false,requests=[],finish,toasts=[];window.showToast=(message,status)=>toasts.push({message,status});
  function response(data){return {ok:true,json:async()=>data};}
  window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
@@ -1705,10 +1705,10 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  assert(card.textContent.includes('Expires')&&card.textContent.includes('Does not expire'),'expiration labels missing');
  const buttons=card.querySelectorAll('button');assert(buttons.length===2,'individual reset actions missing');buttons[1].click();
  await wait();assert(requests.length===1&&requests[0].credit_id==='b'&&requests[0].account_key==='account','selected credit not redeemed directly');
- assert(requests[0].idempotency_key,'missing idempotency key');assert(buttons[1].textContent==='Retry reset','failed reset has no retry');buttons[1].click();await wait();assert(requests.length===2&&requests[1].idempotency_key===requests[0].idempotency_key,'retry changed logical attempt');assert(Array.from(buttons).every(b=>b.disabled),'duplicate submission allowed');
+ assert(toasts.length===0,'failed reset showed success toast');assert(requests[0].idempotency_key,'missing idempotency key');assert(buttons[1].textContent==='Retry reset','failed reset has no retry');buttons[1].click();await wait();assert(requests.length===2&&requests[1].idempotency_key===requests[0].idempotency_key,'retry changed logical attempt');assert(Array.from(buttons).every(b=>b.disabled),'duplicate submission allowed');
  finish();for(let i=0;i<150&&!card.textContent.includes('Usage reset.');i++)await wait();
  assert(card.textContent.includes('Usage resets available: 1')&&card.textContent.includes('0.0%'),'credits and limits not refreshed');
- assert(!card.textContent.includes('My reset'),'redeemed credit still offered');result.dataset.testResult='pass';
+ assert(toasts.length===1&&toasts[0].message==='Usage reset.'&&toasts[0].status==='completed','successful reset missing green toast');assert(!card.textContent.includes('My reset'),'redeemed credit still offered');result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
  });</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
