@@ -1714,6 +1714,55 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+ window.Chart=function(){this.destroy=function(){};};
+ const toasts=[];let payload={},provider='openai';
+ window.showToast=(text,status)=>toasts.push({text,status});
+ const response=data=>({ok:true,json:async()=>data});
+ window.fetch=async function(url){
+ const u=new URL(url,location.href),p=u.searchParams;
+ if(u.pathname.endsWith('/resets/consume'))return response(payload);
+ if(u.pathname.endsWith('/resets'))return response({available_count:1,credits:[{id:'credit',title:'Reset',status:'available',usable:true}]});
+ if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider}]});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider,plan_type:'Pro',limits:[{label:'Weekly',used_percent:99}]}]});
+ return response({totals:{},usage_rate:[],model_breakdown:[]});
+ };
+ window.addEventListener('load',async()=>{
+ const result=document.getElementById('reconnect-result');
+ const wait=()=>new Promise(r=>setTimeout(r,20));
+ const assert=(ok,message)=>{if(!ok)throw Error(message);};
+ const cases=[
+ [{status:'reset'},'completed','Usage reset.'],
+ [{outcome:'already_redeemed'},'completed','Usage reset.'],
+ [{result:'nothing_to_reset'},'info','Your usage does not need a reset right now.'],
+ [{status:'not_limited'},'info','Your usage does not need a reset right now.'],
+ [{outcome:'no_credit'},'error','That reset is no longer available.'],
+ [{result:'ineligible'},'error','This reset is not currently available.'],
+ [{status:'cooldown'},'error','Reset is on cooldown.'],
+ [{status:'unexpected',reason:'unrecognized_response'},'warning','Reset was not confirmed. unrecognized response']
+ ];
+ try{
+ const card=document.getElementById('accountUsageCards');
+ for(provider of ['openai','anthropic'])for(const [data,status,text] of cases){
+ for(let i=0;i<150&&(!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
+ payload=data;const before=toasts.length;card.querySelector('button').click();
+ for(let i=0;i<150&&(!card.textContent.includes(text)||toasts.length===before||!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
+ assert(toasts.length===before+1,'expected one toast per result');
+ assert(toasts[before].status===status&&toasts[before].text===text,'incorrect toast for '+JSON.stringify(data));
+ assert(card.textContent.includes(text),'inline result missing');
+ }
+ result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ });</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestBrowserFunctional_AnalyticsHidesUnavailableResets(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
