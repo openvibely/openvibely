@@ -78,7 +78,7 @@ templ automationNodePanelScript() {
 				var source = (candidate.nodes || []).find(function(n) { return n.key === edge.from; });
 				var target = (candidate.nodes || []).find(function(n) { return n.key === edge.to; });
 				if (!source || !target) return;
-				var card = element('div', 'rounded-box bg-base-200/40 p-3');
+				var card = element('div', 'inspector-connection');
 				card.dataset.automationEdgeDetail = edge.key; card.dataset.from = edge.from; card.dataset.to = edge.to;
 				var header = element('div', 'mb-2 flex items-center justify-between gap-2');
 				header.append(element('span', 'text-xs font-medium', source.name + ' → ' + target.name));

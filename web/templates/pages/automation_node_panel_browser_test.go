@@ -127,7 +127,10 @@ func TestBrowserFunctional_AutomationNodeSidePanel(t *testing.T) {
 		b.click(`[data-node-key="second"] rect`)
 		b.waitFor("task falls back to Details", `String(document.querySelector('#automation-inspector-tab-schedule').hidden && document.querySelector('#automation-inspector-tab-details').getAttribute('aria-selected')==='true')`, "true")
 		b.click("#automation-inspector-tab-connections")
-		b.evaluate(`var label=document.querySelector('[name="edge_handoff_label"]');label.value='Reviewed';label.dispatchEvent(new Event('input',{bubbles:true}));'edited'`)
+		b.click(`[data-automation-edge-detail="handoff"] [data-inspector-property="label"]`)
+		b.evaluate(`document.querySelector('[data-inspector-editor-field="label"]').value='Reviewed';'edited'`)
+		b.click(`[data-inspector-editor-form] button[type="submit"]`)
+		b.waitFor("connection row reflects applied label", `document.querySelector('[data-automation-edge-detail="handoff"] [data-property-label]').textContent`, "Reviewed")
 		b.click(`[data-inspector-connection-group] [data-inspector-open-node]`)
 
 		b.waitFor("connections tab retained across nodes", `document.querySelector('#automation-inspector-tab-connections').getAttribute('aria-selected')`, "true")
