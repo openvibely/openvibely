@@ -50,7 +50,7 @@ func loadInlineTaskDiffCards(t *testing.T, h *Handler, e *echo.Echo, taskID, mar
 			}
 		}
 		if endpoint == "" {
-			endpoint = "/tasks/" + taskID + "/changes/file?file_index=" + index + "&view=inline&review=true&chunk=0&revision=" + url.QueryEscape(revision)
+			endpoint = "/tasks/" + taskID + "/changes/file?file_index=" + index + "&view=inline&chunk=0&revision=" + url.QueryEscape(revision)
 		}
 		request := httptest.NewRequest(http.MethodGet, endpoint+"&file_path="+url.QueryEscape(path), nil)
 		response := httptest.NewRecorder()

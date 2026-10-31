@@ -57,7 +57,7 @@ func TestHandler_DiffChunkSnapshotCache(t *testing.T) {
 	revision := save(diff)
 	request := func(rev, view, path string, chunk int, status int) string {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/tasks/%s/changes/file?file_index=0&review=true&chunk=%d&view=%s&revision=%s&file_path=%s", task.ID, chunk, view, rev, path), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/tasks/%s/changes/file?file_index=0&chunk=%d&view=%s&revision=%s&file_path=%s", task.ID, chunk, view, rev, path), nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("taskId")
@@ -165,7 +165,7 @@ func TestHandler_DiffChunkRejectsOversizedFile(t *testing.T) {
 	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, diff); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&review=true&chunk=0&view=inline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&chunk=0&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")

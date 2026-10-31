@@ -83,7 +83,7 @@ diff --git a/b.txt b/b.txt
 		t.Fatalf("update diff output: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&review=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
@@ -111,7 +111,7 @@ diff --git a/b.txt b/b.txt
 		path   string
 		status int
 	}{{"b.txt", http.StatusOK}, {"a.txt", http.StatusConflict}, {"removed.txt", http.StatusConflict}} {
-		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&review=true&file_path="+url.QueryEscape(identity.path), nil)
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline&file_path="+url.QueryEscape(identity.path), nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("taskId")
@@ -136,7 +136,7 @@ diff --git a/b.txt b/b.txt
 		{"chunk=0&anchor_old_line=-1", http.StatusBadRequest},
 		{"chunk=0&anchor_new_line=oops", http.StatusBadRequest},
 	} {
-		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split&review=true&"+tc.query, nil)
+		req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split&"+tc.query, nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("taskId")

@@ -1934,12 +1934,11 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		if !exists {
 			return nil, echo.NewHTTPError(http.StatusNotFound, "diff file no longer exists")
 		}
-		tooLarge := components.DiffFileTooLarge(meta.File)
-		revision := components.DiffCodeRevisionSized(meta.File, tooLarge)
+		revision := components.DiffCodeRevision(meta.File)
 		if expectedRevision != "" && expectedRevision != revision {
 			return nil, echo.NewHTTPError(http.StatusConflict, "diff changed; reload Changes")
 		}
-		if tooLarge {
+		if components.DiffFileTooLarge(meta.File) {
 			return nil, echo.NewHTTPError(http.StatusRequestEntityTooLarge, "diff file too large to display")
 		}
 		return prepareDiffChunks(meta, revision), nil
