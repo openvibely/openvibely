@@ -574,3 +574,30 @@ func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {
 		t.Fatalf("expected ungranted review follow-up system context to include Goal Agent status-tool guidance, got %q", chatCtx)
 	}
 }
+
+func TestReviewCommentsWithAllProjectsSelected(t *testing.T) {
+	h, app, repo, _, _, taskID := setupReviewHandler(t)
+	ctx := t.Context()
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.NoError(t, h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	for _, scope := range []string{task.ProjectID, models.AllProjectsID} {
+		endpoint := "/tasks/" + taskID + "/reviews?project_id=" + scope
+		req := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader("file_path=file.go&line_number=1&line_type=new&comment_text=Scoped+comment"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		rec = httptest.NewRecorder()
+		app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, endpoint, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "Scoped comment")
+	}
+	comments, err := repo.ListByTask(ctx, taskID)
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+	other := createProject(t, h, "Other review project")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/"+taskID+"/reviews?project_id="+other.ID, nil))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+}

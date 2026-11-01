@@ -938,7 +938,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				if (!taskId) return;
 
 				// Delete all comments for this task via the API, then reload the page
-				fetch('/tasks/' + taskId + '/reviews', { method: 'GET' })
+				fetch(taskReviewURL(taskId), { method: 'GET' })
 					.then(function() {
 						window.location.reload();
 					});
@@ -1088,7 +1088,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 
 			function refreshReviewComments(taskId) {
 				if (!taskId) return Promise.resolve();
-				return fetch('/tasks/' + taskId + '/reviews', {
+				return fetch(taskReviewURL(taskId), {
 					headers: { 'HX-Request': 'true' }
 				})
 				.then(function(resp) {
@@ -1184,11 +1184,19 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				lineRow.classList.add('diff-review-line-open');
 			}
 
-			function reviewMutationURL(commentId) {
+			function scopedReviewURL(path) {
                 var detail = document.getElementById('task-detail-content');
                 var projectId = detail && detail.dataset ? detail.dataset.projectId : '';
                 if (!projectId) projectId = new URLSearchParams(window.location.search).get('project_id') || '';
-                return '/reviews/' + encodeURIComponent(commentId) + (projectId ? '?project_id=' + encodeURIComponent(projectId) : '');
+                return path + (projectId ? '?project_id=' + encodeURIComponent(projectId) : '');
+            }
+
+            function taskReviewURL(taskId) {
+                return scopedReviewURL('/tasks/' + encodeURIComponent(taskId) + '/reviews');
+            }
+
+            function reviewMutationURL(commentId) {
+                return scopedReviewURL('/reviews/' + encodeURIComponent(commentId));
             }
 
             function updateReviewComment(formRow) {
@@ -1279,7 +1287,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				formData.append('line_type', lineType);
 				formData.append('comment_text', text);
 
-				fetch('/tasks/' + taskId + '/reviews', {
+				fetch(taskReviewURL(taskId), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
 					body: formData.toString()

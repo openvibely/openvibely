@@ -112,6 +112,14 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
  await wait(()=>distant.querySelector('tr[data-new-line="2001"]'));
  assert(!distant.querySelector('tr.review-inline-comment'),'deleted comments reappeared in inline view');
 
+ const reviewLine=distant.querySelector('tr[data-new-line="2001"]');
+ openInlineCommentForm(reviewLine);
+ const reviewForm=document.querySelector('.review-comment-form');
+ submitReviewComment('chunk-task','big.txt',2001,'new','created in All projects',reviewForm);
+ await wait(()=>distant.querySelector('[data-comment-id="created"]'));
+ await refreshReviewComments('chunk-task');
+ assert(distant.querySelector('[data-comment-id="created"]'),'scoped comment refresh lost created comment');
+
  fetch('/result?status=pass');
  } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
  });</script>`
@@ -250,6 +258,15 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 			select {
 			case result <- r.URL.Query().Get("status"):
 			default:
+			}
+		case "/tasks/chunk-task/reviews":
+			if r.URL.Query().Get("project_id") != "task-owner" {
+				http.Error(w, "wrong project", http.StatusNotFound)
+				return
+			}
+			err := ReviewCommentList([]models.ReviewComment{{ID: "created", TaskID: "chunk-task", FilePath: "big.txt", LineNumber: 2001, LineType: "new", CommentText: "created in All projects"}}, "chunk-task", "task-owner").Render(r.Context(), w)
+			if err != nil {
+				t.Error(err)
 			}
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
