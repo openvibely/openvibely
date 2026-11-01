@@ -83,6 +83,19 @@ diff --git a/b.txt b/b.txt
 		t.Fatalf("update diff output: %v", err)
 	}
 
+	// Exercise the real project-boundary middleware with All projects selected.
+	if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, models.AllProjectsID); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{models.AllProjectsID, project.ID} {
+		for _, view := range []string{"inline", "split"} {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view="+view+"&project_id="+scope, nil))
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "data-diff-chunk-response") {
+				t.Fatalf("%s/%s: %d %s", scope, view, rec.Code, rec.Body.String())
+			}
+		}
+	}
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?chunk=0&file_index=1&view=inline", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)

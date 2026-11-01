@@ -282,6 +282,11 @@ templ diffViewerPerformanceScript() {
     else if (!card.firstChild) card.appendChild(document.createTextNode('Loading diff…'));
     card.setAttribute('aria-busy', 'true');
     var url = new URL(card.dataset.diffLazyUrl || card.dataset.chunkUrl, location.href);
+    // Lazy fetches do not pass through HTMX's project scoping. Use the
+    // rendered task owner, not the shared selected-project preference.
+    var taskDetail = viewer.closest('#task-detail-content');
+    var projectID = taskDetail && taskDetail.dataset.projectId || new URLSearchParams(location.search).get('project_id');
+    if (projectID) url.searchParams.set('project_id', projectID);
     url.searchParams.set('file_path', card.dataset.diffFilePath);
     if (card.hasAttribute('data-chunk-index')) url.searchParams.set('chunk', card.dataset.chunkIndex);
     if (restore) {

@@ -112,6 +112,14 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
  await wait(()=>distant.querySelector('tr[data-new-line="2001"]'));
  assert(!distant.querySelector('tr.review-inline-comment'),'deleted comments reappeared in inline view');
 
+ const reviewLine=distant.querySelector('tr[data-new-line="2001"]');
+ openInlineCommentForm(reviewLine);
+ const reviewForm=document.querySelector('.review-comment-form');
+ submitReviewComment('chunk-task','big.txt',2001,'new','created in All projects',reviewForm);
+ await wait(()=>distant.querySelector('[data-comment-id="created"]'));
+ await refreshReviewComments('chunk-task');
+ assert(distant.querySelector('[data-comment-id="created"]'),'scoped comment refresh lost created comment');
+
  fetch('/result?status=pass');
  } catch(error) {fetch('/result?status='+encodeURIComponent(error.stack||error));}
  });</script>`
@@ -251,10 +259,27 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 			case result <- r.URL.Query().Get("status"):
 			default:
 			}
+		case "/tasks/chunk-task/reviews":
+			if r.URL.Query().Get("project_id") != "task-owner" {
+				http.Error(w, "wrong project", http.StatusNotFound)
+				return
+			}
+			err := ReviewCommentList([]models.ReviewComment{{ID: "created", TaskID: "chunk-task", FilePath: "big.txt", LineNumber: 2001, LineType: "new", CommentText: "created in All projects"}}, "chunk-task", "task-owner").Render(r.Context(), w)
+			if err != nil {
+				t.Error(err)
+			}
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
 			w.Write(htmx204)
 		case "/tasks/chunk-task/changes/file":
+			expectedProject := "__all_projects__"
+			if kind == "" {
+				expectedProject = "task-owner"
+			}
+			if r.URL.Query().Get("project_id") != expectedProject {
+				http.Error(w, "missing explicit project scope", http.StatusNotFound)
+				return
+			}
 			if r.URL.Query().Get("revision") != DiffCodeRevision(file) {
 				http.Error(w, "stale code revision", 409)
 				return
@@ -290,11 +315,15 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 				t.Error(err)
 			}
 		default:
-			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script><style>.hidden{display:none}svg{width:16px;height:16px}#main-content{height:600px;overflow:auto}.diff-file-header{display:flex}.diff-file-body{overflow:hidden}td{height:16px;padding:0}table{border-collapse:collapse;font-size:12px;line-height:16px}</style>`+script+`</head><body><main id="main-content">`+markup.String()+`</main></body></html>`)
+			body := markup.String()
+			if kind == "" {
+				body = `<div id="task-detail-content" data-project-id="task-owner">` + body + `</div>`
+			}
+			fmt.Fprint(w, `<!doctype html><html><head><script src="/htmx.js"></script><style>.hidden{display:none}svg{width:16px;height:16px}#main-content{height:600px;overflow:auto}.diff-file-header{display:flex}.diff-file-body{overflow:hidden}td{height:16px;padding:0}table{border-collapse:collapse;font-size:12px;line-height:16px}</style>`+script+`</head><body><main id="main-content">`+body+`</main></body></html>`)
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"?project_id=__all_projects__")
 	configureTestBrowserProcess(cmd)
 	if err := startTestBrowserProcess(cmd); err != nil {
 		t.Fatal(err)
