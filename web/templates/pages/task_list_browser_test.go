@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -352,5 +353,121 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 		b.evaluate(`htmx.swap('#main-content','<div id="task-detail-content" data-task-id="menu-task">Deleted thread</div>',{swapStyle:'innerHTML'}); window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_deleted',task_id:'menu-task',project_id:'owner'}})); 'detail deleted'`)
 		b.waitFor("deleted detail navigates to scoped tasks", `String(location.pathname==='/tasks' && new URLSearchParams(location.search).get('project_id')==='__all_projects__' && !document.getElementById('task-detail-content') && !!document.getElementById('kanban-board'))`, "true")
 		b.waitFor("Delete preserves workspace", `String(!!document.getElementById('main-content') && !document.getElementById('unexpected-delete-board'))`, "true")
+	})
+}
+
+func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	var moved, reordered, reject atomic.Bool
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			tasks := []models.Task{
+				{ID: "drag-a", ProjectID: "owner", Title: "First task", Category: models.CategoryBacklog, Status: models.StatusPending},
+				{ID: "drag-b", ProjectID: "other", Title: "Second task", Category: models.CategoryBacklog, Status: models.StatusPending},
+			}
+			if reordered.Load() {
+				tasks[0], tasks[1] = tasks[1], tasks[0]
+			}
+			if moved.Load() {
+				for i := range tasks {
+					if tasks[i].ID == "drag-a" {
+						tasks[i].Category = models.CategoryCompleted
+					}
+				}
+			}
+			menus := map[string]templ.Component{}
+			for _, task := range tasks {
+				menus[task.ID] = components.TaskListMenuItems(task)
+			}
+			if err := layout.TaskListPanelContent(models.AllProjectsID, layout.TaskListGroups(tasks), menus).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/tasks/drag-a/reorder", "/tasks/drag-a/category":
+			requests.Add(1)
+			if r.Method != http.MethodPatch || r.FormValue("project_id") != models.AllProjectsID {
+				t.Errorf("wrong drag request: %s %v", r.Method, r.Form)
+			}
+			if reject.Load() {
+				w.WriteHeader(http.StatusConflict)
+				return
+			}
+			if r.URL.Path == "/tasks/drag-a/reorder" {
+				if r.FormValue("after_task_id") != "drag-b" {
+					t.Errorf("wrong relative anchor: %v", r.Form)
+				}
+				reordered.Store(true)
+			} else {
+				if r.FormValue("category") != "completed" {
+					t.Errorf("wrong category: %v", r.Form)
+				}
+				moved.Store(true)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/":
+			if err := layout.Base("Tasks", []models.Project{{ID: "owner", Name: "Owner"}, {ID: "other", Name: "Other"}}, models.AllProjectsID).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-list-drag", func(b *composerFocusCDP) {
+		b.waitFor("drag rows loaded", `String(!!document.querySelector('[data-task-list-row="drag-b"]'))`, "true")
+		start := `(()=>{var row=document.querySelector('[data-task-list-row="drag-a"]'),r=row.getBoundingClientRect();row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:r.left+40,clientY:r.top+20}));return 'started'})()`
+		mouse := func(kind, selector string, bottom bool) {
+			var point struct {
+				X float64 `json:"x"`
+				Y float64 `json:"y"`
+			}
+			expr := fmt.Sprintf(`(()=>{var r=document.querySelector(%q).getBoundingClientRect();return JSON.stringify({x:r.left+30,y:%s})})()`, selector, "r.top+10")
+			if bottom {
+				expr = fmt.Sprintf(`(()=>{var r=document.querySelector(%q).getBoundingClientRect();return JSON.stringify({x:r.left+30,y:r.bottom-2})})()`, selector)
+			}
+			if err := json.Unmarshal([]byte(b.evaluate(expr)), &point); err != nil {
+				t.Fatal(err)
+			}
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": kind, "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+		}
+		mouse("mousePressed", `[data-task-list-row="drag-a"]`, false)
+		mouse("mouseMoved", `[data-task-list-row="drag-b"]`, false)
+		b.waitFor("drag exposes empty category targets", `String(!document.querySelector('.task-list-drop-targets').hidden && window.isDragging)`, "true")
+		mouse("mouseMoved", `[data-task-list-row="drag-b"]`, true)
+		mouse("mouseReleased", `[data-task-list-row="drag-b"]`, true)
+		b.waitFor("relative reorder persisted", `Array.from(document.querySelectorAll('[data-task-list-row]')).map(r=>r.dataset.taskListRow).join(',')`, "drag-b,drag-a")
+		if !reordered.Load() {
+			t.Fatal("reorder was not sent")
+		}
+		b.waitFor("drag cleanup", `String(!window.isDragging && !document.querySelector('.task-list-drag-ghost'))`, "true")
+		b.evaluate(start)
+		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'cancelled'`)
+		b.waitFor("Escape cancels drag", `String(!window.isDragging && document.querySelector('.task-list-drop-targets').hidden)`, "true")
+		if requests.Load() != 1 {
+			t.Fatal("cancelled drag made a request")
+		}
+		reject.Store(true)
+		drop := `(()=>{var r=document.querySelector('[data-task-list-drop-category="completed"]').getBoundingClientRect();window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:9,clientX:r.left+20,clientY:r.top+10}));return 'dropped'})()`
+		b.evaluate(`window.dragFailed=false;window.dragFailureToast=false;var originalToast=window.showToast;window.showToast=function(message,...args){if(message.includes('move task'))window.dragFailureToast=true;return originalToast(message,...args)};document.body.addEventListener('htmx:responseError',()=>window.dragFailed=true);'watch'`)
+		b.evaluate(start)
+		b.evaluate(drop)
+		b.waitFor("rejected drag handled", `String(window.dragFailed)`, "true")
+		b.waitFor("rejected drag explains failure", `String(window.dragFailureToast)`, "true")
+		b.waitFor("failed move keeps category", `document.querySelector('[data-task-list-row="drag-a"]').closest('[data-task-list-group]').dataset.taskListGroup`, "Backlog")
+		// Wait for the request's finally handler to release subsequent dragging.
+		b.waitFor("failed move refresh complete", `String(!document.querySelector('#task-list-groups.htmx-request'))`, "true")
+		reject.Store(false)
+		b.evaluate(start)
+		b.waitFor("second drag ready", `String(window.isDragging)`, "true")
+		b.evaluate(drop)
+		b.waitFor("move to previously empty category persisted", `document.querySelector('[data-task-list-row="drag-a"]').closest('[data-task-list-group]').dataset.taskListGroup`, "Completed")
+		if !moved.Load() {
+			t.Fatal("category move was not sent")
+		}
+		b.waitFor("drag did not navigate", `location.pathname`, "/")
 	})
 }

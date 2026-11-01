@@ -90,6 +90,8 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 					class="task-list-row"
 					data-task-list-row={ task.ID }
                     data-task-owner-project={ task.ProjectID }
+                    data-task-category={ string(task.Category) }
+                    data-task-status={ string(task.Status) }
                     aria-haspopup="menu"
 					data-task-list-title={ taskListSearchTitle(task, names) }
 					data-task-list-extra?={ i >= taskListGroupLimit }
@@ -145,6 +147,14 @@ templ TaskListPanel(currentProjectID string) {
     @ChangesExplorerScript()
 	<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
 	<style>
+        .task-list-drop-targets:not([hidden]) { display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;flex-shrink:0; }
+        .task-list-drop-targets > div { padding:6px;border:1px dashed #7778;border-radius:5px;font-size:11px;text-align:center; }
+        .task-list-drop-targets .drop-hover { background:#8b7cf644;border-color:#a99af6; }
+        .task-list-row[data-row-drop="before"] { box-shadow:0 -2px #a99af6; }
+        .task-list-row[data-row-drop="after"] { box-shadow:0 2px #a99af6; }
+        .task-list-dragging { opacity:.4; }
+        .task-list-drag-ghost { position:fixed;z-index:10000;pointer-events:none;padding:8px 12px;border-radius:6px;background:#292633;color:#eee;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 16px #0005; }
+
         #appearance-settings-nav { display: none; }
         html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
         html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
@@ -609,6 +619,152 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			groups.addEventListener('scroll', hideHoverCard, { passive: true });
 			groups.addEventListener('click', hideHoverCard);
 
+            // Sidebar dragging uses the same category and relative-order endpoints as cards.
+            var rowDrag = null, rowMovePending = false, suppressRowClick = false;
+            var dropTargets = document.createElement('div');
+            dropTargets.className = 'task-list-drop-targets';
+            dropTargets.hidden = true;
+            ['Active', 'Backlog', 'Completed', 'Scheduled'].forEach(function(label) {
+                var target = document.createElement('div');
+                target.dataset.taskListDropCategory = label.toLowerCase();
+                target.textContent = label;
+                dropTargets.appendChild(target);
+            });
+            groups.parentNode.insertBefore(dropTargets, groups);
+            function clearRowDropIndicators() {
+                groups.querySelectorAll('[data-row-drop]').forEach(function(row) { row.removeAttribute('data-row-drop'); });
+                dropTargets.querySelectorAll('.drop-hover').forEach(function(target) { target.classList.remove('drop-hover'); });
+            }
+            function rowDropAt(x, y) {
+                clearRowDropIndicators();
+                var hit = document.elementFromPoint(x, y);
+                if (!hit) return null;
+                var target = hit.closest('[data-task-list-drop-category]');
+                if (target) {
+                    target.classList.add('drop-hover');
+                    return {category: target.dataset.taskListDropCategory};
+                }
+                var group = hit.closest('[data-task-list-group]');
+                if (!group || !groups.contains(group)) return null;
+                var category = group.dataset.taskListGroup.toLowerCase();
+                var rows = Array.from(group.querySelectorAll('[data-task-list-row]')).filter(function(row) {
+                    return row !== rowDrag.row && row.getClientRects().length && getComputedStyle(row).display !== 'none';
+                });
+                var before = rows.find(function(row) { var rect = row.getBoundingClientRect(); return y < rect.top + rect.height / 2; });
+                var anchor = before || rows[rows.length - 1];
+                if (anchor) anchor.dataset.rowDrop = before ? 'before' : 'after';
+                return {category: category, anchor: anchor, before: !!before};
+            }
+            function finishRowDrag(cancelled) {
+                var state = rowDrag;
+                if (!state) return;
+                rowDrag = null;
+                pressing = false;
+                cancelAnimationFrame(state.frame);
+                window.removeEventListener('pointermove', moveRowDrag, true);
+                window.removeEventListener('pointerup', endRowDrag, true);
+                window.removeEventListener('pointercancel', cancelRowDrag, true);
+                window.removeEventListener('blur', cancelRowDrag);
+                document.removeEventListener('keydown', cancelRowDragKey, true);
+                if (state.ghost) state.ghost.remove();
+                state.row.classList.remove('task-list-dragging');
+                dropTargets.hidden = true;
+                clearRowDropIndicators();
+                if (!state.started) return;
+                window.isDragging = false;
+                document.documentElement.classList.remove('drag-cursor-active');
+                suppressRowClick = true;
+                setTimeout(function() { suppressRowClick = false; }, 0);
+                document.dispatchEvent(new CustomEvent('task-pointer-dragend'));
+                var destination = state.destination;
+                if (cancelled || !destination) { refreshSoon(0); return; }
+                var values = {project_id: currentProjectID()};
+                var path = '/tasks/' + encodeURIComponent(state.row.dataset.taskListRow);
+                // Scheduled executions appear in Active without changing their saved category.
+                // Reordering within that displayed group must not unschedule them.
+                if (destination.category === state.group || destination.category === state.row.dataset.taskCategory) {
+                    if (!destination.anchor || destination.anchor.dataset.taskCategory !== state.row.dataset.taskCategory) { refreshSoon(0); return; }
+                    values[destination.before ? 'before_task_id' : 'after_task_id'] = destination.anchor.dataset.taskListRow;
+                    path += '/reorder';
+                } else {
+                    values.category = destination.category;
+                    path += '/category';
+                }
+                rowMovePending = true;
+                var failureShown = false;
+                function showMoveFailure(event) {
+                    if (event && event.detail && event.detail.requestConfig.path !== path) return;
+                    if (!failureShown && window.showToast) window.showToast('Could not move task. Check its current state and try again.', 'failed');
+                    failureShown = true;
+                }
+                document.body.addEventListener('htmx:responseError', showMoveFailure);
+                // Keep the mutation independent of sidebar refresh requests.
+                var requestSource = document.createElement('span');
+                requestSource.hidden = true;
+                document.body.appendChild(requestSource);
+                htmx.ajax('PATCH', path, {source: requestSource, target: groups, swap: 'none', values: values}).catch(function() {
+                    showMoveFailure();
+                }).finally(function() {
+                    document.body.removeEventListener('htmx:responseError', showMoveFailure);
+                    requestSource.remove();
+                    rowMovePending = false;
+                    refreshSoon(0);
+                    window.dispatchEvent(new CustomEvent('sse-task-event', {detail: {type: 'task_board_updated', project_id: currentProjectID()}}));
+                });
+            }
+            function cancelRowDrag() { finishRowDrag(true); }
+            function cancelRowDragKey(event) { if (event.key === 'Escape') { event.preventDefault(); finishRowDrag(true); } }
+            function endRowDrag(event) {
+                if (!rowDrag || rowDrag.pointerId !== event.pointerId) return;
+                if (rowDrag.started) rowDrag.destination = rowDropAt(event.clientX, event.clientY);
+                finishRowDrag(false);
+            }
+            function moveRowDrag(event) {
+                var state = rowDrag;
+                if (!state || state.pointerId !== event.pointerId) return;
+                if (!state.started && Math.hypot(event.clientX - state.x, event.clientY - state.y) < 5) return;
+                event.preventDefault();
+                state.lastX = event.clientX; state.lastY = event.clientY;
+                if (!state.started) {
+                    state.started = true;
+                    closeTaskContextMenu(false); hideHoverCard();
+                    window.isDragging = true;
+                    document.documentElement.classList.add('drag-cursor-active');
+                    window.getSelection().removeAllRanges();
+                    dropTargets.hidden = false;
+                    state.row.classList.add('task-list-dragging');
+                    state.ghost = document.createElement('div');
+                    state.ghost.className = 'task-list-drag-ghost';
+                    state.ghost.textContent = state.row.querySelector('.task-list-title').textContent;
+                    document.body.appendChild(state.ghost);
+                    function scrollFrame() {
+                        if (rowDrag !== state) return;
+                        var rect = groups.getBoundingClientRect();
+                        if (state.lastX >= rect.left && state.lastX <= rect.right) {
+                            var delta = state.lastY < rect.top + 32 ? -7 : state.lastY > rect.bottom - 32 ? 7 : 0;
+                            if (delta) { groups.scrollTop += delta; state.destination = rowDropAt(state.lastX, state.lastY); }
+                        }
+                        state.frame = requestAnimationFrame(scrollFrame);
+                    }
+                    state.frame = requestAnimationFrame(scrollFrame);
+                }
+                state.ghost.style.left = event.clientX + 12 + 'px';
+                state.ghost.style.top = event.clientY + 12 + 'px';
+                state.destination = rowDropAt(event.clientX, event.clientY);
+            }
+            groups.addEventListener('dragstart', function(event) { if (event.target.closest('[data-task-list-row]')) event.preventDefault(); });
+            groups.addEventListener('click', function(event) { if (suppressRowClick) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+            groups.addEventListener('pointerdown', function(event) {
+                var row = event.target.closest('[data-task-list-row]');
+                if (!row || event.button !== 0 || event.pointerType === 'touch' || rowMovePending || window.isDragging || window.kanbanBatchRunning || event.ctrlKey || event.metaKey || event.shiftKey) return;
+                rowDrag = {row: row, group: row.closest('[data-task-list-group]').dataset.taskListGroup.toLowerCase(), pointerId: event.pointerId, x: event.clientX, y: event.clientY, started: false};
+                window.addEventListener('pointermove', moveRowDrag, true);
+                window.addEventListener('pointerup', endRowDrag, true);
+                window.addEventListener('pointercancel', cancelRowDrag, true);
+                window.addEventListener('blur', cancelRowDrag);
+                document.addEventListener('keydown', cancelRowDragKey, true);
+            });
+
             // Keep the shared card menu outside the scrolling sidebar.
             var contextMenu = document.createElement('div');
             contextMenu.className = 'dropdown';
@@ -780,7 +936,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			document.addEventListener('pointercancel', endPress, true);
 			document.body.addEventListener('htmx:beforeSwap', function(e) {
 				if (e.detail.target !== groups) return;
-				if (pressing || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
+				if (pressing || rowDrag || rowMovePending || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();
