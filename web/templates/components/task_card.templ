@@ -375,13 +375,13 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						@TaskStateIcon(task)
 						<span data-task-title class="min-w-0 flex-1 break-words sm:truncate">{ task.Title }</span>
 					</a>
-					if label := templateui.ProjectLabel(ctx, task.ProjectID); label != "" {
-                        <span class="text-xs opacity-60" data-project-label>{ label }</span>
-                    }
                     if task.Prompt != "" {
 						<p data-task-prompt class="text-sm opacity-60 mt-1 line-clamp-3 sm:line-clamp-2 break-words">{ task.Prompt }</p>
 					}
 					<div class="flex gap-1 mt-1 flex-wrap">
+                        if label := templateui.ProjectLabel(ctx, task.ProjectID); label != "" {
+                            <span class="badge badge-sm badge-outline" data-project-label>{ label }</span>
+                        }
 						if task.ParentTaskID != nil {
 							<span class="badge badge-sm badge-secondary inline-flex items-center">
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">

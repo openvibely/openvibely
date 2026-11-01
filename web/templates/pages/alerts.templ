@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -651,7 +652,11 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, state CardLis
 						{ alert.Title }
 					</p>
 					<div class="mt-2 flex min-w-0 flex-wrap gap-2">
-						<span class="badge badge-outline badge-sm">Project scoped</span>
+						if label := templateui.ProjectLabel(ctx, alert.ProjectID); label != "" {
+                            <span class="badge badge-outline badge-sm" data-project-label>{ label }</span>
+                        } else {
+                            <span class="badge badge-outline badge-sm">Project scoped</span>
+                        }
 						<span class="badge badge-ghost badge-sm">{ string(alert.Type) }</span>
 						if alert.DecisionState != models.AlertDecisionNotRequired {
 							<span class={ "badge badge-sm", templ.KV("badge-warning", alert.DecisionState == models.AlertDecisionPending), templ.KV("badge-success", alert.DecisionState == models.AlertDecisionApproved), templ.KV("badge-error", alert.DecisionState == models.AlertDecisionRejected || alert.DecisionState == models.AlertDecisionDismissed) }>{ string(alert.DecisionState) }</span>
