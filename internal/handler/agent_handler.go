@@ -1574,7 +1574,7 @@ func (h *Handler) ListAgents(c echo.Context) error {
 				}
 				if full != nil && strings.TrimSpace(full.RepoPath) != "" {
 					if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), filepath.Join(full.RepoPath, ".openvibely"), project.ID); err != nil {
-						return err
+						applog.Infof("[handler] ListAgents sync root declarations warning project=%s: %v", project.ID, err)
 					}
 				}
 			}

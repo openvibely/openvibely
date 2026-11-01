@@ -11,6 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -210,4 +211,40 @@ func TestAllProjectsAgentSkillsPreserveOwner(t *testing.T) {
 	rec = httptest.NewRecorder()
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, route+"?project_id="+other.ID, nil))
 	require.Equal(t, 404, rec.Code)
+}
+
+// A local declaration sync failure must not hide persisted Agents or other projects.
+func TestAllProjectsAgentsUnreadableDeclarations(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(stores.Agents)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	maintenance := service.NewAgentLibraryMaintenanceService(nil, nil, stores.Agents)
+	maintenance.SetAgentsRootPath(root)
+	h.SetAgentLibraryMaintenanceService(maintenance)
+	projects := []*models.Project{createProject(t, h, "Unreadable declarations"), createProject(t, h, "Healthy declarations")}
+	for _, p := range projects {
+		p.RepoPath = t.TempDir()
+		require.NoError(t, h.projectRepo.Update(t.Context(), p))
+		require.NoError(t, stores.Agents.Create(t.Context(), &models.Agent{
+			Name: p.Name + " agent", Key: p.ID + "-agent", Scope: models.AgentScopeProject,
+			ProjectID: p.ID, Enabled: true, SelectableAsPrimary: true, Model: "inherit", SystemPrompt: "Review",
+		}))
+	}
+	agentsDir := filepath.Join(projects[0].RepoPath, ".openvibely", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0700))
+	require.NoError(t, os.Chmod(agentsDir, 0000))
+	t.Cleanup(func() { _ = os.Chmod(agentsDir, 0700) })
+	if _, err := os.ReadDir(agentsDir); err == nil {
+		t.Skip("filesystem permissions do not prevent reading the directory")
+	}
+	for _, id := range []string{projects[0].ID, models.AllProjectsID} {
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/agents?project_id="+id, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), projects[0].Name+" agent")
+		if id == models.AllProjectsID {
+			require.Contains(t, rec.Body.String(), projects[1].Name+" agent")
+		}
+	}
 }
