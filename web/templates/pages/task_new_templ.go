@@ -238,7 +238,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    var destination = root.querySelector('#new-task-project');\n    if (destination) {\n     destination.addEventListener('invalid', function() {\n      window.taskWorkspace.openPanel('details');\n     });\n     root.querySelector('#task-thread-form').addEventListener('htmx:configRequest', function(event) {\n      if (!destination.value) {\n       event.preventDefault();\n       destination.reportValidity();\n      }\n     });\n    }\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    function titleDraftRoot(node) {\n     var candidate = node && node.closest ? node.closest('#task-detail-content') : null;\n     return candidate && candidate.getAttribute('data-task-id') === '' ? candidate : null;\n    }\n    function titleDraftKey(pageRoot) {\n     return 'openvibely.new-task-title.' + pageRoot.getAttribute('data-project-id');\n    }\n    function titleDraftInput(pageRoot) {\n     return pageRoot && pageRoot.querySelector('input[name=\"title\"][form=\"task-thread-form\"]');\n    }\n    function composerDraftKey(pageRoot) {\n     return 'openvibely.new-task-composer.' + pageRoot.getAttribute('data-project-id');\n    }\n    function saveComposerDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     if (!message || !model) return;\n     try { sessionStorage.setItem(composerDraftKey(pageRoot), JSON.stringify({message: message.value, model: model.value})); } catch (_) {}\n    }\n    function hydrateComposerDraft(pageRoot) {\n     if (!pageRoot) return;\n     var saved;\n     try { saved = JSON.parse(sessionStorage.getItem(composerDraftKey(pageRoot))); } catch (_) { return; }\n     if (!saved) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     var picker = pageRoot.querySelector('#task-thread-form-agent-select');\n     if (message && typeof saved.message === 'string') {\n      message.value = saved.message;\n      message.style.height = 'auto';\n      message.style.height = Math.min(message.scrollHeight, 200) + 'px';\n     }\n     if (model && picker && typeof saved.model === 'string') {\n      var exists = Array.from(picker.parentElement.querySelectorAll('li[data-value]')).some(function(option) { return option.dataset.value === saved.model; });\n      if (exists) {\n       model.value = saved.model;\n       if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(picker, saved.model);\n       if (window.ovModelPicker) window.ovModelPicker.changed(picker);\n      }\n     }\n    }\n    function saveTitleDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try { sessionStorage.setItem(titleDraftKey(pageRoot), input.value); } catch (_) {}\n    }\n    function clearTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     pageRoot.__openVibelyTaskCreationSucceeded = true;\n     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); sessionStorage.removeItem(composerDraftKey(pageRoot)); } catch (_) {}\n    }\n    function hydrateTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try {\n      var savedTitle = sessionStorage.getItem(titleDraftKey(pageRoot));\n      input.value = savedTitle === null ? '' : savedTitle;\n     } catch (_) {}\n    }\n    function resetCreationDraft(pageRoot, saveTitle) {\n     if (!pageRoot) return;\n     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) { saveTitleDraft(pageRoot); saveComposerDraft(pageRoot); }\n     pageRoot.__openVibelyTaskTitleSavedForCleanup = true;\n     var pageForm = pageRoot.querySelector('#task-thread-form');\n     if (pageForm) {\n      pageForm.reset();\n      var clear = window[pageForm.getAttribute('data-clear-func-name')];\n      if (clear) clear();\n     }\n     var messageInput = pageRoot.querySelector('#task-message-input');\n     if (messageInput) messageInput.value = '';\n    }\n    function handleTaskCreationAfterRequest(pageRoot, event) {\n     var detail = event.detail || {};\n     var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!submittedForm || detail.elt !== submittedForm) return;\n     var xhr = detail.xhr;\n     // A 204 model-setup guard is successful HTTP, but creates no task.\n     // Normal creation acknowledges the ID; swarm creation redirects to its task.\n     var succeeded = xhr && xhr.status >= 200 && xhr.status < 300 && typeof xhr.getResponseHeader === 'function' &&\n      (xhr.getResponseHeader('X-Created-Task-ID') || (xhr.getResponseHeader('HX-Location') || '').indexOf('/tasks/') === 0);\n     var error = pageRoot.querySelector('#new-task-error');\n     if (succeeded) {\n      clearTitleDraft(pageRoot);\n      if (error) error.textContent = '';\n      return;\n     }\n     if (!error || !pageRoot.isConnected) return;\n     var message = 'Unable to create the task. Please try again.';\n     if (xhr && typeof xhr.getResponseHeader === 'function') {\n      var contentType = xhr.getResponseHeader('Content-Type') || '';\n      if (contentType.indexOf('application/json') !== -1) {\n       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}\n      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {\n       message = xhr.responseText;\n      }\n     }\n     error.textContent = message;\n    }\n    function bindTaskCreationAfterRequest(pageRoot) {\n     var pageForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!pageForm || pageForm.__openVibelyTaskCreationAfterRequestInstalled) return;\n     pageForm.__openVibelyTaskCreationAfterRequestInstalled = true;\n     pageForm.addEventListener('htmx:afterRequest', function(event) {\n      handleTaskCreationAfterRequest(pageRoot, event);\n     });\n    }\n    if (!window.openVibelyNewTaskTitleDraftLifecycleInstalled) {\n     window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;\n     document.body.addEventListener('input', function(event) {\n      var input = event.target;\n      if (!input || !input.matches || !input.matches('input[name=\"title\"][form=\"task-thread-form\"], #task-message-input')) return;\n      var pageRoot = titleDraftRoot(input);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveTitleDraft(pageRoot);\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('chat-select-change', function(event) {\n      if (event.target.id !== 'task-thread-form-agent-select') return;\n      var pageRoot = titleDraftRoot(event.target);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('htmx:beforeHistorySave', function() {\n      resetCreationDraft(titleDraftRoot(document.getElementById('task-detail-content')), true);\n     });\n     document.body.addEventListener('htmx:beforeCleanupElement', function(event) {\n      var pageRoot = document.getElementById('task-detail-content');\n      if (pageRoot && event.detail && event.detail.elt === pageRoot) resetCreationDraft(titleDraftRoot(pageRoot), false);\n     });\n     document.body.addEventListener('htmx:historyRestore', function() {\n      var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));\n      if (restoredRoot) {\n       hydrateTitleDraft(restoredRoot);\n       hydrateComposerDraft(restoredRoot);\n       bindTaskCreationAfterRequest(restoredRoot);\n      }\n     });\n    }\n    bindTaskCreationAfterRequest(titleDraftRoot(root));\n    hydrateTitleDraft(titleDraftRoot(root));\n    hydrateComposerDraft(titleDraftRoot(root));\n    // Keep creation fields out of HTMX history; the app-level lifecycle handler\n    // saves the title, message and model before resetting and restores cached views.\n   })();\n  </script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    var destination = root.querySelector('#new-task-project');\n    if (destination) {\n     destination.addEventListener('invalid', function() {\n      window.taskWorkspace.openPanel('details');\n     });\n     root.querySelector('#task-thread-form').addEventListener('htmx:configRequest', function(event) {\n      if (!destination.value) {\n       event.preventDefault();\n       window.taskWorkspace.openPanel('details');\n       root.querySelector('[data-detail-property=\"destination_project\"]').click();\n      }\n     });\n    }\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    function titleDraftRoot(node) {\n     var candidate = node && node.closest ? node.closest('#task-detail-content') : null;\n     return candidate && candidate.getAttribute('data-task-id') === '' ? candidate : null;\n    }\n    function titleDraftKey(pageRoot) {\n     return 'openvibely.new-task-title.' + pageRoot.getAttribute('data-project-id');\n    }\n    function titleDraftInput(pageRoot) {\n     return pageRoot && pageRoot.querySelector('input[name=\"title\"][form=\"task-thread-form\"]');\n    }\n    function composerDraftKey(pageRoot) {\n     return 'openvibely.new-task-composer.' + pageRoot.getAttribute('data-project-id');\n    }\n    function saveComposerDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     if (!message || !model) return;\n     try { sessionStorage.setItem(composerDraftKey(pageRoot), JSON.stringify({message: message.value, model: model.value})); } catch (_) {}\n    }\n    function hydrateComposerDraft(pageRoot) {\n     if (!pageRoot) return;\n     var saved;\n     try { saved = JSON.parse(sessionStorage.getItem(composerDraftKey(pageRoot))); } catch (_) { return; }\n     if (!saved) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     var picker = pageRoot.querySelector('#task-thread-form-agent-select');\n     if (message && typeof saved.message === 'string') {\n      message.value = saved.message;\n      message.style.height = 'auto';\n      message.style.height = Math.min(message.scrollHeight, 200) + 'px';\n     }\n     if (model && picker && typeof saved.model === 'string') {\n      var exists = Array.from(picker.parentElement.querySelectorAll('li[data-value]')).some(function(option) { return option.dataset.value === saved.model; });\n      if (exists) {\n       model.value = saved.model;\n       if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(picker, saved.model);\n       if (window.ovModelPicker) window.ovModelPicker.changed(picker);\n      }\n     }\n    }\n    function saveTitleDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try { sessionStorage.setItem(titleDraftKey(pageRoot), input.value); } catch (_) {}\n    }\n    function clearTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     pageRoot.__openVibelyTaskCreationSucceeded = true;\n     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); sessionStorage.removeItem(composerDraftKey(pageRoot)); } catch (_) {}\n    }\n    function hydrateTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try {\n      var savedTitle = sessionStorage.getItem(titleDraftKey(pageRoot));\n      input.value = savedTitle === null ? '' : savedTitle;\n     } catch (_) {}\n    }\n    function resetCreationDraft(pageRoot, saveTitle) {\n     if (!pageRoot) return;\n     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) { saveTitleDraft(pageRoot); saveComposerDraft(pageRoot); }\n     pageRoot.__openVibelyTaskTitleSavedForCleanup = true;\n     var pageForm = pageRoot.querySelector('#task-thread-form');\n     if (pageForm) {\n      pageForm.reset();\n      var clear = window[pageForm.getAttribute('data-clear-func-name')];\n      if (clear) clear();\n     }\n     var messageInput = pageRoot.querySelector('#task-message-input');\n     if (messageInput) messageInput.value = '';\n    }\n    function handleTaskCreationAfterRequest(pageRoot, event) {\n     var detail = event.detail || {};\n     var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!submittedForm || detail.elt !== submittedForm) return;\n     var xhr = detail.xhr;\n     // A 204 model-setup guard is successful HTTP, but creates no task.\n     // Normal creation acknowledges the ID; swarm creation redirects to its task.\n     var succeeded = xhr && xhr.status >= 200 && xhr.status < 300 && typeof xhr.getResponseHeader === 'function' &&\n      (xhr.getResponseHeader('X-Created-Task-ID') || (xhr.getResponseHeader('HX-Location') || '').indexOf('/tasks/') === 0);\n     var error = pageRoot.querySelector('#new-task-error');\n     if (succeeded) {\n      clearTitleDraft(pageRoot);\n      if (error) error.textContent = '';\n      return;\n     }\n     if (!error || !pageRoot.isConnected) return;\n     var message = 'Unable to create the task. Please try again.';\n     if (xhr && typeof xhr.getResponseHeader === 'function') {\n      var contentType = xhr.getResponseHeader('Content-Type') || '';\n      if (contentType.indexOf('application/json') !== -1) {\n       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}\n      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {\n       message = xhr.responseText;\n      }\n     }\n     error.textContent = message;\n    }\n    function bindTaskCreationAfterRequest(pageRoot) {\n     var pageForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!pageForm || pageForm.__openVibelyTaskCreationAfterRequestInstalled) return;\n     pageForm.__openVibelyTaskCreationAfterRequestInstalled = true;\n     pageForm.addEventListener('htmx:afterRequest', function(event) {\n      handleTaskCreationAfterRequest(pageRoot, event);\n     });\n    }\n    if (!window.openVibelyNewTaskTitleDraftLifecycleInstalled) {\n     window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;\n     document.body.addEventListener('input', function(event) {\n      var input = event.target;\n      if (!input || !input.matches || !input.matches('input[name=\"title\"][form=\"task-thread-form\"], #task-message-input')) return;\n      var pageRoot = titleDraftRoot(input);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveTitleDraft(pageRoot);\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('chat-select-change', function(event) {\n      if (event.target.id !== 'task-thread-form-agent-select') return;\n      var pageRoot = titleDraftRoot(event.target);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('htmx:beforeHistorySave', function() {\n      resetCreationDraft(titleDraftRoot(document.getElementById('task-detail-content')), true);\n     });\n     document.body.addEventListener('htmx:beforeCleanupElement', function(event) {\n      var pageRoot = document.getElementById('task-detail-content');\n      if (pageRoot && event.detail && event.detail.elt === pageRoot) resetCreationDraft(titleDraftRoot(pageRoot), false);\n     });\n     document.body.addEventListener('htmx:historyRestore', function() {\n      var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));\n      if (restoredRoot) {\n       hydrateTitleDraft(restoredRoot);\n       hydrateComposerDraft(restoredRoot);\n       bindTaskCreationAfterRequest(restoredRoot);\n      }\n     });\n    }\n    bindTaskCreationAfterRequest(titleDraftRoot(root));\n    hydrateTitleDraft(titleDraftRoot(root));\n    hydrateComposerDraft(titleDraftRoot(root));\n    // Keep creation fields out of HTMX history; the app-level lifecycle handler\n    // saves the title, message and model before resetting and restores cached views.\n   })();\n  </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -275,7 +275,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 265, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 266, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
@@ -288,7 +288,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 266, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 267, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
@@ -326,7 +326,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ad.ID).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 280, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 281, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
@@ -339,7 +339,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ad.Model).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 280, Col: 61}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 281, Col: 61}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
@@ -352,7 +352,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 281, Col: 20}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 282, Col: 20}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
@@ -370,7 +370,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 283, Col: 23}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 284, Col: 23}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 					if templ_7745c5c3_Err != nil {
@@ -403,7 +403,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(cat)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 294, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 295, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -416,7 +416,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 295, Col: 24}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 296, Col: 24}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
@@ -501,7 +501,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 368, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 369, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
@@ -514,7 +514,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Value).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 368, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 369, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
@@ -527,7 +527,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 368, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 369, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -590,69 +590,60 @@ func NewTaskProjectRow(project *models.Project, projects []models.Project) templ
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
 		if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<label class=\"inspector-property-row\" for=\"new-task-project\"><span class=\"opacity-60\">Project:</span> <select id=\"new-task-project\" name=\"destination_project\" form=\"task-thread-form\" class=\"w-full min-w-0 cursor-pointer bg-transparent border-0 p-0 text-sm\" style=\"appearance:none\" required><option value=\"\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<button type=\"button\" class=\"task-property-row inspector-property-row\" data-detail-property=\"destination_project\" data-value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if project.ID == models.AllProjectsID {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			var templ_7745c5c3_Var24 string
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(newTaskDestinationValue(project)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 390, Col: 161}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " disabled>Choose a project</option> ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			for _, destination := range projects {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<option value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var24 string
-				templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(destination.ID).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 394, Col: 35}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if destination.ID == project.ID {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var25 string
-				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(destination.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 394, Col: 99}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</option>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" aria-haspopup=\"dialog\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</select> <span class=\"opacity-60\" aria-hidden=\"true\">›</span></label>")
+			templ_7745c5c3_Err = components.InspectorPropertyContent("Project", newTaskDestinationLabel(project)).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<input type=\"hidden\" id=\"new-task-project\" name=\"destination_project\" form=\"task-thread-form\" data-draft-property=\"destination_project\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var25 string
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(newTaskDestinationValue(project)).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 392, Col: 179}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\"></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		return nil
 	})
+}
+
+func newTaskDestinationValue(project *models.Project) string {
+	if project.ID == models.AllProjectsID {
+		return ""
+	}
+	return project.ID
+}
+func newTaskDestinationLabel(project *models.Project) string {
+	if project.ID == models.AllProjectsID {
+		return "Choose a project"
+	}
+	return project.Name
 }
 
 var _ = templruntime.GeneratedTemplate

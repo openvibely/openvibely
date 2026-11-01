@@ -2,6 +2,7 @@ package pages
 
 import (
  "fmt"
+ templateui "github.com/openvibely/openvibely/web/templates"
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
  "github.com/openvibely/openvibely/web/templates/components"
@@ -39,6 +40,13 @@ templ TaskAutoMergePanel(task *models.Task) {
 
 templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []persistence.AgentTaskUIOption) {
  @components.InspectorPicker("task-property-picker") {
+   if task.ID == "" {
+    <div data-options="destination_project">
+     for _, project := range templateui.ProjectOptions(ctx) {
+      <button type="button" data-value={ project.ID } class="ov-menu-option w-full">{ project.Name }</button>
+     }
+    </div>
+   }
    <div data-options="agent_id">
     <button type="button" data-value="default" class="ov-menu-option w-full">Default</button>
     <button type="button" data-value="" class="ov-menu-option w-full">Auto</button>
@@ -159,7 +167,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    try {
     if (taskID) await save(name, value);
     else {
-     var input = root.querySelector('[data-draft-property="' + name + '"]'); if (input) input.value = value;
+     var input = root.querySelector('[data-draft-property="' + name + '"]'); if (input) { input.value = value; if (name === 'destination_project') input.dispatchEvent(new Event('change', {bubbles:true})); }
      current.dataset.value = value; current.querySelector('[data-property-label]').textContent = label;
     }
     if (name === 'agent_id') composerModel(value, label);

@@ -100,6 +100,19 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  const projectRow=document.getElementById('new-task-project').closest('.inspector-property-row');
  assert(projectRow && projectRow.parentElement.id==='task-detail-metrics','project selector must share the task property grid');
  assert(projectRow.previousElementSibling.tagName==='H3' && projectRow.previousElementSibling.textContent==='Task','new project selector must follow Task heading');
+ window.taskWorkspace.openPanel('details');
+ assert(projectRow.tagName==='BUTTON','project must use property button');
+ const arrow=projectRow.querySelector('[aria-hidden="true"]');
+ assert(!arrow.classList.contains('opacity-60'),'project arrow must match other rows');
+ arrow.click();
+ const projectOption=document.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="` + project.ID + `"]');
+ await wait(()=>projectOption.getClientRects().length>0);
+ projectOption.click();
+ await wait(()=>document.getElementById('new-task-project').value==='` + project.ID + `');
+ assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
+ assert(new FormData(document.getElementById('task-thread-form')).get('destination_project')==='` + project.ID + `','destination not submitted');
+ assert(document.getElementById('project-selector').value==='__all_projects__','project picker switched tabs');
+
 
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href})}

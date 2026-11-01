@@ -92,7 +92,8 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      root.querySelector('#task-thread-form').addEventListener('htmx:configRequest', function(event) {
       if (!destination.value) {
        event.preventDefault();
-       destination.reportValidity();
+       window.taskWorkspace.openPanel('details');
+       root.querySelector('[data-detail-property="destination_project"]').click();
       }
      });
     }
@@ -386,15 +387,18 @@ func projectDefaultAgentID(project *models.Project) string {
 // Project selection uses the same compact row as the other Task properties.
 templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
  if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
-  <label class="inspector-property-row" for="new-task-project">
-   <span class="opacity-60">Project:</span>
-   <select id="new-task-project" name="destination_project" form="task-thread-form" class="w-full min-w-0 cursor-pointer bg-transparent border-0 p-0 text-sm" style="appearance:none" required>
-    <option value="" selected?={ project.ID == models.AllProjectsID } disabled>Choose a project</option>
-    for _, destination := range projects {
-     <option value={ destination.ID } selected?={ destination.ID == project.ID }>{ destination.Name }</option>
-    }
-   </select>
-   <span class="opacity-60" aria-hidden="true">›</span>
-  </label>
+  <button type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog">
+   @components.InspectorPropertyContent("Project", newTaskDestinationLabel(project))
+   <input type="hidden" id="new-task-project" name="destination_project" form="task-thread-form" data-draft-property="destination_project" value={ newTaskDestinationValue(project) }/>
+  </button>
  }
+}
+
+func newTaskDestinationValue(project *models.Project) string {
+ if project.ID == models.AllProjectsID { return "" }
+ return project.ID
+}
+func newTaskDestinationLabel(project *models.Project) string {
+ if project.ID == models.AllProjectsID { return "Choose a project" }
+ return project.Name
 }
