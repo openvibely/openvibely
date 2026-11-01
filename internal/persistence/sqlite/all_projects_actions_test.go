@@ -106,3 +106,32 @@ func TestRelativeProjectReorderAfterAllProjects(t *testing.T) {
 	require.Equal(t, tasks[2].ID, list[0].ID)
 	require.Error(t, repo.ReorderTaskRelative(ctx, tasks[0].ID, tasks[1].ID, true, "default"))
 }
+
+func TestReorderCompletedPositionCollision(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := t.Context()
+	first := &models.Task{ProjectID: "default", Title: "Already completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2}
+	second := &models.Task{ProjectID: "default", Title: "Newly completed", Category: models.CategoryActive, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, repo.Create(ctx, first))
+	require.NoError(t, repo.Create(ctx, second))
+	_, err := db.ExecContext(ctx, `UPDATE tasks SET display_order=0, created_at='2025-01-01 00:00:00' WHERE id=?`, first.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE tasks SET display_order=0, created_at='2025-01-02 00:00:00' WHERE id=?`, second.ID)
+	require.NoError(t, err)
+	_, err = repo.MoveCompletedActiveToCompleted(ctx, "default")
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO projects(id,name) VALUES ('other','Other')`)
+	require.NoError(t, err)
+	other := &models.Task{ProjectID: "other", Title: "Other project", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, repo.Create(ctx, other))
+	_, err = db.ExecContext(ctx, `UPDATE tasks SET display_order=17 WHERE id=?`, other.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.ReorderTaskRelative(ctx, second.ID, first.ID, true, "default"))
+	unchanged, err := repo.GetByID(ctx, other.ID)
+	require.NoError(t, err)
+	require.Equal(t, 17, unchanged.DisplayOrder)
+	list, err := repo.ListByProject(ctx, "default", string(models.CategoryCompleted))
+	require.NoError(t, err)
+	require.Equal(t, second.ID, list[0].ID, "dragging newly completed task above existing task should move it")
+}

@@ -77,12 +77,25 @@ func (r *TaskRepo) reorderTaskInScope(ctx context.Context, taskID string, positi
 		if oldPosition == position && !allProjects {
 			return nil
 		}
+		// Preserve sparse slots unless the moved range touches a tie. Tied
+		// slots cannot express the requested order, so repair that column.
+		normalize := allProjects
+		start, end := oldPosition, position
+		if start > end {
+			start, end = end, start
+		}
+		for i := start; i <= end; i++ {
+			if (i > 0 && slots[i] == slots[i-1]) || (i+1 < len(slots) && slots[i] == slots[i+1]) {
+				normalize = true
+				break
+			}
+		}
 		ids = append(ids, "")
 		copy(ids[position+1:], ids[position:])
 		ids[position] = taskID
 		for i, id := range ids {
 			order := slots[i]
-			if allProjects {
+			if normalize {
 				order = i
 			}
 			slots[i] = order
