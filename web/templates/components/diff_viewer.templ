@@ -554,9 +554,11 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					</button>
 				</div>
                 @ReviewToolbar(taskID, len(reviewComments))
-                for _, action := range actions {
-                    @action
-                }
+                <div class="contents" data-changes-region="actions">
+                    for _, action := range actions {
+                        @action
+                    }
+                </div>
 			</div>
 		</div>
         <div hidden data-diff-explorer-files>

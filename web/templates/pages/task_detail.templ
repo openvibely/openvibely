@@ -25,9 +25,9 @@ templ TaskChangesContent(diffOutput string, taskID string, reviewComments []mode
 }
 
 templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComments []models.ReviewComment, diffView string) {
-    <div class="task-changes-view min-w-0 max-w-full">
+    <div class="task-changes-view min-w-0 max-w-full" data-changes-metadata="saved">
         @taskChangesStyles()
-        <h4 class="text-sm font-semibold mb-2">File changes</h4>
+        <div data-changes-region="context"><h4 class="text-sm font-semibold mb-2">File changes</h4></div>
         <div id="diff-viewer-container">
             @components.DiffViewer(diffOutput, taskID, reviewComments, diffView)
         </div>
@@ -1861,7 +1861,20 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						var newFp = _computeDiffFingerprint(offscreen);
 						// Compare the live viewer: initial HTMX loads can finish after page setup.
 						if (newFp && newFp === _computeDiffFingerprint(changesContent)) {
-							// Diff unchanged — no DOM mutation, no scroll disruption.
+							// Refresh independently changing controls without replacing file bodies.
+                            var currentMetadata = changesContent.querySelector('[data-changes-metadata]');
+                            var nextMetadata = offscreen.querySelector('[data-changes-metadata]');
+                            if (currentMetadata && nextMetadata && currentMetadata.dataset.changesMetadata !== nextMetadata.dataset.changesMetadata) {
+                                var metadataScroll = window._captureDiffScroll ? window._captureDiffScroll() : null;
+                                ['context', 'actions'].forEach(function(region) {
+                                    var selector = '[data-changes-region="' + region + '"]';
+                                    var current = currentMetadata.querySelector(selector);
+                                    var next = nextMetadata.querySelector(selector);
+                                    if (current && next) htmx.swap(current, next.innerHTML, {swapStyle:'innerHTML', settleDelay:0});
+                                });
+                                currentMetadata.dataset.changesMetadata = nextMetadata.dataset.changesMetadata;
+                                if (window._restoreDiffScroll) window._restoreDiffScroll(metadataScroll, true);
+                            }
 							return;
 						}
                         // A draft may have opened after the request began. Fetch

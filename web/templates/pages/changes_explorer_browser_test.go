@@ -44,6 +44,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 	var cleared atomic.Bool
 	var edited atomic.Bool
 	var many atomic.Bool
+	var metadataChanged atomic.Bool
 	largeDiff := diff
 	for i := 0; i < 350; i++ {
 		largeDiff += fmt.Sprintf("diff --git a/extra%d.txt b/extra%d.txt\n--- a/extra%d.txt\n+++ b/extra%d.txt\n@@ -0,0 +1 @@\n+extra file %d\n", i, i, i, i, i)
@@ -96,7 +97,14 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
 			current := currentDiff()
-			content := TaskChangesWorktreeContent(current, task, nil, nil, nil, false, false)
+			responseTask := *task
+			var pr *models.TaskPullRequest
+			if metadataChanged.Load() {
+				responseTask.MergeTargetBranch = "release"
+				responseTask.MergeStatus = models.MergeStatusConflict
+				pr = &models.TaskPullRequest{PRNumber: 42, PRURL: "https://github.com/example/repo/pull/42"}
+			}
+			content := TaskChangesWorktreeContent(current, &responseTask, nil, nil, pr, false, false)
 			if saved {
 				content = TaskChangesContent(current, task.ID, nil)
 			}
@@ -162,6 +170,20 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.evaluate(`_updateDiffViewer();'refresh unchanged snapshot'`)
 		waitChangesLoaded("unchanged live refresh")
 		b.waitFor("unchanged live refresh preserves viewer", `String(document.getElementById('diff-viewer')===window.retainedDiffViewer)`, "true")
+		if !saved {
+			b.evaluate(`document.getElementById('tab-changes').scrollTop=300;window.metadataCardTop=document.getElementById('diff-file-0').getBoundingClientRect().top;window.taskWorkspace.openThread();'leave changes'`)
+			metadataChanged.Store(true)
+			b.evaluate(`window.taskWorkspace.openChanges();'reopen with changed metadata'`)
+			waitChangesLoaded("metadata refresh")
+			b.waitFor("PR and conflict controls update without replacing diff", `String(document.getElementById('diff-viewer')===window.retainedDiffViewer && document.getElementById('diff-body-0')===window.retainedDiffBody && document.querySelector('#changes-actions-menu a').textContent.includes('View PR #42') && document.querySelector('#changes-actions-menu').textContent.includes('Abort Merge') && !document.querySelector('#changes-actions-menu').textContent.includes('Create PR') && !!document.querySelector('[data-merge-conflict-guidance]') && document.querySelector('[data-changes-region="context"]').textContent.includes('release') && Math.abs(document.getElementById('diff-file-0').getBoundingClientRect().top-window.metadataCardTop)<2)`, "true")
+			b.evaluate(`document.querySelector('[popovertarget="changes-actions-menu"]').click();'open refreshed actions'`)
+			b.waitFor("refreshed actions still work", `String(document.getElementById('changes-actions-menu').matches(':popover-open'))`, "true")
+			metadataChanged.Store(false)
+			b.evaluate(`_updateDiffViewer();'restore metadata'`)
+			waitChangesLoaded("metadata restored")
+			b.waitFor("removed conflict guidance and restored PR action", `String(!document.querySelector('[data-merge-conflict-guidance]') && document.querySelector('#changes-actions-menu').textContent.includes('Create PR') && !document.querySelector('#changes-actions-menu').textContent.includes('Abort Merge') && document.getElementById('diff-viewer')===window.retainedDiffViewer && document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
+			b.evaluate(`document.getElementById('tab-changes').scrollTop=0;'restore scroll'`)
+		}
 		b.evaluate(`openInlineCommentForm(document.querySelector('#diff-file-0 tr.diff-review-line'));document.querySelector('.review-comment-form textarea').value='Keep review draft';'open draft'`)
 		edited.Store(true)
 		b.evaluate(`_updateDiffViewer('final');_updateDiffViewer('final');'final update during draft'`)

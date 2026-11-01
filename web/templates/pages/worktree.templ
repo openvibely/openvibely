@@ -122,9 +122,10 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 }
 
 templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool, diffView string) {
-	<div class="worktree-changes task-changes-view min-w-0 max-w-full">
+	<div class="worktree-changes task-changes-view min-w-0 max-w-full" data-changes-metadata={ changesMetadataKey(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable) }>
 		<div>
 			// Branch context scrolls away; review controls remain in the toolbar.
+            <div data-changes-region="context">
 			if task.WorktreeBranch != "" {
 				<div class="relative flex flex-wrap items-start justify-between gap-2 mb-2 min-w-0 max-w-full">
 					<div class="min-w-0 max-w-full flex-1">
@@ -145,11 +146,19 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 					</div>
 				}
 
+            </div>
 			@taskChangesStyles()
 			// Diff viewer
 			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable))
 		</div>
 	</div>
+}
+
+// Metadata can change independently of the diff revision.
+func changesMetadataKey(task *models.Task, pr *models.TaskPullRequest, unavailable, conflict, rebase bool) string {
+    prKey := ""
+    if pr != nil { prKey = fmt.Sprintf("%d:%s", pr.PRNumber, pr.PRURL) }
+    return fmt.Sprintf("%q:%q:%q:%t:%t:%t:%q", task.WorktreeBranch, components.TaskWorktreeMergeTarget(task), task.MergeStatus, unavailable, conflict, rebase, prKey)
 }
 
 templ changesToolbarActions(task *models.Task, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool) {
