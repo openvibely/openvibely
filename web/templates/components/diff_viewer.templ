@@ -530,9 +530,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				<span class="text-sm font-medium opacity-70">
 					{ fmt.Sprintf("%d", len(metas)) } file{ fileCountSuffix(len(metas)) } changed
 				</span>
-                <span class="text-xs whitespace-nowrap" aria-label={ fmt.Sprintf("%d added lines, %d deleted lines", totals.Adds, totals.Dels) }>
-                    <span class="text-success">+{ fmt.Sprint(totals.Adds) }</span>
-                    <span class="text-error">-{ fmt.Sprint(totals.Dels) }</span>
+                <span class="diff-file-stats text-xs whitespace-nowrap" aria-label={ fmt.Sprintf("%d added lines, %d deleted lines", totals.Adds, totals.Dels) }>
+                    <span class="diff-stat-add">+{ fmt.Sprint(totals.Adds) }</span>
+                    <span class="diff-stat-del">-{ fmt.Sprint(totals.Dels) }</span>
                 </span>
 
 			</div>
