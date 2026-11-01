@@ -455,6 +455,7 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	    parentElement: boundary,
 	    dataset: {},
 	    getAttribute: function(name) { return this[name] || null; },
+	    hasAttribute: function(name) { return this.getAttribute(name) !== null; },
 	    classList: makeClassList(['dropdown', 'dropdown-end']),
 	    querySelector: function(selector) { return selector === '.dropdown-content' ? content : null; }
 	  };

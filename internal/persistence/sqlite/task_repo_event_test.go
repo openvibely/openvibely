@@ -2,11 +2,13 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -279,4 +281,60 @@ func TestTaskRepo_FinalizeExecutionCancellationPublishesStatusAndCategoryEvents(
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timeout waiting for cancellation category event")
 	}
+}
+
+func TestTaskRepo_DeletionPublishesOnlyAfterCommit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	broadcaster := events.NewBroadcaster()
+	repo := NewTaskRepo(db, broadcaster)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Delete event", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := broadcaster.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broadcaster.Unsubscribe(sub)
+	assertNoEvent := func() {
+		t.Helper()
+		select {
+		case event := <-sub:
+			t.Fatalf("unexpected deletion event: %+v", event)
+		default:
+		}
+	}
+	// A rejected pre-delete callback rolls back and must not invalidate any UI.
+	_, deleted, err := repo.DeleteWithCleanupManifest(ctx, task.ID, func(persistence.TaskDeletionManifest) error { return errors.New("reject deletion") })
+	if err == nil || deleted {
+		t.Fatalf("expected rollback: deleted=%v err=%v", deleted, err)
+	}
+	assertNoEvent()
+	_, deleted, err = repo.DeleteWithCleanupManifestIfCategory(ctx, task.ID, "default", models.CategoryCompleted, nil)
+	if err != nil || deleted {
+		t.Fatalf("expected category mismatch: deleted=%v err=%v", deleted, err)
+	}
+	assertNoEvent()
+	_, deleted, err = repo.DeleteWithCleanupManifest(ctx, task.ID, nil)
+	if err != nil || !deleted {
+		t.Fatalf("delete: deleted=%v err=%v", deleted, err)
+	}
+	select {
+	case event := <-sub:
+		if event.Type != events.TaskDeleted || event.TaskID != task.ID || event.ProjectID != "default" || event.TaskName != task.Title {
+			t.Fatalf("unexpected event: %+v", event)
+		}
+		remaining, err := repo.GetByID(ctx, task.ID)
+		if err != nil || remaining != nil {
+			t.Fatalf("event before committed deletion: task=%+v err=%v", remaining, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing deletion event")
+	}
+	_, deleted, err = repo.DeleteWithCleanupManifest(ctx, task.ID, nil)
+	if err != nil || deleted {
+		t.Fatalf("expected missing task no-op: deleted=%v err=%v", deleted, err)
+	}
+	assertNoEvent()
 }

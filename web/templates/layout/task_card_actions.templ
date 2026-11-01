@@ -1,0 +1,87 @@
+package layout
+
+templ TaskCardActionsScript() {
+<script>
+			function setTaskCardActionBusy(taskID, busy) {
+				var card = document.getElementById('task-' + taskID);
+				if (!card) return;
+				if (busy) card.setAttribute('aria-busy', 'true');
+				else card.removeAttribute('aria-busy');
+			}
+
+			function taskCardActionResponseHasToast(xhr) {
+				if (!xhr || !xhr.getResponseHeader) return false;
+				return ['HX-Trigger', 'HX-Trigger-After-Swap', 'HX-Trigger-After-Settle'].some(function(header) {
+					var value = xhr.getResponseHeader(header);
+					if (!value) return false;
+					try {
+						var payload = JSON.parse(value);
+						return !!(payload && Object.prototype.hasOwnProperty.call(payload, 'openvibelyToast'));
+					} catch (_) {
+						return value.split(',').some(function(eventName) { return eventName.trim() === 'openvibelyToast'; });
+					}
+				});
+			}
+
+			function showTaskCardActionFallbackFailure(request, xhr) {
+				var status = xhr && xhr.status || 0;
+				if (status >= 200 && status < 300) return;
+				if (taskCardActionResponseHasToast(xhr) || !window.showToast) return;
+				var label = request.label || 'Task action';
+				window.showToast(label + ' could not be completed. Review the latest task state and try again.', 'failed', '', {
+					toastKey: 'task-card-action-failure-' + request.taskID + '-' + request.path
+				});
+			}
+
+			function restoreTaskCardActionFocus(taskID) {
+				var card = document.getElementById('task-' + taskID);
+				var trigger = card && card.querySelector('[data-task-card-menu-trigger]');
+				var dropdown = trigger && trigger.closest('[data-kanban-menu-key]');
+				if (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, !!trigger);
+			}
+
+			function runTaskCardAction(button) {
+				if (!button || !window.htmx || window._taskCardActionRequest || window.kanbanBatchRunning) return;
+				if (!button.hasAttribute('data-task-card-merge-action') && !button.hasAttribute('data-task-card-pr-action')) return;
+				var taskID = button.dataset.taskId || '';
+				var projectID = button.dataset.projectId || '';
+				var mode = button.dataset.mergeType || '';
+				var endpoint = button.dataset.mergeEndpoint || '';
+				if (!taskID || !projectID || !mode || !endpoint) return;
+				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
+				var dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');
+                var sidebar = dropdown && dropdown.hasAttribute('data-task-list-context-menu');
+				window._taskCardActionRequest = {path: path, taskID: taskID, label: button.dataset.mergeLabel || 'Task action', sidebar: !!sidebar};
+				setTaskCardActionBusy(taskID, true);
+				if (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);
+				var target = button.hasAttribute('data-task-card-merge-action') ? '#task-' + CSS.escape(taskID) : '#kanban-board';
+				htmx.ajax('POST', path, {
+					target: sidebar ? '#task-list-groups' : target,
+					swap: sidebar ? 'none' : 'outerHTML',
+					values: {merge_type: mode, merge_source: 'task_card', project_id: projectID}
+				});
+			}
+
+			if (!window._taskCardActionHandlerAttached) {
+				window._taskCardActionHandlerAttached = true;
+				document.body.addEventListener('click', function(event) {
+					var button = event.target && event.target.closest ? event.target.closest('[data-task-card-merge-action], [data-task-card-pr-action]') : null;
+					if (!button || button.disabled) return;
+					event.preventDefault();
+					runTaskCardAction(button);
+				}, true);
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var request = window._taskCardActionRequest;
+					var config = event.detail && event.detail.requestConfig;
+					if (!request || !config || config.path !== request.path) return;
+					window._taskCardActionRequest = null;
+					setTaskCardActionBusy(request.taskID, false);
+					showTaskCardActionFallbackFailure(request, event.detail && event.detail.xhr);
+					window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
+					if (request.sidebar) {
+                        window.dispatchEvent(new CustomEvent('task-list-action-finished', {detail: {taskID: request.taskID}}));
+                    } else restoreTaskCardActionFocus(request.taskID);
+				});
+			}
+		</script>
+}

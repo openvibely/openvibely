@@ -25,7 +25,13 @@ func TaskListGroups(tasks []models.Task) []TaskListGroup {
 		if task.ParentTaskID != nil {
 			continue
 		}
-		byCategory[task.Category] = append(byCategory[task.Category], task)
+		category := task.Category
+		// Scheduled tasks retain their category across runs. Surface admitted
+		// executions in Active until they finish without changing that category.
+		if category == models.CategoryScheduled && (task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.WorkerCapacityQueued || task.AutomationCapacityQueued) {
+			category = models.CategoryActive
+		}
+		byCategory[category] = append(byCategory[category], task)
 	}
 	groups := make([]TaskListGroup, 0, len(order))
 	for _, category := range order {
@@ -53,8 +59,8 @@ func taskListAge(t time.Time) string {
 	return strconv.Itoa(int(d.Hours()/(24*365))) + "y"
 }
 
-templ TaskListPanelContent(projectID string, groups []TaskListGroup) {
-    @TaskListPanelContentWithProjects(projectID, groups, nil)
+templ TaskListPanelContent(projectID string, groups []TaskListGroup, menus ...map[string]templ.Component) {
+    @TaskListPanelContentWithProjects(projectID, groups, nil, menus...)
 }
 
 func taskListRowURL(projectID string, task models.Task) string {
@@ -68,7 +74,7 @@ func taskListSearchTitle(task models.Task, names map[string]string) string {
     return task.Title
 }
 
-templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup, names map[string]string) {
+templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup, names map[string]string, menus ...map[string]templ.Component) {
 	if len(groups) == 0 {
 		<div class="task-list-empty">No tasks yet.</div>
 	}
@@ -83,6 +89,8 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 				<a
 					class="task-list-row"
 					data-task-list-row={ task.ID }
+                    data-task-owner-project={ task.ProjectID }
+                    aria-haspopup="menu"
 					data-task-list-title={ taskListSearchTitle(task, names) }
 					data-task-list-extra?={ i >= taskListGroupLimit }
 					data-task-list-age={ taskListAge(task.UpdatedAt) }
@@ -101,6 +109,11 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 						<template data-task-list-prompt>{ task.Prompt }</template>
 					}
 				</a>
+                <template data-task-list-menu={ task.ID }>
+                    if len(menus) > 0 && menus[0][task.ID] != nil {
+                        @menus[0][task.ID]
+                    }
+                </template>
 			}
 			if len(group.Tasks) > taskListGroupLimit {
 				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>{ fmt.Sprintf("Show %d more", len(group.Tasks)-taskListGroupLimit) }</button>
@@ -596,6 +609,102 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			groups.addEventListener('scroll', hideHoverCard, { passive: true });
 			groups.addEventListener('click', hideHoverCard);
 
+            // Keep the shared card menu outside the scrolling sidebar.
+            var contextMenu = document.createElement('div');
+            contextMenu.className = 'dropdown';
+            contextMenu.setAttribute('data-menu-dropdown', '');
+            contextMenu.setAttribute('data-task-list-context-menu', '');
+            contextMenu.setAttribute('data-kanban-menu-key', 'task-list-context');
+            contextMenu.innerHTML = '<button type="button" tabindex="-1" data-kanban-menu-trigger data-task-card-menu-trigger aria-label="Task actions" style="position:fixed;width:0;height:0;overflow:hidden;opacity:0"></button><ul tabindex="-1" aria-label="Task actions" data-menu-content data-kanban-menu-content class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-52 max-w-[calc(100vw-2rem)]"></ul>';
+            document.body.appendChild(contextMenu);
+            var contextRow = null;
+            function taskContextMenuOpen() {
+                return contextMenu.getAttribute('data-kanban-menu-open') === 'true';
+            }
+            // Shared handlers also close menus on request start and navigation.
+            new MutationObserver(function() {
+                if (!taskContextMenuOpen() && deferredRefresh) {
+                    deferredRefresh = false;
+                    refreshSoon(0);
+                }
+            }).observe(contextMenu, {attributes: true, attributeFilter: ['data-kanban-menu-open']});
+            function closeTaskContextMenu(restoreFocus) {
+                if (taskContextMenuOpen() && window.closeKanbanMenu) window.closeKanbanMenu(contextMenu, restoreFocus);
+                else if (restoreFocus && contextRow && contextRow.isConnected) contextRow.focus({preventScroll: true});
+                if (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }
+            }
+            function openTaskContextMenu(row, x, y) {
+                var template = row.nextElementSibling;
+                if (!template || !template.matches('[data-task-list-menu]')) return;
+                closeTaskContextMenu(false);
+                hideHoverCard();
+                contextRow = row;
+                contextMenu.__openVibelyMenuReturnFocus = row;
+                var menu = contextMenu.querySelector('ul');
+                menu.replaceChildren(template.content.cloneNode(true));
+                // Keep ownership explicit even when browsing All projects or another task.
+                contextMenu.setAttribute('hx-vals', JSON.stringify({project_id: row.dataset.taskOwnerProject}));
+                if (currentProjectID() === '__all_projects__') {
+                    menu.querySelectorAll('a[hx-get]').forEach(function(link) {
+                        var url = link.getAttribute('hx-get') + '&project_id=' + encodeURIComponent(currentProjectID());
+                        link.setAttribute('hx-get', url); link.setAttribute('href', url);
+                    });
+                }
+                contextMenu.dataset.contextX = x;
+                contextMenu.dataset.contextY = y;
+                htmx.process(contextMenu);
+                var trigger = contextMenu.querySelector('[data-kanban-menu-trigger]');
+                handleDropdownToggle({currentTarget: trigger, stopPropagation: function() {}, preventDefault: function() {}});
+                var first = menu.querySelector('button:not(:disabled), a[href]');
+                contextMenu.__openVibelyPendingMenuFocus = first;
+            }
+            groups.addEventListener('contextmenu', function(event) {
+                var row = event.target.closest('[data-task-list-row]');
+                if (!row) return;
+                event.preventDefault();
+                openTaskContextMenu(row, event.clientX, event.clientY);
+            });
+            groups.addEventListener('keydown', function(event) {
+                if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+                var row = event.target.closest('[data-task-list-row]');
+                if (!row) return;
+                event.preventDefault();
+                var rect = row.getBoundingClientRect();
+                openTaskContextMenu(row, rect.left, rect.bottom);
+            });
+            document.addEventListener('keydown', function(event) {
+                if (!taskContextMenuOpen()) return;
+                if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                    if (window.kanbanDropdownForTarget(event.target) !== contextMenu) return;
+                    var panel = event.target.closest('[data-menu-submenu-portaled], [data-menu-content]');
+                    if (!panel) return;
+                    var items = Array.from(panel.querySelectorAll(':scope > li > button:not(:disabled), :scope > li > a[href]')).filter(function(item) {
+                        return item.getAttribute('aria-disabled') !== 'true' && item.getClientRects().length > 0;
+                    });
+                    if (!items.length) return;
+                    event.preventDefault();
+                    var index = items.indexOf(document.activeElement);
+                    if (event.key === 'Home') index = 0;
+                    else if (event.key === 'End') index = items.length - 1;
+                    else index = (index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+                    items[index].focus({preventScroll: true});
+                }
+                if (event.key === 'Escape') { event.preventDefault(); closeTaskContextMenu(true); }
+                if (event.key === 'Tab') closeTaskContextMenu(true);
+            }, true);
+            document.addEventListener('pointerdown', function(event) {
+                if (window.kanbanDropdownForTarget(event.target) !== contextMenu) closeTaskContextMenu(false);
+            });
+            groups.addEventListener('scroll', function() { closeTaskContextMenu(false); });
+            window.addEventListener('resize', function() { closeTaskContextMenu(false); });
+            window.addEventListener('task-list-action-finished', function() { closeTaskContextMenu(true); refreshSoon(0); });
+            contextMenu.addEventListener('htmx:afterRequest', function(event) {
+                closeTaskContextMenu(true); refreshSoon(0);
+            });
+            contextMenu.addEventListener('click', function(event) {
+                if (event.target.closest('a[href]')) closeTaskContextMenu(false);
+            });
+
 			var refreshTimer = null, refreshAt = 0;
 			function refreshSoon(delay) {
 				var at = Date.now() + delay;
@@ -608,9 +717,41 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				var m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);
 				return m ? decodeURIComponent(m[1]) : '';
 			}
+            function applyTaskDeletion(data) {
+                if (!data || !data.task_id) return;
+                var id = data.task_id;
+                if (contextRow && contextRow.dataset.taskListRow === id) closeTaskContextMenu(false);
+                groups.querySelectorAll('[data-task-list-row]').forEach(function(row) {
+                    if (row.dataset.taskListRow !== id) return;
+                    var template = row.nextElementSibling;
+                    if (template && template.matches('[data-task-list-menu]')) template.remove();
+                    row.remove();
+                });
+                var card = document.getElementById('task-' + id);
+                if (card && card.closest('#kanban-board')) htmx.remove(card);
+                // Reconcile counts and empty groups without waiting for the live stream.
+                refreshSoon(0);
+                var cache = window.openVibelyThreadCache;
+                if (cache) cache.pages.forEach(function(page, key) {
+                    if (page.threadKey === cache.threadKey(data.project_id, id)) cache.pages.delete(key);
+                });
+                var main = document.getElementById('main-content');
+                var detail = main && main.querySelector('#task-detail-content, #task-thread-view');
+                if (detail && detail.dataset.taskId === id) {
+                    // Clean up the deleted thread before navigation can cache it again.
+                    htmx.swap(main, '<div class="p-6">This task has been deleted.</div>', {swapStyle: 'innerHTML'});
+                    window.openVibelyNavigate('/tasks?project_id=' + encodeURIComponent(currentProjectID() || data.project_id)).catch(function() {
+                        if (window.showToast) window.showToast('Task deleted. Unable to load the task list.', 'failed');
+                    });
+                }
+            }
+            document.body.addEventListener('taskDeleted', function(event) {
+                window.dispatchEvent(new CustomEvent('sse-task-event', {detail: event.detail}));
+            });
 			var listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued', 'task_goal_updated', 'task_goal_paused', 'task_goal_resumed', 'task_goal_cleared', 'task_goal_evaluated', 'task_goal_followup_queued'];
 			window.addEventListener('sse-task-event', function(e) {
 				var data = e.detail || {};
+                if (data.type === 'task_deleted') { applyTaskDeletion(data); return; }
 				if (listEvents.indexOf(data.type) === -1) return;
 				if (currentProjectID() !== '__all_projects__' && data.project_id && data.project_id !== currentProjectID()) return;
 				refreshSoon(300);
@@ -639,7 +780,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			document.addEventListener('pointercancel', endPress, true);
 			document.body.addEventListener('htmx:beforeSwap', function(e) {
 				if (e.detail.target !== groups) return;
-				if (pressing) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
+				if (pressing || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();

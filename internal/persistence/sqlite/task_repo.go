@@ -2169,6 +2169,11 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 		return manifest, false, nil
 	}
 
+	var deletedProjectID, deletedTitle string
+	if err = tx.QueryRowContext(ctx, `SELECT project_id, title FROM tasks WHERE id = ?`, id).Scan(&deletedProjectID, &deletedTitle); err != nil {
+		return manifest, false, fmt.Errorf("reading deleted task event metadata: %w", err)
+	}
+
 	readPaths := func(query string, destination *[]string, queryArgs ...any) error {
 		rows, queryErr := tx.QueryContext(ctx, query, queryArgs...)
 		if queryErr != nil {
@@ -2303,6 +2308,9 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 	}
 	if rows > 0 {
 		requestDeletionCleanup(r.db)
+		if r.broadcaster != nil {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskDeleted, TaskID: id, ProjectID: deletedProjectID, TaskName: deletedTitle})
+		}
 	}
 	return manifest, rows > 0, nil
 }
