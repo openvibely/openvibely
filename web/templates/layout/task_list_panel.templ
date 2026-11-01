@@ -147,13 +147,15 @@ templ TaskListPanel(currentProjectID string) {
     @ChangesExplorerScript()
 	<div id="task-list-divider" role="separator" aria-orientation="vertical" aria-label="Resize task list" tabindex="0"></div>
 	<style>
-        .task-list-drop-targets:not([hidden]) { display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;flex-shrink:0; }
-        .task-list-drop-targets > div { padding:6px;border:1px dashed #7778;border-radius:5px;font-size:11px;text-align:center; }
-        .task-list-drop-targets .drop-hover { background:#8b7cf644;border-color:#a99af6; }
-        .task-list-row[data-row-drop="before"] { box-shadow:0 -2px #a99af6; }
-        .task-list-row[data-row-drop="after"] { box-shadow:0 2px #a99af6; }
-        .task-list-dragging { opacity:.4; }
-        .task-list-drag-ghost { position:fixed;z-index:10000;pointer-events:none;padding:8px 12px;border-radius:6px;background:#292633;color:#eee;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 16px #0005; }
+        .task-list-drop-targets { position:fixed;z-index:990;box-sizing:border-box;padding:10px;border:1px solid oklch(var(--bc) / .2);border-radius:12px;background:var(--ov-menu-surface, #24212e);color:oklch(var(--bc));box-shadow:0 12px 32px #0005;max-height:calc(100vh - 16px);overflow-y:auto;overscroll-behavior:contain; }
+        .task-list-drop-targets:not([hidden]) { display:grid;grid-template-columns:1fr;gap:7px; }
+        .task-list-drop-targets[hidden] { display:none !important; }
+        .task-list-drop-targets > div { box-sizing:border-box;min-height:44px;display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid oklch(var(--bc) / .2);border-radius:6px;font-size:12px; }
+        .task-list-drop-targets .drop-current { opacity:.5;border-style:dashed; }
+        .task-list-drop-targets .drop-current::after { content:'(current)';margin-left:auto;font-size:10px; }
+        .task-list-drop-targets .drop-hover { background:oklch(var(--p) / .25);border-color:oklch(var(--p)); }
+        .task-list-row[data-task-list-row] { user-select:none;-webkit-user-select:none; }
+        .task-list-row.task-list-dragging { display:flex !important; opacity:1; }
 
         #appearance-settings-nav { display: none; }
         html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
@@ -585,6 +587,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			var hoverTimer = null, hoverRow = null;
 			function hideHoverCard() { clearTimeout(hoverTimer); hoverRow = null; hoverCard.hidden = true; }
 			function showHoverCard(row) {
+                if (window.isDragging) { hideHoverCard(); return; }
 				hoverCard.replaceChildren();
 				var head = document.createElement('div'); head.className = 'task-list-hovercard-head';
 				var icon = row.querySelector('[data-task-state-icon]');
@@ -608,6 +611,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				hoverCard.style.top = Math.round(top) + 'px';
 			}
 			groups.addEventListener('mouseover', function(e) {
+                if (window.isDragging) { hideHoverCard(); return; }
 				var row = e.target.closest('[data-task-list-row]');
 				if (row === hoverRow) return;
 				clearTimeout(hoverTimer);
@@ -622,7 +626,8 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             // Sidebar dragging uses the same category and relative-order endpoints as cards.
             var rowDrag = null, rowMovePending = false, suppressRowClick = false;
             var dropTargets = document.createElement('div');
-            dropTargets.className = 'task-list-drop-targets';
+            dropTargets.className = 'task-list-drop-targets ov-menu';
+            dropTargets.setAttribute('aria-label', 'Move task to category');
             dropTargets.hidden = true;
             ['Active', 'Backlog', 'Completed', 'Scheduled'].forEach(function(label) {
                 var target = document.createElement('div');
@@ -630,9 +635,24 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 target.textContent = label;
                 dropTargets.appendChild(target);
             });
-            groups.parentNode.insertBefore(dropTargets, groups);
+            document.body.appendChild(dropTargets);
+            function positionRowDropTargets(state) {
+                var origin = state.origin;
+                dropTargets.hidden = false;
+                var style = getComputedStyle(dropTargets);
+                var chrome = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+                dropTargets.style.width = Math.min(origin.width + chrome, innerWidth - 16) + 'px';
+                dropTargets.querySelectorAll('[data-task-list-drop-category]').forEach(function(target) {
+                    var current = target.dataset.taskListDropCategory === state.row.dataset.taskCategory;
+                    target.classList.toggle('drop-current', current);
+                    target.setAttribute('aria-disabled', String(current));
+                });
+                var width = dropTargets.offsetWidth, height = dropTargets.offsetHeight;
+                var above = origin.top - height - 10;
+                dropTargets.style.left = Math.max(8, Math.min(origin.left, innerWidth - width - 8)) + 'px';
+                dropTargets.style.top = (above >= 8 ? above : Math.max(8, Math.min(origin.bottom + 10, innerHeight - height - 8))) + 'px';
+            }
             function clearRowDropIndicators() {
-                groups.querySelectorAll('[data-row-drop]').forEach(function(row) { row.removeAttribute('data-row-drop'); });
                 dropTargets.querySelectorAll('.drop-hover').forEach(function(target) { target.classList.remove('drop-hover'); });
             }
             function rowDropAt(x, y) {
@@ -641,6 +661,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 if (!hit) return null;
                 var target = hit.closest('[data-task-list-drop-category]');
                 if (target) {
+                    if (target.getAttribute('aria-disabled') === 'true') return null;
                     target.classList.add('drop-hover');
                     return {category: target.dataset.taskListDropCategory};
                 }
@@ -652,7 +673,6 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 });
                 var before = rows.find(function(row) { var rect = row.getBoundingClientRect(); return y < rect.top + rect.height / 2; });
                 var anchor = before || rows[rows.length - 1];
-                if (anchor) anchor.dataset.rowDrop = before ? 'before' : 'after';
                 return {category: category, anchor: anchor, before: !!before};
             }
             function finishRowDrag(cancelled) {
@@ -665,8 +685,9 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 window.removeEventListener('pointerup', endRowDrag, true);
                 window.removeEventListener('pointercancel', cancelRowDrag, true);
                 window.removeEventListener('blur', cancelRowDrag);
+                window.removeEventListener('resize', cancelRowDrag);
                 document.removeEventListener('keydown', cancelRowDragKey, true);
-                if (state.ghost) state.ghost.remove();
+                window.endPointerCardMotion(state.motion);
                 state.row.classList.remove('task-list-dragging');
                 dropTargets.hidden = true;
                 clearRowDropIndicators();
@@ -731,16 +752,18 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     window.isDragging = true;
                     document.documentElement.classList.add('drag-cursor-active');
                     window.getSelection().removeAllRanges();
-                    dropTargets.hidden = false;
+                    if (window.openVibelyTooltip) window.openVibelyTooltip.close();
+                    // Move the original entry, preserving its place and exact inline styles.
+                    state.origin = state.row.getBoundingClientRect();
+                    state.motion = window.beginPointerCardMotion(state.row);
                     state.row.classList.add('task-list-dragging');
-                    state.ghost = document.createElement('div');
-                    state.ghost.className = 'task-list-drag-ghost';
-                    state.ghost.textContent = state.row.querySelector('.task-list-title').textContent;
-                    document.body.appendChild(state.ghost);
+                    state.row.style.setProperty('background-color', 'var(--shell-row-selected, #292633)', 'important');
+                    state.row.style.setProperty('box-shadow', '0 8px 24px #0004', 'important');
+                    positionRowDropTargets(state);
                     function scrollFrame() {
                         if (rowDrag !== state) return;
                         var rect = groups.getBoundingClientRect();
-                        if (state.lastX >= rect.left && state.lastX <= rect.right) {
+                        if (state.lastX >= rect.left && state.lastX <= rect.right && !dropTargets.contains(document.elementFromPoint(state.lastX, state.lastY))) {
                             var delta = state.lastY < rect.top + 32 ? -7 : state.lastY > rect.bottom - 32 ? 7 : 0;
                             if (delta) { groups.scrollTop += delta; state.destination = rowDropAt(state.lastX, state.lastY); }
                         }
@@ -748,8 +771,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     }
                     state.frame = requestAnimationFrame(scrollFrame);
                 }
-                state.ghost.style.left = event.clientX + 12 + 'px';
-                state.ghost.style.top = event.clientY + 12 + 'px';
+                window.movePointerCard(state.motion, event.clientX - state.x, event.clientY - state.y);
                 state.destination = rowDropAt(event.clientX, event.clientY);
             }
             groups.addEventListener('dragstart', function(event) { if (event.target.closest('[data-task-list-row]')) event.preventDefault(); });
@@ -762,6 +784,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 window.addEventListener('pointerup', endRowDrag, true);
                 window.addEventListener('pointercancel', cancelRowDrag, true);
                 window.addEventListener('blur', cancelRowDrag);
+                window.addEventListener('resize', cancelRowDrag);
                 document.addEventListener('keydown', cancelRowDragKey, true);
             });
 
