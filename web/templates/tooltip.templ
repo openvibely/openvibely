@@ -88,7 +88,7 @@ templ Tooltips() {
     var style=getComputedStyle(menu);return style.visibility!=='hidden'&&style.display!=='none'&&Number(style.opacity)!==0;
    });
   }
-  function blocked(target){return pressing||menuOpen()||target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled],.ov-modal-close,.modal-backdrop');}
+  function blocked(target){return pressing||window.isDragging||menuOpen()||target instanceof Element&&!!target.closest('[data-kanban-menu-trigger],[data-tooltip-disabled],.ov-modal-close,.modal-backdrop');}
   function trigger(target){if(changing||blocked(target))return null;return target instanceof Element?target.closest(selector)||(active&&active.contains(target)?active:null):null;}
   document.addEventListener('pointerover',function(e){
    if(e.buttons){close();return;}

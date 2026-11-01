@@ -152,8 +152,7 @@ templ TaskListPanel(currentProjectID string) {
         .task-list-drop-targets .drop-hover { background:#8b7cf644;border-color:#a99af6; }
         .task-list-row[data-row-drop="before"] { box-shadow:0 -2px #a99af6; }
         .task-list-row[data-row-drop="after"] { box-shadow:0 2px #a99af6; }
-        .task-list-dragging { opacity:.4; }
-        .task-list-drag-ghost { position:fixed;z-index:10000;pointer-events:none;padding:8px 12px;border-radius:6px;background:#292633;color:#eee;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 16px #0005; }
+        .task-list-row.task-list-dragging { display:flex !important; opacity:1; }
 
         #appearance-settings-nav { display: none; }
         html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
@@ -585,6 +584,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			var hoverTimer = null, hoverRow = null;
 			function hideHoverCard() { clearTimeout(hoverTimer); hoverRow = null; hoverCard.hidden = true; }
 			function showHoverCard(row) {
+                if (window.isDragging) { hideHoverCard(); return; }
 				hoverCard.replaceChildren();
 				var head = document.createElement('div'); head.className = 'task-list-hovercard-head';
 				var icon = row.querySelector('[data-task-state-icon]');
@@ -608,6 +608,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				hoverCard.style.top = Math.round(top) + 'px';
 			}
 			groups.addEventListener('mouseover', function(e) {
+                if (window.isDragging) { hideHoverCard(); return; }
 				var row = e.target.closest('[data-task-list-row]');
 				if (row === hoverRow) return;
 				clearTimeout(hoverTimer);
@@ -666,7 +667,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 window.removeEventListener('pointercancel', cancelRowDrag, true);
                 window.removeEventListener('blur', cancelRowDrag);
                 document.removeEventListener('keydown', cancelRowDragKey, true);
-                if (state.ghost) state.ghost.remove();
+                window.endPointerCardMotion(state.motion);
                 state.row.classList.remove('task-list-dragging');
                 dropTargets.hidden = true;
                 clearRowDropIndicators();
@@ -731,12 +732,13 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     window.isDragging = true;
                     document.documentElement.classList.add('drag-cursor-active');
                     window.getSelection().removeAllRanges();
-                    dropTargets.hidden = false;
+                    if (window.openVibelyTooltip) window.openVibelyTooltip.close();
+                    // Move the original entry, preserving its place and exact inline styles.
+                    state.motion = window.beginPointerCardMotion(state.row);
                     state.row.classList.add('task-list-dragging');
-                    state.ghost = document.createElement('div');
-                    state.ghost.className = 'task-list-drag-ghost';
-                    state.ghost.textContent = state.row.querySelector('.task-list-title').textContent;
-                    document.body.appendChild(state.ghost);
+                    state.row.style.setProperty('background-color', 'var(--shell-row-selected, #292633)', 'important');
+                    state.row.style.setProperty('box-shadow', '0 8px 24px #0004', 'important');
+                    dropTargets.hidden = false;
                     function scrollFrame() {
                         if (rowDrag !== state) return;
                         var rect = groups.getBoundingClientRect();
@@ -748,8 +750,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     }
                     state.frame = requestAnimationFrame(scrollFrame);
                 }
-                state.ghost.style.left = event.clientX + 12 + 'px';
-                state.ghost.style.top = event.clientY + 12 + 'px';
+                window.movePointerCard(state.motion, event.clientX - state.x, event.clientY - state.y);
                 state.destination = rowDropAt(event.clientX, event.clientY);
             }
             groups.addEventListener('dragstart', function(event) { if (event.target.closest('[data-task-list-row]')) event.preventDefault(); });
