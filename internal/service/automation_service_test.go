@@ -75,9 +75,32 @@ func TestAutomationGraphServiceResolveAutomationCardPreservesChatTargetContract(
 }
 
 func TestCurrentAutomationTemplateRevisionTracksMaintainedTemplateChanges(t *testing.T) {
-	require.Equal(t, 11, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
-	require.Equal(t, 16, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
+	require.Equal(t, 12, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
+	require.Equal(t, 17, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
 	require.Zero(t, CurrentAutomationTemplateRevision(AutomationAdapterCustom))
+}
+
+func TestAutomationTemplateLayoutUpgradeAvailableForPreviousRevisions(t *testing.T) {
+	for _, tc := range []struct {
+		adapter  string
+		previous int
+	}{
+		{AutomationAdapterNativeSDLC, 11},
+		{AutomationAdapterGitHubSDLC, 16},
+	} {
+		t.Run(tc.adapter, func(t *testing.T) {
+			revision := tc.previous
+			cards := []models.AutomationCard{{
+				Automation: models.Automation{TemplateRevision: &revision},
+				Version:    models.AutomationVersion{AdapterKey: tc.adapter},
+			}}
+			enrichAutomationCards(cards, nil)
+			require.True(t, cards[0].TemplateUpdateAvailable, "existing templates must offer the new layout")
+			revision = CurrentAutomationTemplateRevision(tc.adapter)
+			enrichAutomationCards(cards, nil)
+			require.False(t, cards[0].TemplateUpdateAvailable, "up-to-date templates must not offer another upgrade")
+		})
+	}
 }
 
 func TestResolveAutomationProjectGitHubRepository_AppliesGlobalEndpoint(t *testing.T) {

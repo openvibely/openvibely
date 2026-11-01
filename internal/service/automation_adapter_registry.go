@@ -48,9 +48,9 @@ type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 func CurrentAutomationTemplateRevision(adapterKey string) int {
 	switch adapterKey {
 	case AutomationAdapterNativeSDLC:
-		return 11
+		return 12 // Wider, uniform horizontal spacing for the maintained graph layout.
 	case AutomationAdapterGitHubSDLC:
-		return 16
+		return 17 // Wider, uniform horizontal spacing for the maintained graph layout.
 	default:
 		return 0
 	}
