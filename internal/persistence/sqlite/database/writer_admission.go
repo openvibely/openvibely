@@ -65,13 +65,16 @@ func (g *writerAdmission) acquire(ctx context.Context, maintenance bool) (func()
 		// Register BEFORE waiting; cleanup cannot win another batch while this
 		// request is waking up or waiting inside database/sql.
 		g.users++
-		g.notifyLocked()
+		// Arrival cannot admit any waiter; broadcasting here would wake all
+		// queued writers just to block again behind the same maintenance batch.
 	}
 	for {
 		if err := ctx.Err(); err != nil {
 			if !maintenance {
 				g.users--
-				g.notifyLocked()
+				if g.users == 0 {
+					g.notifyLocked()
+				}
 			}
 			g.mu.Unlock()
 			return nil, err
@@ -101,7 +104,9 @@ func (g *writerAdmission) acquire(ctx context.Context, maintenance bool) (func()
 			} else {
 				g.users--
 			}
-			g.notifyLocked()
+			if maintenance || g.users == 0 {
+				g.notifyLocked()
+			}
 		})
 	}, nil
 }

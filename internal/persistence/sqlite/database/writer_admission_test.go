@@ -24,9 +24,13 @@ func (c *observedAdmissionContext) Done() <-chan struct{} {
 }
 
 func waitForAdmittedUsers(ctx context.Context, g *writerAdmission, count int) error {
+	// Test-only observation of arrivals. Production notifications are reserved
+	// for releases that can unblock admission, not changes to the queue length.
+	poll := time.NewTicker(time.Millisecond)
+	defer poll.Stop()
 	for {
 		g.mu.Lock()
-		users, changed := g.users, g.changed
+		users := g.users
 		g.mu.Unlock()
 		if users == count {
 			return nil
@@ -34,7 +38,7 @@ func waitForAdmittedUsers(ctx context.Context, g *writerAdmission, count int) er
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-changed:
+		case <-poll.C:
 		}
 	}
 }
@@ -240,4 +244,99 @@ func TestWriterPriorityRegistrationLifetime(t *testing.T) {
 	if admissionFor(db) != nil {
 		t.Fatal("registration leaked")
 	}
+}
+
+func TestWriterAdmissionBroadcastTransitions(t *testing.T) {
+	g := &writerAdmission{changed: make(chan struct{})}
+	assertOpen := func(ch <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-ch:
+			t.Fatal("broadcast without a release transition")
+		default:
+		}
+	}
+	assertClosed := func(ch <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-ch:
+		default:
+			t.Fatal("missing admission wakeup")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	// Ordinary arrivals and non-final releases must not broadcast.
+	changed := g.changed
+	release1, err := g.acquire(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release1()
+	release2, err := g.acquire(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release2()
+	assertOpen(changed)
+	release1()
+	assertOpen(changed)
+	release2()
+	assertClosed(changed)
+	changed = g.changed
+	release2() // Releasing twice must not produce another notification.
+	assertOpen(changed)
+
+	// Arrivals during maintenance really block. Canceling one of two pending
+	// users must not wake the other; canceling the final one notifies cleanup.
+	releaseMaintenance, err := g.acquire(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseMaintenance()
+	cancels := make([]context.CancelFunc, 2)
+	done := make([]chan error, 2)
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	for i := range cancels {
+		userCtx, cancelUser := context.WithCancel(ctx)
+		cancels[i] = cancelUser
+		defer cancelUser()
+		observed := &observedAdmissionContext{Context: userCtx, waiting: make(chan struct{})}
+		done[i] = make(chan error, 1)
+		workers.Add(1)
+		go func(result chan<- error) {
+			defer workers.Done()
+			release, err := g.acquire(observed, false)
+			if release != nil {
+				release()
+			}
+			result <- err
+		}(done[i])
+		select {
+		case <-observed.waiting:
+		case <-ctx.Done():
+			t.Fatal("writer did not wait")
+		}
+		assertOpen(changed)
+	}
+	for i, cancelUser := range cancels {
+		cancelUser()
+		select {
+		case err := <-done[i]:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal("cancellation did not finish")
+		}
+		if i == 0 {
+			assertOpen(changed)
+		} else {
+			assertClosed(changed)
+		}
+	}
+	changed = g.changed
+	releaseMaintenance()
+	assertClosed(changed)
 }
