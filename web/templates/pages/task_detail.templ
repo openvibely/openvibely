@@ -1772,9 +1772,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				console.log('File changes live listener paused');
 			}
 
-				// Track the last diff fingerprint to skip no-op DOM replacements.
-				var _lastDiffFingerprint = '';
-
 				function _computeDiffFingerprint(container) {
 					var viewer = container && container.querySelector('#diff-viewer');
 					if (!viewer) return '';
@@ -1854,14 +1851,16 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						if (!resp.ok) throw new Error('HTTP ' + resp.status);
 						return resp.text();
 					}).then(function(html) {
-						if (!changesContent.isConnected || !_isChangesTabActive()) return;
+						if (!changesContent.isConnected) return;
+                        if (!_isChangesTabActive()) { state.dirty = true; return; }
 						// Parse the response in a detached element to compute fingerprint
 						// without touching the live DOM at all.
 						var offscreen = document.createElement('div');
 						offscreen.innerHTML = html;
 
 						var newFp = _computeDiffFingerprint(offscreen);
-						if (newFp && newFp === _lastDiffFingerprint) {
+						// Compare the live viewer: initial HTMX loads can finish after page setup.
+						if (newFp && newFp === _computeDiffFingerprint(changesContent)) {
 							// Diff unchanged — no DOM mutation, no scroll disruption.
 							return;
 						}
@@ -1872,7 +1871,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             _watchDeferredDiffRefresh(changesContent, state);
                             return;
                         }
-						_lastDiffFingerprint = newFp;
 
 						// Content changed — apply the swap with UI state preservation.
 						var scrollX = window.scrollX || window.pageXOffset || 0;
@@ -1931,8 +1929,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								var taskId = changesContent.dataset.taskId;
 								if (taskId) {
 									_startFileChangesSSE(taskId);
-									// Seed fingerprint from initial server render.
-									_lastDiffFingerprint = _computeDiffFingerprint(changesContent);
 							}
 						}
 					}

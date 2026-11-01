@@ -131,11 +131,9 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("board ready", `String(document.readyState==='complete' && !!window.htmx)`, "true")
 		b.evaluate(`document.getElementById('open-explorer-task').click();'task'`)
 		b.waitFor("workspace ready", `String(document.readyState==='complete' && !!window.taskWorkspace && !!document.getElementById('task-message-input'))`, "true")
-		// openChanges queues htmx.ajax loads of #changes-content whose promises can resolve before the
-		// queued swap lands; wait for every load to swap before relying on the retained diff DOM.
 		b.evaluate(`window.changesLoads=0;document.addEventListener('htmx:beforeSend',e=>{if(e.detail.target&&e.detail.target.id==='changes-content')window.changesLoads++;});document.addEventListener('htmx:afterRequest',e=>{if(e.detail.target&&e.detail.target.id==='changes-content')window.changesLoads--;});'track changes loads'`)
 		waitChangesLoaded := func(name string) {
-			b.waitFor(name+" settled", `String(window.changesLoads===0 && !!document.querySelector('#changes-content #diff-viewer') && !document.querySelector('#changes-content.htmx-swapping, #changes-content.htmx-settling'))`, "true")
+			b.waitFor(name+" settled", `String(window.changesLoads===0 && !!document.querySelector('#changes-content #diff-viewer') && !document.getElementById('changes-content')._diffRefreshState?.pending && !document.querySelector('#changes-content.htmx-swapping, #changes-content.htmx-settling'))`, "true")
 		}
 		b.evaluate(`document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'open'`)
 		b.waitFor("tree replaces collapsed task list", `String(document.documentElement.classList.contains('changes-explorer-active') && !document.documentElement.classList.contains('task-list-collapsed') && document.querySelectorAll('#changes-explorer-host [data-explorer-path]').length===2)`, "true")
@@ -157,6 +155,13 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("changes use shared card-free layout", `String(!!document.querySelector('#changes-content .task-changes-view') && !document.querySelector('#changes-content .card-body') && !document.querySelector('#changes-content > .card'))`, "true")
 		b.waitFor("all inline file cards remain visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && ['diff-file-0','diff-file-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0))`, "true")
 		b.evaluate(`window.retainedDiffBody=document.getElementById('diff-body-0');window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;'capture body'`)
+		b.evaluate(`window.retainedDiffViewer=document.getElementById('diff-viewer');window.taskWorkspace.openThread();window.taskWorkspace.openChanges();'reopen unchanged changes'`)
+		waitChangesLoaded("unchanged reopen")
+		b.waitFor("unchanged reopen preserves viewer and loaded body", `String(document.getElementById('diff-viewer')===window.retainedDiffViewer && document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
+		// Background snapshots must retain the same DOM as well.
+		b.evaluate(`_updateDiffViewer();'refresh unchanged snapshot'`)
+		waitChangesLoaded("unchanged live refresh")
+		b.waitFor("unchanged live refresh preserves viewer", `String(document.getElementById('diff-viewer')===window.retainedDiffViewer)`, "true")
 		b.evaluate(`openInlineCommentForm(document.querySelector('#diff-file-0 tr.diff-review-line'));document.querySelector('.review-comment-form textarea').value='Keep review draft';'open draft'`)
 		edited.Store(true)
 		b.evaluate(`_updateDiffViewer('final');_updateDiffViewer('final');'final update during draft'`)
@@ -165,7 +170,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("final update resumes after cancel", `String(document.getElementById('diff-viewer').dataset.diffRevision!==window.beforeDiffRevision && !document.getElementById('changes-content')._diffRefreshState.cleanup)`, "true")
 		b.waitFor("unchanged body preserved", `String(document.getElementById('diff-body-0')===window.retainedDiffBody)`, "true")
 		// Hold a response while a draft opens, then save it without another live event.
-		b.evaluate(`window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;window.originalDiffFetch=window.fetch;window.fetch=function(url,opts){if(url==='/tasks/explorer-task/changes'){window.fetch=window.originalDiffFetch;return window.originalDiffFetch(url,opts).then(resp=>new Promise(resolve=>{window.releaseDiffResponse=()=>resolve(resp);}));}return window.originalDiffFetch(url,opts);};'hold next response'`)
+		b.evaluate(`window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;window.originalDiffFetch=window.fetch;window.fetch=function(url,opts){if(url.split('?')[0]==='/tasks/explorer-task/changes'){window.fetch=window.originalDiffFetch;return window.originalDiffFetch(url,opts).then(resp=>new Promise(resolve=>{window.releaseDiffResponse=()=>resolve(resp);}));}return window.originalDiffFetch(url,opts);};'hold next response'`)
 		edited.Store(false)
 		b.evaluate(`_updateDiffViewer('final');'request final diff'`)
 		b.waitFor("response held", `String(typeof window.releaseDiffResponse==='function')`, "true")
@@ -174,7 +179,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.evaluate(`document.querySelector('.review-submit-btn').click();'save draft'`)
 		b.waitFor("final update resumes after save", `String(!document.querySelector('.review-comment-form') && document.getElementById('diff-viewer').dataset.diffRevision!==window.beforeDiffRevision && !document.getElementById('changes-content')._diffRefreshState.cleanup)`, "true")
 		// A final event during an ordinary in-flight refresh must also be replayed.
-		b.evaluate(`window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;delete window.releaseDiffResponse;window.fetch=function(url,opts){if(url==='/tasks/explorer-task/changes'){window.fetch=window.originalDiffFetch;return window.originalDiffFetch(url,opts).then(resp=>new Promise(resolve=>{window.releaseDiffResponse=()=>resolve(resp);}));}return window.originalDiffFetch(url,opts);};_updateDiffViewer();'hold unchanged response'`)
+		b.evaluate(`window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;delete window.releaseDiffResponse;window.fetch=function(url,opts){if(url.split('?')[0]==='/tasks/explorer-task/changes'){window.fetch=window.originalDiffFetch;return window.originalDiffFetch(url,opts).then(resp=>new Promise(resolve=>{window.releaseDiffResponse=()=>resolve(resp);}));}return window.originalDiffFetch(url,opts);};_updateDiffViewer();'hold unchanged response'`)
 		b.waitFor("unchanged response held", `String(typeof window.releaseDiffResponse==='function')`, "true")
 		edited.Store(true)
 		b.evaluate(`_updateDiffViewer('final');window.releaseDiffResponse();'final event during fetch'`)

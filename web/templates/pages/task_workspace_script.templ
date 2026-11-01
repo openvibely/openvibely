@@ -102,13 +102,14 @@ templ TaskWorkspaceScript() {
 			resize();
 			if (diff) {
 				_startFileChangesSSE(taskID);
-				if (!wasDiff && window.htmx) {
-					htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskID) + '/changes', {
-						target: changes.querySelector('#changes-content'), swap: 'innerHTML'
-					}).then(function() {
-						if (!signal.aborted) _lastDiffFingerprint = _computeDiffFingerprint(changes);
-					}).catch(function() {});
-				}
+				// Revalidate retained changes without tearing down loaded diff bodies.
+				if (!wasDiff) {
+                    var content = changes.querySelector('#changes-content');
+                    if (content.querySelector('#diff-viewer')) _updateDiffViewer();
+                    else if (window.htmx) htmx.ajax('GET', content.getAttribute('hx-get'), {
+                        target: content, swap: 'innerHTML'
+                    }).catch(function() {});
+                }
 				if (push !== false) back.focus({preventScroll:true});
 			} else {
 				_stopFileChangesSSE();
