@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -4134,6 +4135,14 @@ func TestHandler_DeleteTask_HTMX_UpdatesKanbanBoard(t *testing.T) {
 
 	rec := htmxDelete(e, "/tasks/"+ct1.ID)
 	assertCode(t, rec, http.StatusOK)
+	var triggers map[string]events.TaskEvent
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &triggers); err != nil {
+		t.Fatal(err)
+	}
+	if event := triggers["taskDeleted"]; event.Type != events.TaskDeleted || event.TaskID != ct1.ID || event.ProjectID != project.ID {
+		t.Fatalf("unexpected deletion trigger: %+v", event)
+	}
+
 	assertContains(t, rec, "kanban-board")
 	assertContains(t, rec, "Completed Task 2")
 	assertNotContains(t, rec, "Completed Task 1")

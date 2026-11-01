@@ -5266,7 +5266,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							setKanbanMenuExpanded(candidate, false);
 						});
 						if (restoreTriggerFocus && dropdown) {
-							const trigger = dropdown.querySelector('[data-kanban-menu-trigger]');
+							const trigger = dropdown.__openVibelyMenuReturnFocus || dropdown.querySelector('[data-kanban-menu-trigger]');
 							if (trigger && document.contains(trigger)) {
 								suppressKanbanMenuFocusOpen = true;
 								trigger.focus({preventScroll: true});

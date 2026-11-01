@@ -518,3 +518,11 @@ templ TaskCardMenuItems(task models.Task, projectID string, viewingCategory stri
 					</li>
 				}
 }
+
+// TaskListMenuItems includes the separate card delete control in the sidebar menu.
+templ TaskListMenuItems(task models.Task) {
+    @TaskCardMenuItems(task, task.ProjectID, string(task.Category), "#task-list-groups", "none")
+    <li>
+        <button type="button" class="text-error" hx-delete={ fmt.Sprintf("/tasks/%s", task.ID) } hx-target="#task-list-groups" hx-swap="none">Delete</button>
+    </li>
+}

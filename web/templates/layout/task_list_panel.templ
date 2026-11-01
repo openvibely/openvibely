@@ -615,15 +615,22 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             contextMenu.setAttribute('data-menu-dropdown', '');
             contextMenu.setAttribute('data-task-list-context-menu', '');
             contextMenu.setAttribute('data-kanban-menu-key', 'task-list-context');
-            contextMenu.hidden = true;
             contextMenu.innerHTML = '<button type="button" tabindex="-1" data-kanban-menu-trigger data-task-card-menu-trigger aria-label="Task actions" style="position:fixed;width:0;height:0;overflow:hidden;opacity:0"></button><ul tabindex="-1" aria-label="Task actions" data-menu-content data-kanban-menu-content class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-52 max-w-[calc(100vw-2rem)]"></ul>';
             document.body.appendChild(contextMenu);
             var contextRow = null;
+            function taskContextMenuOpen() {
+                return contextMenu.getAttribute('data-kanban-menu-open') === 'true';
+            }
+            // Shared handlers also close menus on request start and navigation.
+            new MutationObserver(function() {
+                if (!taskContextMenuOpen() && deferredRefresh) {
+                    deferredRefresh = false;
+                    refreshSoon(0);
+                }
+            }).observe(contextMenu, {attributes: true, attributeFilter: ['data-kanban-menu-open']});
             function closeTaskContextMenu(restoreFocus) {
-                if (contextMenu.hidden) return;
-                if (window.closeKanbanMenu) window.closeKanbanMenu(contextMenu, false);
-                contextMenu.hidden = true;
-                if (restoreFocus && contextRow && contextRow.isConnected) contextRow.focus({preventScroll: true});
+                if (taskContextMenuOpen() && window.closeKanbanMenu) window.closeKanbanMenu(contextMenu, restoreFocus);
+                else if (restoreFocus && contextRow && contextRow.isConnected) contextRow.focus({preventScroll: true});
                 if (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }
             }
             function openTaskContextMenu(row, x, y) {
@@ -632,6 +639,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 closeTaskContextMenu(false);
                 hideHoverCard();
                 contextRow = row;
+                contextMenu.__openVibelyMenuReturnFocus = row;
                 var menu = contextMenu.querySelector('ul');
                 menu.replaceChildren(template.content.cloneNode(true));
                 // Keep ownership explicit even when browsing All projects or another task.
@@ -644,7 +652,6 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 }
                 contextMenu.dataset.contextX = x;
                 contextMenu.dataset.contextY = y;
-                contextMenu.hidden = false;
                 htmx.process(contextMenu);
                 var trigger = contextMenu.querySelector('[data-kanban-menu-trigger]');
                 handleDropdownToggle({currentTarget: trigger, stopPropagation: function() {}, preventDefault: function() {}});
@@ -666,7 +673,22 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 openTaskContextMenu(row, rect.left, rect.bottom);
             });
             document.addEventListener('keydown', function(event) {
-                if (contextMenu.hidden) return;
+                if (!taskContextMenuOpen()) return;
+                if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                    if (window.kanbanDropdownForTarget(event.target) !== contextMenu) return;
+                    var panel = event.target.closest('[data-menu-submenu-portaled], [data-menu-content]');
+                    if (!panel) return;
+                    var items = Array.from(panel.querySelectorAll(':scope > li > button:not(:disabled), :scope > li > a[href]')).filter(function(item) {
+                        return item.getAttribute('aria-disabled') !== 'true' && item.getClientRects().length > 0;
+                    });
+                    if (!items.length) return;
+                    event.preventDefault();
+                    var index = items.indexOf(document.activeElement);
+                    if (event.key === 'Home') index = 0;
+                    else if (event.key === 'End') index = items.length - 1;
+                    else index = (index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+                    items[index].focus({preventScroll: true});
+                }
                 if (event.key === 'Escape') { event.preventDefault(); closeTaskContextMenu(true); }
                 if (event.key === 'Tab') closeTaskContextMenu(true);
             }, true);
@@ -677,7 +699,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             window.addEventListener('resize', function() { closeTaskContextMenu(false); });
             window.addEventListener('task-list-action-finished', function() { closeTaskContextMenu(true); refreshSoon(0); });
             contextMenu.addEventListener('htmx:afterRequest', function(event) {
-                if (event.detail.successful) { closeTaskContextMenu(true); refreshSoon(0); }
+                closeTaskContextMenu(true); refreshSoon(0);
             });
             contextMenu.addEventListener('click', function(event) {
                 if (event.target.closest('a[href]')) closeTaskContextMenu(false);
@@ -695,9 +717,41 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				var m = (groups.getAttribute('hx-get') || '').match(/project_id=([^&]+)/);
 				return m ? decodeURIComponent(m[1]) : '';
 			}
+            function applyTaskDeletion(data) {
+                if (!data || !data.task_id) return;
+                var id = data.task_id;
+                if (contextRow && contextRow.dataset.taskListRow === id) closeTaskContextMenu(false);
+                groups.querySelectorAll('[data-task-list-row]').forEach(function(row) {
+                    if (row.dataset.taskListRow !== id) return;
+                    var template = row.nextElementSibling;
+                    if (template && template.matches('[data-task-list-menu]')) template.remove();
+                    row.remove();
+                });
+                var card = document.getElementById('task-' + id);
+                if (card && card.closest('#kanban-board')) htmx.remove(card);
+                // Reconcile counts and empty groups without waiting for the live stream.
+                refreshSoon(0);
+                var cache = window.openVibelyThreadCache;
+                if (cache) cache.pages.forEach(function(page, key) {
+                    if (page.threadKey === cache.threadKey(data.project_id, id)) cache.pages.delete(key);
+                });
+                var main = document.getElementById('main-content');
+                var detail = main && main.querySelector('#task-detail-content, #task-thread-view');
+                if (detail && detail.dataset.taskId === id) {
+                    // Clean up the deleted thread before navigation can cache it again.
+                    htmx.swap(main, '<div class="p-6">This task has been deleted.</div>', {swapStyle: 'innerHTML'});
+                    window.openVibelyNavigate('/tasks?project_id=' + encodeURIComponent(currentProjectID() || data.project_id)).catch(function() {
+                        if (window.showToast) window.showToast('Task deleted. Unable to load the task list.', 'failed');
+                    });
+                }
+            }
+            document.body.addEventListener('taskDeleted', function(event) {
+                window.dispatchEvent(new CustomEvent('sse-task-event', {detail: event.detail}));
+            });
 			var listEvents = ['task_board_updated', 'task_status_changed', 'task_category_changed', 'task_thread_execution_started', 'task_lifecycle_execution_changed', 'task_thread_input_applied', 'task_thread_input_queued', 'task_goal_updated', 'task_goal_paused', 'task_goal_resumed', 'task_goal_cleared', 'task_goal_evaluated', 'task_goal_followup_queued'];
 			window.addEventListener('sse-task-event', function(e) {
 				var data = e.detail || {};
+                if (data.type === 'task_deleted') { applyTaskDeletion(data); return; }
 				if (listEvents.indexOf(data.type) === -1) return;
 				if (currentProjectID() !== '__all_projects__' && data.project_id && data.project_id !== currentProjectID()) return;
 				refreshSoon(300);
@@ -726,7 +780,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			document.addEventListener('pointercancel', endPress, true);
 			document.body.addEventListener('htmx:beforeSwap', function(e) {
 				if (e.detail.target !== groups) return;
-				if (pressing || !contextMenu.hidden) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
+				if (pressing || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();

@@ -1762,6 +1762,11 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 
 	// Return the full kanban board for HTMX requests (consistent with other task operations)
 	if isHTMX(c) {
+		trigger, err := json.Marshal(map[string]events.TaskEvent{"taskDeleted": {Type: events.TaskDeleted, TaskID: taskID, ProjectID: projectID}})
+		if err != nil {
+			return err
+		}
+		c.Response().Header().Set("HX-Trigger", string(trigger))
 		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -3451,7 +3456,7 @@ func (h *Handler) TaskListPanel(c echo.Context) error {
 	}
 	menus := make(map[string]templ.Component, len(tasks))
 	for _, task := range tasks {
-		menus[task.ID] = components.TaskCardMenuItems(task, task.ProjectID, string(task.Category), "#task-list-groups", "none")
+		menus[task.ID] = components.TaskListMenuItems(task)
 	}
 	if projectID == models.AllProjectsID {
 		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
