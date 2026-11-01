@@ -138,6 +138,19 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return to first workspace'`)
 		waitFor("first workspace and sidebar restored", `String(location.search==='?project_id=first&category=backlog' && location.hash==='#board' && !document.documentElement.classList.contains('appearance-settings') && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=first')`, "true")
 
+		// Browser Back updates location before Settings loads. Ownership must
+		// still describe the second project's mounted workspace at that point.
+		b.evaluate(`window.workspaceNavigation.navigate('/themes?project_id=first',true);'settings before history navigation'`)
+		waitFor("settings before switching projects", `String(location.search==='?project_id=first' && !!document.getElementById('themes-container'))`, "true")
+		b.evaluate(`var source=document.createElement('a');source.setAttribute('hx-push-url','true');document.body.appendChild(source);htmx.ajax('GET','/tasks?project_id=second',{source:source,target:'#main-content',swap:'innerHTML'}).finally(()=>source.remove());'switch project with history'`)
+		waitFor("second project before browser back", `String(location.search==='?project_id=second' && !!document.getElementById('settings-workspace') && !document.getElementById('themes-container'))`, "true")
+		b.evaluate(`window.secondProjectWorkspace=document.getElementById('settings-workspace');history.back();'browser back to first settings'`)
+		waitFor("first settings restored by history", `String(location.search==='?project_id=first' && !!document.getElementById('themes-container'))`, "true")
+		waitFor("history does not retain second project workspace", `String(!document.getElementById('settings-retained-workspace') && !window.secondProjectWorkspace.isConnected)`, "true")
+		waitFor("history preserves first project return destination", `document.querySelector('#appearance-settings-nav [data-settings-back]').getAttribute('href')`, "/tasks?project_id=first&category=backlog#board")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return after browser back'`)
+		waitFor("history return restores first workspace and sidebar", `String(location.search==='?project_id=first&category=backlog' && location.hash==='#board' && !!document.getElementById('settings-workspace') && document.getElementById('settings-workspace')!==window.secondProjectWorkspace && !document.documentElement.classList.contains('appearance-settings') && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=first')`, "true")
+
 		// Direct Settings links have no retained workspace. A failed fallback
 		// request must stop rather than recursively trying to open Search.
 		failWorkspace.Store(true)

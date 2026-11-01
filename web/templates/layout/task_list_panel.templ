@@ -203,7 +203,7 @@ templ TaskListPanel(currentProjectID string) {
                 workspaceURL = workspaceURLs.get(destinationProject) || '/tasks?project_id=' + encodeURIComponent(destinationProject);
                 // A settings page reopened in another project must not retain
                 // the outgoing project's workspace as its return destination.
-                if (destinationProject !== workspaceProject(location.href)) return;
+                if (destinationProject !== mountedProject) return;
                 if (!settingsPane && inSettings) return;
                 if (!settingsPane) {
                     retainedScroll = [main].concat(Array.from(main.querySelectorAll('*'))).filter(function(el) {
@@ -324,6 +324,17 @@ templ TaskListPanel(currentProjectID string) {
                 return new URL(value, location.href).searchParams.get('project_id') || (document.getElementById('project-selector') || {}).value || '';
             }
             workspaceURLs.set(workspaceProject(workspaceURL), workspaceURL);
+            // History changes the address before replacing the mounted page.
+            // Update ownership only when content actually swaps or is restored.
+            var mountedProject = workspaceProject(document.getElementById('task-list-groups').getAttribute('hx-get'));
+            document.addEventListener('htmx:afterSwap', function(event) {
+                if (event.detail.target?.id !== 'main-content') return;
+                var url = event.detail.xhr?.responseURL || (window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href);
+                mountedProject = workspaceProject(url);
+            });
+            document.addEventListener('htmx:historyRestore', function() {
+                mountedProject = workspaceProject(location.href);
+            });
             var workspaceScroll = 0;
             var boardScroll = new Map();
             var boardScrollSelector = '#tasks-page, #kanban-board, .category-drop-zone, .task-drop-zone';
