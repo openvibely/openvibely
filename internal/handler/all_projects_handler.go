@@ -18,7 +18,7 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		// Only workspace entry pages inherit it; item/API requests keep their
 		// existing ownership and scope resolution.
 		path := c.Request().URL.Path
-		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations" || path == "/upcoming" || path == "/history" || path == "/alerts" || path == "/schedule" || path == "/insights" || path == "/skills"
+		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations" || path == "/upcoming" || path == "/history" || path == "/alerts" || path == "/schedule" || path == "/insights" || path == "/skills" || path == "/agents" || path == "/channels"
 		if c.Request().Method == http.MethodGet && !isHTMX(c) && workspaceEntry && c.QueryParam("project_id") == "" && h.settingsRepo != nil {
 			selected, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
 			if err == nil && selected == models.AllProjectsID {

@@ -1546,7 +1546,16 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				const body = new URLSearchParams();
 				body.set('description', description);
 				body.set('plugins_json', JSON.stringify(selectedPluginIDs));
-				const response = await fetch('/agents/generate', {
+                const generationURL = new URL(withCurrentProject('/agents/generate'), location.href);
+                const owner = document.getElementById('agent-project-owner');
+                if (document.getElementById('advanced_scope').value === 'project' && owner) {
+                    if (!owner.value) {
+                        if (window.showToast) window.showToast('Choose a project for this Agent', 'failed');
+                        return;
+                    }
+                    generationURL.searchParams.set('project_id', owner.value);
+                }
+				const response = await fetch(generationURL.pathname + generationURL.search, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 					body: body.toString()

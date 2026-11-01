@@ -2354,42 +2354,20 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 	})
 }
 
-// TestWebAPISwitchProject_IsInformationalOnly is the non-regression guard ensuring that
-// the web/API switch_project tool never writes to any channel-specific persistence
-// table (discord_user_projects, slack_user_projects, telegram_user_projects,
-// email_sender_projects). The web/API path is informational: the frontend manages
-// the active project_id, so the handler must not touch channel tables.
-func TestWebAPISwitchProject_IsInformationalOnly(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithStores(t)
-	ctx := context.Background()
-
-	project1 := createProject(t, h, "Alpha")
-	project2 := createProject(t, h, "Beta")
-	_ = project1
-
-	handlers := h.chatActionHandlers(
-		streamingResponseParams{ExecID: "e1", ProjectID: project2.ID},
-		nil,
-		models.ChatModeOrchestrate,
-		chatcontrol.SurfaceWeb,
-	)
-
-	switchHandler, ok := handlers["switch_project"]
-	if !ok {
-		t.Fatal("switch_project handler missing from web surface handlers")
+func TestWebAPISwitchProjectUnavailable(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithStores(t)
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		for _, projectID := range []string{"default", models.AllProjectsID} {
+			params := streamingResponseParams{ProjectID: projectID}
+			handlers := h.projectSelectedChatHandlers(params, nil, models.ChatModeOrchestrate, surface)
+			require.NotContains(t, handlers, "switch_project")
+			defs := chatToolDefsForProject(params, models.ChatModeOrchestrate, surface, true)
+			for _, def := range defs {
+				require.NotEqual(t, "switch_project", def.Name)
+			}
+			require.NotNil(t, chatcontrol.IsAllowed("switch_project", models.ChatModeOrchestrate, surface))
+		}
 	}
-
-	result, err := switchHandler(ctx, json.RawMessage(`{"project":"Alpha"}`))
-	if err != nil {
-		t.Fatalf("switch_project returned unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "Alpha") {
-		t.Fatalf("expected informational response mentioning Alpha, got: %q", result)
-	}
-
-	counts, err := db.Fixtures.ChannelProjectSelections(ctx)
-	require.NoError(t, err)
-	require.Zero(t, counts, "web/API switch_project must not persist channel project selections")
 }
 
 func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {

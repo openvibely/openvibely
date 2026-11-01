@@ -441,7 +441,8 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	// Must have core write actions
 	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task", "send_message", "create_project", "update_project_settings")
 	// Must have new actions
-	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
+	mustContain(t, names, "get_chat_mode", "set_chat_mode", "list_capabilities")
+	mustNotContain(t, names, "switch_project")
 	// Must have new read actions
 	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update", "view_swarm")
 	// Must have alert decision actions in Orchestrate mode.
@@ -686,7 +687,8 @@ func TestToolDefsForContext_Slack(t *testing.T) {
 func TestToolDefsForContext_API(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceAPI, true)
 	names := toolDefNames(defs)
-	mustContain(t, names, "create_task", "switch_project", "send_message", "get_chat_mode", "set_chat_mode", "github_create_issue", "github_get_issue")
+	mustContain(t, names, "create_task", "send_message", "get_chat_mode", "set_chat_mode", "github_create_issue", "github_get_issue")
+	mustNotContain(t, names, "switch_project")
 }
 
 func TestGitHubToolDefsOnlyExposeOnWebAndAPI(t *testing.T) {
@@ -919,14 +921,15 @@ func TestRegistry_PersonalityFlowActions(t *testing.T) {
 	}
 }
 
-func TestRegistry_SwitchProjectAllSurfaces(t *testing.T) {
+func TestRegistry_SwitchProjectChannelSurfaces(t *testing.T) {
 	def := Get("switch_project")
 	if def == nil {
 		t.Fatal("missing switch_project")
 	}
 	for _, s := range AllSurfaces {
-		if !surfaceAllowed(*def, s) {
-			t.Errorf("switch_project should be available on %s", s)
+		want := s != SurfaceWeb && s != SurfaceAPI
+		if surfaceAllowed(*def, s) != want {
+			t.Errorf("switch_project availability for %s, want %v", s, want)
 		}
 	}
 }

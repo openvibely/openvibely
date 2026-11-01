@@ -22,6 +22,13 @@ func TestChatProjectSelectionCreatesOnlyInDestination(t *testing.T) {
 		"project_id": second.ID, "title": "Routed task", "prompt": "Implement in the destination", "category": "backlog", "agent_id": model.ID,
 	})
 	require.NoError(t, err)
+	_, _, rejected, rejectErr := executor(ctx, "create_task", input)
+	require.ErrorContains(t, rejectErr, "restricted to its current project")
+	require.True(t, rejected)
+	none, err := h.taskRepo.ListByProject(ctx, second.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, none)
+	executor = h.chatActionExecutor(streamingResponseParams{ProjectID: models.AllProjectsID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	out, handled, failed, err := executor(ctx, "create_task", input)
 	require.NoError(t, err, out)
 	require.True(t, handled)
@@ -36,7 +43,7 @@ func TestChatProjectSelectionCreatesOnlyInDestination(t *testing.T) {
 	require.Empty(t, firstTasks)
 
 	// Plan mode still blocks mutations even when a destination is explicit.
-	plan := h.chatActionExecutor(streamingResponseParams{ProjectID: first.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)
+	plan := h.chatActionExecutor(streamingResponseParams{ProjectID: models.AllProjectsID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)
 	out, _, failed, err = plan(ctx, "create_task", input)
 	require.NoError(t, err)
 	require.True(t, failed, out)

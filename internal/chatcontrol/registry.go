@@ -2363,7 +2363,7 @@ var registry = []ActionDef{
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     allSurfaces(),
+		Surfaces:     []Surface{SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX},
 		Schema: &toolschema.Schema{
 			Type: "object",
 			Properties: map[string]*toolschema.Schema{
@@ -2735,8 +2735,8 @@ func toolDefsForContext(mode models.ChatMode, surface Surface, includeThreadTool
 		if !a.IncludeThreadTools || includeThreadTools {
 			defs = append(defs, llmcontracts.RuntimeToolDefinition{
 				Name:        a.Name,
-				Description: projectSelectionDescription(a.Name, surface, a.Description),
-				Schema:      projectSelectionSchema(a.Name, surface, a.Schema),
+				Description: a.Description,
+				Schema:      a.Schema,
 				Access:      runtimeToolAccessForAction(a.Access),
 			})
 		}

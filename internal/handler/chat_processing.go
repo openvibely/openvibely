@@ -572,7 +572,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// carries a complete channel-specific runtime pre-built by the channel service.
 	// Using it directly ensures switch_project and other channel-sensitive tools
 	// execute the channel service handler (with persistence) rather than the
-	// informational web/API handler.
+	// generic handler.
 	if h.supportsChatActionTools(ctx, params.Agent) {
 		surface := params.Surface
 		if surface == "" {
@@ -583,7 +583,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			includeMemoryView := len(service.SelectedMemoryHandlesFromContext(ctx)) > 0 && !runtimeToolDefinitionsInclude(llmcontracts.RuntimeToolsFromContext(ctx), "memory_view")
 			defs = filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, true), agentDef, includeMemoryView)
 		} else {
-			defs = chatcontrol.ToolDefsForContext(chatMode, surface, chatMode == models.ChatModeOrchestrate)
+			defs = chatToolDefsForProject(params, chatMode, surface, chatMode == models.ChatModeOrchestrate)
 			if agentDef != nil {
 				defs = filterAssignedAgentRuntimeToolDefs(defs, agentDef)
 			}

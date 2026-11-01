@@ -15,47 +15,54 @@ func TestChatProjectSelection(t *testing.T) {
 	ctx := context.Background()
 	first := createProject(t, h, "First project")
 	second := createProject(t, h, "Second project")
-	for _, project := range []*models.Project{first, second} {
-		task := &models.Task{ProjectID: project.ID, Title: project.Name + " task", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "Implement it"}
-		require.NoError(t, h.taskRepo.Create(ctx, task))
+	for _, p := range []*models.Project{first, second} {
+		require.NoError(t, h.taskRepo.Create(ctx, &models.Task{ProjectID: p.ID, Title: p.Name + " task", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "Implement it"}))
 	}
 	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
 		t.Run(string(surface), func(t *testing.T) {
 			executor := h.chatActionExecutor(streamingResponseParams{ProjectID: first.ID}, nil, models.ChatModeOrchestrate, surface)
-			input, err := json.Marshal(map[string]string{"project_id": second.ID})
+			input, _ := json.Marshal(map[string]string{"project_id": second.ID})
+			_, _, failed, err := executor(ctx, "list_tasks", input)
+			require.ErrorContains(t, err, "restricted to its current project")
+			require.True(t, failed)
+			for _, id := range []string{"", first.ID} {
+				same, _ := json.Marshal(map[string]string{"project_id": id})
+				out, _, failed, err := executor(ctx, "list_tasks", same)
+				require.NoError(t, err)
+				require.False(t, failed, out)
+				require.Contains(t, out, first.Name+" task")
+				require.NotContains(t, out, second.Name+" task")
+			}
+			all := h.chatActionExecutor(streamingResponseParams{ProjectID: models.AllProjectsID}, nil, models.ChatModeOrchestrate, surface)
+			out, _, failed, err := all(ctx, "list_tasks", input)
 			require.NoError(t, err)
-			out, handled, failed, err := executor(ctx, "list_tasks", input)
-			require.NoError(t, err)
-			require.True(t, handled)
 			require.False(t, failed, out)
 			require.Contains(t, out, second.Name+" task")
-			require.Contains(t, out, `"project_id":"`+second.ID+`"`)
 			require.NotContains(t, out, first.Name+" task")
-			out, _, failed, err = executor(ctx, "list_tasks", json.RawMessage(`{}`))
-			require.NoError(t, err)
-			require.False(t, failed, out)
-			require.Contains(t, out, first.Name+" task")
-			require.NotContains(t, out, second.Name+" task", "project selection must not change subsequent tool defaults")
-			out, _, failed, err = executor(ctx, "list_tasks", json.RawMessage(`{"project_id":"missing"}`))
+			_, _, failed, err = all(ctx, "list_tasks", json.RawMessage(`{"project_id":"missing"}`))
 			require.ErrorContains(t, err, "unknown project_id")
-			require.True(t, failed, out)
+			require.True(t, failed)
 		})
 	}
-	empty := createProject(t, h, "Empty project")
-	executor := h.chatActionExecutor(streamingResponseParams{ProjectID: empty.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
-	out, _, failed, err := executor(ctx, "list_tasks", json.RawMessage(`{}`))
-	require.NoError(t, err)
-	require.False(t, failed, out)
-	require.Contains(t, out, `"total":0`)
-	input, err := json.Marshal(map[string]string{"project_id": second.ID})
-	require.NoError(t, err)
-	out, _, failed, err = executor(ctx, "list_tasks", input)
-	require.NoError(t, err)
-	require.False(t, failed, out)
-	require.Contains(t, out, second.Name+" task", "an empty result from one project must not suppress discovery in another")
-	projects := h.executeListProjects(ctx, first.ID)
-	require.Contains(t, projects, first.ID)
-	require.Contains(t, projects, second.ID)
+}
+
+func TestAllProjectsEmptyTaskSearchDoesNotHideOtherProjects(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	empty := createProject(t, h, "Empty")
+	populated := createProject(t, h, "Populated")
+	require.NoError(t, h.taskRepo.Create(t.Context(), &models.Task{ProjectID: populated.ID, Title: "Visible task", Category: models.CategoryBacklog, Status: models.StatusPending}))
+	executor := h.chatActionExecutor(streamingResponseParams{ProjectID: models.AllProjectsID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	for _, p := range []*models.Project{empty, populated} {
+		input, _ := json.Marshal(map[string]string{"project_id": p.ID})
+		out, _, failed, err := executor(t.Context(), "list_tasks", input)
+		require.NoError(t, err)
+		require.False(t, failed, out)
+		if p == populated {
+			require.Contains(t, out, "Visible task")
+		} else {
+			require.Contains(t, out, `"total":0`)
+		}
+	}
 }
 
 func TestChatProjectSelectionCannotEscapePersistedScope(t *testing.T) {
@@ -64,6 +71,8 @@ func TestChatProjectSelectionCannotEscapePersistedScope(t *testing.T) {
 		params  streamingResponseParams
 		surface chatcontrol.Surface
 	}{
+		{"project chat", streamingResponseParams{ProjectID: "owner"}, chatcontrol.SurfaceWeb},
+		{"api project chat", streamingResponseParams{ProjectID: "owner"}, chatcontrol.SurfaceAPI},
 		{"task", streamingResponseParams{ProjectID: "owner", IsTaskFollowup: true}, chatcontrol.SurfaceWeb},
 		{"api task", streamingResponseParams{ProjectID: "owner", IsTaskFollowup: true}, chatcontrol.SurfaceAPI},
 		{"automation", streamingResponseParams{ProjectID: "owner", AutomationContext: &models.AutomationContext{ProjectID: "owner"}}, chatcontrol.SurfaceWeb},
@@ -93,4 +102,31 @@ func TestDecodeChatProjectSelection(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "p", id)
 	require.JSONEq(t, `{"project_id":"p","title":"a"}`, string(payload))
+}
+
+func TestChatProjectToolDefinitions(t *testing.T) {
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		for _, tc := range []struct {
+			name    string
+			params  streamingResponseParams
+			routing bool
+		}{
+			{name: "ordinary", params: streamingResponseParams{ProjectID: "default"}},
+			{name: "all", params: streamingResponseParams{ProjectID: models.AllProjectsID}, routing: true},
+			{name: "followup", params: streamingResponseParams{ProjectID: models.AllProjectsID, IsTaskFollowup: true}},
+		} {
+			t.Run(string(surface)+"/"+tc.name, func(t *testing.T) {
+				defs := chatToolDefsForProject(tc.params, models.ChatModeOrchestrate, surface, true)
+				for _, def := range defs {
+					require.NotEqual(t, "switch_project", def.Name)
+					if def.Name == "create_task" || def.Name == "list_tasks" {
+						require.Equal(t, tc.routing, def.Schema.Properties["project_id"] != nil)
+					}
+					if !tc.routing {
+						require.Equal(t, chatcontrol.Get(def.Name).Schema, def.Schema)
+					}
+				}
+			})
+		}
+	}
 }

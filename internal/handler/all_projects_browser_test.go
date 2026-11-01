@@ -67,11 +67,39 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(document.getElementById('kanban-board').innerText.includes('Other project task'),'missing default');
  await liveRefresh('#kanban-board','task_board_updated');
  const card=document.querySelector('#kanban-board [data-task-id="` + task.ID + `"]');
+ for(const button of [card.querySelector('[hx-post$="/run"]'),card.querySelector('[hx-delete]')]) {
+  const config=await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('No task-card request')),3000);
+   const capture=e=>{e.preventDefault();clearTimeout(timer);document.body.removeEventListener('htmx:beforeRequest',capture);resolve(e.detail.requestConfig)};
+   document.body.addEventListener('htmx:beforeRequest',capture);button.click();
+  });
+  const scope=new URL(config.path,location.href).searchParams.get('project_id')||config.parameters.project_id;
+  assert(scope==='__all_projects__','task-card mutation missing workspace: '+config.path+' params='+JSON.stringify(config.parameters));
+ }
  assert(card,'native task card missing');
  const link=card.querySelector('a[href*="/tasks/"]');
  assert(link,'native task link missing');link.click();
  await wait(()=>location.pathname==='/tasks/` + task.ID + `' && document.getElementById('task-detail-content'));
  assert(document.getElementById('project-selector').value==='__all_projects__','task switched workspace');
+ const results=document.createElement('div');
+ results.textContent='"Created task" (backlog) [TASK_ID:` + task.ID + `]\n"Edited task" (updated: title) [TASK_EDITED:` + task.ID + `]';
+ document.body.appendChild(results);
+ window.convertTaskLinksInMessage(results);window.convertTaskEditLinksInMessage(results);
+ const resultLinks=results.querySelectorAll('a');
+ assert(resultLinks.length===2,'task result links missing');
+ for(const resultLink of resultLinks){
+  assert(new URL(resultLink.href).searchParams.get('project_id')==='__all_projects__','native task result link lost scope');
+  const response=await fetch(resultLink.href);
+  assert(response.ok,'native task result URL failed');
+ }
+ const savedFetch=window.fetch;let startURL='';
+ window.fetch=function(url,options){startURL=String(url);return Promise.resolve(new Response(null,{status:204}));};
+ results.querySelector('button').click();
+ await wait(()=>results.querySelector('button').textContent.includes('Started'));
+ window.fetch=savedFetch;
+ assert(new URL(startURL,location.href).searchParams.get('project_id')==='__all_projects__','Start Task lost scope');
+ results.remove();
+
  const owner=document.querySelector('#task-detail-metrics [data-task-project]');
  assert(owner && owner.textContent.includes('` + project.Name + `'),'task owner missing from Details');
  assert(owner.previousElementSibling.tagName==='H3' && owner.previousElementSibling.textContent==='Task','project must follow Task heading');

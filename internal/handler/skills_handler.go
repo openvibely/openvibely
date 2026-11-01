@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -698,7 +699,8 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 			scoped := c.Echo().NewContext(req, c.Response())
 			cards, err := h.listStandaloneSkillsInProject(scoped)
 			if err != nil {
-				return nil, err
+				applog.Infof("[handler] All projects skills: skipping project %s: %v", project.ID, err)
+				continue
 			}
 			for _, card := range cards {
 				if card.Scope == "project" {

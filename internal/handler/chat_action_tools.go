@@ -268,7 +268,7 @@ func (h *Handler) buildChatActionToolRuntime(params streamingResponseParams, col
 	}
 	// Web handler includes thread tools for orchestrate mode
 	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatcontrol.ToolDefsForContext(mode, surface, includeThread)
+	defs := chatToolDefsForProject(params, mode, surface, includeThread)
 
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
@@ -284,7 +284,7 @@ func (h *Handler) buildAPIChatActionToolRuntime(params streamingResponseParams, 
 		mode = models.ChatModeOrchestrate
 	}
 	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatcontrol.ToolDefsForContext(mode, surface, includeThread)
+	defs := chatToolDefsForProject(params, mode, surface, includeThread)
 
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
@@ -667,9 +667,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				DispatchQueuedWork: dispatch,
 			})
 		},
-		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
-		},
+
 		"list_alerts":                            alertHandlers["list_alerts"],
 		"get_alert":                              alertHandlers["get_alert"],
 		"list_existing_automation_notifications": alertHandlers["list_existing_automation_notifications"],
@@ -1038,39 +1036,6 @@ func (h *Handler) executeGetCurrentProject(ctx context.Context, projectID string
 		repo = fmt.Sprintf("\nRepository: %s", project.RepoPath)
 	}
 	return fmt.Sprintf("Current project: %s (id: %s)%s%s", project.Name, project.ID, desc, repo)
-}
-
-func (h *Handler) executeSwitchProject(ctx context.Context, currentProjectID string, input json.RawMessage) string {
-	var req struct {
-		Project string `json:"project"`
-	}
-	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-		return "Invalid input for switch_project."
-	}
-	target := strings.TrimSpace(req.Project)
-	if target == "" {
-		return "switch_project requires a project name or ID."
-	}
-
-	projects, err := h.projectRepo.ListSelectorOptions(ctx)
-	if err != nil {
-		return "Error loading projects: " + err.Error()
-	}
-
-	for _, p := range projects {
-		if strings.EqualFold(p.Name, target) || p.ID == target {
-			// For web/API, the project switch is informational — the frontend
-			// manages the active project_id. Return the target so the model
-			// can communicate the switch to the user.
-			return fmt.Sprintf("Switched to project: %s (id: %s). Use this project for subsequent actions.", p.Name, p.ID)
-		}
-	}
-
-	var names []string
-	for _, p := range projects {
-		names = append(names, p.Name)
-	}
-	return fmt.Sprintf("Project not found: %q. Available projects: %s", target, strings.Join(names, ", "))
 }
 
 func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input json.RawMessage) string {

@@ -1239,7 +1239,15 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 
 	callCtx := c.Request().Context()
 	workDir, _ := os.Getwd()
-	if projectID, err := h.getCurrentProjectID(c); err == nil && projectID != "" {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if projectID == models.AllProjectsID {
+		// A combined/global draft has no repository-local tool configuration.
+		workDir = ""
+	}
+	if projectID != "" {
 		callCtx = llmcontracts.WithDirectUsageProject(callCtx, projectID)
 		if h.projectSvc != nil {
 			if project, getErr := h.projectSvc.GetByID(callCtx, projectID); getErr == nil && project != nil && strings.TrimSpace(project.RepoPath) != "" {

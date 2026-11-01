@@ -2689,7 +2689,16 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 		{tool: "list_automations", input: json.RawMessage(fmt.Sprintf(`{"project_id":%q}`, foreign.ID))},
 		{tool: "get_automation", input: json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"project_id":%q}`, foreignAutomationID, foreign.ID))},
 	} {
-		result := execute(request.tool, request.input)
+		_, _, rejected, scopeErr := runtime.Executor(ctx, request.tool, request.input)
+		require.ErrorContains(t, scopeErr, "restricted to its current project")
+		require.True(t, rejected)
+		allRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: models.AllProjectsID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		output, handled, failed, scopeErr := allRuntime.Executor(ctx, request.tool, request.input)
+		require.NoError(t, scopeErr)
+		require.True(t, handled)
+		require.False(t, failed, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
 		if request.tool == "list_automations" {
 			items, ok := result["automations"].([]any)
 			require.True(t, ok)

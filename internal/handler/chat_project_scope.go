@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -36,7 +37,7 @@ func (h *Handler) projectSelectedChatHandlers(params streamingResponseParams, co
 			if projectID == "" || projectID == params.ProjectID {
 				return handler(ctx, forwarded)
 			}
-			if params.IsTaskFollowup || params.AutomationContext != nil {
+			if params.ProjectID != models.AllProjectsID || params.IsTaskFollowup || params.AutomationContext != nil {
 				return "", fmt.Errorf("%s: this conversation is restricted to its current project", name)
 			}
 			if h.projectSvc == nil {
@@ -54,11 +55,7 @@ func (h *Handler) projectSelectedChatHandlers(params streamingResponseParams, co
 			return h.chatActionHandlers(scoped, collector, mode, surface)[name](ctx, forwarded)
 		}
 	}
-	if params.ProjectID == models.AllProjectsID {
-		handlers["switch_project"] = func(context.Context, json.RawMessage) (string, error) {
-			return "", fmt.Errorf("All projects chat stays in this workspace; use project_id on individual tools instead")
-		}
-	}
+
 	return handlers
 }
 
@@ -92,4 +89,11 @@ func decodeChatProjectSelection(name string, input json.RawMessage) (string, jso
 	}
 	forwarded, err := json.Marshal(fields)
 	return projectID, forwarded, err
+}
+
+func chatToolDefsForProject(params streamingResponseParams, mode models.ChatMode, surface chatcontrol.Surface, includeThread bool) []llmcontracts.RuntimeToolDefinition {
+	if params.ProjectID == models.AllProjectsID && !params.IsTaskFollowup && params.AutomationContext == nil {
+		return chatcontrol.ToolDefsForAllProjectsContext(mode, surface, includeThread)
+	}
+	return chatcontrol.ToolDefsForContext(mode, surface, includeThread)
 }

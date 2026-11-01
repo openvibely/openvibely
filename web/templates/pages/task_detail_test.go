@@ -658,7 +658,7 @@ func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
 
 	// Must use fetch() for diff updates, NOT htmx.ajax() — fetch allows pre-swap
 	// fingerprint comparison in a detached DOM element.
-	if !strings.Contains(output, "fetch('/tasks/' + taskId + '/changes'") {
+	if !strings.Contains(output, "fetch(changesContent.getAttribute('hx-get'), {") {
 		t.Fatal("expected _updateDiffViewer to use fetch() for pre-swap fingerprint comparison")
 	}
 

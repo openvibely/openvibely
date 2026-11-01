@@ -294,3 +294,151 @@ func TestAllProjectsSkillsSavedSelection(t *testing.T) {
 	require.Equal(t, 200, implicit.Code)
 	require.Contains(t, implicit.Body.String(), "Owner-only fixture", "Saved All projects selection should load the same skills")
 }
+
+func TestAllProjectsSavedAgentAndChannelSelection(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(stores.Agents)
+	h.SetWebhookRepo(stores.Webhooks)
+	p := createProject(t, h, "Library owner")
+	agent := &models.Agent{Name: "Hidden owner Agent", Scope: models.AgentScopeProject, ProjectID: p.ID, Key: "audit-hidden-owner", Model: "inherit", Enabled: true, SelectableAsPrimary: true, SystemPrompt: "test"}
+	require.NoError(t, stores.Agents.Create(t.Context(), agent))
+	wh := &models.WebhookEndpoint{ProjectID: p.ID, Name: "Hidden owner webhook", Enabled: true, DefaultPriority: 2}
+	require.NoError(t, stores.Webhooks.Create(t.Context(), wh))
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	for route, marker := range map[string]string{"/agents": "Hidden owner Agent", "/channels": "Hidden owner webhook"} {
+		t.Run(route, func(t *testing.T) {
+			explicit := httptest.NewRecorder()
+			app.ServeHTTP(explicit, httptest.NewRequest(http.MethodGet, route+"?project_id="+models.AllProjectsID, nil))
+			require.Contains(t, explicit.Body.String(), marker)
+			implicit := httptest.NewRecorder()
+			app.ServeHTTP(implicit, httptest.NewRequest(http.MethodGet, route, nil))
+			require.Contains(t, implicit.Body.String(), marker)
+		})
+	}
+}
+
+func TestAllProjectsTaskCardMutationScope(t *testing.T) {
+	for _, action := range []string{"run", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			h, app, _, stores := setupTestHandlerWithStores(t)
+			p := createProject(t, h, "Card owner")
+			require.NoError(t, stores.LLMConfigs.Create(t.Context(), &models.LLMConfig{Name: "Audit", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024, IsDefault: true}))
+			task := &models.Task{ProjectID: p.ID, Title: "Card action target", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+			other := &models.Task{ProjectID: "default", Title: "Other project must remain visible", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+			require.NoError(t, stores.Tasks.Create(t.Context(), task))
+			require.NoError(t, stores.Tasks.Create(t.Context(), other))
+			require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+			method, path := http.MethodPost, "/tasks/"+task.ID+"/run"
+			if action == "delete" {
+				method, path = http.MethodDelete, "/tasks/"+task.ID
+			}
+			req := httptest.NewRequest(method, path+"?project_id="+models.AllProjectsID, nil)
+			req.Header.Set("HX-Request", "true")
+			req.Header.Set("HX-Current-URL", "http://example.com/tasks?project_id="+models.AllProjectsID)
+			req.Header.Set("HX-Target", "kanban-board")
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, req)
+			if action == "run" {
+				require.Equal(t, http.StatusNoContent, rec.Code)
+				require.Contains(t, rec.Header().Get("HX-Trigger"), "Task queued to run now")
+				updated, err := stores.Tasks.GetByID(t.Context(), task.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.CategoryActive, updated.Category)
+			} else {
+				require.Equal(t, 200, rec.Code)
+				require.Contains(t, rec.Body.String(), other.Title)
+			}
+		})
+	}
+}
+
+func TestAllProjectsAgentGenerationOwnerConfiguration(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(stores.Agents)
+	h.llmSvc = nil
+	p := createProject(t, h, "Chosen owner")
+	p.RepoPath = t.TempDir()
+	require.NoError(t, h.projectRepo.Update(t.Context(), p))
+	require.NoError(t, os.MkdirAll(filepath.Join(p.RepoPath, ".claude"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(p.RepoPath, ".claude", "settings.json"), []byte(`{"mcpServers":{"owner-browser":{"command":"owner-browser","args":[]}}}`), 0600))
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	for _, explicit := range []bool{true, false} {
+		route := "/agents/generate?project_id=" + models.AllProjectsID
+		if explicit {
+			route = "/agents/generate?project_id=" + p.ID
+		}
+		form := url.Values{"description": {"browser screenshots"}}
+		req := httptest.NewRequest(http.MethodPost, route, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		require.Equal(t, 200, rec.Code)
+		if explicit {
+			require.Contains(t, rec.Body.String(), "owner-browser")
+		} else {
+			require.NotContains(t, rec.Body.String(), "owner-browser")
+		}
+	}
+}
+
+func TestAllProjectsChatTaskResultActions(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	p := createProject(t, h, "Chat target owner")
+	require.NoError(t, stores.LLMConfigs.Create(t.Context(), &models.LLMConfig{Name: "Audit", Provider: models.ProviderTest, Model: "test", APIKey: "test", MaxTokens: 1024, IsDefault: true}))
+	task := &models.Task{ProjectID: p.ID, Title: "Chat result task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, stores.Tasks.Create(t.Context(), task))
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	for _, scope := range []string{models.AllProjectsID, p.ID} {
+		t.Run("open-link-scope="+scope, func(t *testing.T) {
+			path := "/tasks/" + task.ID
+			if scope != "" {
+				path += "?project_id=" + scope
+			}
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			require.Equal(t, 200, rec.Code, "body=%s", rec.Body.String())
+		})
+	}
+	for _, scope := range []string{models.AllProjectsID, p.ID} {
+		t.Run("scope="+scope, func(t *testing.T) {
+			path := "/tasks/" + task.ID + "/category"
+			if scope != "" {
+				path += "?project_id=" + scope
+			}
+			req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader("category=active"))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, req)
+			require.Less(t, rec.Code, 300, "body=%s", rec.Body.String())
+		})
+	}
+}
+
+func TestAllProjectsSkillsUnreadableProject(t *testing.T) {
+	h, app, _, _ := setupTestHandlerWithStores(t)
+	h.SetAgentSkillRoot(t.TempDir())
+	writeStandaloneSkill(t, h.agentSkillRoot, "global-ok", "Global available", "global", "global")
+	p := createProject(t, h, "Broken skills index")
+	p.RepoPath = t.TempDir()
+	require.NoError(t, h.projectRepo.Update(t.Context(), p))
+	root := filepath.Join(p.RepoPath, ".openvibely")
+	writeStandaloneSkill(t, root, "broken-skill", "Unavailable skill", "project", "project")
+	index := filepath.Join(root, "skills", "SKILLS.md")
+	require.NoError(t, os.Chmod(index, 0000))
+	t.Cleanup(func() { _ = os.Chmod(index, 0600) })
+	if _, err := os.ReadFile(index); err == nil {
+		t.Skip("permissions not enforced")
+	}
+	good := createProject(t, h, "Healthy skills")
+	good.RepoPath = t.TempDir()
+	require.NoError(t, h.projectRepo.Update(t.Context(), good))
+	writeStandaloneSkill(t, filepath.Join(good.RepoPath, ".openvibely"), "healthy", "Healthy available", "project", "project")
+	for _, id := range []string{good.ID, models.AllProjectsID} {
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/skills?project_id="+id, nil))
+		require.Equal(t, 200, rec.Code, "scope=%s body=%s", id, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "Healthy available")
+		require.Contains(t, rec.Body.String(), "Global available")
+		require.NotContains(t, rec.Body.String(), "Unavailable skill")
+	}
+}

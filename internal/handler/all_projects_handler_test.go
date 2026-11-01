@@ -470,3 +470,26 @@ func TestAllProjectsTaskRunChartsContainBothProjects(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskChangesRefreshKeepsWorkspaceScope(t *testing.T) {
+	h, app, _, _ := setupTestHandlerWithStores(t)
+	owner := createProject(t, h, "Diff owner")
+	task := createTask(t, h, owner.ID, "Live diff")
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	for _, scope := range []string{models.AllProjectsID, owner.ID} {
+		t.Run(scope, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=changes&project_id="+scope, nil))
+			require.Equal(t, 200, rec.Code, rec.Body.String())
+			refreshURL := "/tasks/" + task.ID + "/changes?project_id=" + scope
+			require.Contains(t, rec.Body.String(), `hx-get="`+refreshURL+`"`)
+			require.Contains(t, rec.Body.String(), `fetch(changesContent.getAttribute('hx-get'), {`)
+			require.NotContains(t, rec.Body.String(), `fetch('/tasks/' + taskId + '/changes', {`)
+			req := httptest.NewRequest(http.MethodGet, refreshURL, nil)
+			req.Header.Set("HX-Request", "true")
+			result := httptest.NewRecorder()
+			app.ServeHTTP(result, req)
+			require.Equal(t, 200, result.Code, result.Body.String())
+		})
+	}
+}

@@ -3242,7 +3242,7 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	}
 	for _, snippet := range []string{
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
-		"link.href = '/tasks/' + encodedTaskId",
+		"link.href = window.chatTaskResultURL(encodedTaskId, '?from=chat')",
 		"if (inCode && !inToolOutput) continue", "(inToolOutput || inMarkdownFallback) && window.isInsideCode",
 		"window.convertTaskLinksInMessage(bubble)",
 		"window.convertTaskEditLinksInMessage(bubble)",
@@ -3282,6 +3282,7 @@ function element(tag) {
   };
 }
 global.document = {
+  getElementById() { return null; },
   createTreeWalker(root) { let i = 0; return { nextNode() { return root.nodes[i++] || null; } }; },
   createDocumentFragment() { return element('fragment'); },
   createElement: element,
@@ -3332,7 +3333,7 @@ function descendants(root, tag, out = []) {
 function anchors(root, out = []) { return descendants(root, 'A', out); }
 function buttons(root, out = []) { return descendants(root, 'BUTTON', out); }
 `
-	script := "global.window = {};\n" + content[start:end] + codeHelpers + harness + `
+	script := "global.window = {location:{href:'http://example.com/chat?project_id=__all_projects__',search:'?project_id=__all_projects__'}};\n" + content[start:end] + codeHelpers + harness + `
 window.convertTaskLinksInMessage(message('- "Created" (backlog) [TASK_ID:task/id?unsafe]', 'plain'));
 window.convertTaskEditLinksInMessage(message('- "Edited" (updated: title) [TASK_EDITED:edit/id]', 'plain'));
 const toolCreate = message('- "Tool-created" (active) [TASK_ID:tool/create]', 'tool-pre');
@@ -3387,18 +3388,18 @@ if (replacements.length !== 10) { console.error('replacements', replacements.len
 if (inlineCreate.nodes[0].textContent !== '- "Inline example" (backlog) [TASK_ID:inline/create]' || fencedEdit.nodes[0].textContent !== '- "Fence example" (updated: title) [TASK_EDITED:fence/edit]' || codedToolCreate.nodes[0].textContent.indexOf('[TASK_ID:example/create]') === -1 || codedToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:example/edit]') === -1 || multilineToolCreate.nodes[0].textContent.indexOf('[TASK_ID:multiline/create]') === -1 || multilineToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:multiline/edit]') === -1 || unmatchedThenCreate.nodes[0].textContent.indexOf('[TASK_ID:later/create]') === -1 || unmatchedThenEdit.nodes[0].textContent.indexOf('[TASK_EDITED:later/edit]') === -1 || unicodeFenceCreate.nodes[0].textContent.indexOf('[TASK_ID:unicode/create]') === -1 || unicodeFenceEdit.nodes[0].textContent.indexOf('[TASK_EDITED:unicode/edit]') === -1 || bareCRFenceCreate.nodes[0].textContent.indexOf('[TASK_ID:bare-cr/create]') === -1 || bareCRFenceEdit.nodes[0].textContent.indexOf('[TASK_EDITED:bare-cr/edit]') === -1) { console.error('coded metadata changed'); process.exit(2); }
 const fallbackCreateOutput = replacements[6];
 const fallbackEditOutput = replacements[7];
-if (anchors(fallbackCreateOutput.next).length !== 1 || anchors(fallbackCreateOutput.next)[0].href !== '/tasks/fallback%2Freal' || buttons(fallbackCreateOutput.next).length !== 1) { console.error('fallback create hydration', fallbackCreateOutput); process.exit(9); }
-if (anchors(fallbackEditOutput.next).length !== 1 || anchors(fallbackEditOutput.next)[0].href !== '/tasks/fallback%2Freal-edit') { console.error('fallback edit hydration', fallbackEditOutput); process.exit(10); }
+if (anchors(fallbackCreateOutput.next).length !== 1 || anchors(fallbackCreateOutput.next)[0].href !== '/tasks/fallback%2Freal?from=chat&project_id=__all_projects__' || buttons(fallbackCreateOutput.next).length !== 1) { console.error('fallback create hydration', fallbackCreateOutput); process.exit(9); }
+if (anchors(fallbackEditOutput.next).length !== 1 || anchors(fallbackEditOutput.next)[0].href !== '/tasks/fallback%2Freal-edit?from=chat&project_id=__all_projects__') { console.error('fallback edit hydration', fallbackEditOutput); process.exit(10); }
 if (fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/inline]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/multiline]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/fence]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/bare-cr]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/inline-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/multiline-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/fence-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/bare-cr-edit]') === -1 || fallbackToolCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/tool-bare-cr]') === -1 || fallbackToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/tool-bare-cr-edit]') === -1) { console.error('fallback coded metadata changed'); process.exit(11); }
 if (toolCreate.nodes[0].textContent.indexOf('[TASK_ID:tool/create]') === -1 || toolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:tool/edit]') === -1 || fallbackToolCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/tool-real]') === -1 || fallbackToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/tool-real-edit]') === -1) { console.error('preformatted tool metadata changed'); process.exit(12); }
 const links = replacements.flatMap(item => anchors(item.next));
 if (links.length !== 10) { console.error('links', links.length); process.exit(3); }
-if (links[0].href !== '/tasks/task%2Fid%3Funsafe' || links[0].textContent !== 'Created') { console.error(links[0]); process.exit(4); }
-if (links[1].href !== '/tasks/edit%2Fid' || links[1].textContent !== '"Edited"') { console.error(links[1]); process.exit(5); }
-if (links[2].href !== '/tasks/tool%2Fcreate' || links[2].textContent !== 'Tool-created' || links[2].textContent.includes('\n')) { console.error('tool create', links[2]); process.exit(13); }
-if (links[3].href !== '/tasks/tool%2Fedit' || links[3].textContent !== '"Tool-edited"' || links[3].textContent.includes('\n')) { console.error('tool edit', links[3]); process.exit(14); }
-if (links[4].href !== '/tasks/escaped%2Fcreate' || links[5].href !== '/tasks/escaped%2Fedit') { console.error('escaped real links', links[4], links[5]); process.exit(15); }
-if (links[8].href !== '/tasks/fallback%2Ftool-real' || links[9].href !== '/tasks/fallback%2Ftool-real-edit') { console.error('fallback tool links', links[8], links[9]); process.exit(17); }
+if (links[0].href !== '/tasks/task%2Fid%3Funsafe?from=chat&project_id=__all_projects__' || links[0].textContent !== 'Created') { console.error(links[0]); process.exit(4); }
+if (links[1].href !== '/tasks/edit%2Fid?from=chat&project_id=__all_projects__' || links[1].textContent !== '"Edited"') { console.error(links[1]); process.exit(5); }
+if (links[2].href !== '/tasks/tool%2Fcreate?from=chat&project_id=__all_projects__' || links[2].textContent !== 'Tool-created' || links[2].textContent.includes('\n')) { console.error('tool create', links[2]); process.exit(13); }
+if (links[3].href !== '/tasks/tool%2Fedit?from=chat&project_id=__all_projects__' || links[3].textContent !== '"Tool-edited"' || links[3].textContent.includes('\n')) { console.error('tool edit', links[3]); process.exit(14); }
+if (links[4].href !== '/tasks/escaped%2Fcreate?from=chat&project_id=__all_projects__' || links[5].href !== '/tasks/escaped%2Fedit?from=chat&project_id=__all_projects__') { console.error('escaped real links', links[4], links[5]); process.exit(15); }
+if (links[8].href !== '/tasks/fallback%2Ftool-real?from=chat&project_id=__all_projects__' || links[9].href !== '/tasks/fallback%2Ftool-real-edit?from=chat&project_id=__all_projects__') { console.error('fallback tool links', links[8], links[9]); process.exit(17); }
 if (anchors(sourceCreate).length || anchors(sourceEdit).length || anchors(blankCreate).length || anchors(blankEdit).length) { console.error('invalid source or blank marker linked'); process.exit(16); }
 const chunkSize = 64 * 1024;
 const crossingCreate = chunkedToolMessage('x'.repeat(chunkSize - 18) + '\n- "Boundary create" (backlog) [TASK_ID:chunk/create]');
@@ -3411,7 +3412,7 @@ window.convertTaskEditLinksInMessage(crossingEdit.root);
 window.convertTaskLinksInMessage(codedInline.root);
 window.convertTaskEditLinksInMessage(codedFence.root);
 const chunkedReplacements = replacements.slice(chunkedReplacementStart);
-if (chunkedReplacements.length !== 2 || anchors(chunkedReplacements[0].next)[0].href !== '/tasks/chunk%2Fcreate' || anchors(chunkedReplacements[1].next)[0].href !== '/tasks/chunk%2Fedit') { console.error('chunk-boundary links', chunkedReplacements); process.exit(18); }
+if (chunkedReplacements.length !== 2 || anchors(chunkedReplacements[0].next)[0].href !== '/tasks/chunk%2Fcreate?from=chat&project_id=__all_projects__' || anchors(chunkedReplacements[1].next)[0].href !== '/tasks/chunk%2Fedit?from=chat&project_id=__all_projects__') { console.error('chunk-boundary links', chunkedReplacements); process.exit(18); }
 if (codedInline.pre.childNodes.length !== 1 || codedFence.pre.childNodes.length !== 1 || anchors(codedInline.root).length || anchors(codedFence.root).length) { console.error('cross-chunk coded metadata converted'); process.exit(19); }
 const createButtons = buttons(replacements[0].next);
 if (createButtons.length !== 1 || createButtons[0].className.indexOf('ov-task-result-start-btn') === -1) { console.error('buttons', createButtons); process.exit(8); }

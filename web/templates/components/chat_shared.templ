@@ -3332,6 +3332,16 @@ templ ChatAutoScrollScript() {
 				});
 			};
 
+            // Preserve the rendered workspace on native links and raw fetches too.
+            window.chatTaskResultURL = function(encodedTaskId, suffix) {
+                var url = new URL('/tasks/' + encodedTaskId + (suffix || ''), window.location.href);
+                var scope = new URLSearchParams(window.location.search).get('project_id');
+                var selector = document.getElementById('project-selector');
+                if (!scope && selector) scope = selector.value;
+                if (scope) url.searchParams.set('project_id', scope);
+                return url.pathname + url.search;
+            };
+
 			// Convert task-creation result metadata to clickable links
 			window.convertTaskLinksInMessage = function(messageElement) {
 				window.normalizeTaskResultToolOutputTextNodes(messageElement);
@@ -3388,15 +3398,16 @@ templ ChatAutoScrollScript() {
 							linkWrapper.appendChild(bullet);
 						}
 							var link = document.createElement('a');
-							link.href = '/tasks/' + encodedTaskId;
+							link.href = window.chatTaskResultURL(encodedTaskId, '?from=chat');
 							link.className = inToolOutput
 								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
 								: 'ov-task-result-link cursor-pointer';
 							link.textContent = taskTitle;
 						link.onclick = function(e) {
+                            if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
 							e.preventDefault();
 							e.stopPropagation();
-							window.openVibelyNavigate('/tasks/' + encodedTaskId + '?from=chat').catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
+							window.openVibelyNavigate(link.getAttribute('href')).catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
 						};
 						linkWrapper.appendChild(link);
 						if (category) {
@@ -3417,7 +3428,7 @@ templ ChatAutoScrollScript() {
 								startBtn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
 								var formData = new URLSearchParams();
 								formData.set('category', 'active');
-								fetch('/tasks/' + encodedTaskId + '/category', {
+								fetch(window.chatTaskResultURL(encodedTaskId, '/category'), {
 									method: 'PATCH',
 									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 									body: formData.toString()
@@ -3513,14 +3524,15 @@ templ ChatAutoScrollScript() {
 						var linkWrapper = document.createElement('span');
 						linkWrapper.innerHTML = '- ';
 							var link = document.createElement('a');
-							link.href = '/tasks/' + encodedTaskId;
+							link.href = window.chatTaskResultURL(encodedTaskId, '?from=chat');
 							link.className = inToolOutput
 								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
 								: 'ov-task-result-link cursor-pointer';
 							link.textContent = '"' + taskTitle + '"';
 						link.onclick = function(e) {
+                            if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
 							e.preventDefault();
-							window.openVibelyNavigate('/tasks/' + encodedTaskId + '?from=chat');
+							window.openVibelyNavigate(link.getAttribute('href'));
 						};
 						linkWrapper.appendChild(link);
 						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));

@@ -3,10 +3,13 @@ package chatcontrol
 import (
 	"strings"
 
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/models"
+
 	"github.com/openvibely/openvibely/pkg/toolschema"
 )
 
-const projectSelectionHelp = "Optional destination/filter project ID from list_projects. Defaults to the current project in a project conversation. In All projects chat an explicit real project ID is required; call once per project for a subset or all. Available in interactive web/API chat only; task follow-ups remain restricted to their owning project."
+const projectSelectionHelp = "Optional destination/filter project ID from list_projects. In an individual-project conversation, omission uses the current project and any supplied ID must match it. Cross-project selection is only available in All projects chat. In All projects chat an explicit real project ID is required; call once per project for a subset or all. Available in interactive web/API chat only; task follow-ups remain restricted to their owning project."
 
 // SupportsProjectSelection identifies actions whose implicit project can be
 // selected by an interactive web/API conversation. Task workers and channel
@@ -67,4 +70,15 @@ func projectSelectionDescription(name string, surface Surface, description strin
 		description = strings.ReplaceAll(description, "optional project_id/project_name are selected-project assertions", "project_id selects the project; project_name optionally asserts its name")
 	}
 	return description
+}
+
+// ToolDefsForAllProjectsContext adds routing fields only for global web/API chat.
+// Ordinary conversations and channel runtimes use the original registry schemas.
+func ToolDefsForAllProjectsContext(mode models.ChatMode, surface Surface, includeThreadTools bool) []llmcontracts.RuntimeToolDefinition {
+	defs := ToolDefsForContext(mode, surface, includeThreadTools)
+	for i := range defs {
+		defs[i].Description = projectSelectionDescription(defs[i].Name, surface, defs[i].Description)
+		defs[i].Schema = projectSelectionSchema(defs[i].Name, surface, defs[i].Schema)
+	}
+	return defs
 }

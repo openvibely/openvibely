@@ -1496,13 +1496,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<div id="tab-changes" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes") }>
 			<div
 				id="changes-content"
-				hx-get={ fmt.Sprintf("/tasks/%s/changes", task.ID) }
+				hx-get={ fmt.Sprintf("/tasks/%s/changes?project_id=%s", task.ID, layout.WorkspaceProjectID(ctx, task.ProjectID)) }
 				hx-trigger="refreshChanges from:body"
 				hx-swap="innerHTML"
 				data-task-id={ task.ID }
 			>
 				if defaultTab == "changes" {
-					<div class="card bg-base-100 shadow-sm border border-base-300" hx-get={ fmt.Sprintf("/tasks/%s/changes", task.ID) } hx-trigger="load" hx-swap="outerHTML">
+					<div class="card bg-base-100 shadow-sm border border-base-300" hx-get={ fmt.Sprintf("/tasks/%s/changes?project_id=%s", task.ID, layout.WorkspaceProjectID(ctx, task.ProjectID)) } hx-trigger="load" hx-swap="outerHTML">
 						<div class="card-body">
 							<h4 class="text-lg font-bold mb-3">File Changes</h4>
 							<p class="text-sm opacity-60">Loading changes...</p>
@@ -1848,7 +1848,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					// Only swap if content actually changed — this prevents the viewport
 					// jumps caused by the old htmx.ajax() path which replaced innerHTML
 					// before the fingerprint check could run.
-					fetch('/tasks/' + taskId + '/changes', {
+					fetch(changesContent.getAttribute('hx-get'), {
 						headers: { 'HX-Request': 'true' }
 					}).then(function(resp) {
 						if (!resp.ok) throw new Error('HTTP ' + resp.status);

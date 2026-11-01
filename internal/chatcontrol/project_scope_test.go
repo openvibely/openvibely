@@ -9,7 +9,7 @@ import (
 
 func TestProjectSelectionSchemaIsContextual(t *testing.T) {
 	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceEmail} {
-		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
+		defs := ToolDefsForAllProjectsContext(models.ChatModeOrchestrate, surface, true)
 		found := false
 		for _, def := range defs {
 			if def.Name != "list_tasks" {
@@ -34,7 +34,7 @@ func TestExistingProjectAssertionsHaveContextualDescriptions(t *testing.T) {
 			original := Get(name)
 			originalSchema := original.ParameterSchema()
 			for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceEmail} {
-				for _, def := range ToolDefsForContext(models.ChatModeOrchestrate, surface, true) {
+				for _, def := range ToolDefsForAllProjectsContext(models.ChatModeOrchestrate, surface, true) {
 					if def.Name != name {
 						continue
 					}
@@ -54,5 +54,14 @@ func TestExistingProjectAssertionsHaveContextualDescriptions(t *testing.T) {
 			}
 			require.Equal(t, originalSchema, original.ParameterSchema(), "generating web/API definitions must not mutate shared registry schemas")
 		})
+	}
+}
+
+func TestOrdinarySchemasRetainRegistryFields(t *testing.T) {
+	for _, surface := range AllSurfaces {
+		for _, def := range ToolDefsForContext(models.ChatModeOrchestrate, surface, true) {
+			require.Equal(t, Get(def.Name).Schema, def.Schema)
+			require.Equal(t, Get(def.Name).Description, def.Description)
+		}
 	}
 }

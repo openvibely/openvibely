@@ -104,8 +104,19 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
  assert(!document.getElementById('agent-project-choice').classList.contains('hidden'),'project selector hidden');
  ownerSelect.value='` + b.ID + `';
  assert(new FormData(document.getElementById('agent_form')).get('agent_project_id')===ownerSelect.value,'owner missing from form');
+ const originalFetch=window.fetch;
+ const generatedURLs=[];
+ window.fetch=function(url,options){if(String(url).startsWith('/agents/generate')) generatedURLs.push(String(url));return originalFetch.apply(this,arguments);};
+ document.getElementById('agent_description').value='Browser audit';
+ await generateAgentFromPrompt();
+ assert(new URL(generatedURLs[0],location.href).searchParams.get('project_id')===ownerSelect.value,'generation ignored chosen owner');
+
  scope.value='global'; scope.dispatchEvent(new Event('change',{bubbles:true}));
  assert(!new FormData(document.getElementById('agent_form')).has('agent_project_id'),'global submits stale owner');
+ await generateAgentFromPrompt();
+ assert(new URL(generatedURLs[1],location.href).searchParams.get('project_id')==='__all_projects__','global generation reused stale owner');
+ window.fetch=originalFetch;
+
  await new Promise(resolve=>{const modal=document.getElementById('agent_modal');modal.addEventListener('close',resolve,{once:true});modal.close();});
  assert(document.getElementById('project-selector').value==='__all_projects__','left All projects');
  await fetch('/browser-result',{method:'POST',body:'pass'});
