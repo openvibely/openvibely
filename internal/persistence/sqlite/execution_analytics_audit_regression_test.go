@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -266,6 +267,15 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	}
 	if len(dashboard.OutcomeTrend) != 1 || dashboard.OutcomeTrend[0].TechnicalCompletion.Denominator != 1 || dashboard.OutcomeTrend[0].FollowUp.Denominator != 1 {
 		t.Fatalf("workflow filter not applied to outcome trend: %+v", dashboard.OutcomeTrend)
+	}
+	allFilter := filter
+	allFilter.ProjectID = models.AllProjectsID
+	allDashboard, err := execRepo.GetAnalyticsDashboard(ctx, allFilter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(dashboard.WorkflowDetail, allDashboard.WorkflowDetail) || !reflect.DeepEqual(dashboard.Workflows, allDashboard.Workflows) {
+		t.Fatalf("All projects must preserve all four selected automation chart datasets: single=%+v all=%+v", dashboard.WorkflowDetail, allDashboard.WorkflowDetail)
 	}
 	if dashboard.WorkflowDetail == nil || len(dashboard.WorkflowDetail.Funnel) != 2 || len(dashboard.WorkflowDetail.Durations) == 0 || len(dashboard.WorkflowDetail.Failures) == 0 || len(dashboard.WorkflowDetail.Bottlenecks) == 0 {
 		t.Fatalf("workflow node detail missing: %+v", dashboard.WorkflowDetail)
