@@ -29,6 +29,11 @@ func TestSearchFilesUTF8Truncation(t *testing.T) {
 			wantText: asciiPrefix + "...",
 		},
 		{
+			name:     "four-byte rune ending at cutoff is preserved",
+			line:     []byte(strings.Repeat("a", maxLineLength-4) + "🌱needle"),
+			wantText: strings.Repeat("a", maxLineLength-4) + "🌱...",
+		},
+		{
 			name:     "long ASCII preserves excerpt length",
 			line:     []byte(longASCII + "needle"),
 			wantText: longASCII[:maxLineLength] + "...",
