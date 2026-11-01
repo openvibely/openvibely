@@ -164,12 +164,40 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("new task link initially scoped", `document.getElementById("task-list-new").getAttribute("href")`, "/tasks/new?project_id=p00")
 				// Tab setup moves the selector on DOMContentLoaded, which would demote an already-open modal menu.
 				browser.waitFor("page initialized", `String(document.readyState === 'complete' && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
+				// Sweep across the divider and its neighboring pixels: every point
+				// must hit a tab and show its hover surface, without a titlebar gap.
+				for _, offset := range []float64{-3, -2, -1, 0, 1} {
+					var dividerPoint struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').getBoundingClientRect();return {X:r.right,Y:r.y+15};})())`)), &dividerPoint); err != nil {
+						t.Fatal(err)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": dividerPoint.X + offset, "y": dividerPoint.Y}, nil)
+					browser.waitFor("divider highlights adjacent tab", `String(Array.from(document.querySelectorAll('.desktop-project-tab:hover [role="tab"]')).some(tab => tab.getAttribute('aria-selected') === 'false' && getComputedStyle(tab).backgroundColor !== 'rgba(0, 0, 0, 0)'))`, "true")
+					browser.waitFor("hover hides divider", `getComputedStyle(document.querySelector('[data-project-tab="p01"]').parentElement,'::after').opacity`, "0")
+				}
 				if got := browser.evaluate(`String(location.hash === '#keep' && new URL(location.href).searchParams.get('view') === 'board')`); got != "true" {
 					t.Fatal("initial URL lost route state", got)
 				}
 				if got := browser.evaluate(`String(document.querySelector('.drawer-content').getBoundingClientRect().bottom <= innerHeight + 1)`); got != "true" {
 					t.Fatal("shared page shell extends below viewport", got)
 				}
+				// Attached-tab highlights are inset; their margins still activate the tab.
+				browser.evaluate(`window.savedDividerTabStyle = document.documentElement.getAttribute('data-tab-style'); document.documentElement.setAttribute('data-tab-style', 'attached'); 'ready'`)
+				var insetPoint struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect();return {X:r.right-1,Y:r.top+r.height/2};})())`)), &insetPoint); err != nil {
+					t.Fatal(err)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": insetPoint.X, "y": insetPoint.Y}, nil)
+				if got := browser.evaluate(fmt.Sprintf(`String(document.elementFromPoint(%f,%f) === document.querySelector('[data-project-tab="p01"]').parentElement)`, insetPoint.X, insetPoint.Y)); got != "true" {
+					t.Fatal("divider activation fixture must hit the wrapper margin", got)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": insetPoint.X, "y": insetPoint.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+				browser.waitFor("divider margin activates tab on press", `document.querySelector('[data-project-tab][aria-selected="true"]').dataset.projectTab`, "p01")
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": insetPoint.X, "y": insetPoint.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+				browser.waitFor("divider margin navigates", `new URLSearchParams(location.search).get('project_id')`, "p01")
+				browser.click(`[data-project-tab="p00"]`)
+				browser.waitFor("restore initial project after divider activation", `new URLSearchParams(location.search).get('project_id')`, "p00")
+				browser.evaluate(`if (window.savedDividerTabStyle === null) document.documentElement.removeAttribute('data-tab-style'); else document.documentElement.setAttribute('data-tab-style', window.savedDividerTabStyle); delete window.savedDividerTabStyle; 'restored'`)
 				browser.click("#project-selector-trigger")
 				browser.waitFor("menu ready for hover", `String(document.getElementById('project-selector-dialog').open)`, "true")
 				activeColor := browser.evaluate(`getComputedStyle(document.querySelector('#project-selector-dialog [data-selector-active]')).backgroundColor`)
