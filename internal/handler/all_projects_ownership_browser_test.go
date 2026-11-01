@@ -77,6 +77,19 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
  assert(!document.getElementById('agent_skill_new_btn').disabled,'cannot manage Agent skills');
   await new Promise(resolve=>{const modal=document.getElementById('agent_modal');modal.addEventListener('close',resolve,{once:true});modal.close();});
  }
+
+ openNewAgentModal();
+ const scope=document.getElementById('advanced_scope');
+ const ownerSelect=document.getElementById('agent-project-owner');
+ assert(ownerSelect && ownerSelect.disabled,'global Agent must not submit an owner');
+ scope.value='project'; scope.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(!ownerSelect.disabled && ownerSelect.required,'project selector not enabled');
+ assert(!document.getElementById('agent-project-choice').classList.contains('hidden'),'project selector hidden');
+ ownerSelect.value='` + b.ID + `';
+ assert(new FormData(document.getElementById('agent_form')).get('agent_project_id')===ownerSelect.value,'owner missing from form');
+ scope.value='global'; scope.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(!new FormData(document.getElementById('agent_form')).has('agent_project_id'),'global submits stale owner');
+ await new Promise(resolve=>{const modal=document.getElementById('agent_modal');modal.addEventListener('close',resolve,{once:true});modal.close();});
  assert(document.getElementById('project-selector').value==='__all_projects__','left All projects');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)})}

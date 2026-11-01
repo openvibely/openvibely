@@ -2,6 +2,7 @@ package pages
 
 import (
 	"encoding/json"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -439,12 +440,23 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									</div>
 									<div class="form-control">
 										<label class="label"><span class="label-text">Scope</span></label>
-										<select id="advanced_scope" class="select select-bordered select-sm">
+										<select id="advanced_scope" class="select select-bordered select-sm" onchange="updateAgentProjectChoice()">
 											<option value="global">Global (app data)</option>
 											<option value="project">Project-scoped</option>
 										</select>
 									</div>
 								</div>
+                                if state.ProjectID == models.AllProjectsID {
+                                    <label id="agent-project-choice" class="form-control hidden">
+                                        <span class="label-text">Project</span>
+                                        <select id="agent-project-owner" name="agent_project_id" class="select select-bordered select-sm" disabled>
+                                            <option value="">Choose a project</option>
+                                            for _, project := range templateui.ProjectOptions(ctx) {
+                                                <option value={ project.ID }>{ project.Name }</option>
+                                            }
+                                        </select>
+                                    </label>
+                                }
 								<div class="grid grid-cols-1 md:grid-cols-3 gap-2">
 									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
 										<input type="checkbox" id="advanced_selectable_as_primary" class="checkbox checkbox-sm"/>
@@ -1606,7 +1618,20 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				};
 			}
 
-			function resetLifecycleFormFields() {
+			function updateAgentProjectChoice() {
+                const choice = document.getElementById('agent-project-choice');
+                const owner = document.getElementById('agent-project-owner');
+                if (!choice || !owner) return;
+                const scoped = document.getElementById('advanced_scope').value === 'project';
+                choice.classList.toggle('hidden', !scoped);
+                owner.disabled = !scoped || owner.dataset.fixed === 'true';
+                owner.required = scoped && !owner.disabled;
+            }
+
+            function resetLifecycleFormFields() {
+                const owner = document.getElementById('agent-project-owner');
+                if (owner) { owner.value = ''; delete owner.dataset.fixed; }
+
 				['perm_read_task_prompt','perm_read_task_execution','perm_read_project_memory','perm_write_project_memory','perm_read_agents','perm_write_agents','perm_read_skills','perm_write_skills','perm_read_repository_files','perm_write_repository_files','perm_use_shell_or_tools'].forEach(id => {
 					const el = document.getElementById(id); if (el) { el.checked = false; el.closest('label')?.classList.remove('hidden'); }
 				});
@@ -1614,6 +1639,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					});
 					const scopeEl = document.getElementById('advanced_scope');
 					if (scopeEl) scopeEl.value = 'global';
+ updateAgentProjectChoice();
 						['advanced_selectable_as_primary'].forEach(id => {
 							const el = document.getElementById(id); if (el) el.checked = true;
 						});				const enabledEl = document.getElementById('advanced_enabled');
@@ -1692,6 +1718,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 				setVal('advanced_key', data ? data.key : '');
 							setVal('advanced_scope', data && data.scope === 'project' ? 'project' : 'global');
+                    const owner = document.getElementById('agent-project-owner');
+                    if (owner) {
+                        owner.value = data && data.project_id || '';
+                        owner.dataset.fixed = String(!!(data && data.id && data.scope === 'project' && data.project_id));
+                        updateAgentProjectChoice();
+                    }
 					setCheck('advanced_selectable_as_primary', data ? data.selectable_as_primary !== false : true);				setCheck('advanced_enabled', data ? data.enabled : true);
 				setVal('advanced_source_refs', data && Array.isArray(data.source_refs) ? data.source_refs.join('\n') : '');
 

@@ -248,3 +248,31 @@ func TestAllProjectsAgentsUnreadableDeclarations(t *testing.T) {
 		}
 	}
 }
+
+func TestAllProjectsCreateAgentOwner(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(stores.Agents)
+	owner := createProject(t, h, "Selected owner")
+	for _, tc := range []struct {
+		name, owner string
+		status      int
+	}{
+		{"missing", "", 400}, {"unknown", "missing-project", 400},
+		{"virtual", models.AllProjectsID, 400}, {"selected", owner.ID, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form := url.Values{"name": {"Project Agent"}, "key": {"selected-owner-" + tc.name}, "system_prompt": {"Review"}, "model": {"inherit"}, "scope": {"project"}, "agent_project_id": {tc.owner}}
+			req := httptest.NewRequest(http.MethodPost, "/agents?project_id="+models.AllProjectsID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			app.ServeHTTP(rec, req)
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			if tc.status == 200 {
+				saved, err := stores.Agents.GetByKey(t.Context(), "selected-owner-"+tc.name)
+				require.NoError(t, err)
+				require.Equal(t, owner.ID, saved.ProjectID)
+				require.Contains(t, rec.Body.String(), `data-project-label>`+owner.Name+`</span>`)
+			}
+		})
+	}
+}

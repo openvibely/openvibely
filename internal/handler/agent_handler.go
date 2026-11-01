@@ -730,6 +730,23 @@ func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent
 	if err := applyLifecycleAgentFormFields(c, agent); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if owner := strings.TrimSpace(c.FormValue("agent_project_id")); owner != "" && agent.Scope == models.AgentScopeProject {
+		current, err := h.getCurrentProjectID(c)
+		if err != nil {
+			return err
+		}
+		if owner == models.AllProjectsID || (current != models.AllProjectsID && current != owner) {
+			return echo.NewHTTPError(http.StatusBadRequest, "Choose a valid project for this Agent")
+		}
+		if agent.ProjectID != "" && agent.ProjectID != owner {
+			return echo.NewHTTPError(http.StatusBadRequest, "Cannot change this Agent's project")
+		}
+		project, err := h.projectSvc.GetByID(c.Request().Context(), owner)
+		if err != nil || project == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "Choose a valid project for this Agent")
+		}
+		agent.ProjectID = project.ID
+	}
 	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
 		if pid, _ := h.getCurrentProjectID(c); pid != "" && pid != models.AllProjectsID {
 			agent.ProjectID = pid
