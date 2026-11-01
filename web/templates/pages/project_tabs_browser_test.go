@@ -181,6 +181,18 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`String(document.querySelector('.drawer-content').getBoundingClientRect().bottom <= innerHeight + 1)`); got != "true" {
 					t.Fatal("shared page shell extends below viewport", got)
 				}
+				// Visible highlights remain separated even though pointer targets touch.
+				browser.evaluate(`window.savedSpacingTabStyle = document.documentElement.getAttribute('data-tab-style'); 'ready'`)
+				for _, style := range []string{"detached", "attached"} {
+					browser.evaluate(`document.documentElement.setAttribute('data-tab-style', '` + style + `'); 'ready'`)
+					var spacingPoint struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect();return {X:r.left+80,Y:r.top+r.height/2};})())`)), &spacingPoint); err != nil {
+						t.Fatal(err)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": spacingPoint.X, "y": spacingPoint.Y}, nil)
+					browser.waitFor(style+" highlight has breathing room on both sides", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),r=tab.getBoundingClientRect(),slot=tab.parentElement.getBoundingClientRect(),selected=document.querySelector('[data-project-tab="p00"]').parentElement.getBoundingClientRect();return tab.parentElement.matches(':hover') && r.left-slot.left>=6 && slot.right-r.right>=6 && r.left-selected.right>=6;})())`, "true")
+				}
+				browser.evaluate(`if (window.savedSpacingTabStyle === null) document.documentElement.removeAttribute('data-tab-style'); else document.documentElement.setAttribute('data-tab-style', window.savedSpacingTabStyle); delete window.savedSpacingTabStyle; 'restored'`)
 				// Attached-tab highlights are inset; their margins still activate the tab.
 				browser.evaluate(`window.savedDividerTabStyle = document.documentElement.getAttribute('data-tab-style'); document.documentElement.setAttribute('data-tab-style', 'attached'); 'ready'`)
 				var insetPoint struct{ X, Y float64 }
