@@ -354,7 +354,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     dragFrame = requestAnimationFrame(dragTick);
    }
    list.addEventListener('pointerdown', function(event) {
-    var tab = event.target.closest('[data-project-tab]');
+    // The wrapper owns the full hover area, including the inset highlight's margins.
+    // Close buttons must retain their own action without selecting or dragging a tab.
+    if (event.target.closest('[data-close-project]')) return;
+    var wrapper = event.target.closest('.desktop-project-tab');
+    var tab = wrapper && wrapper.querySelector('[data-project-tab]');
     if (!tab || event.button !== 0 || !event.isPrimary) return;
     if (!switchProject(tab.dataset.projectTab)) return;
     drag = {pointer: event.pointerId, startX: event.clientX, grabOffset: event.clientX - tab.parentElement.getBoundingClientRect().left, x: event.clientX, wrapper: tab.parentElement, started: false};

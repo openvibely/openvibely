@@ -181,6 +181,23 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`String(document.querySelector('.drawer-content').getBoundingClientRect().bottom <= innerHeight + 1)`); got != "true" {
 					t.Fatal("shared page shell extends below viewport", got)
 				}
+				// Attached-tab highlights are inset; their margins still activate the tab.
+				browser.evaluate(`window.savedDividerTabStyle = document.documentElement.getAttribute('data-tab-style'); document.documentElement.setAttribute('data-tab-style', 'attached'); 'ready'`)
+				var insetPoint struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect();return {X:r.right-1,Y:r.top+r.height/2};})())`)), &insetPoint); err != nil {
+					t.Fatal(err)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": insetPoint.X, "y": insetPoint.Y}, nil)
+				if got := browser.evaluate(fmt.Sprintf(`String(document.elementFromPoint(%f,%f) === document.querySelector('[data-project-tab="p01"]').parentElement)`, insetPoint.X, insetPoint.Y)); got != "true" {
+					t.Fatal("divider activation fixture must hit the wrapper margin", got)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": insetPoint.X, "y": insetPoint.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+				browser.waitFor("divider margin activates tab on press", `document.querySelector('[data-project-tab][aria-selected="true"]').dataset.projectTab`, "p01")
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": insetPoint.X, "y": insetPoint.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+				browser.waitFor("divider margin navigates", `new URLSearchParams(location.search).get('project_id')`, "p01")
+				browser.click(`[data-project-tab="p00"]`)
+				browser.waitFor("restore initial project after divider activation", `new URLSearchParams(location.search).get('project_id')`, "p00")
+				browser.evaluate(`if (window.savedDividerTabStyle === null) document.documentElement.removeAttribute('data-tab-style'); else document.documentElement.setAttribute('data-tab-style', window.savedDividerTabStyle); delete window.savedDividerTabStyle; 'restored'`)
 				browser.click("#project-selector-trigger")
 				browser.waitFor("menu ready for hover", `String(document.getElementById('project-selector-dialog').open)`, "true")
 				activeColor := browser.evaluate(`getComputedStyle(document.querySelector('#project-selector-dialog [data-selector-active]')).backgroundColor`)
