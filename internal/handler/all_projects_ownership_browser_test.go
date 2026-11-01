@@ -25,12 +25,14 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
 	}
 	h, app, _, stores := setupTestHandlerWithStores(t)
 	h.SetAgentRepo(stores.Agents)
+	h.SetLifecycleRepo(stores.Lifecycle)
 	h.SetWebhookRepo(stores.Webhooks)
 	h.SetAgentSkillRoot(t.TempDir())
 	a, b := createProject(t, h, "Owner Alpha"), createProject(t, h, "Owner Beta")
 	for _, p := range []*models.Project{a, b} {
 		p.RepoPath = t.TempDir()
 		require.NoError(t, h.projectRepo.Update(t.Context(), p))
+		require.NoError(t, stores.Agents.Create(t.Context(), &models.Agent{Name: p.Name + " agent", Scope: models.AgentScopeProject, ProjectID: p.ID, Key: p.ID + "-review", Model: "inherit", Enabled: true, SelectableAsPrimary: true, SystemPrompt: p.Name + " prompt"}))
 		writeStandaloneSkillWithBody(t, filepath.Join(p.RepoPath, ".openvibely"), "same-skill", "Same skill", "Same description", "project", p.Name+" body")
 		require.NoError(t, stores.Webhooks.Create(t.Context(), &models.WebhookEndpoint{ProjectID: p.ID, Name: p.Name + " webhook", Enabled: true, DefaultPriority: 2}))
 	}
@@ -61,6 +63,16 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
   assert(document.querySelector('#webhook_form [name=project_id]').value===owner,'wrong webhook owner');
   assert(document.getElementById('webhook_project_owner').value===owner,'wrong webhook owner label');
   closeWebhookModal();
+ }
+ window.openVibelyNavigate('/agents?project_id=__all_projects__');
+ await wait(()=>document.querySelectorAll('[data-agent-scope="project"]').length===2);
+ for(const ownerName of ['Owner Alpha','Owner Beta']) {
+  const card=Array.from(document.querySelectorAll('[data-agent-id]')).find(c=>c.dataset.agentName===ownerName+' agent');
+  assert(card,'missing Agent');
+  editAgentFromData(card);
+  await wait(()=>!document.getElementById('agent_save_btn').disabled);
+  assert(document.getElementById('agent_system_prompt').value===ownerName+' prompt','wrong Agent details');
+  await new Promise(resolve=>{const modal=document.getElementById('agent_modal');modal.addEventListener('close',resolve,{once:true});modal.close();});
  }
  assert(document.getElementById('project-selector').value==='__all_projects__','left All projects');
  await fetch('/browser-result',{method:'POST',body:'pass'});

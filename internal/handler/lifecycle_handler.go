@@ -72,6 +72,11 @@ func (h *Handler) ensureAgentProjectAccess(c echo.Context, agent *models.Agent) 
 		}
 		requestedProjectID = strings.TrimSpace(resolvedProjectID)
 	}
+	// The combined workspace can operate on any existing Agent. Its stored
+	// ProjectID remains authoritative for filesystem and persistence operations.
+	if requestedProjectID == models.AllProjectsID {
+		return nil
+	}
 	if requestedProjectID != "" && requestedProjectID != strings.TrimSpace(agent.ProjectID) {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}

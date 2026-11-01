@@ -129,3 +129,50 @@ func TestAllProjectsAuthorizedUsersKeepOwnerAndCombinedList(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, remaining, 1)
 }
+
+func TestAllProjectsAgentEditorPreservesOwner(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(stores.Agents)
+	p := createProject(t, h, "Audit owner")
+	a := &models.Agent{Name: "Audit scoped", Scope: models.AgentScopeProject, ProjectID: p.ID, Enabled: true, SelectableAsPrimary: true, Model: "inherit", SystemPrompt: "Review"}
+	require.NoError(t, stores.Agents.Create(t.Context(), a))
+	for _, scope := range []string{p.ID, models.AllProjectsID} {
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/agents/"+a.ID+"/json?project_id="+scope, nil))
+		require.Equal(t, 200, rec.Code, "scope=%s response=%s", scope, rec.Body.String())
+	}
+	form := url.Values{"name": {a.Name}, "system_prompt": {"Updated prompt"}, "model": {"inherit"}, "scope": {"project"}}
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+a.ID+"?project_id="+models.AllProjectsID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	require.Equal(t, 200, rec.Code, rec.Body.String())
+	saved, err := stores.Agents.GetByID(t.Context(), a.ID)
+	require.NoError(t, err)
+	require.Equal(t, p.ID, saved.ProjectID)
+	require.Equal(t, "Updated prompt", saved.SystemPrompt)
+	require.Contains(t, rec.Body.String(), `data-project-label>`+p.Name+`</span>`)
+	other := createProject(t, h, "Other owner")
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/agents/"+a.ID+"/json?project_id="+other.ID, nil))
+	require.Equal(t, 404, rec.Code)
+
+}
+
+func TestAllProjectsSkillEventOwner(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.skillAnalyticsRepo = stores.SkillAnalytics
+	h.SetAgentSkillRoot(t.TempDir())
+	p := createProject(t, h, "Audit skill owner")
+	p.RepoPath = t.TempDir()
+	require.NoError(t, h.projectRepo.Update(t.Context(), p))
+	writeStandaloneSkill(t, filepath.Join(p.RepoPath, ".openvibely"), "audit-skill", "Audit skill", "audit", "project")
+	req := httptest.NewRequest(http.MethodPost, "/skills/audit-skill/enabled?project_id="+models.AllProjectsID+"&skill_project_id="+p.ID, strings.NewReader(`{"scope":"project","enabled":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	require.Equal(t, 200, rec.Code, rec.Body.String())
+	events := skillAnalyticsEventsForTest(t, stores, "audit-skill")
+	require.Len(t, events, 1)
+	require.Equal(t, p.ID, events[0].ProjectID)
+}

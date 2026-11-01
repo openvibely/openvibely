@@ -27,7 +27,8 @@ func applyLifecycleAgentFormFields(c echo.Context, agent *models.Agent) error {
 		}
 		agent.Scope = s
 	}
-	if pid := strings.TrimSpace(c.FormValue("project_id")); pid != "" {
+	// A workspace selector is not an Agent ownership change.
+	if pid := strings.TrimSpace(c.FormValue("project_id")); pid != "" && pid != models.AllProjectsID {
 		agent.ProjectID = pid
 	}
 	if v := strings.TrimSpace(c.FormValue("selectable_as_primary")); v != "" {

@@ -731,9 +731,12 @@ func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
-		if pid, _ := h.getCurrentProjectID(c); pid != "" {
+		if pid, _ := h.getCurrentProjectID(c); pid != "" && pid != models.AllProjectsID {
 			agent.ProjectID = pid
 		}
+	}
+	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this Agent")
 	}
 	return nil
 }
