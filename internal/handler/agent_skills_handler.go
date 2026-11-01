@@ -378,7 +378,7 @@ func (h *Handler) agentOwnedSkillProjectRoot(c echo.Context, agent *models.Agent
 	if agent != nil && agent.Scope == models.AgentScopeProject {
 		agentProjectID := strings.TrimSpace(agent.ProjectID)
 		if agentProjectID != "" {
-			if requestedProjectID := strings.TrimSpace(c.QueryParam("project_id")); requestedProjectID != "" && requestedProjectID != agentProjectID {
+			if requestedProjectID := strings.TrimSpace(c.QueryParam("project_id")); requestedProjectID != "" && requestedProjectID != models.AllProjectsID && requestedProjectID != agentProjectID {
 				return "", echo.NewHTTPError(http.StatusNotFound, "agent not found")
 			}
 			return h.projectSkillRootForAgent(c, agent), nil

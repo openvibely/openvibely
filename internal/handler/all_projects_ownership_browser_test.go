@@ -33,6 +33,7 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
 		p.RepoPath = t.TempDir()
 		require.NoError(t, h.projectRepo.Update(t.Context(), p))
 		require.NoError(t, stores.Agents.Create(t.Context(), &models.Agent{Name: p.Name + " agent", Scope: models.AgentScopeProject, ProjectID: p.ID, Key: p.ID + "-review", Model: "inherit", Enabled: true, SelectableAsPrimary: true, SystemPrompt: p.Name + " prompt"}))
+		writeAgentOwnedSkillForTest(t, filepath.Join(p.RepoPath, ".openvibely"), p.ID+"-review", "owned-review", p.Name+" owned skill", p.Name+" skill body")
 		writeStandaloneSkillWithBody(t, filepath.Join(p.RepoPath, ".openvibely"), "same-skill", "Same skill", "Same description", "project", p.Name+" body")
 		require.NoError(t, stores.Webhooks.Create(t.Context(), &models.WebhookEndpoint{ProjectID: p.ID, Name: p.Name + " webhook", Enabled: true, DefaultPriority: 2}))
 	}
@@ -72,6 +73,8 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
   editAgentFromData(card);
   await wait(()=>!document.getElementById('agent_save_btn').disabled);
   assert(document.getElementById('agent_system_prompt').value===ownerName+' prompt','wrong Agent details');
+ await wait(()=>document.getElementById('agent_skills_list').textContent.includes(ownerName+' owned skill'));
+ assert(!document.getElementById('agent_skill_new_btn').disabled,'cannot manage Agent skills');
   await new Promise(resolve=>{const modal=document.getElementById('agent_modal');modal.addEventListener('close',resolve,{once:true});modal.close();});
  }
  assert(document.getElementById('project-selector').value==='__all_projects__','left All projects');

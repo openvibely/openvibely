@@ -176,3 +176,38 @@ func TestAllProjectsSkillEventOwner(t *testing.T) {
 	require.Len(t, events, 1)
 	require.Equal(t, p.ID, events[0].ProjectID)
 }
+
+func TestAllProjectsAgentSkillsPreserveOwner(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	h.SetAgentRepo(stores.Agents)
+	h.SetAgentSkillRoot(t.TempDir())
+	owner := createProject(t, h, "Skills owner")
+	other := createProject(t, h, "Other skills")
+	for _, p := range []*models.Project{owner, other} {
+		p.RepoPath = t.TempDir()
+		require.NoError(t, h.projectRepo.Update(t.Context(), p))
+		writeAgentOwnedSkillForTest(t, filepath.Join(p.RepoPath, ".openvibely"), "reviewer", "review", "Review", p.Name+" body")
+	}
+	a := &models.Agent{Name: "Reviewer", Key: "reviewer", ProjectID: owner.ID, Scope: models.AgentScopeProject, Enabled: true, Model: "inherit", SystemPrompt: "Review"}
+	require.NoError(t, stores.Agents.Create(t.Context(), a))
+	route := "/agents/" + a.ID + "/skills"
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, route+"?project_id="+models.AllProjectsID, nil))
+	require.Equal(t, 200, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), owner.Name+" body")
+	require.NotContains(t, rec.Body.String(), other.Name+" body")
+	req := httptest.NewRequest(http.MethodPut, route+"/review?project_id="+models.AllProjectsID, strings.NewReader(`{"handle":"review","name":"Review","scope":"project","body":"Updated through All projects"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	require.Equal(t, 200, rec.Code, rec.Body.String())
+	content, err := os.ReadFile(filepath.Join(owner.RepoPath, ".openvibely", "agents", "reviewer", "skills", "review", "SKILL.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(content), "Updated through All projects")
+	untouched, err := os.ReadFile(filepath.Join(other.RepoPath, ".openvibely", "agents", "reviewer", "skills", "review", "SKILL.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(untouched), other.Name+" body")
+	rec = httptest.NewRecorder()
+	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, route+"?project_id="+other.ID, nil))
+	require.Equal(t, 404, rec.Code)
+}
