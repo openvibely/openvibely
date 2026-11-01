@@ -168,5 +168,12 @@ func TestBrowserFunctional_SchedulePageDateTimePicker(t *testing.T) {
 		b.waitFor("local date and time ready to submit", `String(document.querySelector('[data-run-at-picker]').checkValidity() && document.getElementById('new_scheduled_task_modal').open)`, "true")
 		b.evaluate(`document.getElementById('new_scheduled_task_modal').close();openNewScheduledTaskModal();'reset'`)
 		b.waitFor("new schedule defaults to future minute", `String(new Date(document.querySelector('[name="run_at"]').value).getTime()>Date.now() && !!document.querySelector('.schedule-datetime-icon'))`, "true")
+		b.call("Emulation.setTimezoneOverride", map[string]any{"timezoneId": "America/New_York"}, nil)
+		b.evaluate(`window.realScheduleDate=Date; 'saved'`)
+		for _, instant := range []string{"2026-11-01T05:59:30Z", "2026-11-01T06:15:30Z", "2026-11-01T06:59:30Z", "2027-11-07T06:15:30Z", "2027-03-14T06:59:30Z"} {
+			b.evaluate(fmt.Sprintf(`window.Date=class extends window.realScheduleDate { constructor(...args){super(...(args.length?args:[%q]));} static now(){return new window.realScheduleDate(%q).getTime();} }; document.getElementById('new_scheduled_task_modal').close();openNewScheduledTaskModal();'reset'`, instant, instant))
+			b.waitFor("future default across DST at "+instant, `String(new Date(document.querySelector('[name="run_at"]').value).getTime()>Date.now())`, "true")
+		}
+		b.evaluate(`window.Date=window.realScheduleDate; 'restored'`)
 	})
 }

@@ -1067,7 +1067,7 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 	[data-automation-live-edit] { top:120px; }
 	</style>`
 	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>` + automationActions.String() + taskActions.String()
-	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `</body></html>`
+	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8"><link rel="stylesheet" href="` + static.URL("app.css") + `"><link rel="stylesheet" href="` + static.URL("app-utilities.css") + `">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `<button class="btn btn-ghost btn-sm" data-reference-ghost style="position:fixed;left:200px;top:120px;transition:none;z-index:2147483647">Reference</button></body></html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
 		if static.ServeAsset(w, assetReq) {
@@ -1274,18 +1274,15 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 	}
 
 	secondaryCases := []struct {
-		name       string
-		mode       string
-		id         string
-		wantHover  string
-		wantText   string
-		wantActive string
+		name string
+		mode string
+		id   string
 	}{
-		{name: "native dark exact", mode: "dark", id: "openvibely-dark", wantHover: "rgb(201, 208, 219)", wantText: "rgb(31, 41, 55)"},
-		{name: "native dark server-rendered", mode: "dark", wantHover: "rgb(201, 208, 219)", wantText: "rgb(31, 41, 55)"},
-		{name: "native light exact", mode: "light", id: "openvibely-light", wantHover: "rgb(204, 204, 204)", wantText: "rgb(59, 59, 59)"},
-		{name: "native light server-rendered", mode: "light", wantHover: "rgb(204, 204, 204)", wantText: "rgb(59, 59, 59)"},
-		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(4, 5, 6)"},
+		{name: "native dark exact", mode: "dark", id: "openvibely-dark"},
+		{name: "native dark server-rendered", mode: "dark"},
+		{name: "native light exact", mode: "light", id: "openvibely-light"},
+		{name: "native light server-rendered", mode: "light"},
+		{name: "imported", mode: "dark", id: "vscode-test"},
 	}
 	secondarySelectors := []struct {
 		name     string
@@ -1325,19 +1322,24 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 				if !hovered.Hovered {
 					t.Fatal("Chrome pointer did not activate the secondary action :hover state")
 				}
-				if hovered.Background != tc.wantHover || hovered.Border != tc.wantHover {
-					t.Fatalf("hover background/border = %s/%s, want historical %s", hovered.Background, hovered.Border, tc.wantHover)
+				// Edit now uses the shared ghost-button style, rather than the old
+				// filled secondary action. Compare against a real ghost control.
+				if evaluate(t, fmt.Sprintf(`String(document.querySelector(%q).classList.contains('btn-ghost'))`, control.selector)) != "true" {
+					t.Fatal("Automation Edit must use the ghost-button style")
 				}
-				if tc.wantText != "" && hovered.Color != tc.wantText {
-					t.Fatalf("hover text color = %s, want historical %s", hovered.Color, tc.wantText)
+				movePointer(t, 220, 132)
+				time.Sleep(100 * time.Millisecond)
+				var reference struct {
+					Background string `json:"background"`
+					Border     string `json:"border"`
+					Color      string `json:"color"`
+					Hovered    bool   `json:"hovered"`
 				}
-				if tc.wantActive != "" {
-					call(t, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": normal.Center[0], "y": normal.Center[1], "button": "left", "clickCount": 1}, nil)
-					active := evaluate(t, fmt.Sprintf(`getComputedStyle(document.querySelector(%q)).backgroundColor`, control.selector))
-					call(t, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": normal.Center[0], "y": normal.Center[1], "button": "left", "clickCount": 1}, nil)
-					if active != tc.wantActive || active == hovered.Background {
-						t.Fatalf("active background = %s, want distinct %s", active, tc.wantActive)
-					}
+				if err := json.Unmarshal([]byte(evaluate(t, `JSON.stringify((function(){var b=document.querySelector('[data-reference-ghost]'),s=getComputedStyle(b);return {background:s.backgroundColor,border:s.borderColor,color:s.color,hovered:b.matches(':hover')};})())`)), &reference); err != nil {
+					t.Fatal(err)
+				}
+				if !reference.Hovered || hovered.Background != reference.Background || hovered.Border != reference.Border || hovered.Color != reference.Color {
+					t.Fatalf("Edit hover styles = %+v, want ghost styles %+v", hovered, reference)
 				}
 				evaluate(t, fmt.Sprintf(`document.querySelector(%q).disabled=true; ''`, control.selector))
 				movePointer(t, 1000, 1000)

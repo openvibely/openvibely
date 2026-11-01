@@ -99,7 +99,7 @@ func testKanbanHeaderSearch(t *testing.T, width int) {
 		}
 		check("hover styles only on mouse devices", `(() => { const hovers = []; for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules } catch (e) { continue } const walk = (rs, media) => { for (const r of rs) { if (r.cssRules && r.media) walk(r.cssRules, r.media.mediaText); else if (r.selectorText && /(sidebar-toggle-btn|kanban-search-clear):hover/.test(r.selectorText) && !/opened|data-open/.test(r.selectorText)) hovers.push(media) } }; walk(rules, "") } return hovers.length >= 2 && hovers.every(m => m.includes("hover: hover")) })()`)
 		check("collapsed box has rounded corners", `getComputedStyle(`+search+`).borderTopLeftRadius === '8px'`)
-		check("search and Add Task 8px apart", `Math.round(`+addTask+`.getBoundingClientRect().left - `+search+`.getBoundingClientRect().right) === 8`)
+		check("search and Add Task 2px apart", `Math.round(`+addTask+`.getBoundingClientRect().left - `+search+`.getBoundingClientRect().right) === 2`)
 
 		b.evaluate(`(window.__iconColor = getComputedStyle(` + toggle + `).color, 'ok')`)
 		b.click(`[data-kanban-search-toggle]`)

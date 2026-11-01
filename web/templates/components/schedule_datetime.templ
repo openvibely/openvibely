@@ -66,9 +66,16 @@ templ ScheduleDateTime(value string) {
   const dateValue = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   const localValue = d => `${dateValue(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const stored = input => input.parentElement.querySelector('[name="run_at"]');
+  function futureMinute() {
+   const now=Date.now();
+   let next=new Date(Math.floor(now/60000)*60000+60000);
+   // The form omits the offset. Skip repeated minutes that parse into the past.
+   while(new Date(localValue(next)).getTime()<=now) next=new Date(next.getTime()+60000);
+   return next;
+  }
   function refresh(input) {
    if(!stored(input).value) {
-    const now=new Date(); now.setMinutes(now.getMinutes()+1); now.setSeconds(0,0);
+    const now=futureMinute();
     stored(input).value=localValue(now);
    }
    const value=stored(input).value, date=new Date(value);
@@ -205,7 +212,7 @@ templ ScheduleDateTime(value string) {
    if(active && active.popup===popup && popup.matches(':popover-open'))return;
    if(active)close(active,false);
    let selected=new Date(stored(input).value);
-   if(!stored(input).value||Number.isNaN(selected.getTime())) { selected=new Date(); selected.setMinutes(selected.getMinutes()+1); }
+   if(!stored(input).value||Number.isNaN(selected.getTime())) { selected=futureMinute(); }
    selected.setSeconds(0,0);
    const state={input,popup,selected,month:new Date(selected.getFullYear(),selected.getMonth(),1)};
    active=state;
