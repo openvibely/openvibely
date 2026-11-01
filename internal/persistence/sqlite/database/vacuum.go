@@ -207,6 +207,19 @@ func runVacuum(ctx context.Context, timer vacuumTimer, idle time.Duration, batch
 		// Include idle checks and checkpoint deferrals, but not every active batch.
 		if lastLog.IsZero() || time.Since(lastLog) >= time.Minute {
 			lastLog = time.Now()
+			// Report the next request, not the adaptive size of the finished run.
+			// Pending is a snapshot: later deletion requests may wake an idle worker
+			// sooner, but never shorten contention/error cooldowns.
+			nextPages, nextDelay := pages, delay
+			pendingRecheck := len(requests) > 0
+			if !active {
+				nextPages = vacuumBatchPages
+				if pendingRecheck && !cooldown {
+					nextDelay = 0
+				}
+			} else if remaining >= 0 {
+				nextPages = int(min(int64(nextPages), remaining))
+			}
 			reclaimed, freeBytes := int64(-1), int64(-1)
 			statsStage := "unknown"
 			if r.beforeKnown {
@@ -218,7 +231,7 @@ func runVacuum(ctx context.Context, timer vacuumTimer, idle time.Duration, batch
 				freeBytes = r.after.free * r.after.pageSize
 				statsStage = "after"
 			}
-			applog.Infof("database: incremental vacuum stage=%s batch_pages=%d next_batch_pages=%d duration=%s yield_duration=%s vacuum_duration=%s checkpoint_duration=%s busy=%t checkpoint_busy=%d wal_frames=%d checkpointed_frames=%d logical_reclaimed_bytes=%d remaining_free_bytes=%d stats=%s run_remaining_pages=%d next_delay=%s error=%v (bytes=-1 means unknown; logical shrink is not physical file shrink)", r.stage, r.pages, pages, r.duration, r.yieldDuration, r.vacuumDuration, r.checkpointDuration, r.busy, r.checkpoint.busy, r.checkpoint.frames, r.checkpoint.checkpointed, reclaimed, freeBytes, statsStage, remaining, delay, r.err)
+			applog.Infof("database: incremental vacuum stage=%s batch_pages=%d next_batch_pages=%d duration=%s yield_duration=%s vacuum_duration=%s checkpoint_duration=%s busy=%t checkpoint_busy=%d wal_frames=%d checkpointed_frames=%d logical_reclaimed_bytes=%d remaining_free_bytes=%d stats=%s run_remaining_pages=%d pending_recheck=%t timer_delay=%s next_delay=%s error=%v (bytes=-1 means unknown; logical shrink is not physical file shrink)", r.stage, r.pages, nextPages, r.duration, r.yieldDuration, r.vacuumDuration, r.checkpointDuration, r.busy, r.checkpoint.busy, r.checkpoint.frames, r.checkpoint.checkpointed, reclaimed, freeBytes, statsStage, remaining, pendingRecheck, delay, nextDelay, r.err)
 		}
 		timer.Reset(delay)
 	}
