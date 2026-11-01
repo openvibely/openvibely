@@ -1070,10 +1070,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Kanban dropdowns are explicitly state-driven so dismissal can
 				   return focus to the trigger without focus reopening the menu. */
-				#kanban-board [data-kanban-menu-key] > [data-kanban-menu-content] {
+				#kanban-board [data-kanban-menu-key] > [data-kanban-menu-content],
+				[data-task-list-context-menu] > [data-kanban-menu-content] {
 					transition: none !important;
 				}
-				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
+				#kanban-board [data-kanban-menu-key]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content],
+				[data-task-list-context-menu]:not([data-kanban-menu-open="true"]) > [data-kanban-menu-content] {
 					visibility: hidden !important;
 					opacity: 0 !important;
 					pointer-events: none !important;
@@ -1082,15 +1084,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					position: relative;
 					z-index: 999;
 				}
-				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] {
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"],
+				[data-task-list-context-menu][data-kanban-menu-open="true"] {
 					z-index: 1000 !important;
 				}
-				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] > [data-kanban-menu-content] {
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-open="true"] > [data-kanban-menu-content],
+				[data-task-list-context-menu][data-kanban-menu-open="true"] > [data-kanban-menu-content] {
 					visibility: visible !important;
 					opacity: 1 !important;
 					pointer-events: auto !important;
 				}
-				#kanban-board [data-kanban-menu-key][data-kanban-menu-positioning="true"] > [data-kanban-menu-content] {
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-positioning="true"] > [data-kanban-menu-content],
+				[data-task-list-context-menu][data-kanban-menu-positioning="true"] > [data-kanban-menu-content] {
 					visibility: hidden !important;
 					opacity: 0 !important;
 					pointer-events: none !important;
@@ -1098,7 +1103,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				#kanban-board [data-task-card-menu-trigger] + [data-kanban-menu-content] {
 					overflow: visible;
 				}
-				#kanban-board [data-kanban-menu-key][data-kanban-menu-fixed="true"] > [data-task-card-menu-trigger] + [data-kanban-menu-content] {
+				#kanban-board [data-kanban-menu-key][data-kanban-menu-fixed="true"] > [data-task-card-menu-trigger] + [data-kanban-menu-content],
+				[data-task-list-context-menu][data-kanban-menu-fixed="true"] > [data-task-card-menu-trigger] + [data-kanban-menu-content] {
 					position: fixed !important;
 					right: auto !important;
 					bottom: auto !important;
@@ -4242,6 +4248,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				if (!dropdown.dataset.originalDropdownTop) dropdown.dataset.originalDropdownTop = dropdown.classList.contains('dropdown-top') ? 'true' : 'false';
 				const content = dropdown.querySelector('.dropdown-content');
 				if (!content) return;
+                if (dropdown.hasAttribute('data-task-list-context-menu')) {
+                    dropdown.setAttribute('data-kanban-menu-fixed', 'true');
+                    const x = Number(dropdown.dataset.contextX), y = Number(dropdown.dataset.contextY);
+                    content.style.left = Math.max(8, Math.min(x, innerWidth - content.offsetWidth - 8)) + 'px';
+                    content.style.top = Math.max(8, Math.min(y, innerHeight - content.offsetHeight - 8)) + 'px';
+                    return;
+                }
 				const labelRect = label.getBoundingClientRect();
 				const boundary = closestDropdownScrollBoundary(dropdown);
 				const boundaryRect = boundary ? boundary.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
@@ -4419,7 +4432,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
 					// Check if this dropdown was already open before the click. A desktop Chat
 					// trigger may only be focused by WebView startup, which is not an open action.
-					if ((kanbanDropdown && kanbanMenuWasOpenBeforeClick) || (focusedBeforeClick === label && !kanbanDropdown && !desktopChatStartupFocus)) {
+					if ((kanbanDropdown && kanbanMenuWasOpenBeforeClick && !kanbanDropdown.hasAttribute('data-task-list-context-menu')) || (focusedBeforeClick === label && !kanbanDropdown && !desktopChatStartupFocus)) {
 						// Dropdown was already open, close it.
 						event.preventDefault();
 						if (kanbanDropdown && window.closeKanbanMenu) {
@@ -7487,6 +7500,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 		@ImageGallery()
  @FileViewer()
         @templateui.Tooltips()
+		@TaskCardActionsScript()
 		</body>
 	</html>
 }

@@ -6,8 +6,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -137,5 +139,76 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("expanded group still excludes nonmatches", visible, `["login-first","login-extra"]`)
 		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); 'cleared'`)
 		b.waitFor("clearing search preserves show more", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
+	})
+}
+
+func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := models.Task{ID: "menu-task", ProjectID: "owner", Title: "Menu task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	var runs, merges atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			menus := map[string]templ.Component{task.ID: components.TaskCardMenuItems(task, task.ProjectID, string(task.Category), "#task-list-groups", "none")}
+			if err := layout.TaskListPanelContent(models.AllProjectsID, layout.TaskListGroups([]models.Task{task}), menus).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/tasks/menu-task/card/merge-options":
+			if r.URL.Query().Get("project_id") != "owner" {
+				t.Error("wrong merge options project")
+			}
+			if err := components.TaskCardMergeOptions(&task, task.ProjectID, true, true, nil, true).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/tasks/menu-task/run":
+			if r.FormValue("project_id") != "owner" {
+				t.Error("wrong Run project")
+			}
+			runs.Add(1)
+			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/menu-task/worktree/merge":
+			if r.FormValue("project_id") != "owner" || r.FormValue("merge_source") != "task_card" || r.FormValue("merge_type") != "ff" {
+				t.Error("wrong merge request")
+			}
+			merges.Add(1)
+			w.Write([]byte(`<div id="unexpected-card">Card response</div>`))
+		case "/":
+			if err := layout.Base("Tasks", []models.Project{{ID: "owner", Name: "Owner"}}, models.AllProjectsID).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-list-context-menu", func(b *composerFocusCDP) {
+		b.waitFor("sidebar loaded", `String(!!document.querySelector('[data-task-list-row="menu-task"]'))`, "true")
+		open := `(()=>{var row=document.querySelector('[data-task-list-row="menu-task"]');row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-5,clientY:innerHeight-5}));return 'opened'})()`
+		b.evaluate(open)
+		b.waitFor("shared Git actions loaded", `String(!!document.querySelector('[data-task-list-context-menu] [data-merge-type="ff"]'))`, "true")
+		b.waitFor("menu fits viewport", `(()=>{var menu=document.querySelector('[data-task-list-context-menu] [data-menu-content]');var r=menu.getBoundingClientRect();return String(r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight)})()`, "true")
+		b.waitFor("Edit preserves All projects", `String(document.querySelector('[data-task-list-context-menu] a[hx-get]').getAttribute('href').includes('project_id=__all_projects__'))`, "true")
+		b.click(`[data-task-list-context-menu] button[hx-post]`)
+		b.waitFor("Run closes menu", `String(document.querySelector('[data-task-list-context-menu]').hidden)`, "true")
+		if runs.Load() != 1 {
+			t.Fatalf("Run requests = %d", runs.Load())
+		}
+		b.evaluate(open)
+		b.waitFor("Git actions reloaded", `String(!!document.querySelector('[data-task-list-context-menu] [data-merge-type="ff"]'))`, "true")
+		b.click(`[data-task-list-context-menu] [data-task-card-local-submenu] > button`)
+		b.waitFor("Local submenu open", `String(!!document.querySelector('[data-menu-submenu-portaled="true"] [data-merge-type="ff"]'))`, "true")
+		b.click(`[data-menu-submenu-portaled="true"] [data-merge-type="ff"]`)
+		b.waitFor("merge completed", `String(!window._taskCardActionRequest && document.querySelector('[data-task-list-context-menu]').hidden)`, "true")
+		if merges.Load() != 1 {
+			t.Fatalf("merge requests = %d", merges.Load())
+		}
+		b.waitFor("card response does not replace sidebar or workspace", `String(!document.getElementById('unexpected-card') && !!document.querySelector('[data-task-list-row="menu-task"]'))`, "true")
+		b.evaluate(`var row=document.querySelector('[data-task-list-row="menu-task"]');row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true})); 'opened'`)
+		b.waitFor("keyboard opens menu", `String(!document.querySelector('[data-task-list-context-menu]').hidden)`, "true")
+		b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})); 'closed'`)
+		b.waitFor("Escape closes and restores row focus", `String(document.querySelector('[data-task-list-context-menu]').hidden && document.activeElement.matches('[data-task-list-row="menu-task"]'))`, "true")
 	})
 }

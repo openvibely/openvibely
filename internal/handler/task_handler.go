@@ -3449,6 +3449,10 @@ func (h *Handler) TaskListPanel(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	menus := make(map[string]templ.Component, len(tasks))
+	for _, task := range tasks {
+		menus[task.ID] = components.TaskCardMenuItems(task, task.ProjectID, string(task.Category), "#task-list-groups", "none")
+	}
 	if projectID == models.AllProjectsID {
 		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 		if err != nil {
@@ -3458,7 +3462,7 @@ func (h *Handler) TaskListPanel(c echo.Context) error {
 		for _, project := range projects {
 			names[project.ID] = project.Name
 		}
-		return render(c, http.StatusOK, layout.TaskListPanelContentWithProjects(projectID, layout.TaskListGroups(tasks), names))
+		return render(c, http.StatusOK, layout.TaskListPanelContentWithProjects(projectID, layout.TaskListGroups(tasks), names, menus))
 	}
-	return render(c, http.StatusOK, layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks)))
+	return render(c, http.StatusOK, layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks), menus))
 }
