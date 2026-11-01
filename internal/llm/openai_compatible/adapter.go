@@ -332,6 +332,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 
 	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
+		OnText:                   llmcontracts.TextStreamFromContext(ctx),
 		OnReplayChanged:          a.replayChangesSaver(ctx, req.ExecID),
 		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
 		ContinueFromHistory:      llmcontracts.HistoryContinuationFromContext(ctx),

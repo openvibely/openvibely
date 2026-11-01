@@ -1224,7 +1224,8 @@ func (r *ThreadInputRepo) claimQueuedForTaskExecution(ctx context.Context, input
 			SELECT 1
 			FROM tasks
 			WHERE id = ? AND `+taskAdmissionPredicate+`
-			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, args...).Scan(&surfaceOK); err != nil {
+			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+              AND NOT EXISTS (SELECT 1 FROM task_computer_sessions c WHERE c.task_id = tasks.id AND c.handoff_kind <> '')`, args...).Scan(&surfaceOK); err != nil {
 			if err == sql.ErrNoRows {
 				if _, guarded := persistence.ActiveLaneExpectedState(ctx, exec.TaskID); guarded {
 					return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, exec.TaskID)

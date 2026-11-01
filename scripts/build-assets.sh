@@ -102,6 +102,13 @@ cp "$assets/permission-errors.js" "$dist/permission-errors.js"
 cp "$assets/plugin-nav-overflow.js" "$dist/plugin-nav-overflow.js"
 cp "$assets/page-chat.js" "$dist/page-chat.js"
 cp "$assets/chat-input-requests.js" "$dist/chat-input-requests.js"
+# Desktop viewer code is embedded, never served as executable JS from an agent's computer.
+NOVNC_VERSION=1.6.0
+novnc=$(fetch "https://codeload.github.com/novnc/noVNC/tar.gz/refs/tags/v${NOVNC_VERSION}" "5066103959ef4e9b10f37e5a148627360dd8414e4cf8a7db92bdbd022e728aaa")
+mkdir -p "$cache/novnc" "$dist/vendor/novnc"
+tar -xzf "$novnc" -C "$cache/novnc" --strip-components=1 "noVNC-${NOVNC_VERSION}/core" "noVNC-${NOVNC_VERSION}/vendor" "noVNC-${NOVNC_VERSION}/LICENSE.txt" "noVNC-${NOVNC_VERSION}/docs/LICENSE.MPL-2.0" "noVNC-${NOVNC_VERSION}/docs/LICENSE.BSD-3-Clause"
+cp -R "$cache/novnc/core" "$cache/novnc/vendor" "$dist/vendor/novnc/"
+cp "$cache/novnc/LICENSE.txt" "$cache/novnc/docs/LICENSE.MPL-2.0" "$cache/novnc/docs/LICENSE.BSD-3-Clause" "$dist/vendor/novnc/"
 cp "$assets/kanban.js" "$dist/kanban.js"
 cp "$assets/thread-navigation.js" "$dist/thread-navigation.js"
 cp "$assets/thread-output-window.js" "$dist/thread-output-window.js"

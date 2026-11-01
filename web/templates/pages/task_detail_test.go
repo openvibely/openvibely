@@ -109,7 +109,7 @@ func TestTaskInspectorSectionsHaveNoOuterCards(t *testing.T) {
 	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	for _, tab := range []string{"details", "schedules", "chaining", "attachments", "lifecycle"} {
+	for _, tab := range []string{"details", "computer", "schedules", "chaining", "attachments", "lifecycle"} {
 		_, section, ok := strings.Cut(buf.String(), `id="tab-`+tab+`"`)
 		if !ok {
 			t.Fatalf("missing %s section", tab)

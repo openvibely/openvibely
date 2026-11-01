@@ -35,6 +35,7 @@ const activeTaskAdmissionSelectColumns = `id, project_id, title, category, prior
 const activeTaskAdmissionQuery = `SELECT ` + activeTaskAdmissionSelectColumns + `
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
 		 AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM task_computer_sessions c WHERE c.task_id = tasks.id AND c.handoff_kind <> '')
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
 		 AND NOT ` + taskThreadInputOwnsAdmissionPredicate + `
@@ -1711,6 +1712,7 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 		 WHERE id = ? AND status = 'pending'
 		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		   AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM task_computer_sessions c WHERE c.task_id = tasks.id AND c.handoff_kind <> '')
            AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
 		   AND NOT `+taskThreadInputOwnsAdmissionPredicate,
 		id)
@@ -1831,6 +1833,7 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*persis
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		  AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM task_computer_sessions c WHERE c.task_id = tasks.id AND c.handoff_kind <> '')
            AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
 		  AND NOT `+taskThreadInputOwnsAdmissionPredicate, id)
 	if err != nil {
@@ -2667,6 +2670,7 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 		 FROM tasks WHERE category = 'active' AND status = 'queued' AND updated_at < ?
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		 AND NOT EXISTS (SELECT 1 FROM schedule_dispatch_admissions a WHERE a.task_id = tasks.id)
+           AND NOT EXISTS (SELECT 1 FROM task_computer_sessions c WHERE c.task_id = tasks.id AND c.handoff_kind <> '')
            AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
 		 AND NOT EXISTS (SELECT 1 FROM thread_inputs i
 		                 WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')

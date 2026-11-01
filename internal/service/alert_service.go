@@ -299,6 +299,13 @@ func (s *AlertService) DeleteAll(ctx context.Context, projectID string) error {
 }
 
 func (s *AlertService) SetDecision(ctx context.Context, projectID, id string, state models.AlertDecisionState) error {
+	a, err := s.GetByID(ctx, projectID, id)
+	if err != nil {
+		return err
+	}
+	if a != nil && a.Source == "project_computer" {
+		return errors.New("review this request in the task computer panel")
+	}
 	owners, err := s.alertChangeOwners(ctx, projectID, []string{id})
 	if err != nil {
 		return err

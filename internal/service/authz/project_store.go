@@ -125,3 +125,10 @@ func (s *ProjectStore) DeleteWithCleanupManifest(ctx context.Context, id string,
 	}
 	return s.store.DeleteWithCleanupManifest(ctx, id, before)
 }
+
+// Computers exposes the computer store used by the computer service. HTTP
+// operations enforce project access before entering that service, like the task
+// and attachment stores used by those handlers.
+func (s *ProjectStore) Computers() persistence.ProjectComputerStore {
+	return s.store.Computers()
+}

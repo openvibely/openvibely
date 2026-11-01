@@ -138,6 +138,12 @@ func (h *Handler) recognizeSession(request *http.Request, now time.Time) session
 func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			if c.Request().URL.Path == "/computer-stream" {
+				if !h.consumeComputerTicket(c) {
+					return echo.NewHTTPError(http.StatusForbidden, "Computer viewer ticket required")
+				}
+				return next(c)
+			}
 			if err := h.consumeNativeLiveTicket(c); err != nil {
 				return err
 			}

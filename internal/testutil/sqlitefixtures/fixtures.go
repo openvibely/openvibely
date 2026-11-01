@@ -694,3 +694,8 @@ func (f *fixtures) SetDefaultProject(ctx context.Context, id string) error {
 	_, err := f.db.ExecContext(ctx, `UPDATE projects SET is_default=(id=?)`, id)
 	return err
 }
+
+func (f *fixtures) ExpireComputerChromeGrant(ctx context.Context, id string) error {
+	_, err := f.db.ExecContext(ctx, `UPDATE computer_chrome_grants SET expires_at=1 WHERE id=?`, id)
+	return err
+}

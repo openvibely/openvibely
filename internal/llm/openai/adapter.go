@@ -529,6 +529,8 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		environmentWorkDir = ""
 	}
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{
+		Stream:              llmcontracts.TextStreamFromContext(ctx) != nil,
+		OnDelta:             llmcontracts.TextStreamFromContext(ctx),
 		EnvironmentWorkDir:  environmentWorkDir,
 		Model:               agent.Model,
 		MaxOutputTokens:     openAIDirectOutputBudget,

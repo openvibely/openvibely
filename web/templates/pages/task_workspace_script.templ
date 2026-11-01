@@ -16,7 +16,7 @@ templ TaskWorkspaceScript() {
 		var back = root.querySelector('#task-workspace-back');
 		var abort = new AbortController();
 		var signal = abort.signal;
-		var tabNames = ['details', 'schedules', 'chaining', 'attachments', 'lifecycle'];
+		var tabNames = ['details', 'computer', 'schedules', 'chaining', 'attachments', 'lifecycle'];
 		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
 		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0, actionRevision = null;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
@@ -44,6 +44,7 @@ templ TaskWorkspaceScript() {
 		function selectTab(name, push) {
 			if (tabNames.indexOf(name) < 0) name = selected;
 			selected = name;
+ root.dispatchEvent(new CustomEvent('computer-tab-change',{bubbles:true}));
 			store('task-inspector-tab-' + taskID, name);
 			panel.querySelectorAll('[role="tab"]').forEach(function(tab) {
 				var active = !panel.hidden && tab.dataset.tab === name;

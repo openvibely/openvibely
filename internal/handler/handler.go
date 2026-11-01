@@ -35,6 +35,10 @@ type Handler struct {
 	runIdentities              persistence.RunIdentityStore
 	organizationSvc            *service.OrganizationService
 	projectAccessSvc           *service.ProjectAccessService
+	computerDesktopURL         string
+	computerTicketsMu          sync.Mutex
+	computerTickets            map[string]computerStreamTicket
+	computerSvc                *service.ProjectComputerService
 	projectSvc                 *service.ProjectService
 	taskSvc                    *service.TaskService
 	swarmSvc                   *service.SwarmService
@@ -352,6 +356,18 @@ func New(
 	if taskSvc != nil {
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
 		taskSvc.SetFailedTaskThreadFollowupRetryHook(h.RetryLatestFailedTaskThreadFollowup)
+	}
+	if projectRepo != nil {
+		h.computerSvc = llmSvc.ProjectComputerService()
+		if h.computerSvc == nil {
+			h.computerSvc = service.NewProjectComputerService(projectRepo, nil)
+		}
+		if taskSvc != nil {
+			taskSvc.SetProjectComputerService(h.computerSvc)
+		}
+		if projectSvc != nil {
+			projectSvc.SetProjectComputerService(h.computerSvc)
+		}
 	}
 	if llmSvc != nil {
 		llmSvc.SetTaskRuntimeProvider(h.initialTaskRuntimeTools)
@@ -818,6 +834,24 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/projects/:id/edit", h.EditProjectDialog)
 	e.GET("/projects/:id/sharing", h.ProjectSharing)
 	e.POST("/projects/:id/sharing", h.UpdateProjectSharing)
+	e.GET("/computer", h.ProjectComputerSelectedPage)
+	e.GET("/computer-stream", h.ProjectComputerNativeStream)
+	e.GET("/projects/:id/computer", h.ProjectComputerPage)
+	e.GET("/projects/:id/computer/status", h.ProjectComputerStatus)
+	e.GET("/projects/:id/computer/jobs", h.ProjectComputerJobs)
+	e.POST("/projects/:id/computer/jobs", h.ProjectComputerJobs)
+	e.GET("/projects/:id/computer/chrome-grants", h.ProjectComputerChromeGrants)
+	e.POST("/projects/:id/computer/chrome-grants", h.ProjectComputerChromeGrants)
+	e.GET("/projects/:id/computer/chrome", h.ProjectComputerChrome)
+	e.GET("/projects/:id/computer/files", h.ProjectComputerFiles)
+	e.PUT("/projects/:id/computer/files", h.ProjectComputerFiles)
+	e.POST("/projects/:id/computer/import-file", h.ProjectComputerImportFile)
+	e.POST("/projects/:id/computer/teach", h.ProjectComputerTeach)
+	e.GET("/projects/:id/computer/workflows", h.ProjectComputerWorkflows)
+	e.POST("/projects/:id/computer/workflows", h.ProjectComputerWorkflows)
+	e.POST("/projects/:id/computer/chrome-import", h.ProjectComputerChromeImport)
+	e.POST("/projects/:id/computer/:action", h.ProjectComputerLifecycle)
+	e.GET("/projects/:id/computer/stream/:mode", h.ProjectComputerStream)
 	e.POST("/projects/:id/reclone", h.RecoverProjectRepo)
 
 	// Automations (project-scoped via ?project_id= query param)

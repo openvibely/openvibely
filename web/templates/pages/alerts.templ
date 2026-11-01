@@ -662,7 +662,9 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, state CardLis
  if alert.ImplementationTaskID != nil {
 						<button class="btn btn-link btn-xs mt-2 px-0" data-task-id={ *alert.ImplementationTaskID } onclick="event.stopPropagation(); openAlertTaskDialog(this.dataset.taskId)">View implementation task</button>
 					}
-					if alert.DecisionState == models.AlertDecisionPending {
+					if alert.Source == "project_computer" && alert.DecisionState == models.AlertDecisionPending && alert.TaskID != nil {
+ <button class="btn btn-primary btn-sm" data-task-id={ *alert.TaskID } onclick="event.stopPropagation(); openAlertTaskDialog(this.dataset.taskId)">Review computer request</button>
+ } else if alert.DecisionState == models.AlertDecisionPending {
 						<div class="mt-4 flex flex-wrap gap-2" onclick="event.stopPropagation()">
 							<button class="btn btn-success btn-sm" hx-post={ CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/approve", alert.ID), state) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Approve</button>
 							<button class="btn btn-error btn-outline btn-sm" hx-post={ CardListActionURL("alerts", fmt.Sprintf("/alerts/%s/reject", alert.ID), state) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Reject</button>

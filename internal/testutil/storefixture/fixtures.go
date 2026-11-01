@@ -84,6 +84,7 @@ type NativeAlertProjection struct {
 }
 type NativeMailboxKeys struct{ Producer, Action, Gate, Mailbox string }
 type Fixtures interface {
+	ExpireComputerChromeGrant(context.Context, string) error
 	SeedDiscardedIssueDiscovery(context.Context, DiscardedIssueDiscovery) error
 	IssueDiscovery(context.Context, string, string, string) (IssueDiscoveryState, error)
 	CountIssueMailboxOwners(context.Context) (int, error)

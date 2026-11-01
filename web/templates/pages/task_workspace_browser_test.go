@@ -714,7 +714,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 600, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("direct diff lazy load", `String(document.getElementById('diff-viewer')&&document.getElementById('diff-viewer').textContent)`, "Authoritative full diff")
 		b.waitFor("background thread mounted", `String(Boolean(document.getElementById('task-message-input')))`, "true")
-		for _, tab := range []string{"chat", "thread", "history", "details", "schedules", "chaining", "attachments", "lifecycle"} {
+		for _, tab := range []string{"chat", "thread", "history", "details", "computer", "schedules", "chaining", "attachments", "lifecycle"} {
 			b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/workspace-task?from=automation&automation_id=origin&automation_name=Source&tab=" + tab}, nil)
 			b.waitFor("deep link "+tab, `String(document.readyState!=='loading'&&document.getElementById('task-detail-content').dataset.initialTab)`, tab)
 			wantPanel := "false"

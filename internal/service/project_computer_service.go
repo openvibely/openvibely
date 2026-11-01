@@ -1,0 +1,723 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"time"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/pkg/agenttools"
+)
+
+type ProjectComputerService struct {
+	verifyLoginVisual   func(context.Context, string, string, string, []byte) (bool, error)
+	attachmentDirectory string
+	repo                persistence.ProjectComputerStore
+	projects            persistence.ProjectStore
+	provisioner         ComputerProvisioner
+	client              *http.Client
+	locks               *sync.Map
+	active              *sync.Map
+	taskID              string
+}
+
+func NewProjectComputerService(projects persistence.ProjectStore, p ComputerProvisioner) *ProjectComputerService {
+	if p == nil {
+		p = defaultComputerProvisioner()
+	}
+	return &ProjectComputerService{repo: projects.Computers(), locks: &sync.Map{}, active: &sync.Map{}, projects: projects, provisioner: p, client: &http.Client{Timeout: 190 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+}
+func (s *ProjectComputerService) lock(id string) *sync.Mutex {
+	m, _ := s.locks.LoadOrStore(id+":"+s.taskID, &sync.Mutex{})
+	return m.(*sync.Mutex)
+}
+func (s *ProjectComputerService) lifecycle(id string) *sync.RWMutex {
+	m, _ := s.locks.LoadOrStore("lifecycle:"+id, &sync.RWMutex{})
+	return m.(*sync.RWMutex)
+}
+func (s *ProjectComputerService) Get(ctx context.Context, id string) (*models.ProjectComputer, error) {
+	return s.repo.Get(ctx, id)
+}
+func (s *ProjectComputerService) Connection(ctx context.Context, id string) (ComputerConnection, error) {
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return ComputerConnection{}, err
+	}
+	if !c.Enabled {
+		return ComputerConnection{}, errors.New("project computer is disabled")
+	}
+	if c.Provider != s.provisioner.Provider() {
+		return ComputerConnection{}, errors.New("computer provider differs from this installation")
+	}
+	conn, err := s.provisioner.Resolve(ctx, id)
+	if err == nil && s.taskID != "" {
+		conn.Endpoint += "/desktops/" + ComputerDesktopID(s.taskID)
+		stale, cleanupErr := s.repo.ExpiredChromeInstallations(ctx, id)
+		if cleanupErr != nil {
+			return ComputerConnection{}, cleanupErr
+		}
+		for _, grant := range stale {
+			body, _ := json.Marshal(map[string]any{"action": "clear_cookies", "cookies": grant.Selections})
+			if _, cleanupErr = s.request(ctx, conn, "POST", "/browser", body); cleanupErr != nil {
+				return ComputerConnection{}, errors.New("could not clear expired browser permissions")
+			}
+			if cleanupErr = s.repo.ClearChromeInstall(ctx, id, grant.ID); cleanupErr != nil {
+				return ComputerConnection{}, cleanupErr
+			}
+		}
+	}
+	return conn, err
+}
+func (s *ProjectComputerService) Start(ctx context.Context, id string) error {
+	return s.start(ctx, id, false)
+}
+func (s *ProjectComputerService) EnsureStarted(ctx context.Context, id string) error {
+	root := *s
+	root.taskID = ""
+	root.repo = s.projects.Computers()
+	if root.Ready(ctx, id) {
+		return nil
+	}
+	return root.start(ctx, id, true)
+}
+func (s *ProjectComputerService) start(ctx context.Context, id string, automatic bool) error {
+	gate := s.lifecycle(id)
+	gate.Lock()
+	defer gate.Unlock()
+	if s.taskID != "" {
+		return errors.New("start the project computer")
+	}
+	if err := s.repo.Configure(ctx, id, s.provisioner.Provider()); err != nil {
+		return err
+	}
+	state, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !state.Enabled {
+		return errors.New("project computer is disabled")
+	}
+	if automatic && s.Ready(ctx, id) {
+		return nil
+	}
+	if busy, err := s.repo.SessionsBusy(ctx, id); err != nil {
+		return err
+	} else if busy && !automatic {
+		return persistence.ErrComputerBusy
+	}
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	if project, err := s.projects.GetByID(ctx, id); err != nil || project == nil {
+		return errors.New("project not found")
+	}
+	c, err := s.repo.Get(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		c = &models.ProjectComputer{ProjectID: id, Provider: s.provisioner.Provider(), Enabled: true}
+	} else if err != nil {
+		return err
+	}
+	if c.Provider != s.provisioner.Provider() {
+		return errors.New("computer provider differs from this installation")
+	}
+	if !automatic && (c.Held || (c.Owner != "" && c.LeaseUntil >= time.Now().Unix())) {
+		return persistence.ErrComputerBusy
+	}
+	var conn ComputerConnection
+	if local, ok := s.provisioner.(interface {
+		StartWithTimeZone(context.Context, string, string) (ComputerConnection, error)
+	}); ok {
+		conn, err = local.StartWithTimeZone(ctx, id, c.TimeZone)
+	} else {
+		conn, err = s.provisioner.Start(ctx, id)
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.repo.Configure(ctx, id, s.provisioner.Provider()); err != nil {
+		return err
+	}
+	ready, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	for {
+		if _, err = s.request(ready, conn, "GET", "/health", nil); err == nil {
+			return nil
+		}
+		select {
+		case <-ready.Done():
+			return errors.New("project computer did not become ready; check its container logs")
+		case <-time.After(time.Second):
+		}
+	}
+}
+func (s *ProjectComputerService) Stop(ctx context.Context, id string) error {
+	gate := s.lifecycle(id)
+	gate.Lock()
+	defer gate.Unlock()
+	if s.taskID != "" {
+		return errors.New("stop the project computer in project settings")
+	}
+	if busy, err := s.repo.SessionsBusy(ctx, id); err != nil {
+		return err
+	} else if busy {
+		return persistence.ErrComputerBusy
+	}
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if c.Owner != "" && c.LeaseUntil >= time.Now().Unix() {
+		return persistence.ErrComputerBusy
+	}
+	if c.Held {
+		return errors.New("release user control before stopping the computer")
+	}
+	if c.Provider != s.provisioner.Provider() {
+		return errors.New("computer provider differs from this installation")
+	}
+	return s.provisioner.Stop(ctx, id)
+}
+func (s *ProjectComputerService) Hold(ctx context.Context, id string, held bool) error {
+	if held {
+		// Block new actions before cancelling the in-flight action. Only return control
+		// after it has stopped, so no agent screenshot overlaps a private user session.
+		if err := s.repo.Hold(ctx, id, true); err != nil {
+			return err
+		}
+		if cancel, ok := s.active.Load(id + ":" + s.taskID); ok {
+			cancel.(context.CancelFunc)()
+		}
+	}
+	gate := s.lifecycle(id)
+	gate.RLock()
+	defer gate.RUnlock()
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	if held {
+		if s.taskID != "" {
+			return s.cancelJobs(ctx, id, "")
+		}
+		return nil
+	}
+	state, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if state.HandoffKind != "" {
+		return errors.New("complete or cancel the private login request first")
+	}
+	return s.repo.Hold(ctx, id, false)
+}
+
+func (s *ProjectComputerService) WithHumanInput(ctx context.Context, id string, fn func() error) error {
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	c, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !c.Held || c.TakeoverPending {
+		return errors.New("take over the computer before sending input")
+	}
+	return fn()
+}
+func (s *ProjectComputerService) request(ctx context.Context, conn ComputerConnection, method, path string, body []byte) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, conn.Endpoint+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+conn.Token)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := s.client.Do(req)
+	if err != nil {
+		return nil, errors.New("project computer is unavailable")
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(res.Body, 12_000_001))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > 12_000_000 {
+		return nil, errors.New("computer response too large")
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("computer operation failed (%d)", res.StatusCode)
+	}
+	return b, nil
+}
+func (s *ProjectComputerService) Ready(ctx context.Context, id string) bool {
+	conn, err := s.Connection(ctx, id)
+	if err != nil {
+		return false
+	}
+	check, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err = s.request(check, conn, "GET", "/health", nil)
+	return err == nil
+}
+
+func (s *ProjectComputerService) runtimeTools(ctx context.Context, projectID, owner string) *llmcontracts.RuntimeTools {
+	if s == nil || projectID == "" || owner == "" {
+		return nil
+	}
+	state, err := s.repo.Get(ctx, projectID)
+	if err != nil || !state.Enabled {
+		return nil
+	}
+	owner += ":" + persistence.NewID()
+	defs := projectComputerToolDefinitions()
+	routed := state.ToolTarget == "computer"
+	if routed {
+		for _, d := range agenttools.Definitions() {
+			defs = append(defs, llmcontracts.RuntimeToolDefinition{Name: d.Name, Description: "Runs in this task computer, under Files. " + d.Description, Schema: d.Schema, Access: llmcontracts.RuntimeToolAccessWrite})
+		}
+	}
+	var releaseOnce sync.Once
+	return &llmcontracts.RuntimeTools{Definitions: defs, SkipDefaultTools: routed, Executor: func(call context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		if routed {
+			switch name {
+			case "bash":
+				var args struct {
+					Command string `json:"command"`
+					Timeout int    `json:"timeout"`
+				}
+				if err := json.Unmarshal(input, &args); err != nil {
+					return "", true, true, err
+				}
+				input, _ = json.Marshal(map[string]any{"command": args.Command, "timeout_seconds": args.Timeout})
+				name = "computer_shell"
+			case "read_file", "write_file", "edit_file", "list_files", "grep_search":
+				input, _ = json.Marshal(map[string]any{"operation": name, "input": json.RawMessage(input)})
+				name = "computer_files"
+			}
+		}
+		if name != "computer" && name != "computer_shell" && name != "computer_files" && name != "release_computer" && name != "project_browser" && name != "request_browser_login" && name != "request_chrome_login" && name != "request_computer_help" && name != "computer_transfer" && name != "computer_job" && name != "computer_chrome_grant" && name != "computer_attachment" {
+			return "", false, false, nil
+		}
+		if name != "release_computer" {
+			if err := s.EnsureStarted(call, projectID); err != nil {
+				return "", true, true, err
+			}
+		}
+		gate := s.lifecycle(projectID)
+		gate.RLock()
+		defer gate.RUnlock()
+		lock := s.lock(projectID)
+		lock.Lock()
+		defer lock.Unlock()
+		if name == "release_computer" {
+			err := s.repo.Release(call, projectID, owner)
+			return "Computer released", true, err != nil, err
+		}
+		if err := s.repo.Reserve(call, projectID, owner); err != nil {
+			return "", true, true, err
+		}
+		releaseOnce.Do(func() {
+			if ctx.Done() == nil {
+				return
+			}
+			go func() {
+				ticker := time.NewTicker(time.Minute)
+				defer ticker.Stop()
+				defer func() {
+					cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					s.repo.Release(cleanup, projectID, owner)
+				}()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						s.repo.Renew(ctx, projectID, owner)
+					}
+				}
+			}()
+		})
+		operation, cancel := context.WithCancel(call)
+		defer cancel()
+		s.active.Store(projectID+":"+s.taskID, cancel)
+		defer s.active.Delete(projectID + ":" + s.taskID)
+		current, err := s.repo.Get(operation, projectID)
+		if err != nil {
+			return "", true, true, err
+		}
+		if current.Held {
+			return "", true, true, persistence.ErrComputerBusy
+		}
+		call = operation
+		conn, err := s.Connection(call, projectID)
+		if err != nil {
+			return "", true, true, err
+		}
+		if name == "computer_attachment" {
+			call = llmcontracts.WithArtifactExecutionID(call, llmcontracts.ArtifactExecutionIDFromContext(ctx))
+			out, err := s.attachmentTransfer(call, projectID, input)
+			return out, true, err != nil, err
+		}
+		if name == "computer_transfer" {
+			var args struct {
+				Direction string `json:"direction"`
+				Local     string `json:"local_path"`
+				Remote    string `json:"computer_path"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", true, true, err
+			}
+			out, err := s.transfer(call, projectID, args.Direction, args.Local, args.Remote)
+			return out, true, err != nil, err
+		}
+		if name == "computer_chrome_grant" {
+			var args struct {
+				Action string `json:"action"`
+				ID     string `json:"grant_id"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", true, true, err
+			}
+			if args.Action == "list" {
+				grants, err := s.ChromeGrants(call, projectID)
+				data, _ := json.Marshal(grants)
+				return string(data), true, err != nil, err
+			}
+			if args.Action != "use" {
+				return "", true, true, errors.New("choose list or use")
+			}
+			count, err := s.UseChromeGrant(call, projectID, args.ID)
+			data, _ := json.Marshal(map[string]int{"imported": count})
+			return string(data), true, err != nil, err
+		}
+		if name == "computer_job" {
+			var args struct {
+				Action string `json:"action"`
+				ID     string `json:"job_id"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", true, true, err
+			}
+			if args.Action == "cancel" {
+				if args.ID == "" {
+					return "", true, true, errors.New("job_id is required")
+				}
+				err := s.cancelJobs(call, projectID, args.ID)
+				return "Job cancelled", true, err != nil, err
+			}
+			if args.Action != "list" && args.Action != "read" {
+				return "", true, true, errors.New("choose list, read or cancel")
+			}
+			data, err := s.Jobs(call, projectID, args.ID)
+			return string(data), true, err != nil, err
+		}
+		path := "/action"
+		if name == "request_browser_login" || name == "request_chrome_login" || name == "request_computer_help" {
+			var args struct {
+				URL      string `json:"url"`
+				Reason   string `json:"reason"`
+				Expected string `json:"expected_text"`
+			}
+			if err := json.Unmarshal(input, &args); err != nil {
+				return "", true, true, err
+			}
+			if len(args.Reason) > 2000 || len(args.Expected) > 500 {
+				return "", true, true, errors.New("computer request is too long")
+			}
+			if name == "request_computer_help" {
+				if err := s.cancelJobs(call, projectID, ""); err != nil {
+					return "", true, true, err
+				}
+				if strings.TrimSpace(args.Reason) == "" {
+					return "", true, true, errors.New("describe the help needed")
+				}
+				err := s.repo.RequestHandoff(call, projectID, name, "", args.Reason, "")
+				return "Computer help requested in Inbox. End this turn; the task resumes after the user responds.", true, err != nil, err
+			}
+			parsed, err := url.Parse(args.URL)
+			if err != nil || parsed.Hostname() == "" || parsed.User != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+				return "", true, true, errors.New("provide an HTTP website URL")
+			}
+			if name == "request_chrome_login" && !s.ChromeImportAvailable() {
+				return "", true, true, errors.New("Chrome import requires local macOS; use request_browser_login")
+			}
+			if strings.TrimSpace(args.Expected) == "" {
+				return "", true, true, errors.New("provide specific expected_text proving access to the protected page")
+			}
+			if err := s.cancelJobs(call, projectID, ""); err != nil {
+				return "", true, true, err
+			}
+			body, _ := json.Marshal(map[string]string{"action": "navigate", "url": args.URL})
+			if _, err := s.request(call, conn, "POST", "/browser", body); err != nil {
+				return "", true, true, err
+			}
+			err = s.repo.RequestHandoff(call, projectID, name, args.URL, args.Reason, args.Expected)
+			return "Private login requested in Inbox. End this turn. Completing the handoff verifies access and resumes this task.", true, err != nil, err
+		}
+		if name == "project_browser" {
+			var args struct {
+				Action string `json:"action"`
+			}
+			json.Unmarshal(input, &args)
+			switch args.Action {
+			case "navigate", "read", "click", "type", "select", "press_key", "scroll", "back", "forward":
+			default:
+				return "", true, true, errors.New("unsupported browser action")
+			}
+			path = "/browser"
+		}
+		if name == "computer_files" {
+			path = "/native-files"
+		}
+		if name == "computer_shell" {
+			var args struct {
+				Command    string `json:"command"`
+				Directory  string `json:"working_directory"`
+				Timeout    int    `json:"timeout_seconds"`
+				Background bool   `json:"background"`
+			}
+			if err = json.Unmarshal(input, &args); err != nil {
+				return "", true, true, err
+			}
+			if args.Directory == "" {
+				args.Directory = "Files"
+			}
+			limit := 180
+			if args.Background {
+				limit = 3600
+			}
+			if args.Timeout <= 0 {
+				if args.Background {
+					args.Timeout = 3600
+				} else {
+					args.Timeout = 60
+				}
+			}
+			if args.Timeout > limit {
+				args.Timeout = limit
+			}
+			input, _ = json.Marshal(args)
+			out, bad, err := s.shell(call, conn, input)
+			return out, true, bad, err
+		}
+		data, err := s.request(call, conn, "POST", path, input)
+		if err != nil {
+			return "", true, true, err
+		}
+		if name == "computer" && bytes.Contains(data, []byte(`"content"`)) {
+			output, err := agenttools.EncodeImageResult(data)
+			return output, true, err != nil, err
+		}
+		return string(data), true, false, nil
+	}}
+}
+
+// TaskRuntimeTools binds every operation to the durable task desktop, across turns.
+func (s *ProjectComputerService) RuntimeTools(ctx context.Context, projectID, taskID string) *llmcontracts.RuntimeTools {
+	if s == nil {
+		return nil
+	}
+	scoped, err := s.ForTask(ctx, projectID, taskID)
+	if err != nil {
+		return nil
+	}
+	return scoped.runtimeTools(ctx, projectID, taskID)
+}
+func (s *ProjectComputerService) ForTask(ctx context.Context, projectID, taskID string) (*ProjectComputerService, error) {
+	// Materialize configuration and the desktop record before the first task turn.
+	if err := s.projects.Computers().Configure(ctx, projectID, s.provisioner.Provider()); err != nil {
+		return nil, err
+	}
+	repo, err := s.projects.Computers().ForTask(ctx, projectID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &ProjectComputerService{repo: repo, projects: s.projects, provisioner: s.provisioner, client: s.client, locks: s.locks, active: s.active, taskID: taskID, attachmentDirectory: s.attachmentDirectory, verifyLoginVisual: s.verifyLoginVisual}, nil
+}
+func ComputerDesktopID(taskID string) string {
+	sum := sha256.Sum256([]byte(taskID))
+	return "task-" + hex.EncodeToString(sum[:16])
+}
+
+func (s *ProjectComputerService) CompleteLogin(ctx context.Context, id string) error {
+	gate := s.lifecycle(id)
+	gate.RLock()
+	defer gate.RUnlock()
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	state, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !state.Held || state.HandoffKind == "" {
+		return errors.New("no computer request awaiting completion")
+	}
+	if state.HandoffKind != "request_computer_help" && state.HandoffExpectedText != "" {
+		conn, err := s.Connection(ctx, id)
+		if err != nil {
+			return err
+		}
+		body, _ := json.Marshal(map[string]string{"action": "verify_access", "url": state.HandoffURL, "expected_text": state.HandoffExpectedText})
+		data, err := s.request(ctx, conn, "POST", "/browser", body)
+		if err != nil {
+			return errors.New("the requested page is not accessible yet; finish signing in and retry")
+		}
+		if err := s.verifyLoginResult(ctx, state, data); err != nil {
+			return err
+		}
+	}
+	return s.repo.FinishHandoff(ctx, id, false)
+}
+
+// CloseTaskDesktop frees processes after deletion while retaining files until project cleanup.
+func (s *ProjectComputerService) CloseTaskDesktop(ctx context.Context, projectID, taskID string) error {
+	if _, err := s.repo.Get(ctx, projectID); errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	key := projectID + ":" + taskID
+	if cancel, ok := s.active.Load(key); ok {
+		cancel.(context.CancelFunc)()
+	}
+	gate := s.lifecycle(projectID)
+	gate.RLock()
+	defer gate.RUnlock()
+	m, _ := s.locks.LoadOrStore(key, &sync.Mutex{})
+	lock := m.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	conn, err := s.provisioner.Resolve(ctx, projectID)
+	if err != nil {
+		return nil
+	} // A stopped computer has no desktop processes.
+	req, err := http.NewRequestWithContext(ctx, "DELETE", conn.Endpoint+"/desktops/"+ComputerDesktopID(taskID)+"/", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+conn.Token)
+	res, err := s.client.Do(req)
+	if err != nil {
+		return errors.New("could not close task desktop")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 204 {
+		return errors.New("could not close task desktop")
+	}
+	return nil
+}
+
+func (s *ProjectComputerService) CleanupDeletedProject(ctx context.Context, id string) error {
+	if local, ok := s.provisioner.(interface {
+		RemoveProject(context.Context, string) error
+	}); ok {
+		return local.RemoveProject(ctx, id)
+	}
+	return nil
+}
+
+func (s *ProjectComputerService) CancelHandoff(ctx context.Context, id string) error {
+	gate := s.lifecycle(id)
+	gate.RLock()
+	defer gate.RUnlock()
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.repo.FinishHandoff(ctx, id, true)
+}
+func (s *ProjectComputerService) SetToolTarget(ctx context.Context, id, target string) error {
+	lock := s.lock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.repo.SetToolTarget(ctx, id, target)
+}
+
+// SetEnabled changes the project preference shared by all task desktops.
+func (s *ProjectComputerService) SetEnabled(ctx context.Context, id string, enabled bool) error {
+	gate := s.lifecycle(id)
+	gate.Lock()
+	defer gate.Unlock()
+	repo := s.projects.Computers()
+	if err := repo.Configure(ctx, id, s.provisioner.Provider()); err != nil {
+		return err
+	}
+	if !enabled {
+		busy, err := repo.SessionsBusy(ctx, id)
+		if err != nil {
+			return err
+		}
+		if busy {
+			return persistence.ErrComputerBusy
+		}
+		state, err := repo.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.Held || state.Owner != "" && state.LeaseUntil >= time.Now().Unix() {
+			return persistence.ErrComputerBusy
+		}
+		if _, err := s.provisioner.Resolve(ctx, id); err == nil {
+			if err = s.provisioner.Stop(ctx, id); err != nil {
+				return err
+			}
+		}
+	}
+	return repo.SetEnabled(ctx, id, enabled)
+}
+
+// Control serializes takeover/interruption with handback for the same desktop.
+func (s *ProjectComputerService) Control(ctx context.Context, id string, held bool, interrupt func() error) error {
+	value, _ := s.locks.LoadOrStore("control:"+id+":"+s.taskID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	if held {
+		if err := s.repo.SetTakeoverPending(ctx, id, true); err != nil {
+			return err
+		}
+	}
+	if err := s.Hold(ctx, id, held); err != nil {
+		return err
+	}
+	if held && s.taskID != "" && interrupt != nil {
+		if err := interrupt(); err != nil {
+			return err
+		}
+	}
+	return s.repo.SetTakeoverPending(ctx, id, false)
+}
+
+func validateComputerTimeZone(zone string) error {
+	if zone == "" || zone == "Local" {
+		return errors.New("choose a named time zone, such as America/New_York or UTC")
+	}
+	if _, err := time.LoadLocation(zone); err != nil {
+		return errors.New("unknown time zone")
+	}
+	return nil
+}
+func (s *ProjectComputerService) SetTimeZone(ctx context.Context, id, zone string) error {
+	if err := validateComputerTimeZone(zone); err != nil {
+		return err
+	}
+	if err := s.repo.Configure(ctx, id, s.provisioner.Provider()); err != nil {
+		return err
+	}
+	return s.repo.SetTimeZone(ctx, id, zone)
+}

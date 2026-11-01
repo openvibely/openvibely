@@ -494,7 +494,8 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 			UNION ALL SELECT 1 FROM automation_task_run_reservations WHERE task_id = ?
 			UNION ALL SELECT 1 FROM thread_inputs
 			 WHERE scope = 'task_thread' AND task_id = ? AND input_status = 'pending'
-		)`, e.TaskID, e.TaskID, e.TaskID).Scan(&protected); err != nil {
+            UNION ALL SELECT 1 FROM task_computer_sessions WHERE task_id = ? AND handoff_kind <> ''
+		)`, e.TaskID, e.TaskID, e.TaskID, e.TaskID).Scan(&protected); err != nil {
 			return fmt.Errorf("checking task follow-up admission: %w", err)
 		}
 		if status == models.StatusRunning || status == models.StatusQueued || protected != 0 {

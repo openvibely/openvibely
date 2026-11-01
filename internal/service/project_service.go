@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,7 @@ type ProjectSelectionCacheInvalidator interface {
 }
 
 type ProjectService struct {
+	computerSvc                   *ProjectComputerService
 	repo                          persistence.ProjectStore
 	taskSvc                       *TaskService
 	workerRepo                    persistence.WorkerStore
@@ -187,6 +189,17 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("project not found or is the default project")
 	}
 
+	computerConfigured := false
+	if s.computerSvc != nil {
+		if _, err := s.computerSvc.Get(ctx, id); err == nil {
+			computerConfigured = true
+			if err := s.computerSvc.Stop(ctx, id); err != nil {
+				return fmt.Errorf("stop project computer before deleting project: %w", err)
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	managedRepo := false
 	if strings.TrimSpace(project.RepoPath) != "" && s.managedRepoResolver != nil {
 		managedRepo, err = s.managedRepoResolver.IsManagedProjectRepo(ctx, project.ID, project.RepoPath)
@@ -240,6 +253,11 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error
+		if computerConfigured {
+			if err := s.computerSvc.CleanupDeletedProject(cleanupCtx, id); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+		}
 		if s.taskSvc != nil {
 			if runtimeErr := s.taskSvc.cleanupDeletedProjectRuntime(cleanupCtx, manifest.TaskIDs); runtimeErr != nil {
 				cleanupErrors = append(cleanupErrors, runtimeErr)
@@ -578,4 +596,8 @@ func (s *ProjectService) ValidateRepoPaths(ctx context.Context) []string {
 		}
 	}
 	return missing
+}
+
+func (s *ProjectService) SetProjectComputerService(computer *ProjectComputerService) {
+	s.computerSvc = computer
 }

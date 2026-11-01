@@ -1,0 +1,81 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil/teststores"
+	"github.com/stretchr/testify/require"
+)
+
+func TestComputerTimeZoneReachesDockerAndReplacesChangedContainer(t *testing.T) {
+	db := teststores.New(t)
+	project := &models.Project{Name: "Desktop zone"}
+	require.NoError(t, db.Projects.Create(t.Context(), project))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{}`)) }))
+	defer server.Close()
+	port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
+	t.Setenv("OPENVIBELY_COMPUTER_IMAGE", "timezone-fixture")
+	exists := false
+	zone := ""
+	runs, removes := 0, 0
+	var mount string
+	p := &LocalComputerProvisioner{run: func(ctx context.Context, in io.Reader, args ...string) ([]byte, error) {
+		switch args[0] {
+		case "inspect":
+			if !exists {
+				return nil, errors.New("not found")
+			}
+			return json.Marshal([]any{map[string]any{"Config": map[string]any{"Labels": map[string]string{"openvibely.project": project.ID}, "Image": "timezone-fixture", "Env": []string{"TZ=" + zone, "OPENVIBELY_COMPUTER_TOKEN=fixture"}}, "State": map[string]bool{"Running": true}, "NetworkSettings": map[string]any{"Ports": map[string]any{"8090/tcp": []map[string]string{{"HostIP": "127.0.0.1", "HostPort": port}}}}}})
+		case "run":
+			runs++
+			exists = true
+			for i, arg := range args {
+				if arg == "--env" && strings.HasPrefix(args[i+1], "TZ=") {
+					zone = strings.TrimPrefix(args[i+1], "TZ=")
+				}
+				if arg == "--mount" {
+					if mount != "" {
+						require.Equal(t, mount, args[i+1])
+					}
+					mount = args[i+1]
+				}
+			}
+		case "container":
+			return []byte(computerContainerName(project.ID)), nil
+		case "rm":
+			removes++
+			exists = false
+		}
+		return nil, nil
+	}}
+	svc := NewProjectComputerService(db.Projects, p)
+	require.NoError(t, svc.SetTimeZone(t.Context(), project.ID, "America/New_York"))
+	require.NoError(t, svc.Start(t.Context(), project.ID))
+	require.Equal(t, "America/New_York", zone)
+	require.Equal(t, 1, runs)
+	require.NoError(t, svc.Start(t.Context(), project.ID))
+	require.Equal(t, 1, runs, "unchanged zone should reuse container")
+	require.NoError(t, svc.SetTimeZone(t.Context(), project.ID, "Asia/Kathmandu"))
+	require.NoError(t, svc.Start(t.Context(), project.ID))
+	require.Equal(t, "Asia/Kathmandu", zone)
+	require.Equal(t, 2, runs)
+	require.Equal(t, 1, removes)
+	for _, bad := range []string{"", "Local", "Not/AZone"} {
+		require.Error(t, svc.SetTimeZone(t.Context(), project.ID, bad))
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Zone inheritance", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, db.Tasks.Create(t.Context(), task))
+	scoped, err := svc.ForTask(t.Context(), project.ID, task.ID)
+	require.NoError(t, err)
+	state, err := scoped.Get(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Asia/Kathmandu", state.TimeZone)
+}

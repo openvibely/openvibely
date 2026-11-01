@@ -93,7 +93,7 @@ templ projectRepoPathHealth(health models.ProjectRepoPathHealth, remote bool) {
 	}
 }
 
-templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int, repoPathHealth models.ProjectRepoPathHealth) {
+templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int, repoPathHealth models.ProjectRepoPathHealth, computerEnabled ...bool) {
 	<dialog id="edit_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
 			<div class="modal-box">
 				@ModalCloseButton("edit_project_modal", "Close project settings")
@@ -198,7 +198,8 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 				}
 				@ProjectDefaultsFields("edit-project", project, agents, globalMaxWorkers)
-				</section>
+				@ProjectComputerFormOption(len(computerEnabled)==0 || computerEnabled[0])
+</section>
 				@ProjectKnowledgePanel("edit-project", project.ManagedPermissions())
 </div>
 				<div class="modal-action">
@@ -546,7 +547,8 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
 						</div>				}
 				@ProjectDefaultsFields("new-project", &models.Project{}, agents, globalMaxWorkers)
-				</section>
+				@ProjectComputerFormOption(true)
+</section>
 				@ProjectKnowledgePanel("new-project", models.NewProjectPermissions())
 </div>
 				<div id="new-project-error" class="alert alert-error mb-4 hidden">
@@ -747,6 +749,14 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glo
 	</script>
 }
 
+
+templ ProjectComputerFormOption(enabled bool) {
+ <input type="hidden" name="computer_setting_present" value="1"/>
+ <label class="label cursor-pointer justify-start gap-2 mb-3">
+ <input type="checkbox" name="computer_enabled" value="on" class="toggle toggle-sm" checked?={enabled}/>
+ <span>Project computer</span>
+ </label>
+}
 
 templ ProjectSettingsTabs(prefix string) {
  <style>

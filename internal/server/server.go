@@ -564,6 +564,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.ProjectComputerService().SetAttachmentDirectory(uploadsPath)
 	oauthRefreshSvc := service.NewOAuthRefreshService(llmConfigRepo, nil)
 	oauthRefreshSvc.SetAnthropicIdentityResolver(service.ResolveAnthropicOAuthIdentity)
 	llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
@@ -682,6 +683,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 
 	projectSvc := service.NewProjectService(projectRepo)
 	projectSvc.RegisterProjectSelectionCacheInvalidator(projectAccessSvc)
+	projectSvc.SetProjectComputerService(llmSvc.ProjectComputerService())
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
 	taskGoalSvc.SetProjectAuthorization(projectAccessSvc, cfg.AuthMode == auth.AuthModeDisabled)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
@@ -1350,6 +1352,7 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 		host = "127.0.0.1"
 	}
 	baseURL := fmt.Sprintf("http://%s:%s", host, port)
+	h.SetComputerDesktopBackendURL(baseURL)
 	if binaryUpdateInstaller != nil {
 		binaryUpdateInstaller.HealthURL = baseURL + "/api/system/health"
 		updateCoordinator.StartRecovery(srvCtx)

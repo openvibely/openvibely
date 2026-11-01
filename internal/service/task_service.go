@@ -26,6 +26,7 @@ var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its
 var ErrTaskCancellationSuperseded = errors.New("task cancellation was superseded by a newer run")
 
 type TaskService struct {
+	computerSvc                       *ProjectComputerService
 	repo                              persistence.TaskStore
 	uploadsDir                        string
 	workerSvc                         *WorkerService
@@ -839,6 +840,12 @@ func (s *TaskService) cleanupDeletionFiles(manifest persistence.TaskDeletionMani
 }
 
 func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory, observed ...*models.Task) (bool, error) {
+	computerProjectID := ""
+	if s.computerSvc != nil {
+		if task, err := s.repo.GetByID(ctx, id); err == nil && task != nil {
+			computerProjectID = task.ProjectID
+		}
+	}
 	prepareDelete := func(manifest persistence.TaskDeletionManifest) error {
 		taskIDs := append([]string{id}, manifest.SwarmChildTaskIDs...)
 		return s.prepareDeletion(manifest, taskIDs)
@@ -859,11 +866,22 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 		return deleted, err
 	}
 
+	var computerCleanupErrors []error
+	if computerProjectID != "" {
+		for _, taskID := range append([]string{id}, manifest.SwarmChildTaskIDs...) {
+			if err := s.computerSvc.CloseTaskDesktop(ctx, computerProjectID, taskID); err != nil {
+				computerCleanupErrors = append(computerCleanupErrors, fmt.Errorf("desktop cleanup failed: %w", err))
+			}
+		}
+	}
 	// The transaction reserves the sole database connection from cleanup capture
 	// through deletion. A concurrent upload metadata write therefore either lands
 	// in the manifest first or fails after the task rows disappear and rolls back
 	// its newly published file. Filesystem and git work remain outside SQLite.
 	if err := s.cleanupDeletionFiles(manifest); err != nil {
+		computerCleanupErrors = append(computerCleanupErrors, err)
+	}
+	if err := errors.Join(computerCleanupErrors...); err != nil {
 		return true, fmt.Errorf("task deleted but %w", err)
 	}
 
@@ -1362,6 +1380,51 @@ func (s *TaskService) requireBoardTask(ctx context.Context, id string) error {
 	}
 	if owned {
 		return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
+	}
+	return nil
+}
+
+func (s *TaskService) SetProjectComputerService(computer *ProjectComputerService) {
+	s.computerSvc = computer
+}
+
+// InterruptForComputer stops this task's run without pausing its goal or sweeping queued user messages.
+func (s *TaskService) InterruptForComputer(ctx context.Context, id string) error {
+	unlock := persistence.LockTaskLifecycle(id)
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return errors.New("task not found")
+	}
+	var done <-chan struct{}
+	if s.workerSvc != nil {
+		done = s.workerSvc.CancelForComputer(id)
+		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+			if err := s.workerSvc.CancelQueuedTask(ctx, id, "Paused for computer takeover"); err != nil {
+				return err
+			}
+		}
+	}
+	if task.Status == models.StatusQueued {
+		if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
+			return err
+		}
+	}
+	unlock()
+	unlock = nil
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	return nil
 }

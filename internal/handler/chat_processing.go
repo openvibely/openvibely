@@ -386,17 +386,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	var waitCancelRegistration uint64
 	if params.IsTaskFollowup && h.workerSvc != nil {
 		waitCtx, waitCancel = context.WithCancel(baseCtx)
+		defer waitCancel()
 		waitCancelRegistration = h.registerTaskCancellation(params.TaskID, waitCancel)
+		defer func() { h.deregisterTaskCancellation(params.TaskID, waitCancelRegistration) }()
 	}
 	cleanupWaitCancellation := func() {
 		if waitCancel != nil {
 			h.deregisterTaskCancellation(params.TaskID, waitCancelRegistration)
-			waitCancel()
-			waitCancel = nil
-		}
-	}
-	cancelWaitOnly := func() {
-		if waitCancel != nil {
 			waitCancel()
 			waitCancel = nil
 		}
@@ -416,11 +412,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			return
 		}
 		var resetInactivity func()
-		ctx, cancel, resetInactivity = withInactivityTimeout(baseCtx, timeout)
+		ctx, cancel, resetInactivity = withInactivityTimeout(waitCtx, timeout)
 		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
+		if waitCtx.Err() != nil {
+			cancel()
+		}
 		runtimeCancelRegistration = h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true
-		cancelWaitOnly()
 	}
 	cleanupRuntimeCancellation := func() {
 		if runtimeCancelRegistered {
@@ -432,9 +430,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			cancel = nil
 		}
 	}
+	defer cleanupRuntimeCancellation()
 	completeCancelledBeforeModel := func() {
-		cleanupWaitCancellation()
-		cleanupRuntimeCancellation()
+		defer cleanupWaitCancellation()
+		defer cleanupRuntimeCancellation()
 		h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 		h.finalizeStreamingTurn(params, "")
 	}
@@ -477,7 +476,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if err := h.workerSvc.AcquireWorkerSlots(waitCtx, params.ProjectID, agentConfigID); err != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for worker capacity project=%s model=%s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, agentConfigID, err)
-			cleanupWaitCancellation()
+			// Keep completion tracking until finalization and deferred cleanup finish.
 			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
 			return
@@ -548,7 +547,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			ctx = service.WithAutomationExecution(ctx, params.TaskID, params.ExecID)
 		}
 	}
-	defer cleanupRuntimeCancellation()
 	if ctx.Err() != nil {
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
 		completeCancelledBeforeModel()
@@ -624,7 +622,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Using it directly ensures switch_project and other channel-sensitive tools
 	// execute the channel service handler (with persistence) rather than the
 	// generic handler.
-	if h.supportsChatActionTools(ctx, params.Agent) {
+	supportsRuntimeTools := h.supportsChatActionTools(ctx, params.Agent)
+	if supportsRuntimeTools {
 		surface := params.Surface
 		if surface == "" {
 			surface = chatcontrol.SurfaceWeb
@@ -659,6 +658,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), bootstrapRT))
 			}
 		}
+	}
+	if params.IsTaskFollowup && supportsRuntimeTools && h.computerSvc != nil && params.ChatMode != models.ChatModePlan {
+		ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), h.computerSvc.RuntimeTools(llmcontracts.WithArtifactExecutionID(ctx, params.ExecID), params.ProjectID, params.TaskID)))
 	}
 	// Lazy-load system context and work dir for task-thread
 	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so
@@ -1667,6 +1669,15 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 	if completed.IsTaskFollowup {
 		if completed.TaskID == "" {
 			return
+		}
+		if h.computerSvc != nil && completed.ProjectID != "" {
+			scoped, err := h.computerSvc.ForTask(ctx, completed.ProjectID, completed.TaskID)
+			if err == nil {
+				state, err := scoped.Get(ctx, completed.ProjectID)
+				if err == nil && state.Held {
+					return
+				}
+			}
 		}
 		active, activeErr := h.execRepo.HasActiveTaskThreadExecution(ctx, completed.TaskID, excludeExecID)
 		if activeErr != nil {

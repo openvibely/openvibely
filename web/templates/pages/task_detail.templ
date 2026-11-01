@@ -168,11 +168,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		</div>
 		<div id="task-workspaces">
 			@TaskDetailPanel() {
+		<div id="tab-computer" class={ "task-tab-panel flex-1 min-h-0", templ.KV("hidden", defaultTab != "computer") }>
+ @ProjectComputerContent(task.ProjectID, task.ID)
+ </div>
 		<!-- Tab: Details -->
 		<div id="tab-details" class={ "task-tab-panel task-details-scroll-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details") }>
 			<div class="flex flex-col min-w-0 flex-1 min-h-0 overflow-hidden">
 				<div class="flex flex-col gap-2 flex-1 min-h-0">
-					<!-- View Mode -->
+
+ <!-- View Mode -->
 						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
 								@TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, taskAgentLabelFromDefinitions(task, agentDefs))
 							@SwarmContextPanel(task)

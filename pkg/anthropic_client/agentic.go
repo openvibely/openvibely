@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"io"
 	"math"
 	"net"
@@ -838,7 +839,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			saveMu.Lock()
 			defer saveMu.Unlock()
 			if opts.OnToolResult != nil {
-				opts.OnToolResult(exec.block.Name, exec.output, exec.isError)
+				opts.OnToolResult(exec.block.Name, agenttools.ImageResultSummary(exec.output), exec.isError)
 			}
 
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
@@ -847,7 +848,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				Error:  exec.isError,
 			})
 
-			content := anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit))
+			content := agenttools.AnthropicImageOutput(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit))
 			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
 				content, _ = json.Marshal([]any{
 					map[string]any{"type": "text", "text": "Image returned by view_image: " + image.Name},
@@ -1000,6 +1001,9 @@ func anthropicProviderToolResultName(block agenticBlock) string {
 }
 
 func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) string {
+	if _, ok := agenttools.DecodeImageResult(output); ok {
+		return output
+	}
 	return tokenestimate.ToolOutputForModelInput(output, tokenLimit)
 }
 

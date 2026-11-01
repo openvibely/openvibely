@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"io"
 	"math"
 	"net/http"
@@ -464,7 +465,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			}
 
 			if opts.OnToolResult != nil {
-				opts.OnToolResult(tc.Function.Name, output, isError)
+				opts.OnToolResult(tc.Function.Name, agenttools.ImageResultSummary(output), isError)
 			}
 
 			var inputMap map[string]interface{}
@@ -705,7 +706,7 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 	}
 	payload := map[string]interface{}{
 		"model":    opts.Model,
-		"messages": messages,
+		"messages": completionsComputerImages(messages),
 		"stream":   true,
 	}
 	effort := ""
@@ -956,6 +957,7 @@ type completionsStreamChunk struct {
 }
 
 func prepareCompletionsMessages(messages []completionsMessage) (*requestjson.Field, error) {
+	messages = completionsComputerImages(messages)
 	items := make([]any, len(messages))
 	for i, m := range messages {
 		var raw json.RawMessage

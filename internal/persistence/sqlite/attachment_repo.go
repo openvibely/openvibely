@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 )
 
@@ -48,6 +49,14 @@ func createAttachmentWithExecutor(ctx context.Context, exec sqlExecutor, att *mo
 		return fmt.Errorf("creating attachment: %w", err)
 	}
 	return nil
+}
+
+func (r *AttachmentRepo) CreateInTx(ctx context.Context, tx persistence.Tx, att *models.Attachment) error {
+	exec, err := executorFromTx(tx)
+	if err != nil {
+		return err
+	}
+	return exec.QueryRowContext(ctx, `INSERT INTO task_attachments(task_id,file_name,file_path,media_type,file_size) VALUES (?,?,?,?,?) RETURNING id,created_at`, att.TaskID, att.FileName, att.FilePath, att.MediaType, att.FileSize).Scan(&att.ID, &att.CreatedAt)
 }
 
 func nullableString(v string) any {

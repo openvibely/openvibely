@@ -37,6 +37,7 @@ type LLMCaller interface {
 type LLMService struct {
 	gitCredentials            *GitHubService
 	checkpointCache           activeCheckpointCache
+	computerSvc               *ProjectComputerService
 	skillInstallationResult   func(context.Context, llmcontracts.AgentRequest) (string, error)
 	skillInstallationPrompt   func(context.Context, llmcontracts.AgentRequest, skilldeps.InstallationRequest) error
 	taskRuntimeProvider       func(context.Context, models.Task, string, map[string]bool) *llmcontracts.RuntimeTools
@@ -97,6 +98,10 @@ func NewLLMService(llmConfigRepo persistence.LLMConfigStore, execRepo persistenc
 		projectRepo:    projectRepo,
 		scheduleRepo:   scheduleRepo,
 		attachmentRepo: attachmentRepo,
+	}
+	if projectRepo != nil {
+		s.computerSvc = NewProjectComputerService(projectRepo, nil)
+		s.computerSvc.verifyLoginVisual = s.verifyComputerLoginVisual
 	}
 	s.initProviderAdapters()
 	s.routing = newAgentRoutingStrategy(s)
@@ -283,7 +288,7 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 		SuppressIssueComments:    automationBound,
 	})
-	runtime := llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+	runtime := llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task), s.computerSvc.RuntimeTools(ctx, task.ProjectID, task.ID))
 	if s.taskRuntimeProvider != nil {
 		missing := chatcontrol.TaskToolNames(task.CreatedVia)
 		// Automation deliberately suppresses status comments; the application fallback
@@ -1598,11 +1603,14 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
 	if runtimeToolsSupported {
-		taskActionTools = s.taskActionRuntimeTools(callCtx, task, exec.ID)
+		taskActionTools = s.taskActionRuntimeTools(llmcontracts.WithArtifactExecutionID(callCtx, exec.ID), task, exec.ID)
 	}
 	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
 		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
 			mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
+			if taskActionTools != nil && taskActionTools.HasDefinition("bash") {
+				mergedTools = llmcontracts.CompositeRuntimeTools(taskActionTools, runtimeTools, ctxTools)
+			}
 			callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
 			if mergedTools != nil && mergedTools.SkipDefaultTools {
 				projectInstructions = ""
@@ -2735,6 +2743,20 @@ func withTaskPreClaimed(ctx context.Context) context.Context {
 func isTaskPreClaimed(ctx context.Context) bool {
 	v, _ := ctx.Value(taskPreClaimedKey{}).(bool)
 	return v
+}
+
+func (s *LLMService) SetProjectComputerService(computer *ProjectComputerService) {
+	if computer != nil {
+		computer.verifyLoginVisual = s.verifyComputerLoginVisual
+	}
+	s.computerSvc = computer
+}
+
+func (s *LLMService) ProjectComputerService() *ProjectComputerService {
+	if s == nil {
+		return nil
+	}
+	return s.computerSvc
 }
 
 var automationRegistrationDefinition = llmcontracts.RuntimeToolDefinition{

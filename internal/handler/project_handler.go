@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -394,6 +395,9 @@ func (h *Handler) CreateProject(c echo.Context) error {
 			applog.Infof("[handler] CreateProject warning: agent library maintenance setup failed project=%s: %v", p.ID, err)
 		}
 	}
+	if err := h.saveProjectComputerForm(c, p.ID); err != nil {
+		return err
+	}
 	applog.Infof("[handler] CreateProject success id=%s, redirecting to tasks", p.ID)
 	redirectURL := "/tasks?project_id=" + p.ID
 	if isHTMX(c) {
@@ -472,6 +476,9 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	}
 	applog.Infof("[handler] UpdateProject id=%s name=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v legacy_local_project=%v", projectID, p.Name, settings.RepoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled, settings.PreserveLegacyLocalProject)
 
+	if err := h.saveProjectComputerForm(c, p.ID); err != nil {
+		return err
+	}
 	if err := h.projectSvc.Update(c.Request().Context(), p); err != nil {
 		applog.Infof("[handler] UpdateProject error: %v", err)
 		if isHTMX(c) {
@@ -569,7 +576,17 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 	}
 
 	repoPathHealth := h.projectSvc.RepoPathHealth(p)
-	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled(), globalMaxWorkers, repoPathHealth))
+	enabled := true
+	if h.computerSvc != nil {
+		state, err := h.computerSvc.Get(c.Request().Context(), projectID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if state != nil {
+			enabled = state.Enabled
+		}
+	}
+	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled(), globalMaxWorkers, repoPathHealth, enabled))
 }
 
 func (h *Handler) DeleteProject(c echo.Context) error {
@@ -714,6 +731,19 @@ func render(c echo.Context, status int, component templ.Component) error {
 	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Response().WriteHeader(status)
 	return component.Render(ctx, c.Response().Writer)
+}
+
+func (h *Handler) saveProjectComputerForm(c echo.Context, projectID string) error {
+	if c.FormValue("computer_setting_present") != "1" {
+		return nil
+	}
+	if h.computerSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "Project computers unavailable")
+	}
+	if err := h.computerSvc.SetEnabled(c.Request().Context(), projectID, c.FormValue("computer_enabled") == "on"); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return nil
 }
 
 func applyProjectKnowledgeForm(c echo.Context, p *models.Project) {

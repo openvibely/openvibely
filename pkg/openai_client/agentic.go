@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/pkg/agenttools"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -816,7 +817,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				}
 			}
 			if opts.OnToolResult != nil && !(exec.webSearchResult != nil && opts.OnWebSearchResult != nil) {
-				opts.OnToolResult(exec.call.Name, exec.output, exec.isError)
+				opts.OnToolResult(exec.call.Name, agenttools.ImageResultSummary(exec.output), exec.isError)
 			}
 
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
@@ -834,7 +835,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			toolResultItem := agenticInputItem{
 				"type":    "function_call_output",
 				"call_id": exec.call.CallID,
-				"output":  modelOutput,
+				"output":  agenttools.ResponsesImageOutput(modelOutput),
 			}
 			appendInput(toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
@@ -1038,7 +1039,7 @@ func appendRecoveredAsyncToolResults(inputItems *[]any, results []AsyncToolResul
 		if !hasOutput {
 			*inputItems = append(*inputItems, agenticInputItem{
 				"type": "function_call_output", "call_id": callID,
-				"output": truncateToolOutputForModelInput(result.Output, toolOutputTokenLimit),
+				"output": agenttools.ResponsesImageOutput(truncateToolOutputForModelInput(result.Output, toolOutputTokenLimit)),
 			})
 		}
 		deliveries = append(deliveries, record)
@@ -1704,6 +1705,9 @@ func normalizedToolOutputTokenLimit(limit int) int {
 }
 
 func truncateToolOutputForModelInput(output string, tokenLimit int) string {
+	if _, ok := agenttools.DecodeImageResult(output); ok {
+		return output
+	}
 	return tokenestimate.ToolOutputForModelInput(output, tokenLimit)
 }
 

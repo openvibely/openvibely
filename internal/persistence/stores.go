@@ -71,6 +71,7 @@ type AlertStore interface {
 
 // AttachmentStore persists task attachments.
 type AttachmentStore interface {
+	CreateInTx(ctx context.Context, tx Tx, att *models.Attachment) error
 	CreateGeneratedFile(context.Context, *models.GeneratedFile) error
 	GeneratedFile(context.Context, string, string) (*models.GeneratedFile, error)
 	ListGeneratedFiles(context.Context, string, string) ([]models.GeneratedFile, error)
@@ -528,6 +529,7 @@ type OpenAIAsyncToolCallStore interface {
 
 // ProjectStore persists projects.
 type ProjectStore interface {
+	Computers() ProjectComputerStore
 	Create(ctx context.Context, p *models.Project) error
 	DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error)
 	ForEachRepoRoot(ctx context.Context, visit func(ProjectRepoRoot)) error

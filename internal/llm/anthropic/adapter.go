@@ -516,6 +516,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
+		OnText:                    llmcontracts.TextStreamFromContext(ctx),
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
 		MaxTokens:                 maxTokens,

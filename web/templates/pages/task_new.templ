@@ -41,7 +41,10 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     <div id="tab-details" class="task-tab-panel hidden">
      @NewTaskDetails(agents, agentDefs, NewTaskProjectRow(project, projects))
     </div>
-    <div id="tab-attachments" class="task-tab-panel hidden">
+    <div id="tab-computer" class="task-tab-panel hidden">
+ @ProjectComputerContent(project.ID, "")
+ </div>
+ <div id="tab-attachments" class="task-tab-panel hidden">
      <div class="flex items-center justify-between mb-3" style="height:20px"><h3 class="text-sm font-semibold">Attachments</h3>
      <button id="new-task-files" type="button" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.getElementById('task-thread-form-file-input').click()">+</button></div>
      <div id="draft-panel-attachments" class="space-y-2" data-image-gallery-group=""><p class="text-sm opacity-60">No attachments</p></div>

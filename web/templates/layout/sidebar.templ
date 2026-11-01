@@ -28,7 +28,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</div>
 			}
 
-			<!-- Project Selector -->
+
+            <!-- Project Selector -->
 			if serverRuntimeMode(ctx) != "desktop" {
 				@ProjectSelector(projects, currentProjectID)
 			}
@@ -854,6 +855,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						<span class="sidebar-text">Chat</span>
 					</a>
 				</li>
+
 				<li>
 					<a
 						data-nav-base="/tasks"

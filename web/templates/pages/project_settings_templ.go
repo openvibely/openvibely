@@ -172,7 +172,7 @@ func projectRepoPathHealth(health models.ProjectRepoPathHealth, remote bool) tem
 	})
 }
 
-func EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int, repoPathHealth models.ProjectRepoPathHealth) templ.Component {
+func EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int, repoPathHealth models.ProjectRepoPathHealth, computerEnabled ...bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -466,6 +466,10 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = ProjectComputerFormOption(len(computerEnabled) == 0 || computerEnabled[0]).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -491,7 +495,7 @@ func EditProjectDialog(project *models.Project, agents []models.LLMConfig, local
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.NewAttributeExpression("/projects/" + project.ID + "/sharing").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 221, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 222, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -557,7 +561,7 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%t", localRepoPathEnabled)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 472, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 473, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -613,6 +617,10 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = ProjectComputerFormOption(true).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -622,6 +630,41 @@ func NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool, glob
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</div><div id=\"new-project-error\" class=\"alert alert-error mb-4 hidden\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"stroke-current shrink-0 h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg> <span id=\"new-project-error-text\"></span></div><div class=\"modal-action\"><button type=\"button\" id=\"new-project-cancel-button\" class=\"btn\" onclick=\"new_project_modal.close()\">Cancel</button> <button type=\"submit\" id=\"new-project-create-button\" class=\"btn btn-primary\"><span id=\"new-project-create-progress\" class=\"loading loading-spinner loading-sm htmx-indicator\" aria-hidden=\"true\"></span> <span class=\"new-project-create-label\">Create</span> <span class=\"new-project-create-busy-label hidden\">Cloning repository...</span></button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script>\n\t\t(function() {\n\t\t\tvar modal = document.getElementById('new_project_modal');\n\t\t\tif (modal) modal.showModal();\n\n\t\t\tvar repoPathInput = document.getElementById('new-project-repo-path');\n\t\t\tvar repoURLInput = document.getElementById('new-project-repo-url');\n\t\t\tvar createDirCheckbox = document.getElementById('new-project-create-dir');\n\t\t\tvar createDirWrapper = document.getElementById('new-project-create-dir-wrapper');\n\t\t\tvar pathPreview = document.getElementById('new-project-path-preview');\n\t\t\tvar pathPreviewText = document.getElementById('new-project-path-preview-text');\n\t\t\tvar errorDiv = document.getElementById('new-project-error');\n\t\t\tvar pickerFeedback = document.getElementById('new-project-picker-feedback');\n\t\t\tvar repoSourceSelect = document.getElementById('new-project-repo-source');\n\t\t\tvar localFields = document.getElementById('new-project-local-fields');\n\t\t\tvar githubFields = document.getElementById('new-project-github-fields');\n\t\t\t\tvar browseBtn = document.getElementById('new-project-browse-btn');\n\t\t\t\tvar form = document.getElementById('new-project-form');\n\t\t\t\tvar createButton = document.getElementById('new-project-create-button');\n\t\t\t\tvar cancelButton = document.getElementById('new-project-cancel-button');\n\t\t\t\tvar createLabel = createButton ? createButton.querySelector('.new-project-create-label') : null;\n\t\t\t\tvar createBusyLabel = createButton ? createButton.querySelector('.new-project-create-busy-label') : null;\n\t\t\t\tvar localRepoPathEnabled = !!modal && modal.dataset.localRepoPathEnabled === 'true';\n\n\t\t\t\tfunction setCreateBusy(isBusy) {\n\t\t\t\t\tif (createButton) createButton.disabled = !!isBusy;\n\t\t\t\t\tif (cancelButton) cancelButton.disabled = !!isBusy;\n\t\t\t\t\tif (createLabel) createLabel.classList.toggle('hidden', !!isBusy);\n\t\t\t\t\tif (createBusyLabel) {\n                        if (isBusy) createBusyLabel.textContent = repoSourceSelect && repoSourceSelect.value === 'github' ? 'Cloning repository...' : 'Creating...';\n                        createBusyLabel.classList.toggle('hidden', !isBusy);\n                    }\n\t\t\t\t}\n\n\t\t\t\tfunction updatePathPreview() {\n\t\t\t\tif (!repoPathInput || !createDirCheckbox || !repoSourceSelect || !pathPreview || !pathPreviewText) return;\n\t\t\t\tvar path = repoPathInput.value.trim();\n\t\t\t\tif (repoSourceSelect.value === 'local' && createDirCheckbox.checked && path) {\n\t\t\t\t\tpathPreviewText.textContent = path;\n\t\t\t\t\tpathPreview.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tpathPreview.classList.add('hidden');\n\t\t\t\t}\n\t\t\t\tif (errorDiv) {\n\t\t\t\t\terrorDiv.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction updateRepoSourceFields() {\n\t\t\t\tif (!repoSourceSelect || !localFields || !githubFields) return;\n\t\t\t\tvar source = repoSourceSelect.value === 'github' ? 'github' : 'local';\n\t\t\t\tlocalFields.hidden = source !== 'local';\n\t\t\t\tgithubFields.hidden = source !== 'github';\n\t\t\t\tif (createDirWrapper) {\n\t\t\t\t\tcreateDirWrapper.hidden = source !== 'local';\n\t\t\t\t}\n\t\t\t\tif (repoPathInput) {\n\t\t\t\t\trepoPathInput.required = (source === 'local');\n\t\t\t\t}\n\t\t\t\tif (repoURLInput) repoURLInput.required = (source === 'github');\n\t\t\t\tif (createDirCheckbox && source !== 'local') {\n\t\t\t\t\tcreateDirCheckbox.checked = false;\n\t\t\t\t}\n\t\t\t\tupdatePathPreview();\n\t\t\t}\n\n\t\t\tfunction isAbsolutePath(pathValue) {\n\t\t\t\treturn !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\\\') || /^[a-zA-Z]:[\\\\/]/.test(pathValue) || pathValue.startsWith('\\\\\\\\'));\n\t\t\t}\n\n\t\t\tfunction applySelectedDirectoryPath(selectedPath) {\n\t\t\t\tif (!repoPathInput || !isAbsolutePath(selectedPath)) return;\n\t\t\t\trepoPathInput.value = selectedPath;\n\t\t\t\trepoPathInput.dispatchEvent(new Event('input', { bubbles: true }));\n\t\t\t}\n\n\t\t\tfunction setPickerFeedback(message, isError) {\n\t\t\t\tif (!pickerFeedback) return;\n\t\t\t\tpickerFeedback.textContent = message || '';\n\t\t\t\tpickerFeedback.classList.remove('hidden');\n\t\t\t\tpickerFeedback.classList.toggle('text-error', !!isError);\n\t\t\t}\n\n\t\t\tasync function chooseDirectoryNative() {\n\t\t\t\tif (!browseBtn || !localRepoPathEnabled) return;\n\t\t\t\tbrowseBtn.disabled = true;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/projects/pick-folder', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t\tvar payload = {};\n\t\t\t\t\ttry {\n\t\t\t\t\t\tpayload = await response.json();\n\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\tpayload = {};\n\t\t\t\t\t}\n\n\t\t\t\t\tif (response.status === 501) {\n\t\t\t\t\t\tvar unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(unavailableMessage, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (response.status === 403) {\n\t\t\t\t\t\tsetPickerFeedback('Local repository path mode is disabled in this environment.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) {\n\t\t\t\t\t\tvar message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';\n\t\t\t\t\t\tsetPickerFeedback(message, true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!payload.selected) {\n\t\t\t\t\t\tif (pickerFeedback) {\n\t\t\t\t\t\t\tpickerFeedback.textContent = '';\n\t\t\t\t\t\t\tpickerFeedback.classList.add('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!isAbsolutePath(payload.path)) {\n\t\t\t\t\t\tsetPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tapplySelectedDirectoryPath(payload.path);\n\t\t\t\t\tsetPickerFeedback('Folder selected from native picker.', false);\n\t\t\t\t} catch (err) {\n\t\t\t\t\tsetPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);\n\t\t\t\t} finally {\n\t\t\t\t\tbrowseBtn.disabled = false;\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tif (repoPathInput) {\n\t\t\t\trepoPathInput.addEventListener('input', updatePathPreview);\n\t\t\t}\n\t\t\tif (createDirCheckbox) {\n\t\t\t\tcreateDirCheckbox.addEventListener('change', updatePathPreview);\n\t\t\t}\n\t\t\tif (browseBtn && localRepoPathEnabled) {\n\t\t\t\tbrowseBtn.addEventListener('click', function() {\n\t\t\t\t\tchooseDirectoryNative();\n\t\t\t\t});\n\t\t\t}\n\t\t\t\tif (repoSourceSelect && localRepoPathEnabled) {\n\t\t\t\t\trepoSourceSelect.addEventListener('change', updateRepoSourceFields);\n\t\t\t\t\tupdateRepoSourceFields();\n\t\t\t\t}\n\t\t\t\tif (form) {\n\t\t\t\t\tform.addEventListener('htmx:beforeRequest', function() {\n\t\t\t\t\t\tsetCreateBusy(true);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:afterRequest', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:sendError', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t\tform.addEventListener('htmx:abort', function() {\n\t\t\t\t\t\tsetCreateBusy(false);\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\t\tif (modal) {\n\t\t\t\tmodal.addEventListener('close', function() {\n\t\t\t\t\tvar form = document.getElementById('new-project-form');\n\t\t\t\t\tif (form) form.reset();\n\t\t\t\t\tif (errorDiv) errorDiv.classList.add('hidden');\n\t\t\t\t\tif (pathPreview) pathPreview.classList.add('hidden');\n\t\t\t\t\tif (pickerFeedback) pickerFeedback.classList.add('hidden');\n\t\t\t\t\tif (repoSourceSelect && localRepoPathEnabled) {\n\t\t\t\t\t\tupdateRepoSourceFields();\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t})();\n\t</script>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func ProjectComputerFormOption(enabled bool) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<input type=\"hidden\" name=\"computer_setting_present\" value=\"1\"> <label class=\"label cursor-pointer justify-start gap-2 mb-3\"><input type=\"checkbox\" name=\"computer_enabled\" value=\"on\" class=\"toggle toggle-sm\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if enabled {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, " checked")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "> <span>Project computer</span></label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -646,69 +689,69 @@ func ProjectSettingsTabs(prefix string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<style>\n  #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }\n  :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > :is(button[type=\"submit\"], [data-sharing-save]) { min-width: 6rem; }\n  :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }\n  :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }\n  [data-project-tab-content], [data-project-sharing-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }\n  [data-project-panel][hidden], [data-project-tab-content][hidden], .modal-action[hidden] { display: none !important; }\n  [data-project-repo-fields][hidden] { display: none !important; }\n  [data-project-panel=\"general\"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .flex > .btn { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }\n  [data-project-panel=\"general\"] .project-defaults-fields .form-control { min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields .label { justify-content: flex-start; gap: 0.375rem; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"] { -moz-appearance: textfield; appearance: textfield; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-inner-spin-button,\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }\n  [data-project-panel=\"knowledge\"] .table { table-layout: fixed; }\n  [data-project-panel=\"knowledge\"] .table :is(th, td) { padding: 0.75rem 0; }\n  [data-project-panel=\"knowledge\"] .table th:first-child { width: 50%; }\n  @media (max-width: 640px) { [data-project-panel=\"general\"] .project-defaults-fields { grid-template-columns: minmax(0, 1fr); } }\n\n </style><div role=\"tablist\" aria-label=\"Project settings\" class=\"tabs tabs-bordered mb-4\" onkeydown=\"window.projectSettingsTabKey(event)\"><button type=\"button\" role=\"tab\" id=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general-tab").Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 779, Col: 63}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "\" aria-controls=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<style>\n  #edit_project_modal > .modal-box, #new_project_modal > .modal-box { max-height: calc(100dvh - 2rem); }\n  :is(#edit_project_modal, #new_project_modal) .modal-action { flex-wrap: wrap; gap: 0.5rem; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > button { margin-left: 0; }\n  :is(#edit_project_modal, #new_project_modal) .modal-action > :is(button[type=\"submit\"], [data-sharing-save]) { min-width: 6rem; }\n  :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }\n  :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }\n  [data-project-tab-content], [data-project-sharing-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }\n  [data-project-panel][hidden], [data-project-tab-content][hidden], .modal-action[hidden] { display: none !important; }\n  [data-project-repo-fields][hidden] { display: none !important; }\n  [data-project-panel=\"general\"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .flex > .btn { flex-shrink: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }\n  [data-project-panel=\"general\"] .project-defaults-fields .form-control { min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields :is(.input, .select) { width: 100%; min-width: 0; }\n  [data-project-panel=\"general\"] .project-defaults-fields .label { justify-content: flex-start; gap: 0.375rem; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"] { -moz-appearance: textfield; appearance: textfield; }\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-inner-spin-button,\n  [data-project-panel=\"general\"] input[name=\"max_workers\"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }\n  [data-project-panel=\"knowledge\"] .table { table-layout: fixed; }\n  [data-project-panel=\"knowledge\"] .table :is(th, td) { padding: 0.75rem 0; }\n  [data-project-panel=\"knowledge\"] .table th:first-child { width: 50%; }\n  @media (max-width: 640px) { [data-project-panel=\"general\"] .project-defaults-fields { grid-template-columns: minmax(0, 1fr); } }\n\n </style><div role=\"tablist\" aria-label=\"Project settings\" class=\"tabs tabs-bordered mb-4\" onkeydown=\"window.projectSettingsTabKey(event)\"><button type=\"button\" role=\"tab\" id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general").Resolve(ctx)
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 779, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 789, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" aria-selected=\"true\" tabindex=\"0\" class=\"tab tab-active\" data-project-tab=\"general\" onclick=\"window.selectProjectSettingsTab(this)\">General</button> <button type=\"button\" role=\"tab\" id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "\" aria-controls=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-general").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 780, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 789, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "\" aria-controls=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "\" aria-selected=\"true\" tabindex=\"0\" class=\"tab tab-active\" data-project-tab=\"general\" onclick=\"window.selectProjectSettingsTab(this)\">General</button> <button type=\"button\" role=\"tab\" id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 780, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 790, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "\" aria-selected=\"false\" tabindex=\"-1\" class=\"tab\" data-project-tab=\"knowledge\" onclick=\"window.selectProjectSettingsTab(this)\">Skills &amp; Memory</button> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "\" aria-controls=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var23 string
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 790, Col: 105}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" aria-selected=\"false\" tabindex=\"-1\" class=\"tab\" data-project-tab=\"knowledge\" onclick=\"window.selectProjectSettingsTab(this)\">Skills &amp; Memory</button> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if prefix == "edit-project" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<button type=\"button\" role=\"tab\" id=\"edit-project-sharing-tab\" aria-controls=\"edit-project-sharing\" aria-selected=\"false\" tabindex=\"-1\" class=\"tab\" data-project-tab=\"sharing\" onclick=\"window.selectProjectSettingsTab(this)\">Sharing</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<button type=\"button\" role=\"tab\" id=\"edit-project-sharing-tab\" aria-controls=\"edit-project-sharing\" aria-selected=\"false\" tabindex=\"-1\" class=\"tab\" data-project-tab=\"sharing\" onclick=\"window.selectProjectSettingsTab(this)\">Sharing</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "</div><script>\n window.selectProjectSettingsTab = function(button) {\n  var form = button.closest('form');\n  var dialog = form.closest('dialog');\n  dialog.querySelectorAll('[data-project-tab]').forEach(function(tab) {\n   var active = tab === button;\n   tab.classList.toggle('tab-active', active);\n   tab.setAttribute('aria-selected', String(active));\n   tab.tabIndex = active ? 0 : -1;\n  });\n  dialog.querySelectorAll('[data-project-panel]').forEach(function(panel) { panel.hidden = panel.dataset.projectPanel !== button.dataset.projectTab; });\n  form.querySelector('[data-project-tab-content]').hidden = button.dataset.projectTab === 'sharing';\n  form.querySelector('.modal-action').hidden = button.dataset.projectTab === 'sharing';\n };\n window.projectSettingsTabKey = function(event) {\n  var tabs = Array.from(event.currentTarget.querySelectorAll('[role=\"tab\"]'));\n  var index = tabs.indexOf(document.activeElement);\n  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;\n  event.preventDefault();\n  index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;\n  window.selectProjectSettingsTab(tabs[index]);\n  tabs[index].focus();\n };\n // Reveal the relevant tab before the browser focuses an invalid field in a hidden panel.\n (function() {\n  var form = document.currentScript.closest('form');\n  form.addEventListener('reset', function() {\n   var global = form.querySelector('[data-global-skill-switch]');\n   global.disabled = !form.elements.write_skills.defaultChecked;\n   form.elements.allow_global_skill_writes.value = global.defaultChecked ? 'on' : 'off';\n  });\n  form.addEventListener('invalid', function(event) {\n   var panel = event.target.closest('[data-project-panel]');\n   if (panel && panel.hidden) window.selectProjectSettingsTab(form.querySelector('[data-project-tab=\"' + panel.dataset.projectPanel + '\"]'));\n  }, true);\n  form.closest('dialog').addEventListener('close', function() { window.selectProjectSettingsTab(form.querySelector('[data-project-tab=\"general\"]')); });\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</div><script>\n window.selectProjectSettingsTab = function(button) {\n  var form = button.closest('form');\n  var dialog = form.closest('dialog');\n  dialog.querySelectorAll('[data-project-tab]').forEach(function(tab) {\n   var active = tab === button;\n   tab.classList.toggle('tab-active', active);\n   tab.setAttribute('aria-selected', String(active));\n   tab.tabIndex = active ? 0 : -1;\n  });\n  dialog.querySelectorAll('[data-project-panel]').forEach(function(panel) { panel.hidden = panel.dataset.projectPanel !== button.dataset.projectTab; });\n  form.querySelector('[data-project-tab-content]').hidden = button.dataset.projectTab === 'sharing';\n  form.querySelector('.modal-action').hidden = button.dataset.projectTab === 'sharing';\n };\n window.projectSettingsTabKey = function(event) {\n  var tabs = Array.from(event.currentTarget.querySelectorAll('[role=\"tab\"]'));\n  var index = tabs.indexOf(document.activeElement);\n  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;\n  event.preventDefault();\n  index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;\n  window.selectProjectSettingsTab(tabs[index]);\n  tabs[index].focus();\n };\n // Reveal the relevant tab before the browser focuses an invalid field in a hidden panel.\n (function() {\n  var form = document.currentScript.closest('form');\n  form.addEventListener('reset', function() {\n   var global = form.querySelector('[data-global-skill-switch]');\n   global.disabled = !form.elements.write_skills.defaultChecked;\n   form.elements.allow_global_skill_writes.value = global.defaultChecked ? 'on' : 'off';\n  });\n  form.addEventListener('invalid', function(event) {\n   var panel = event.target.closest('[data-project-panel]');\n   if (panel && panel.hidden) window.selectProjectSettingsTab(form.querySelector('[data-project-tab=\"' + panel.dataset.projectPanel + '\"]'));\n  }, true);\n  form.closest('dialog').addEventListener('close', function() { window.selectProjectSettingsTab(form.querySelector('[data-project-tab=\"general\"]')); });\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -733,33 +776,33 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<section id=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 826, Col: 36}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\" role=\"tabpanel\" aria-labelledby=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "<section id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 826, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 836, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" data-project-panel=\"knowledge\" hidden><input type=\"hidden\" name=\"skill_memory_settings_present\" value=\"true\"><table class=\"table w-full text-sm\"><thead><tr><th scope=\"col\" class=\"text-sm font-medium\">Resource</th><th class=\"text-center\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Read ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "\" role=\"tabpanel\" aria-labelledby=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var26 string
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-knowledge-tab").Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 836, Col: 98}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "\" data-project-panel=\"knowledge\" hidden><input type=\"hidden\" name=\"skill_memory_settings_present\" value=\"true\"><table class=\"table w-full text-sm\"><thead><tr><th scope=\"col\" class=\"text-sm font-medium\">Resource</th><th class=\"text-center\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Read ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -767,7 +810,7 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</span></th><th class=\"text-center\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Write ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</span></th><th class=\"text-center\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Write ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -775,47 +818,47 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "</span></th></tr></thead> <tbody><tr><th scope=\"row\" class=\"text-sm font-medium\">Skills</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_skills\" aria-label=\"Read skills\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "</span></th></tr></thead> <tbody><tr><th scope=\"row\" class=\"text-sm font-medium\">Skills</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_skills\" aria-label=\"Read skills\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if permissions.ReadSkills {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_skills\" aria-label=\"Write skills\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_skills\" aria-label=\"Write skills\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if permissions.WriteSkills {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, " onchange=\"var global = this.form.querySelector('[data-global-skill-switch]'); global.disabled = !this.checked; if (!this.checked) { global.checked = false; this.form.elements.allow_global_skill_writes.value = 'off'; }\"></td></tr><tr><th scope=\"row\" class=\"text-sm font-medium\">Memories</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_memories\" aria-label=\"Read memories\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " onchange=\"var global = this.form.querySelector('[data-global-skill-switch]'); global.disabled = !this.checked; if (!this.checked) { global.checked = false; this.form.elements.allow_global_skill_writes.value = 'off'; }\"></td></tr><tr><th scope=\"row\" class=\"text-sm font-medium\">Memories</th><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"read_memories\" aria-label=\"Read memories\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if permissions.ReadMemories {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_memories\" aria-label=\"Write memories\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" name=\"write_memories\" aria-label=\"Write memories\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if permissions.WriteMemories {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 83, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 84, "></td></tr><tr><th scope=\"row\" class=\"text-sm font-medium\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Allow global skill writes ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, "></td></tr><tr><th scope=\"row\" class=\"text-sm font-medium\"><span class=\"inline-flex items-center gap-1 text-sm font-medium\">Allow global skill writes ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -823,36 +866,36 @@ func ProjectKnowledgePanel(prefix string, permissions models.SkillMemoryPermissi
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</span></th><td></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" data-global-skill-switch aria-label=\"Allow global skill writes\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, "</span></th><td></td><td class=\"text-center\"><input type=\"checkbox\" class=\"toggle toggle-sm\" data-global-skill-switch aria-label=\"Allow global skill writes\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if permissions.WriteSkills && permissions.AllowGlobalSkillWrites {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 86, " checked")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
 		if !permissions.WriteSkills {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 87, " disabled")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, " disabled")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 88, " onchange=\"this.form.elements.allow_global_skill_writes.value = this.checked ? 'on' : 'off'\"></td></tr></tbody></table><input type=\"hidden\" name=\"allow_global_skill_writes\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, " onchange=\"this.form.elements.allow_global_skill_writes.value = this.checked ? 'on' : 'off'\"></td></tr></tbody></table><input type=\"hidden\" name=\"allow_global_skill_writes\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectGlobalSkillWriteValue(permissions)).Resolve(ctx)
+		var templ_7745c5c3_Var27 string
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectGlobalSkillWriteValue(permissions)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 836, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 846, Col: 105}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 89, "\"></section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\"></section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -884,33 +927,33 @@ func projectPermissionHelp(label, help string) templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "<button type=\"button\" class=\"btn btn-ghost btn-circle btn-xs shrink-0\" data-model-help=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templruntime.NewAttributeExpression(help).Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 846, Col: 94}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "\" aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "<button type=\"button\" class=\"btn btn-ghost btn-circle btn-xs shrink-0\" data-model-help=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression("About " + label).Resolve(ctx)
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templruntime.NewAttributeExpression(help).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 846, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 856, Col: 94}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path stroke-linecap=\"round\" d=\"M12 11v6\"></path><path stroke-linecap=\"round\" d=\"M12 7h.01\"></path></svg></button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" aria-label=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var30 string
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression("About " + label).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 856, Col: 126}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "\" aria-expanded=\"false\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path stroke-linecap=\"round\" d=\"M12 11v6\"></path><path stroke-linecap=\"round\" d=\"M12 7h.01\"></path></svg></button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -935,20 +978,20 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 93, "<div class=\"project-defaults-fields\"><div class=\"form-control\"><div class=\"label\"><label for=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "<div class=\"project-defaults-fields\"><div class=\"form-control\"><div class=\"label\"><label for=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
+		var templ_7745c5c3_Var32 string
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 855, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 865, Col: 43}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 94, "\" class=\"text-sm font-medium\">Default Model</label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "\" class=\"text-sm font-medium\">Default Model</label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -956,115 +999,115 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 95, "</div><select id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "</div><select id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-default-model").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 858, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 868, Col: 42}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 96, "\" name=\"default_agent_config_id\" class=\"select select-bordered\"><option value=\"\">Global default</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, "\" name=\"default_agent_config_id\" class=\"select select-bordered\"><option value=\"\">Global default</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, agent := range agents {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 97, "<option value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var33 string
-			templ_7745c5c3_Var33, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 861, Col: 30}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 98, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if isProjectDefaultModel(project, agent.ID) {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 99, " selected")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, ">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "<option value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var34 string
-			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+			templ_7745c5c3_Var34, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 862, Col: 19}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 871, Col: 30}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, " (")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if isProjectDefaultModel(project, agent.ID) {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, ">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var35 string
-			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
+			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 862, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 19}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 102, "/")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, " (")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
+			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 862, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, ") ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "/")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var37 string
+			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 63}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, ") ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if agent.IsDefault {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 104, "[global default]")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "[global default]")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "</option>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 106, "</select></div><div class=\"form-control\"><div class=\"label\"><label for=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "</select></div><div class=\"form-control\"><div class=\"label\"><label for=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
+		var templ_7745c5c3_Var38 string
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 872, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 882, Col: 41}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "\" class=\"text-sm font-medium\">Worker limit</label>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "\" class=\"text-sm font-medium\">Worker limit</label>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1072,79 +1115,79 @@ func ProjectDefaultsFields(prefix string, project *models.Project, agents []mode
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 108, "</div><input type=\"number\" name=\"max_workers\" id=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var38 string
-		templ_7745c5c3_Var38, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 875, Col: 72}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var38)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, "</div><input type=\"number\" name=\"max_workers\" id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var39 string
-		templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectMaxWorkersValue(project)).Resolve(ctx)
+		templ_7745c5c3_Var39, templ_7745c5c3_Err = templruntime.NewAttributeExpression(prefix + "-max-workers").Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 875, Col: 114}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 885, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "\" min=\"0\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var40 string
+		templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(projectMaxWorkersValue(project)).Resolve(ctx)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 885, Col: 114}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\" min=\"0\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if globalMaxWorkers > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, " max=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var40 string
-			templ_7745c5c3_Var40, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", globalMaxWorkers)).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 875, Col: 192}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, " step=\"1\" placeholder=\"Inherit\" class=\"input input-bordered\" data-tooltip-disabled> ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<p class=\"text-xs text-warning mt-1\">The current project limit exceeds the global limit of ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, " max=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var41 string
-			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", globalMaxWorkers))
+			templ_7745c5c3_Var41, templ_7745c5c3_Err = templruntime.NewAttributeExpression(fmt.Sprintf("%d", globalMaxWorkers)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 877, Col: 133}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 885, Col: 192}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, ". Lower it before saving.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 115, "\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 116, " step=\"1\" placeholder=\"Inherit\" class=\"input input-bordered\" data-tooltip-disabled> ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if projectWorkerLimitExceedsGlobal(globalMaxWorkers, project.MaxWorkers) {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, "<p class=\"text-xs text-warning mt-1\">The current project limit exceeds the global limit of ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var42 string
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", globalMaxWorkers))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/project_settings.templ`, Line: 887, Col: 133}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 118, ". Lower it before saving.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 119, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

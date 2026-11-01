@@ -1,0 +1,116 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os/exec"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/pages"
+	"github.com/stretchr/testify/require"
+)
+
+func TestComputerChromeConsentAcrossProfilesInPanel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("browser test")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome not installed")
+	}
+	var fragment bytes.Buffer
+	require.NoError(t, pages.ProjectComputerContent("project", "task").Render(t.Context(), &fragment))
+	runner := `<script>(async()=>{
+ const wait=async check=>{for(let n=0;n<100;n++){if(check())return;await new Promise(r=>setTimeout(r,20));}throw Error('Timed out');};
+ const q=s=>document.querySelector(s);const finish=(status,message)=>{const node=document.createElement('div');node.id='browser-result';node.dataset.status=status;node.textContent=message;document.body.append(node);};
+ try{
+ await wait(()=>!q('[data-computer-login]').hidden);
+ q('[data-computer-chrome]').click();await wait(()=>q('[data-computer-sites] input'));
+ q('[data-computer-sites] input').click();
+ q('[data-computer-profile]').value='Profile 1';q('[data-computer-profile]').dispatchEvent(new Event('change'));
+ await wait(()=>q('[data-computer-sites]').textContent.includes('second-session'));q('[data-computer-sites] input').click();
+ q('[data-computer-grant-scope]').value='project';q('[data-computer-grant-hours]').value='24';q('[data-computer-import]').click();
+ await wait(()=>q('[data-computer-import]').textContent.includes('Resume'));q('[data-computer-import]').click();await wait(()=>q('[data-computer-status]').textContent.includes('Imported 2'));
+ q('[data-computer-target]').value='computer';q('[data-computer-target]').dispatchEvent(new Event('change'));
+ await wait(()=>q('[data-computer-status]').textContent.includes('destination saved'));
+ finish('pass','Selected cookies across two profiles and tool destination saved');
+ }catch(error){finish('fail',error.message);}
+ })();</script>`
+	var mu sync.Mutex
+	var imported struct {
+		GrantID    string                         `json:"grant_id"`
+		Scope      string                         `json:"scope"`
+		Hours      int                            `json:"hours"`
+		Selections []models.ChromeCookieSelection `json:"selections"`
+	}
+	target := ""
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<!doctype html><html><body>"+fragment.String()+runner+"</body></html>")
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			fmt.Fprint(w, `{"enabled":false,"ready":false,"held":true,"handoff_kind":"request_chrome_login","handoff_url":"https://example.test","chrome_available":true}`)
+		case strings.HasSuffix(r.URL.Path, "/chrome"):
+			profile := r.URL.Query().Get("profile")
+			if profile == "" {
+				fmt.Fprint(w, `{"profiles":["Default","Profile 1"]}`)
+				return
+			}
+			name := "first-session"
+			if profile == "Profile 1" {
+				name = "second-session"
+			}
+			json.NewEncoder(w).Encode(map[string]any{"cookies": []models.ChromeCookieSelection{{Profile: profile, Domain: "example.test", Name: name, Path: "/"}, {Profile: profile, Domain: "example.test", Name: "unselected", Path: "/"}}})
+		case strings.HasSuffix(r.URL.Path, "/chrome-import"):
+			mu.Lock()
+			_ = json.NewDecoder(r.Body).Decode(&imported)
+			mu.Unlock()
+			attempts++
+			if attempts == 1 {
+				w.WriteHeader(409)
+				fmt.Fprint(w, `{"grant_id":"partial-grant","imported":1,"message":"Retry remaining profile"}`)
+			} else {
+				require.Equal(t, "partial-grant", imported.GrantID)
+				fmt.Fprint(w, `{"imported":2}`)
+			}
+		case strings.HasSuffix(r.URL.Path, "/target-computer"):
+			mu.Lock()
+			target = "computer"
+			mu.Unlock()
+			fmt.Fprint(w, `{"ok":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--user-data-dir="+t.TempDir(), "--virtual-time-budget=10000", "--dump-dom", server.URL)
+	output, err := runHandlerBrowserProcess(t, cmd)
+	require.NoError(t, err)
+	if !bytes.Contains(output, []byte(`id="browser-result" data-status="pass"`)) {
+		t.Fatalf("consent panel did not pass: %s", output[max(0, len(output)-1000):])
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, "computer", target)
+	require.Equal(t, "project", imported.Scope)
+	require.Equal(t, 24, imported.Hours)
+	require.Len(t, imported.Selections, 2)
+	require.Equal(t, "Default", imported.Selections[0].Profile)
+	require.Equal(t, "Profile 1", imported.Selections[1].Profile)
+	for _, cookie := range imported.Selections {
+		require.NotEqual(t, "unselected", cookie.Name)
+	}
+}
