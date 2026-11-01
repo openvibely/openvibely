@@ -2140,6 +2140,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
     click('[data-automation-view-yaml]', 'YAML view button before Add node dialog');
     var yamlCommentMarker = '# manual edit that must survive typing in the Add node dialog';
+    var yamlBeforeManualEdit = editor.value;
     editor.value = editor.value + '\n' + yamlCommentMarker + '\n';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
@@ -2163,6 +2164,12 @@ window.addEventListener('DOMContentLoaded', function() {
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     yamlNameValueClassBeforeDrag = yamlValueClassForLineContaining('Browser YAML');
+    editor.value = yamlBeforeManualEdit;
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    click('[data-automation-view-graph]', 'Graph view for node drag and connection hover');
+    expectBuilderActive('graph', 'Graph view for node drag and connection hover');
+    if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch with unchanged YAML must stay on the page instead of submitting a preview');
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var first = document.querySelector('[data-node-key="first"]');
     if (!first) fail('missing first node');
     var originalTransform = first.getAttribute('transform');
@@ -2188,8 +2195,6 @@ window.addEventListener('DOMContentLoaded', function() {
       var hit = document.querySelector('.automation-draft-edge[data-edge-key="' + path.dataset.edgeKey + '"] [data-edge-hit]');
       if (path.tagName.toLowerCase() !== 'path' || !path.getAttribute('d') || !hit || hit.getAttribute('d') !== path.getAttribute('d')) fail('dragged connection must keep its visible path and click target aligned');
     });
-    click('[data-automation-view-graph]', 'Graph view for connection hover');
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var hoverPath = document.querySelector('[data-edge-hit]');
     var hoverKey = hoverPath.closest('[data-edge-key]').dataset.edgeKey;
     var hoverControls = document.querySelector('[data-edge-controls][data-edge-key="' + hoverKey + '"]');
@@ -2242,7 +2247,6 @@ window.addEventListener('DOMContentLoaded', function() {
     });
     document.querySelector('[data-automation-canvas]').dispatchEvent(new PointerEvent('pointerleave'));
     if (getComputedStyle(hoverDelete).opacity !== '0' || hoverDelete.getAttribute('transform') !== centeredDelete) fail('leaving canvas should hide hover delete and restore keyboard position');
-    click('[data-automation-view-yaml]', 'Restore YAML after connection hover');
     if (editor.value.includes('position: {"x":0,"y":0}')) fail('node drag did not update YAML position: ' + editor.value);
     contains(editor, 'YAML-only configuration', 'node drag discarded YAML-only configuration');
     var yamlNameValueClassAfterDrag = yamlValueClassForLineContaining('Browser YAML');
@@ -2358,7 +2362,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--disable-background-networking",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--window-size=1200,700",
+		"--window-size=1200,900",
 		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-yaml-browser-profile"),
 		server.URL,
 	)

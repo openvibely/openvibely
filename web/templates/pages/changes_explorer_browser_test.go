@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"errors"
 	"fmt"
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -72,7 +74,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		case "/models":
 			fmt.Fprint(w, `<div id="models-container">Models</div>`)
 		case "/themes":
-			if err := ThemesContent(nil).Render(r.Context(), w); err != nil {
+			if err := ThemesContent(nil).Render(r.Context(), w); err != nil && r.Context().Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task":
@@ -98,7 +100,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 			if saved {
 				content = TaskChangesContent(current, task.ID, nil)
 			}
-			if err := content.Render(r.Context(), w); err != nil {
+			if err := content.Render(r.Context(), w); err != nil && r.Context().Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/file":
@@ -115,7 +117,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 				http.Error(w, "invalid chunk", 400)
 				return
 			}
-			if err := components.DiffChunk(chunks, index, view, task.ID, nil, chunk, components.DiffFileRevision(files[index], nil)).Render(r.Context(), w); err != nil {
+			if err := components.DiffChunk(chunks, index, view, task.ID, nil, chunk, components.DiffFileRevision(files[index], nil)).Render(r.Context(), w); err != nil && r.Context().Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/summary":
@@ -129,6 +131,12 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("board ready", `String(document.readyState==='complete' && !!window.htmx)`, "true")
 		b.evaluate(`document.getElementById('open-explorer-task').click();'task'`)
 		b.waitFor("workspace ready", `String(document.readyState==='complete' && !!window.taskWorkspace && !!document.getElementById('task-message-input'))`, "true")
+		// openChanges queues htmx.ajax loads of #changes-content whose promises can resolve before the
+		// queued swap lands; wait for every load to swap before relying on the retained diff DOM.
+		b.evaluate(`window.changesLoads=0;document.addEventListener('htmx:beforeSend',e=>{if(e.detail.target&&e.detail.target.id==='changes-content')window.changesLoads++;});document.addEventListener('htmx:afterRequest',e=>{if(e.detail.target&&e.detail.target.id==='changes-content')window.changesLoads--;});'track changes loads'`)
+		waitChangesLoaded := func(name string) {
+			b.waitFor(name+" settled", `String(window.changesLoads===0 && !!document.querySelector('#changes-content #diff-viewer') && !document.querySelector('#changes-content.htmx-swapping, #changes-content.htmx-settling'))`, "true")
+		}
 		b.evaluate(`document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'open'`)
 		b.waitFor("tree replaces collapsed task list", `String(document.documentElement.classList.contains('changes-explorer-active') && !document.documentElement.classList.contains('task-list-collapsed') && document.querySelectorAll('#changes-explorer-host [data-explorer-path]').length===2)`, "true")
 		b.waitFor("automatically expanded toggle state", `JSON.stringify([document.getElementById('task-list-toggle').getAttribute('aria-expanded'),document.getElementById('task-list-toggle').getAttribute('aria-label')])`, `["true","Collapse task list"]`)
@@ -145,6 +153,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.evaluate(`document.getElementById('task-list-search-toggle').click();'search again'`)
 		b.waitFor("existing task search stays open and retains query", `String(!document.documentElement.classList.contains('changes-explorer-active') && document.activeElement===document.getElementById('task-list-search-input') && document.getElementById('task-list-search-input').getBoundingClientRect().height>0 && document.getElementById('task-list-search-input').value==='Explore')`, "true")
 		b.evaluate(`document.getElementById('task-list-search-toggle').click();document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'return to changes'`)
+		waitChangesLoaded("changes reload")
 		b.waitFor("changes use shared card-free layout", `String(!!document.querySelector('#changes-content .task-changes-view') && !document.querySelector('#changes-content .card-body') && !document.querySelector('#changes-content > .card'))`, "true")
 		b.waitFor("all inline file cards remain visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && ['diff-file-0','diff-file-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0))`, "true")
 		b.evaluate(`window.retainedDiffBody=document.getElementById('diff-body-0');window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;'capture body'`)
@@ -243,6 +252,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("expanded workspace is restored", `String(!document.documentElement.classList.contains('task-list-collapsed') && !document.documentElement.classList.contains('changes-explorer-active'))`, "true")
 		b.waitFor("restored expanded toggle state", `JSON.stringify([document.getElementById('task-list-toggle').getAttribute('aria-expanded'),document.getElementById('task-list-toggle').getAttribute('aria-label')])`, `["true","Collapse task list"]`)
 		b.evaluate(`window.taskWorkspace.openChanges();'changes'`)
+		waitChangesLoaded("changes")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("mobile explorer", `String(!!document.querySelector('#changes-explorer-mobile .changes-explorer') && document.getElementById('changes-explorer-mobile').getBoundingClientRect().height>0)`, "true")
 		b.evaluate(`search.value='';search.dispatchEvent(new Event('input'));'clear filter'`)
