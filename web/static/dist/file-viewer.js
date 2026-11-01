@@ -30,12 +30,22 @@
  function restoreHTML(){
   if(!borrowedHTML)return;
   const {frame,canvas}=borrowedHTML;borrowedHTML=null;frame.hidden=false;
+  canvas.removeAttribute('data-file-html-expanded');
   if(canvas.isConnected&&frame.isConnected&&canvas.moveBefore)canvas.moveBefore(frame,canvas.firstChild);
+  else canvas.insertBefore(frame,canvas.firstChild);
  }
+ const pendingHTMLFrames=new Map();
  function prepareHTMLFrames(root){
   root.querySelectorAll('iframe').forEach(frame=>{
    frame.style.visibility='hidden';
-   frame.addEventListener('load',()=>{frame.style.removeProperty('visibility')},{once:true});
+   // A stalled subresource must not hide an otherwise usable document forever.
+   const reveal=()=>{
+    clearTimeout(timer);pendingHTMLFrames.delete(frame);
+    frame.removeEventListener('load',reveal);frame.style.removeProperty('visibility');
+   };
+   const timer=setTimeout(reveal,1500);
+   pendingHTMLFrames.set(frame,reveal);
+   frame.addEventListener('load',reveal,{once:true});
   });
  }
  function clear(){
@@ -88,6 +98,7 @@
    if(marker){
     marker.parentNode.moveBefore(liveFrame,marker);marker.remove();
     borrowedHTML={frame:liveFrame,canvas};
+    canvas.setAttribute('data-file-html-expanded','');
    }
    const header=content.querySelector('[data-file-header],[data-document-header]');
    if(header){title.textContent=header.querySelector('h3')?.textContent||item.name;download.download=title.textContent;const link=header.querySelector('a');if(link)download.href=link.href;header.remove()}
@@ -301,5 +312,7 @@
  const canvas=document.createElement('div');canvas.className='file-html-canvas';const frame=document.createElement('iframe');frame.title=file.file_name;frame.setAttribute('sandbox','allow-scripts');frame.referrerPolicy='no-referrer';frame.src=mode(url,'raw');const expand=document.createElement('button');expand.type='button';expand.textContent='Expand';canvas.append(frame,expand);prepareHTMLFrames(canvas);link.dataset.fileName=file.file_name;link.after(canvas);
  }).catch(()=>{});
  })}
- let scanQueued=false;new MutationObserver(()=>{if(scanQueued)return;scanQueued=true;requestAnimationFrame(()=>{scanQueued=false;scanLinks()})}).observe(document.body,{childList:true,subtree:true});scanLinks();
+ let scanQueued=false;new MutationObserver(()=>{
+  for(const [frame,reveal] of pendingHTMLFrames)if(!frame.isConnected)reveal();
+  if(scanQueued)return;scanQueued=true;requestAnimationFrame(()=>{scanQueued=false;scanLinks()})}).observe(document.body,{childList:true,subtree:true});scanLinks();
 })();

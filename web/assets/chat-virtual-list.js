@@ -340,7 +340,7 @@
             const rect = el.getBoundingClientRect();
             const protectedRow = mounted && (row.loading || row.node.contains(document.activeElement) ||
                 (selection && !selection.isCollapsed && selection.containsNode(row.node, true)) ||
-                row.node.querySelector('video, audio, iframe, [data-chat-input-request-id]'));
+                row.node.querySelector('video, audio, iframe, [data-file-html-expanded], [data-chat-input-request-id]'));
             // Find/selection retain all rows, but must still render newly added
             // or updated content instead of freezing it as empty placeholders.
             const visible = suspended || list.selecting || (!row.lazy && list.rows.size < 40) || protectedRow ||
