@@ -188,6 +188,22 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 						browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": divider.X + offset, "y": divider.Y}, nil)
 						browser.waitFor(style+" divider highlights its tab", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]');return tab.parentElement.matches(':hover') && getComputedStyle(tab).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(tab.parentElement,'::after').opacity === '0';})())`, "true")
 					}
+					// Cross both rounded tab edges as well as the gap, in both directions.
+					// Do not wait for opacity to settle: a visible divider at any point is a flash.
+					for _, dy := range []float64{-10, 0, 10} {
+						for _, direction := range []float64{1, -1} {
+							for step := float64(0); step <= divider.Gap+16; step++ {
+								x := divider.X - 8 + step
+								if direction < 0 {
+									x = divider.X + divider.Gap + 8 - step
+								}
+								browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": divider.Y + dy}, nil)
+								if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p01"]').parentElement,'::after').opacity`); got != "0" {
+									t.Fatalf("%s divider flashed crossing edge: x=%v y=%v direction=%v opacity=%s", style, x, divider.Y+dy, direction, got)
+								}
+							}
+						}
+					}
 					if got := browser.evaluate(`String(document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect().width)`); got != "240" {
 						t.Fatal("tab width must stay unchanged", got)
 					}

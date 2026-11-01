@@ -123,9 +123,10 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab[data-selected="true"]::before, .desktop-project-tab[data-selected="true"]::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
   .desktop-project-tab[data-selected="true"]::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
   .desktop-project-tab[data-selected="true"]::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
-  /* Extend only the invisible pointer target across the divider gap. */
-  .desktop-project-tab:not([data-selected="true"])::before { content: ""; position: absolute; top: 0; bottom: 0; right: -4px; width: 4px; --wails-draggable: no-drag; }
-  html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"])::before { right: -6px; width: 6px; }
+  /* Cover rounded-edge cutouts and the divider gap without changing the painted tab. */
+  .desktop-project-tab:not([data-selected="true"]) { isolation: isolate; }
+  .desktop-project-tab:not([data-selected="true"])::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; right: -4px; z-index: -1; --wails-draggable: no-drag; }
+  html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"])::before { right: -6px; }
   .desktop-project-tab:not([data-selected="true"])::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: none; }
   .desktop-project-tab:not([data-selected="true"]):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::before, .desktop-project-tab::after { transition: none; } }
