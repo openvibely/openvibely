@@ -21,6 +21,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// futureScheduleFormTime returns an unambiguous future local time for forms
+// that omit the UTC offset. Adding an hour can land in the repeated DST hour
+// and parse back as a time in the past.
+func futureScheduleFormTime() time.Time {
+	tomorrow := time.Now().In(time.Local).AddDate(0, 0, 1)
+	return time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 12, 0, 0, 0, time.Local)
+}
+
 // ---- CreateSchedule ----
 
 func TestParseScheduleForm_ValidatesIntervalBeforeDate(t *testing.T) {
@@ -73,7 +81,7 @@ func TestCreateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 	task := tc.CreateTask(project.ID).Build()
 
 	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
-		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"run_at":          {futureScheduleFormTime().Format("2006-01-02T15:04")},
 		"repeat_type":     {"seconds"},
 		"repeat_interval": {"366"},
 	}).Execute()
@@ -272,7 +280,7 @@ func TestCreateAndUpdateSchedule_NativeRedirectParity(t *testing.T) {
 			tc := NewStoreTestContext(t)
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).Build()
-			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+			runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 			form := url.Values{
 				"run_at":          {runAt},
 				"repeat_type":     {"once"},
@@ -307,7 +315,7 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"once"},
@@ -347,7 +355,7 @@ func TestCreateSchedule_OneTimeResetsCompletedScheduledTask(t *testing.T) {
 		WithStatus(models.StatusCompleted).
 		Build()
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"once"},
@@ -384,7 +392,7 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"daily"},
@@ -434,7 +442,7 @@ func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
 		t.Fatalf("main task detail showed older execution duration; body=%s", mainRec.Body.String())
 	}
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	scheduleRec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"daily"},
@@ -458,7 +466,7 @@ func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_interval": {"1"},
@@ -575,7 +583,7 @@ func TestCreateScheduledTaskFromScheduleUsesCompactAgentProjection(t *testing.T)
 		"prompt":          {"Run the scheduled task"},
 		"category":        {"scheduled"},
 		"priority":        {"2"},
-		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"run_at":          {futureScheduleFormTime().Format("2006-01-02T15:04")},
 		"repeat_type":     {"daily"},
 		"repeat_interval": {"1"},
 	}.Encode()))
@@ -689,7 +697,7 @@ func TestCreateSchedule_AssignsPrimaryAgent(t *testing.T) {
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Schedule Runner", models.AgentScopeProject, project.ID, true)
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + project.ID).WithForm(url.Values{
 		"run_at":                            {runAt},
 		"repeat_type":                       {"once"},
@@ -721,7 +729,7 @@ func TestCreateSchedule_ExplicitNoAgentClearsPrimaryAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + project.ID).WithForm(url.Values{
 		"run_at":                            {runAt},
 		"repeat_type":                       {"once"},
@@ -749,7 +757,7 @@ func TestUpdateSchedule_PersistsAndClearsPrimaryAgentWithoutChangingModel(t *tes
 	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Updated Runner", models.AgentScopeProject, project.ID, true)
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 
 	for _, agentID := range []string{agent.ID, ""} {
 		rec := tc.HTTP().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
@@ -788,7 +796,7 @@ func TestUpdateSchedule_RejectsIneligibleAndCrossProjectAgents(t *testing.T) {
 	tc.handler.agentRepo = agentRepo
 	ineligible := createScheduleTestAgent(t, agentRepo, "Maintenance Agent", models.AgentScopeGlobal, "", false)
 	otherProjectAgent := createScheduleTestAgent(t, agentRepo, "Other Project Agent", models.AgentScopeProject, otherProject.ID, true)
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 
 	for _, agentID := range []string{ineligible.ID, otherProjectAgent.ID} {
 		rec := tc.HTTP().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
@@ -898,7 +906,7 @@ func TestCreateScheduledTask_AutoMergeIntent(t *testing.T) {
 				"prompt":          {"Run later"},
 				"category":        {"scheduled"},
 				"priority":        {"2"},
-				"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+				"run_at":          {futureScheduleFormTime().Format("2006-01-02T15:04")},
 				"repeat_type":     {"daily"},
 				"repeat_interval": {"1"},
 			}
@@ -1034,7 +1042,7 @@ func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T
 			if tcse.assignAgent {
 				agentID = agent.ID
 			}
-			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+			runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 			rec := tc.HTMX().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
 				"title":               {"Scheduled Assignment " + tcse.name},
 				"prompt":              {"Run later"},
@@ -1067,7 +1075,7 @@ func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T
 func TestUpdateSchedule_NotFound(t *testing.T) {
 	tc := NewStoreTestContext(t)
 
-	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Put("/schedules/nonexistent-id").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"once"},
@@ -1104,7 +1112,7 @@ func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 	originalRunAt := schedule.RunAt
 
 	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
-		"run_at":          {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")},
+		"run_at":          {futureScheduleFormTime().Format("2006-01-02T15:04")},
 		"repeat_type":     {"hours"},
 		"repeat_interval": {"366"},
 	}).Execute()
@@ -1135,7 +1143,7 @@ func TestUpdateSchedule_ClearsCancellationRequestWhenResettingScheduledTaskPendi
 	}
 
 	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
-		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"run_at":          {futureScheduleFormTime().Format("2006-01-02T15:04")},
 		"repeat_type":     {"daily"},
 		"repeat_interval": {"1"},
 	}).Execute()
@@ -1161,7 +1169,7 @@ func TestUpdateSchedule_Success_Redirect(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
 
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"once"},
@@ -1179,7 +1187,7 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
 
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 	rec := tc.HTMX().Put("/schedules/" + schedule.ID).WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"daily"},
@@ -1203,7 +1211,7 @@ func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.
 		t.Fatal(err)
 	}
 	schedule := tc.CreateSchedule(task.ID).Build()
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 
 	rec := tc.HTTP().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
 		"run_at":          {runAt},
@@ -1227,7 +1235,7 @@ func TestUpdateSchedule_HTMXResponseHydratesSavedPrimaryAgent(t *testing.T) {
 	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "HTMX Scheduled Runner", models.AgentScopeProject, project.ID, true)
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 
 	rec := tc.HTMX().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
 		"run_at":                            {runAt},
@@ -1257,7 +1265,7 @@ func TestUpdateSchedule_NativeFormMethodOverridePersistsPrimaryAgent(t *testing.
 	agentRepo := tc.stores.Agents
 	tc.handler.agentRepo = agentRepo
 	agent := createScheduleTestAgent(t, agentRepo, "Native Scheduled Runner", models.AgentScopeProject, project.ID, true)
-	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	runAt := futureScheduleFormTime().Format("2006-01-02T15:04")
 
 	rec := tc.HTTP().Post("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
 		"_method":                           {"PUT"},
@@ -2071,7 +2079,7 @@ func TestTaskPanelScheduleRejectsPastStart(t *testing.T) {
 	if err != nil || len(schedules) != 0 {
 		t.Fatalf("past schedule persisted: %v %v", schedules, err)
 	}
-	form.Set("run_at", time.Now().Add(time.Hour).Format("2006-01-02T15:04"))
+	form.Set("run_at", futureScheduleFormTime().Format("2006-01-02T15:04"))
 	rec = tc.HTTP().Post(endpoint).WithForm(form).Execute()
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("future schedule rejected: %d %s", rec.Code, rec.Body.String())
@@ -2116,7 +2124,7 @@ func TestConversationScheduleFormsCreateRunnableSchedules(t *testing.T) {
 			project := tc.CreateProject().Build()
 			task := tc.CreateTask(project.ID).WithCategory(models.CategoryChat).Build()
 			rec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule?from=task-panel").WithForm(url.Values{
-				"run_at": {time.Now().Add(time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {repeat}, "repeat_interval": {"1"},
+				"run_at": {futureScheduleFormTime().Format("2006-01-02T15:04")}, "repeat_type": {repeat}, "repeat_interval": {"1"},
 			}).Execute()
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected saved schedule, got %d: %s", rec.Code, rec.Body.String())
@@ -2142,7 +2150,7 @@ func TestConversationScheduleEditAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := tc.HTMX().Post("/schedules/" + schedule.ID).WithForm(url.Values{
-		"run_at": {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {"daily"}, "repeat_interval": {"1"},
+		"run_at": {futureScheduleFormTime().Format("2006-01-02T15:04")}, "repeat_type": {"daily"}, "repeat_interval": {"1"},
 	}).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("edit: %d %s", rec.Code, rec.Body.String())

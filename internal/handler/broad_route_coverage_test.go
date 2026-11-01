@@ -116,12 +116,12 @@ func TestBroadReadOnlyRouteSmokeExercisesProjectTaskAndSettingsSurfaces(t *testi
 		{"/tasks/" + backlog.ID + "/goal/pause" + projectQuery, nil},
 		{"/tasks/" + backlog.ID + "/goal/resume" + projectQuery, nil},
 		{"/tasks/" + backlog.ID + "/goal/clear" + projectQuery, nil},
-		{"/tasks/" + active.ID + "/schedule" + projectQuery, url.Values{"run_at": {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {string(models.RepeatOnce)}, "repeat_interval": {"1"}}},
+		{"/tasks/" + active.ID + "/schedule" + projectQuery, url.Values{"run_at": {futureScheduleFormTime().Format("2006-01-02T15:04")}, "repeat_type": {string(models.RepeatOnce)}, "repeat_interval": {"1"}}},
 		{"/schedules/" + schedule.ID + "/toggle" + projectQuery, nil},
 		{"/schedules/" + schedule.ID + "/reschedule" + projectQuery, url.Values{"run_at": {time.Now().Add(3 * time.Hour).Format(time.RFC3339)}}},
 		{"/tasks/move-completed" + projectQuery, nil},
 		{"/tasks/batch-category" + projectQuery, url.Values{"task_ids": {backlog.ID}, "category": {string(models.CategoryActive)}}},
-		{"/tasks/" + other.ID + "/schedule" + projectQuery, url.Values{"run_at": {time.Now().Add(time.Hour).Format("2006-01-02T15:04")}}},
+		{"/tasks/" + other.ID + "/schedule" + projectQuery, url.Values{"run_at": {futureScheduleFormTime().Format("2006-01-02T15:04")}}},
 	}
 	for _, tt := range postForms {
 		rec := tc.HTMX().Post(tt.path).WithForm(tt.form).Execute()
@@ -242,7 +242,7 @@ func TestBroadMutationRouteContractsExerciseMoreHandlers(t *testing.T) {
 		{"/tasks/" + active.ID + "/changes/live" + projectQuery, nil},
 		{"/tasks/" + active.ID + "/worktree/auto-merge" + projectQuery, url.Values{"auto_merge_enabled": {"true"}}},
 		{"/settings/worktree" + projectQuery, url.Values{"auto_sync_on_start": {"true"}, "auto_merge_enabled": {"false"}, "dirty_policy": {"commit"}}},
-		{"/schedules/" + schedule.ID + projectQuery, url.Values{"run_at": {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {string(models.RepeatDaily)}, "repeat_interval": {"1"}}},
+		{"/schedules/" + schedule.ID + projectQuery, url.Values{"run_at": {futureScheduleFormTime().Format("2006-01-02T15:04")}, "repeat_type": {string(models.RepeatDaily)}, "repeat_interval": {"1"}}},
 		{"/api/schedules/" + schedule.ID + "/toggle" + projectQuery, nil},
 		{"/agents", url.Values{"name": {"Broad Agent"}, "description": {"Broad mutation agent"}, "model": {agent.Model}, "model_id": {agent.ID}, "scope": {string(models.AgentScopeProject)}, "project_id": {project.ID}}},
 		{"/agents/generate" + projectQuery, url.Values{"prompt": {"Generate a concise test agent"}, "model_id": {agent.ID}}},
