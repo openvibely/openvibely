@@ -206,8 +206,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					}
 					if style == "attached" {
 						browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": divider.X + 1, "y": divider.Y}, nil)
-						browser.waitFor("attached hover uses its own superellipse dimensions", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),s=getComputedStyle(tab),points=s.clipPath.match(/[-\d.]+px [-\d.]+px/g);if(!points)return false;var xy=points.map(p=>p.split(' ').map(parseFloat));return s.borderRadius==='0px' && tab.offsetWidth===236 && tab.offsetHeight===32 && Math.max(...xy.map(p=>p[0]))===236 && Math.max(...xy.map(p=>p[1]))===32 && xy.some(p=>Math.abs(p[0]-233.45)<0.02 && Math.abs(p[1]-2.55)<0.02);})())`, "true")
+						browser.waitFor("attached hover uses its own superellipse dimensions", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),s=getComputedStyle(tab),points=s.clipPath.match(/[-\d.]+px [-\d.]+px/g);if(!points)return false;var xy=points.map(p=>p.split(' ').map(parseFloat));return s.borderRadius==='0px' && tab.offsetWidth===236 && tab.offsetHeight===35 && Math.max(...xy.map(p=>p[0]))===236 && Math.max(...xy.map(p=>p[1]))===35 && xy.some(p=>Math.abs(p[0]-233.3)<0.02 && Math.abs(p[1]-2.7)<0.02);})())`, "true")
 					}
+					browser.waitFor(style+" highlight height and vertical alignment", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),r=tab.getBoundingClientRect(),close=tab.parentElement.querySelector('[data-close-project]').getBoundingClientRect();return r.height===35 && Math.abs((r.top+r.bottom-close.top-close.bottom)/2)<0.1;})())`, "true")
 					if got := browser.evaluate(`String(document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect().width)`); got != "240" {
 						t.Fatal("tab width must stay unchanged", got)
 					}

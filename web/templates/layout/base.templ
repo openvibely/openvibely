@@ -3266,7 +3266,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				/* Keep inactive labels aligned, and draw the hover pill without
 				   asymmetric transparent borders that distort its rounded ends. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"]) [role="tab"] { height: calc(100% - 4px); align-self: flex-start; padding-bottom: 6px; }
-				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { height: 32px; width: calc(100% - 4px); align-self: flex-start; margin: 1px 2px 0; border: 0; padding: 0 38px 0 14px; border-radius: 999px; }
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { height: 35px; width: calc(100% - 4px); align-self: flex-start; margin: -0.5px 2px 0; border: 0; padding: 0 38px 0 14px; border-radius: 999px; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--attached-tab-hover-clip"]:hover [role="tab"] { border-radius: 0; clip-path: var(--attached-tab-hover-clip); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [data-close-project],
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
@@ -5649,8 +5649,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								function shape(el, attachedHover) {
 									var w = el.clientWidth, h = el.clientHeight;
 									if (!w || !h) return;
-									// Attached hover surfaces are inset 2px per side and 32px tall.
-									if (attachedHover) { w -= 4; h = 32; }
+									// Attached hover surfaces are inset 2px per side and match detached tabs at 35px tall.
+									if (attachedHover) { w -= 4; h = 35; }
 									var inspector = el.hasAttribute('data-side-panel');
 									var layout = document.documentElement.getAttribute('data-layout');
 									var unified = layout === 'unified';
