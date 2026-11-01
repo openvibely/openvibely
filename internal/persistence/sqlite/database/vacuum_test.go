@@ -52,12 +52,11 @@ func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
 	}
 
 	start := make(chan struct{})
-	vacuumDone := make(chan struct{})
+	vacuumDone := make(chan vacuumResult, 1)
 	writerDone := make(chan error, 1)
 	go func() {
 		<-start
-		reclaimOnce(ctx, db)
-		close(vacuumDone)
+		vacuumDone <- reclaimOnceWithHook(ctx, db, nil)
 	}()
 	go func() {
 		<-start
@@ -65,9 +64,17 @@ func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
 		writerDone <- err
 	}()
 	close(start)
-	<-vacuumDone
+	result := <-vacuumDone
 	if err := <-writerDone; err != nil {
 		t.Fatalf("writer concurrent with incremental vacuum: %v", err)
+	}
+	// With both pool connections occupied, cleanup now yields rather than
+	// waiting indefinitely. Model the next scheduled attempt after the writer.
+	if result.busy {
+		result = reclaimOnceWithHook(ctx, db, nil)
+	}
+	if result.err != nil || !result.progress() {
+		t.Fatalf("vacuum after concurrent writer: %+v", result)
 	}
 
 	var freeAfter int

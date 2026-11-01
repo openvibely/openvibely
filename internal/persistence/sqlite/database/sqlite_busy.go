@@ -20,14 +20,15 @@ const (
 // restores and verifies the previous value, or discards the physical connection
 // when restoration cannot be confirmed.
 func BindSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(), error) {
-	deadline, hasDeadline := ctx.Deadline()
+	_, hasDeadline := ctx.Deadline()
 	if !hasDeadline && ctx.Done() == nil {
 		return func() {}, nil
 	}
-	var previousMS int
-	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&previousMS); err != nil {
-		return nil, err
-	}
+	return bindSQLiteBusyTimeout(ctx, conn, boundedSQLiteBusyTimeout(ctx))
+}
+
+func boundedSQLiteBusyTimeout(ctx context.Context) int {
+	deadline, hasDeadline := ctx.Deadline()
 	boundedMS := int(sqliteCancellationPollInterval / time.Millisecond)
 	if hasDeadline {
 		deadlineBoundMS := int((time.Until(deadline) - sqliteBusyTimeoutRestoreReserve) / time.Millisecond)
@@ -37,6 +38,15 @@ func BindSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func()
 		if deadlineBoundMS < boundedMS {
 			boundedMS = deadlineBoundMS
 		}
+	}
+	return boundedMS
+}
+
+// bindSQLiteBusyTimeout also serves maintenance callers with a shorter lock budget.
+func bindSQLiteBusyTimeout(ctx context.Context, conn *sql.Conn, boundedMS int) (func(), error) {
+	var previousMS int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&previousMS); err != nil {
+		return nil, err
 	}
 	if previousMS > 0 && previousMS <= boundedMS {
 		return func() {}, nil
