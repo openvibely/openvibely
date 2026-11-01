@@ -415,6 +415,9 @@ func (r *ProjectRepo) DeleteWithCleanupManifest(ctx context.Context, id string, 
 	if err = tx.Commit(); err != nil {
 		return manifest, false, fmt.Errorf("committing project deletion: %w", err)
 	}
+	if len(manifest.TaskIDs) > 0 {
+		requestDeletionCleanup(r.db)
+	}
 	return manifest, true, nil
 }
 

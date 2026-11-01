@@ -2287,6 +2287,9 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 	if err = tx.Commit(); err != nil {
 		return manifest, false, fmt.Errorf("committing task deletion: %w", err)
 	}
+	if rows > 0 {
+		requestDeletionCleanup(r.db)
+	}
 	return manifest, rows > 0, nil
 }
 
@@ -2303,7 +2306,7 @@ func isTaskDeletionUploadSessionID(sessionID string) bool {
 }
 
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM tasks WHERE id = ?`, id)
+	_, err := execTaskDeletion(ctx, r.db, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting task: %w", err)
 	}
@@ -2354,7 +2357,7 @@ func (r *TaskRepo) FindBlockedChildByParent(ctx context.Context, parentTaskID st
 
 // DeleteBlockedChildrenByParent removes all blocked child tasks for the given parent task ID.
 func (r *TaskRepo) DeleteBlockedChildrenByParent(ctx context.Context, parentTaskID string) error {
-	_, err := execBoundSQLite(ctx, r.db,
+	_, err := execTaskDeletion(ctx, r.db,
 		`DELETE FROM tasks WHERE parent_task_id = ? AND status = ?`,
 		parentTaskID, models.StatusBlocked)
 	if err != nil {
@@ -2739,7 +2742,7 @@ func (r *TaskRepo) ListByCategory(ctx context.Context, category models.TaskCateg
 // DeleteAllCompleted deletes all tasks in the 'completed' category.
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllCompleted(ctx context.Context, projectID string) (int, error) {
-	result, err := execBoundSQLite(ctx, r.db,
+	result, err := execTaskDeletion(ctx, r.db,
 		`DELETE FROM tasks WHERE category = 'completed' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting completed tasks: %w", err)
@@ -2754,7 +2757,7 @@ func (r *TaskRepo) DeleteAllCompleted(ctx context.Context, projectID string) (in
 // DeleteAllBacklog deletes all tasks in the 'backlog' category.
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllBacklog(ctx context.Context, projectID string) (int, error) {
-	result, err := execBoundSQLite(ctx, r.db,
+	result, err := execTaskDeletion(ctx, r.db,
 		`DELETE FROM tasks WHERE category = 'backlog' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting backlog tasks: %w", err)
@@ -2770,7 +2773,7 @@ func (r *TaskRepo) DeleteAllBacklog(ctx context.Context, projectID string) (int,
 // Executions are cascade-deleted via FK constraint.
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, error) {
-	result, err := execBoundSQLite(ctx, r.db,
+	result, err := execTaskDeletion(ctx, r.db,
 		`DELETE FROM tasks WHERE category = 'chat' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting chat tasks: %w", err)

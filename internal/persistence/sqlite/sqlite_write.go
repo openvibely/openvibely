@@ -196,3 +196,20 @@ func (t *manualTx) Rollback() error {
 	_, err := t.conn.ExecContext(rollbackCtx, `ROLLBACK`)
 	return err
 }
+
+// Task/chat deletion statements are autocommit transactions. Signal only after
+// successful execution and connection release; explicit transactions signal
+// separately after COMMIT. Never infer commits by parsing arbitrary SQL.
+func execTaskDeletion(ctx context.Context, db *sql.DB, query string, args ...interface{}) (sql.Result, error) {
+	result, err := execBoundSQLite(ctx, db, query, args...)
+	if err == nil {
+		if rows, countErr := result.RowsAffected(); countErr == nil && rows > 0 {
+			requestDeletionCleanup(db)
+		}
+	}
+	return result, err
+}
+
+func requestDeletionCleanup(db *sql.DB) {
+	database.RequestIncrementalVacuum(writeDatabase(db))
+}

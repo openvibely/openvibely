@@ -102,61 +102,128 @@ func (t realVacuumTimer) channel() <-chan time.Time { return t.C }
 
 // StartIncrementalVacuum runs serial batches, releasing the connection before
 // starting each delay. Logical shrinkage need not immediately shrink the main
-// file: WAL checkpointing determines physical filesystem reclamation.
-func StartIncrementalVacuum(ctx context.Context, db *sql.DB) {
-	startIncrementalVacuum(ctx, db, vacuumInterval, nil)
+// file: WAL checkpointing determines physical filesystem reclamation. Repeated
+// starts return the existing worker's completion channel; its original context
+// owns shutdown. Callers must share the database's writer pool.
+func StartIncrementalVacuum(ctx context.Context, db *sql.DB) <-chan struct{} {
+	return startIncrementalVacuum(ctx, db, vacuumInterval, nil)
 }
 func startIncrementalVacuum(ctx context.Context, db *sql.DB, interval time.Duration, beforeWrite func()) <-chan struct{} {
-	done := make(chan struct{})
+	vacuumWorkers.Lock()
+	if w := vacuumWorkers.workers[db]; w != nil {
+		vacuumWorkers.Unlock()
+		return w.done
+	}
+	w := &vacuumWorker{requests: make(chan struct{}, 1), done: make(chan struct{})}
+	vacuumWorkers.workers[db] = w
+	vacuumWorkers.Unlock()
 	unregister := RegisterWriterPriority(db)
 	go func() {
-		defer close(done)
-		defer unregister()
+		defer func() {
+			unregister()
+			vacuumWorkers.Lock()
+			delete(vacuumWorkers.workers, db)
+			close(w.done)
+			vacuumWorkers.Unlock()
+		}()
 		runVacuum(ctx, realVacuumTimer{time.NewTimer(interval)}, interval, func(pages int) vacuumResult {
 			return reclaimBatch(ctx, db, pages, beforeWrite)
-		}, rand.Int64N)
+		}, rand.Int64N, w.requests)
 	}()
-	return done
+	return w.done
 }
-func runVacuum(ctx context.Context, timer vacuumTimer, idle time.Duration, batch func(int) vacuumResult, jitter func(int64) int64) {
+
+// The optional mailbox keeps existing single-worker tests/callers usable. Only
+// idle workers receive requests; during a run/backoff the capacity-one mailbox
+// coalesces them without shortening the scheduled wait.
+func runVacuum(ctx context.Context, timer vacuumTimer, idle time.Duration, batch func(int) vacuumResult, jitter func(int64) int64, mailbox ...<-chan struct{}) {
 	defer timer.Stop()
+	var requests <-chan struct{}
+	if len(mailbox) != 0 {
+		requests = mailbox[0]
+	}
 	var schedule vacuumSchedule
 	var lastLog time.Time
 	pages := vacuumBatchPages
+	active, cooldown := false, false
+	remaining := int64(-1) // Unknown until this run's first successful stats read.
 	for {
+		wake := requests
+		if active || cooldown {
+			wake = nil
+		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
+			// Cancel the fallback tick; this request and the timer use the same worker.
+			if !timer.Stop() {
+				select {
+				case <-timer.channel():
+				default:
+				}
+			}
 		case <-timer.channel():
-			if ctx.Err() != nil {
-				return
-			}
-			r := batch(pages)
-			if ctx.Err() != nil {
-				return
-			}
-			delay := schedule.next(r, idle, jitter)
-			pages = nextVacuumPages(pages, r)
-			// Include idle checks and checkpoint deferrals, but not every active batch.
-			if lastLog.IsZero() || time.Since(lastLog) >= time.Minute {
-				lastLog = time.Now()
-				reclaimed, remaining := int64(-1), int64(-1)
-				statsStage := "unknown"
-				if r.beforeKnown {
-					remaining = r.before.free * r.before.pageSize
-					statsStage = "before"
-				}
-				if r.afterKnown {
-					reclaimed = (r.before.pages - r.after.pages) * r.before.pageSize
-					remaining = r.after.free * r.after.pageSize
-					statsStage = "after"
-				}
-				applog.Infof("database: incremental vacuum stage=%s batch_pages=%d next_batch_pages=%d duration=%s yield_duration=%s vacuum_duration=%s checkpoint_duration=%s busy=%t checkpoint_busy=%d wal_frames=%d checkpointed_frames=%d logical_reclaimed_bytes=%d remaining_free_bytes=%d stats=%s next_delay=%s error=%v (bytes=-1 means unknown; logical shrink is not physical file shrink)", r.stage, r.pages, pages, r.duration, r.yieldDuration, r.vacuumDuration, r.checkpointDuration, r.busy, r.checkpoint.busy, r.checkpoint.frames, r.checkpoint.checkpointed, reclaimed, remaining, statsStage, delay, r.err)
-			}
-			timer.Reset(delay)
 		}
+		if ctx.Err() != nil {
+			return
+		}
+		if !active {
+			// A timer wake also consumes the pending recheck. Requests arriving after
+			// this point belong to the next run, never this run's fixed budget.
+			select {
+			case <-requests:
+			default:
+			}
+			active, remaining, pages = true, -1, vacuumBatchPages
+		}
+		requested := pages
+		if remaining >= 0 {
+			requested = int(min(int64(requested), remaining))
+		}
+		r := batch(requested)
+		if ctx.Err() != nil {
+			return
+		}
+		if remaining < 0 && r.beforeKnown {
+			remaining = 0
+			if r.before.eligible() {
+				remaining = r.before.free
+			}
+		}
+		if r.progress() && remaining >= 0 {
+			remaining = max(0, remaining-(r.before.pages-r.after.pages))
+		}
+		delay := schedule.next(r, idle, jitter)
+		pages = nextVacuumPages(pages, r)
+		// Busy keeps the run and its budget alive. Errors/no progress end the run
+		// but preserve a cooldown, so delete storms cannot defeat retry pacing.
+		cooldown = r.busy || r.err != nil || (r.attempted && !r.progress())
+		if !r.busy && !(r.progress() && r.after.eligible() && remaining != 0) {
+			active = false
+			delay = idle
+			// Leave pending requests for the idle select to start a fresh snapshot.
+		}
+		// Include idle checks and checkpoint deferrals, but not every active batch.
+		if lastLog.IsZero() || time.Since(lastLog) >= time.Minute {
+			lastLog = time.Now()
+			reclaimed, freeBytes := int64(-1), int64(-1)
+			statsStage := "unknown"
+			if r.beforeKnown {
+				freeBytes = r.before.free * r.before.pageSize
+				statsStage = "before"
+			}
+			if r.afterKnown {
+				reclaimed = (r.before.pages - r.after.pages) * r.before.pageSize
+				freeBytes = r.after.free * r.after.pageSize
+				statsStage = "after"
+			}
+			applog.Infof("database: incremental vacuum stage=%s batch_pages=%d next_batch_pages=%d duration=%s yield_duration=%s vacuum_duration=%s checkpoint_duration=%s busy=%t checkpoint_busy=%d wal_frames=%d checkpointed_frames=%d logical_reclaimed_bytes=%d remaining_free_bytes=%d stats=%s run_remaining_pages=%d next_delay=%s error=%v (bytes=-1 means unknown; logical shrink is not physical file shrink)", r.stage, r.pages, pages, r.duration, r.yieldDuration, r.vacuumDuration, r.checkpointDuration, r.busy, r.checkpoint.busy, r.checkpoint.frames, r.checkpoint.checkpointed, reclaimed, freeBytes, statsStage, remaining, delay, r.err)
+		}
+		timer.Reset(delay)
 	}
 }
+
 func reclaimOnce(ctx context.Context, db *sql.DB) { reclaimOnceWithHook(ctx, db, nil) }
 func reclaimOnceWithHook(ctx context.Context, db *sql.DB, beforeWrite func()) vacuumResult {
 	return reclaimBatch(ctx, db, vacuumBatchPages, beforeWrite)

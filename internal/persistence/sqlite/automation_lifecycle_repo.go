@@ -522,6 +522,9 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
+	if len(deletedTasks) > 0 {
+		requestDeletionCleanup(r.db)
+	}
 	return versions, deletedTasks, nil
 }
 
