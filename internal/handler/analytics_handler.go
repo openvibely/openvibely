@@ -37,6 +37,9 @@ func (h *Handler) Analytics(c echo.Context) error {
 	}
 
 	var currentProject *models.Project
+	if projectID == models.AllProjectsID {
+		currentProject = &models.Project{ID: projectID, Name: "All projects"}
+	}
 	for i := range projects {
 		if projects[i].ID == projectID {
 			currentProject = &projects[i]

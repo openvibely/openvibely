@@ -674,10 +674,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	ctx := c.Request().Context()
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID == models.AllProjectsID {
-		if c.Request().URL.Path == "/chat" || strings.HasPrefix(c.Request().URL.Path, "/chat/") {
-			return projectID, nil
-		}
-		return "", echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this operation.")
+		return projectID, nil
 	}
 	if projectID != "" {
 		p, err := h.projectSvc.GetByID(ctx, projectID)

@@ -31,9 +31,10 @@ type AgentPickerOption struct {
 // Agent selector. Availability is enforced by ListScheduleOptions; this type
 // contains only the display fields rendered by the selector.
 type AgentScheduleOption struct {
-	ID    string
-	Name  string
-	Model string
+	ProjectID string
+	ID        string
+	Name      string
+	Model     string
 }
 
 // AgentTaskUIOption is the compact Agent projection shared by Task board badges

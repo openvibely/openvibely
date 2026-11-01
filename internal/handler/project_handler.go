@@ -641,6 +641,9 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 	}
 
 	var currentProject *models.Project
+	if projectID == models.AllProjectsID {
+		currentProject = &models.Project{ID: projectID, Name: "All projects"}
+	}
 	for i := range projects {
 		if projects[i].ID == projectID {
 			currentProject = &projects[i]
@@ -691,6 +694,13 @@ func render(c echo.Context, status int, component templ.Component) error {
 	ctx := c.Request().Context()
 	if h, ok := c.Get("handler").(*Handler); ok {
 		ctx = templateui.WithMessageAuthors(ctx, h.authEnabled())
+		if layout.WorkspaceProjectID(ctx, c.QueryParam("project_id")) == models.AllProjectsID {
+			projects, err := h.projectSvc.ListSelectorOptions(ctx)
+			if err != nil {
+				return err
+			}
+			ctx = templateui.WithProjectNames(ctx, projects)
+		}
 		ctx = layout.WithDesktopMode(ctx, h.desktopMode)
 		ctx = layout.WithBuildVersion(ctx, h.buildIdentity.Version)
 		ctx = layout.WithNativeWindow(ctx, h.desktopMode && c.Request().Header.Get("X-OpenVibely-Native-Window") == "1")

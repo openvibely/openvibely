@@ -207,60 +207,109 @@ func (s *AlertService) CountUnread(ctx context.Context, projectID string) (int, 
 }
 
 func (s *AlertService) MarkRead(ctx context.Context, projectID, id string) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, []string{id})
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.MarkRead(ctx, projectID, id); err != nil {
 		return err
 	}
-	s.publishProjectAlert(projectID, id)
+	for _, owner := range owners {
+		s.publishProjectAlert(owner, id)
+	}
 	return nil
 }
 
 func (s *AlertService) MarkReadBulk(ctx context.Context, projectID string, ids []string) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, ids)
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.MarkReadBulk(ctx, projectID, ids); err != nil {
 		return err
 	}
-	s.publishProjectAlert(projectID, "")
+	for _, owner := range owners {
+		s.publishProjectAlert(owner, "")
+	}
 	return nil
 }
 
 func (s *AlertService) MarkAllRead(ctx context.Context, projectID string) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, nil)
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.MarkAllRead(ctx, projectID); err != nil {
 		return err
 	}
-	s.publishProjectAlert(projectID, "")
+	for _, owner := range owners {
+		s.publishProjectAlert(owner, "")
+	}
 	return nil
 }
 
 func (s *AlertService) Delete(ctx context.Context, projectID, id string) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, []string{id})
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.Delete(ctx, projectID, id); err != nil {
 		return err
 	}
-	s.publishProjectAlert(projectID, id)
+	for _, owner := range owners {
+		s.publishProjectAlert(owner, id)
+	}
 	return nil
 }
 
 func (s *AlertService) DeleteBulk(ctx context.Context, projectID string, ids []string) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, ids)
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.DeleteBulk(ctx, projectID, ids); err != nil {
 		return err
 	}
-	s.publishProjectAlert(projectID, "")
+	for _, owner := range owners {
+		s.publishProjectAlert(owner, "")
+	}
 	return nil
 }
 
 func (s *AlertService) DeleteAll(ctx context.Context, projectID string) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, nil)
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.DeleteAll(ctx, projectID); err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)
 	}
 	if s.broadcaster != nil {
-		s.broadcaster.Publish(events.TaskEvent{Type: events.AlertCreated, ProjectID: projectID})
+		for _, owner := range owners {
+			s.publishProjectAlert(owner, "")
+		}
 	}
 	return nil
 }
 
 func (s *AlertService) SetDecision(ctx context.Context, projectID, id string, state models.AlertDecisionState) error {
+	owners, err := s.alertChangeOwners(ctx, projectID, []string{id})
+	if err != nil {
+		return err
+	}
+
 	if err := s.alertRepo.SetDecision(ctx, projectID, id, state); err != nil {
 		return err
 	}
-	s.publishProjectAlert(projectID, id)
+	for _, owner := range owners {
+		s.publishProjectAlert(owner, id)
+	}
 	return nil
 }
 
@@ -323,4 +372,12 @@ func (s *AlertService) CreateAccountUsageAlert(ctx context.Context, a *models.Al
 		s.broadcaster.Publish(events.TaskEvent{Type: events.AlertCreated, ProjectID: a.ProjectID, AlertID: a.ID, AlertSource: "account_usage", AlertTitle: a.Title, AlertSeverity: string(a.Severity), AlertURL: link})
 	}
 	return nil
+}
+
+// Capture owners before deletion so individual project subscribers also refresh.
+func (s *AlertService) alertChangeOwners(ctx context.Context, projectID string, ids []string) ([]string, error) {
+	if projectID != models.AllProjectsID || s.broadcaster == nil {
+		return []string{projectID}, nil
+	}
+	return s.alertRepo.ListOwnerProjectIDs(ctx, projectID, ids)
 }

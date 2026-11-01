@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -55,6 +56,50 @@ templ AutomationsContentPageWithState(cards []models.AutomationCard, currentProj
 }
 
 templ automationsContent(cards []models.AutomationCard, currentProjectID string, description string, errorMessage string, hasMore bool, state CardListState) {
+<script>
+(function() {
+ if (window.openVibelyAutomationListEventsInstalled) return;
+ window.openVibelyAutomationListEventsInstalled = true;
+ var pending = false, timer = null, pressed = false, inFlight = false;
+ function root() { return document.getElementById('automations-container'); }
+ function busy(node) { return pressed || node.contains(document.activeElement) || node.querySelector('.htmx-request, [data-card-selected="true"]') || document.querySelector('dialog[open]'); }
+ function refresh() {
+  clearTimeout(timer);
+  var node = root();
+  if (!node) { pending = false; return; }
+  if (!pending || inFlight || document.hidden || busy(node)) return;
+  pending = false; inFlight = true;
+  var url = node.dataset.cardPaginationUrl;
+  if (window.cardPaginationRefreshURL) url = window.cardPaginationRefreshURL(node, url);
+  Promise.resolve(htmx.ajax('GET', url, {source:node, target:node, swap:'outerHTML', headers:{'X-Automation-List-Refresh':'true'}})).finally(function(){inFlight=false;if(pending) timer=setTimeout(refresh,100);});
+ }
+ function changed(event) {
+  var node = root(); if (!node) return;
+  var project = new URL(node.dataset.cardPaginationUrl, location.href).searchParams.get('project_id');
+  if (event && event.type === 'sse-automation-event' && project !== '__all_projects__' && event.detail && event.detail.project_id !== project) return;
+  pending = true; clearTimeout(timer);timer = setTimeout(refresh,100);
+ }
+ window.addEventListener('sse-automation-event', changed);
+ window.addEventListener('sse-live-connected', changed);
+ document.addEventListener('visibilitychange', function(){if(!document.hidden) refresh();});
+ document.addEventListener('pointerdown',function(event){var node=root();pressed=!!(node && node.contains(event.target));},true);
+ document.addEventListener('pointerup',function(){pressed=false;setTimeout(refresh,0);},true);
+ document.addEventListener('pointercancel',function(){pressed=false;refresh();},true);
+ document.addEventListener('focusout',function(){setTimeout(refresh,0);});
+ document.addEventListener('close',refresh,true);
+ document.body.addEventListener('htmx:beforeSwap',function(event){
+  var d=event.detail, headers=d.requestConfig && d.requestConfig.headers || {};
+  if(headers['X-Automation-List-Refresh']!=='true')return;
+  var node=root();
+  if(!node || node!==d.target || !node.isConnected){d.shouldSwap=false;return;}
+  if(busy(node)){pending=true;d.shouldSwap=false;return;}
+  var parsed=new DOMParser().parseFromString(d.xhr.responseText,'text/html');
+  var current=node.querySelector('#automations-card-list'), replacement=parsed.querySelector('#automations-card-list');
+  if(current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;
+ });
+})();
+</script>
+
 		<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div data-page-header class="mb-6 flex items-center justify-between gap-3">
@@ -96,6 +141,9 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 						onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"
 					>
 						<div class="card-body relative">
+                            if label := templateui.ProjectLabel(ctx, card.Automation.ProjectID); label != "" {
+                                <span class="text-xs opacity-60" data-project-label>{ label }</span>
+                            }
 							<div class="absolute top-4 right-4" data-automation-card-action onclick="event.stopPropagation()">
 								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + card.Automation.Name}) {
 									<li>

@@ -71,7 +71,7 @@ func (r *ScheduleRepo) ListByProject(ctx context.Context, projectID string) ([]m
 		 s.next_run, s.last_run, s.created_at, s.updated_at
 		 FROM schedules s
 		 JOIN tasks t ON t.id = s.task_id
-		 WHERE t.project_id = ?
+		 WHERE `+analyticsProjectPredicate("t.project_id", projectID)+`
 		 ORDER BY s.next_run ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing project schedules: %w", err)
@@ -272,7 +272,7 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 				`SELECT s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled,
 				        s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at
 				 FROM schedules s JOIN tasks t ON t.id = s.task_id
-				 WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).
+				 WHERE s.id = ? AND `+analyticsProjectPredicate("t.project_id", projectID)+``, scheduleID, projectID).
 				Scan(&schedule.ID, &schedule.TaskID, &schedule.RunAt, &schedule.RepeatType,
 					&schedule.RepeatInterval, &schedule.Enabled, &schedule.ClearContextOnStart,
 					&schedule.NextRun, &schedule.LastRun, &schedule.CreatedAt, &schedule.UpdatedAt)
@@ -290,7 +290,7 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 			result, err := exec.ExecContext(ctx,
 				`UPDATE schedules SET run_at = ?, next_run = ?, updated_at = datetime('now')
 				 WHERE id = ? AND EXISTS (
-				  SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id AND tasks.project_id = ?
+				  SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id AND `+analyticsProjectPredicate("tasks.project_id", projectID)+`
 				 )`, schedule.RunAt, schedule.NextRun, schedule.ID, projectID)
 			if err != nil {
 				return fmt.Errorf("updating schedule %s in batch: %w", schedule.ID, err)

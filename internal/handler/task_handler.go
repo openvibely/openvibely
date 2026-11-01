@@ -319,6 +319,7 @@ func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, project
 }
 
 func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjustSort func(*taskSortPreferences)) error {
+	projectID = layout.WorkspaceProjectID(c.Request().Context(), projectID)
 	sortPrefs := getSortPreferences(c)
 	if adjustSort != nil {
 		adjustSort(&sortPrefs)
@@ -383,6 +384,9 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	applog.Debugf("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
+	if projectID == models.AllProjectsID {
+		project = &models.Project{ID: projectID, Name: "All projects"}
+	}
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
 
@@ -703,7 +707,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	// or redirect native form submissions back to the project-scoped schedule page.
 	if c.QueryParam("from") == "schedule" {
 		if !isHTMX(c) {
-			return c.Redirect(http.StatusSeeOther, "/schedule?project_id="+projectID)
+			return c.Redirect(http.StatusSeeOther, "/schedule?project_id="+url.QueryEscape(layout.WorkspaceProjectID(c.Request().Context(), projectID)))
 		}
 		return h.renderScheduleContentForProject(c, projectID)
 	}
@@ -1982,6 +1986,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	// Return the full Pulse fragment for its in-place Stop action. The established
 	// board and task-thread response paths remain unchanged for other callers.
 	if pulseRequest && isHTMX(c) {
+		pulseProjectID = layout.WorkspaceProjectID(c.Request().Context(), pulseProjectID)
 		upcoming, err := h.upcomingSvc.GenerateUpcoming(c.Request().Context(), pulseProjectID)
 		if err != nil {
 			applog.Infof("[handler] CancelTask Pulse refresh error project=%s: %v", pulseProjectID, err)
@@ -2284,7 +2289,7 @@ func (h *Handler) ReorderTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] ReorderTask task=%s newPosition=%d", taskID, newPosition)
 
-	if err := h.taskSvc.ReorderTask(c.Request().Context(), taskID, newPosition); err != nil {
+	if err := h.taskSvc.ReorderTask(c.Request().Context(), taskID, newPosition, layout.WorkspaceProjectID(c.Request().Context(), h.mutationProjectID(c))); err != nil {
 		applog.Infof("[handler] ReorderTask error: %v", err)
 		return err
 	}

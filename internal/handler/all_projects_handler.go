@@ -3,14 +3,11 @@ package handler
 import (
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/layout"
-	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 // allProjectsScope handles the virtual UI scope before project-specific handlers
@@ -21,7 +18,7 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 		// Only workspace entry pages inherit it; item/API requests keep their
 		// existing ownership and scope resolution.
 		path := c.Request().URL.Path
-		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations"
+		workspaceEntry := path == "/chat" || path == "/tasks" || path == "/tasks/new" || path == "/analytics" || path == "/automations" || path == "/upcoming" || path == "/history" || path == "/alerts" || path == "/schedule" || path == "/insights"
 		if c.Request().Method == http.MethodGet && !isHTMX(c) && workspaceEntry && c.QueryParam("project_id") == "" && h.settingsRepo != nil {
 			selected, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
 			if err == nil && selected == models.AllProjectsID {
@@ -122,173 +119,31 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 			c.Request().URL.RawQuery = q.Encode()
 			return next(c)
 		}
-		if c.Request().Method != http.MethodGet {
-			return echo.NewHTTPError(http.StatusBadRequest, "Choose a project before making changes.")
-		}
-		switch path {
-		case "/tasks", "/automations", "/analytics":
-			return h.AllProjects(c)
-		case "/tasks/sidebar":
-			return h.TaskListPanel(c)
-		case "/alerts/unread-count":
-			return c.NoContent(http.StatusOK)
-		case "/events":
-			// Legacy SSE endpoint; notifications use the shared WebSocket transport.
-			return c.NoContent(http.StatusNoContent)
-		}
-
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/events") {
-			return echo.NewHTTPError(http.StatusBadRequest, "Choose a project for this operation.")
-		}
-		return h.AllProjectsChooseProject(c)
-	}
-}
-
-func (h *Handler) AllProjects(c echo.Context) error {
-	ctx := c.Request().Context()
-	projects, err := h.projectSvc.ListSelectorOptions(ctx)
-	if err != nil {
-		return err
-	}
-	data := pages.AllProjectsData{Projects: projects, Section: strings.TrimPrefix(c.Request().URL.Path, "/"), Search: strings.TrimSpace(c.QueryParam("search")), FilterProject: c.QueryParam("filter_project"), Range: c.QueryParam("range")}
-	projectID := models.AllProjectsID
-	if data.FilterProject != "" {
-		found := false
-		for _, project := range projects {
-			if project.ID == data.FilterProject {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// A remembered filter can outlive its project. Clear the stale
-			// filter and page boundary rather than preventing tab navigation.
-			query := c.QueryParams()
-			for _, key := range []string{"filter_project", "offset", "page", "card_page"} {
-				query.Del(key)
-			}
-			location := c.Request().URL.Path + "?" + query.Encode()
-			if !isHTMX(c) {
-				return c.Redirect(http.StatusSeeOther, location)
-			}
-			if c.Request().Header.Get("HX-Target") == "all-projects-results" {
-				// A poll cannot retarget itself into the main page: the shell
-				// must start a fresh navigation after checking it is still current.
-				c.Response().Header().Set("X-OpenVibely-All-Projects-Location", location)
-				return c.NoContent(http.StatusOK)
-			}
-			c.Request().URL.RawQuery = query.Encode()
-			data.FilterProject = ""
-			// Main-page requests can replace their URL and filter controls directly.
-			c.Request().Header.Set("HX-Target", "main-content")
-			c.Response().Header().Set("HX-Replace-Url", location)
-			c.Response().Header().Set("HX-Retarget", "#main-content")
-			c.Response().Header().Set("HX-Reswap", "innerHTML")
-		} else {
-			projectID = data.FilterProject
-		}
-	}
-	switch data.Section {
-	case "tasks":
-		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(ctx, projectID, "", "", "")
-		if err != nil {
-			return err
-		}
-		for _, task := range tasks {
-			if task.Category == models.CategoryChat {
-				continue
-			}
-			if data.Search != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(data.Search)) {
-				continue
-			}
-			data.Tasks = append(data.Tasks, task)
-		}
-	case "automations":
-		if h.automationGraphSvc == nil {
-			return echo.NewHTTPError(http.StatusServiceUnavailable, "Automations unavailable")
-		}
-		page := parseCardPageRequest(c)
-		data.Offset = page.Offset
-		data.PageSize = page.PageSize
-		cards, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, page.Offset, persistence.AutomationCardListFilter{Search: data.Search, Sort: "name_asc"})
-		if err != nil {
-			return err
-		}
-		if len(cards) == 0 && page.Offset > 0 {
-			// Find the last occupied page without walking every stale page.
-			filter := persistence.AutomationCardListFilter{Search: data.Search, Sort: "name_asc"}
-			low, high, last := 0, (page.Offset-1)/page.PageSize, 0
-			for low <= high {
-				mid := low + (high-low)/2
-				probe, err := h.automationGraphSvc.ListPageFiltered(ctx, projectID, 1, mid*page.PageSize, filter)
-				if err != nil {
-					return err
-				}
-				if len(probe) > 0 {
-					last = mid
-					low = mid + 1
-				} else {
-					high = mid - 1
-				}
-			}
-			data.Offset = last * page.PageSize
-			query := c.QueryParams()
-			query.Del("page")
-			query.Set("card_page", "1")
-			query.Set("page_size", strconv.Itoa(page.PageSize))
-			query.Set("offset", strconv.Itoa(data.Offset))
-			location := "/automations?" + query.Encode()
-			if !isHTMX(c) {
-				return c.Redirect(http.StatusSeeOther, location)
-			}
-			if c.Request().Header.Get("HX-Target") == "all-projects-results" {
-				c.Response().Header().Set("X-OpenVibely-All-Projects-Location", location)
-				return c.NoContent(http.StatusOK)
-			}
-			c.Response().Header().Set("HX-Replace-Url", location)
-			cards, err = h.automationGraphSvc.ListPageFiltered(ctx, projectID, page.PageSize+1, data.Offset, filter)
+		if strings.HasPrefix(path, "/schedules/") && c.Param("id") != "" && c.FormValue("schedule_ids") == "" {
+			schedule, err := h.scheduleRepo.GetByID(c.Request().Context(), c.Param("id"))
 			if err != nil {
 				return err
 			}
-		}
-		data.Automations, data.HasMore = cardPageItems(cards, page.PageSize)
-	case "analytics":
-		data.AnalyticsFilters = c.QueryParams()
-		data.AnalyticsProject = &models.Project{ID: projectID, Name: "All projects"}
-		for _, project := range projects {
-			if project.ID == projectID {
-				data.AnalyticsProject.Name = project.Name
+			if schedule == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 			}
+			task, err := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID)
+			if err != nil {
+				return err
+			}
+			if task == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "task not found")
+			}
+			c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+			q := c.QueryParams()
+			q.Set("project_id", task.ProjectID)
+			c.Request().URL.RawQuery = q.Encode()
+			return next(c)
 		}
-		c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(ctx, models.AllProjectsID)))
+		// Aggregate pages use the same handlers and templates as a project.
+		c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+		return next(c)
 	}
-	if isHTMX(c) && c.Request().Header.Get("HX-Target") == "all-projects-results" {
-		if data.Section == "tasks" {
-			return render(c, http.StatusOK, pages.AllProjectsTaskResults(data))
-		}
-		if data.Section == "automations" {
-			return render(c, http.StatusOK, pages.AllProjectsAutomationResults(data))
-		}
-	}
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AllProjectsContent(data))
-	}
-	return render(c, http.StatusOK, pages.AllProjects(data))
-}
-
-func (h *Handler) AllProjectsChooseProject(c echo.Context) error {
-	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	if err != nil {
-		return err
-	}
-	path := c.Request().URL.Path
-	if strings.HasPrefix(path, "/projects/") {
-		path = "/tasks"
-	}
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AllProjectsChooseContent(projects, path))
-	}
-	return render(c, http.StatusOK, pages.AllProjectsChoose(projects, path))
 }
 
 // workspaceListReturnURL only accepts a relative list URL for this workspace.

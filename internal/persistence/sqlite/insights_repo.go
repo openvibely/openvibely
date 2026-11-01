@@ -32,7 +32,7 @@ func (r *InsightsRepo) GetInsight(ctx context.Context, projectID, id string) (*m
 	var i models.Insight
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE project_id = ? AND id = ?`, projectID, id,
+		FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id,
 	).Scan(&i.ID, &i.ProjectID, &i.Type, &i.Severity, &i.Status, &i.Title, &i.Description, &i.Evidence, &i.Suggestion, &i.Impact, &i.TaskID, &i.Confidence, &i.CreatedAt, &i.UpdatedAt, &i.ResolvedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -46,7 +46,7 @@ func (r *InsightsRepo) GetInsight(ctx context.Context, projectID, id string) (*m
 func (r *InsightsRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Insight, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE project_id = ?
+		FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -59,7 +59,7 @@ func (r *InsightsRepo) ListByProject(ctx context.Context, projectID string, limi
 func (r *InsightsRepo) ListByStatus(ctx context.Context, projectID string, status models.InsightStatus, limit int) ([]models.Insight, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE project_id = ? AND status = ?
+		FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND status = ?
 		ORDER BY
 			CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 WHEN 'info' THEN 4 END,
 			confidence DESC
@@ -75,7 +75,7 @@ func (r *InsightsRepo) ListByStatus(ctx context.Context, projectID string, statu
 func (r *InsightsRepo) ListByType(ctx context.Context, projectID string, insightType models.InsightType, limit int) ([]models.Insight, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence, created_at, updated_at, resolved_at
-		FROM insights WHERE project_id = ? AND type = ?
+		FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND type = ?
 		ORDER BY created_at DESC LIMIT ?`, projectID, insightType, limit,
 	)
 	if err != nil {
@@ -86,9 +86,9 @@ func (r *InsightsRepo) ListByType(ctx context.Context, projectID string, insight
 }
 
 func (r *InsightsRepo) UpdateStatus(ctx context.Context, projectID, id string, status models.InsightStatus) error {
-	query := `UPDATE insights SET status = ?, updated_at = datetime('now') WHERE project_id = ? AND id = ?`
+	query := `UPDATE insights SET status = ?, updated_at = datetime('now') WHERE ` + analyticsProjectPredicate("project_id", projectID) + ` AND id = ?`
 	if status == models.InsightStatusResolved {
-		query = `UPDATE insights SET status = ?, updated_at = datetime('now'), resolved_at = datetime('now') WHERE project_id = ? AND id = ?`
+		query = `UPDATE insights SET status = ?, updated_at = datetime('now'), resolved_at = datetime('now') WHERE ` + analyticsProjectPredicate("project_id", projectID) + ` AND id = ?`
 	}
 	result, err := execBoundSQLite(ctx, r.db, query, status, projectID, id)
 	if err != nil {
@@ -120,7 +120,7 @@ func (r *InsightsRepo) LinkTask(ctx context.Context, projectID, insightID, taskI
 }
 
 func (r *InsightsRepo) DeleteInsight(ctx context.Context, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM insights WHERE project_id = ? AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func (r *InsightsRepo) DeleteInsight(ctx context.Context, projectID, id string) 
 
 func (r *InsightsRepo) CountByStatus(ctx context.Context, projectID string) (map[string]int, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT status, COUNT(*) FROM insights WHERE project_id = ? GROUP BY status`, projectID,
+		SELECT status, COUNT(*) FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+` GROUP BY status`, projectID,
 	)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (r *InsightsRepo) CountByStatus(ctx context.Context, projectID string) (map
 
 func (r *InsightsRepo) CountByType(ctx context.Context, projectID string) (map[string]int, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT type, COUNT(*) FROM insights WHERE project_id = ? GROUP BY type`, projectID,
+		SELECT type, COUNT(*) FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+` GROUP BY type`, projectID,
 	)
 	if err != nil {
 		return nil, err
@@ -178,7 +178,7 @@ func (r *InsightsRepo) CountByType(ctx context.Context, projectID string) (map[s
 
 func (r *InsightsRepo) AvgConfidence(ctx context.Context, projectID string) (float64, error) {
 	var avg sql.NullFloat64
-	err := r.db.QueryRowContext(ctx, `SELECT AVG(confidence) FROM insights WHERE project_id = ?`, projectID).Scan(&avg)
+	err := r.db.QueryRowContext(ctx, `SELECT AVG(confidence) FROM insights WHERE `+analyticsProjectPredicate("project_id", projectID)+``, projectID).Scan(&avg)
 	if err != nil {
 		return 0, err
 	}
@@ -217,7 +217,7 @@ func (r *InsightsRepo) GetLatestReport(ctx context.Context, projectID string) (*
 	var rpt models.InsightReport
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, report_date, summary, insight_ids, stats, analysis_log, created_at
-		FROM insight_reports WHERE project_id = ?
+		FROM insight_reports WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT 1`, projectID,
 	).Scan(&rpt.ID, &rpt.ProjectID, &rpt.ReportDate, &rpt.Summary, &rpt.InsightIDs, &rpt.Stats, &rpt.AnalysisLog, &rpt.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -232,7 +232,7 @@ func (r *InsightsRepo) GetLatestReport(ctx context.Context, projectID string) (*
 func (r *InsightsRepo) ListReports(ctx context.Context, projectID string, limit int) ([]models.InsightReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, report_date, summary, insight_ids, stats, analysis_log, created_at
-		FROM insight_reports WHERE project_id = ?
+		FROM insight_reports WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -266,7 +266,7 @@ func (r *InsightsRepo) GetKnowledge(ctx context.Context, projectID, id string) (
 	var k models.KnowledgeEntry
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, topic, content, source, source_ref, tags, created_at, updated_at
-		FROM knowledge_entries WHERE project_id = ? AND id = ?`, projectID, id,
+		FROM knowledge_entries WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id,
 	).Scan(&k.ID, &k.ProjectID, &k.Topic, &k.Content, &k.Source, &k.SourceRef, &k.Tags, &k.CreatedAt, &k.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -280,7 +280,7 @@ func (r *InsightsRepo) GetKnowledge(ctx context.Context, projectID, id string) (
 func (r *InsightsRepo) ListKnowledge(ctx context.Context, projectID string, limit int) ([]models.KnowledgeEntry, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, topic, content, source, source_ref, tags, created_at, updated_at
-		FROM knowledge_entries WHERE project_id = ?
+		FROM knowledge_entries WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -300,7 +300,7 @@ func (r *InsightsRepo) ListKnowledge(ctx context.Context, projectID string, limi
 }
 
 func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, projectID, id string) error {
-	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM knowledge_entries WHERE project_id = ? AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM knowledge_entries WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id = ?`, projectID, id)
 	if err != nil {
 		return err
 	}
@@ -421,7 +421,7 @@ func (r *InsightsRepo) GetLatestHealthCheck(ctx context.Context, projectID strin
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, grade, strengths, improvements, assessment, how_to_improve,
 			tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct, created_at
-		FROM health_checks WHERE project_id = ?
+		FROM health_checks WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT 1`, projectID,
 	).Scan(&hc.ID, &hc.ProjectID, &hc.Grade, &hc.Strengths, &hc.Improvements, &hc.Assessment, &hc.HowToImprove,
 		&hc.TasksTotal, &hc.TasksCompleted, &hc.TasksFailed, &hc.TasksPending, &hc.BacklogSize, &hc.AvgCompletionPct, &hc.CreatedAt)
@@ -438,7 +438,7 @@ func (r *InsightsRepo) ListHealthChecks(ctx context.Context, projectID string, l
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, grade, strengths, improvements, assessment, how_to_improve,
 			tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct, created_at
-		FROM health_checks WHERE project_id = ?
+		FROM health_checks WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -585,7 +585,7 @@ func (r *InsightsRepo) GetLatestIdeaGrade(ctx context.Context, projectID string)
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade,
 			tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score, created_at
-		FROM idea_grades WHERE project_id = ?
+		FROM idea_grades WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT 1`, projectID,
 	).Scan(&ig.ID, &ig.ProjectID, &ig.Grade, &ig.Summary, &ig.Strengths, &ig.Improvements, &ig.HowToNextGrade, &ig.NextGrade,
 		&ig.TasksEvaluated, &ig.ClarityScore, &ig.AmbitionScore, &ig.FollowThrough, &ig.DiversityScore, &ig.StrategyScore, &ig.CreatedAt)
@@ -602,7 +602,7 @@ func (r *InsightsRepo) ListIdeaGrades(ctx context.Context, projectID string, lim
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade,
 			tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score, created_at
-		FROM idea_grades WHERE project_id = ?
+		FROM idea_grades WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {

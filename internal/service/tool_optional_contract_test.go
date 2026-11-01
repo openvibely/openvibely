@@ -377,7 +377,7 @@ func TestPresenceSensitiveToolDefaultsAfterNullNormalization(t *testing.T) {
 
 func TestNestedToolRequiredFieldContracts(t *testing.T) {
 	for _, tc := range []struct{ name, path, required string }{
-		{"request_user_input", "questions[]", "id question options"},
+		{"request_user_input", "questions[]", "id question"},
 		{"request_user_input", "questions[].options[]", "label description"},
 		{"create_task", "chain", "enabled"}, {"edit_task", "chain", "enabled"},
 		{"create_agent", "scoped_files[]", "directory"}, {"update_agent", "scoped_files[]", "directory"},

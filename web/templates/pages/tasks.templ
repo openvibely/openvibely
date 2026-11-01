@@ -283,7 +283,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 							if (data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied') return;
 
 							// Only refresh if the event is for a task in the current project
-							if (data.project_id !== projectID) return;
+							if (projectID !== '__all_projects__' && data.project_id !== projectID) return;
 
 						const blocker = isRefreshBlocked();
 						if (blocker) {

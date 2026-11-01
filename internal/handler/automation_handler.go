@@ -9,6 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -112,6 +113,7 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	projectID = layout.WorkspaceProjectID(ctx, projectID)
 	page := parseCardPageRequest(c)
 	filter := automationCardListFilter(c, page)
 	listState := automationCardListState(projectID, filter)

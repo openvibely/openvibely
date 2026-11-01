@@ -5066,8 +5066,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
                     // One owner for full-page fragment navigation, including sidebar links.
                     let currentPageRequest = null;
-                    // A new request does not own the visible page until it swaps.
-                    let renderedPageRequest = null;
                     // Capture runs before HTMX restores cached history or starts a
                     // cache-miss request. A late response must not replace history.
                     if (window.addEventListener) window.addEventListener('popstate', function() {
@@ -5077,12 +5075,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                     }, true);
                     document.addEventListener('htmx:beforeRequest', function(event) {
                         const detail = event.detail;
-                        if (!event.defaultPrevented && detail.target && detail.target.id === 'all-projects-results') {
-                            detail.xhr.openVibelyOriginPageRequest = renderedPageRequest;
-                            const state = allProjectsInteraction(detail.target);
-                            detail.xhr.openVibelyAllProjectsRevision = state.revision;
-                            state.deferred = false;
-                        }
                         if (event.defaultPrevented || !detail.target || detail.target.id !== 'main-content') return;
                         const previous = currentPageRequest;
                         currentPageRequest = detail.xhr;
@@ -5098,189 +5090,22 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                         if (main) main.removeAttribute('data-page-loading');
                     }
                     document.addEventListener('htmx:beforeHistorySave', clearPageLoading);
-                    document.addEventListener('htmx:historyRestore', function() {
-                        renderedPageRequest = currentPageRequest;
-                    });
                     document.addEventListener('htmx:afterSwap', function(event) {
                         if (event.detail.target && event.detail.target.id === 'main-content') {
-                            renderedPageRequest = event.detail.xhr;
                             clearPageLoading();
                         }
                     });
                     document.addEventListener('htmx:afterRequest', function(event) {
                         if (event.detail.xhr === currentPageRequest && !event.detail.successful) {
                             // Failed navigation leaves the existing page active.
-                            renderedPageRequest = currentPageRequest;
                             clearPageLoading();
-                            const root = document.getElementById('all-projects-results');
-                            if (root) retryAllProjectsRefresh(root);
                         }
                     });
                     document.addEventListener('htmx:sendAbort', function(event) {
                         if (event.detail.target && event.detail.target.id === 'main-content' && !currentPageRequest) clearPageLoading();
                     });
-                    // Polls must not replace cards during a click or keyboard navigation.
-                    const allProjectsInteractions = new WeakMap();
-                    function allProjectsInteraction(root) {
-                        let state = allProjectsInteractions.get(root);
-                        if (!state) { state = {pointers: new Set(), deferred: false, revision: 0}; allProjectsInteractions.set(root, state); }
-                        return state;
-                    }
-                    function retryAllProjectsRefresh(root) {
-                        setTimeout(function() {
-                            if (document.hidden || !root.isConnected || root !== document.getElementById('all-projects-results') || currentPageRequest !== renderedPageRequest) return;
-                            const state = allProjectsInteraction(root);
-                            if (state.deferred && !state.moving && !state.pointers.size && !root.contains(document.activeElement)) {
-                                state.deferred = false;
-                                htmx.trigger(root, 'allProjectsRefresh');
-                            }
-                        }, 0);
-                    }
-                    // Aggregate moves use the existing task mutation endpoint, whose
-                    // middleware resolves ownership without leaving this workspace.
-                    let allProjectsDrag = null;
-                    let suppressedAllProjectsClick = null;
-                    document.addEventListener('pointerdown', function(event) {
-                        const card = event.target.closest('[data-all-projects-task]');
-                        if (!card || event.button !== 0 || !event.isPrimary || allProjectsDrag) return;
-                        const root = card.closest('#all-projects-results');
-                        if (allProjectsInteraction(root).moving) return;
-                        allProjectsDrag = {card, root, id: event.pointerId, x: event.clientX, y: event.clientY};
-                        try { card.setPointerCapture(event.pointerId); } catch (_) {}
-                    });
-                    document.addEventListener('pointermove', function(event) {
-                        const drag = allProjectsDrag;
-                        if (!drag || event.pointerId !== drag.id) return;
-                        const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-                        if (!drag.motion && Math.hypot(dx, dy) < 6) return;
-                        if (!drag.motion) drag.motion = window.beginPointerCardMotion(drag.card);
-                        event.preventDefault();
-                        window.movePointerCard(drag.motion, dx, dy);
-                        if (drag.zone) drag.zone.classList.remove('ring-2', 'ring-primary');
-                        drag.zone = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-all-projects-category]');
-                        if (drag.zone && drag.root.contains(drag.zone)) drag.zone.classList.add('ring-2', 'ring-primary');
-                        window.handlePointerAutoScroll(event, drag.root.closest('#all-projects-page'), null, null);
-                    }, {passive: false});
-                    async function finishAllProjectsDrag(event) {
-                        const drag = allProjectsDrag;
-                        if (!drag || (event.pointerId != null && event.pointerId !== drag.id)) return;
-                        allProjectsDrag = null;
-                        window.stopPointerAutoScroll();
-                        if (!drag.motion) return;
-                        const zone = event.type === 'pointerup' ? document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-all-projects-category]') : null;
-                        window.endPointerCardMotion(drag.motion);
-                        if (drag.zone) drag.zone.classList.remove('ring-2', 'ring-primary');
-                        suppressedAllProjectsClick = drag.card;
-                        setTimeout(function() { suppressedAllProjectsClick = null; }, 0);
-                        if (!zone || !drag.root.contains(zone) || zone.dataset.allProjectsCategory === drag.card.dataset.taskCategory || !drag.root.isConnected) return;
-                        const state = allProjectsInteraction(drag.root);
-                        state.moving = true;
-                        state.revision++;
-                        drag.card.setAttribute('aria-busy', 'true');
-                        try {
-                            const response = await fetch('/tasks/' + encodeURIComponent(drag.card.dataset.allProjectsTask) + '/category?project_id=__all_projects__', {
-                                method: 'PATCH',
-                                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                                body: new URLSearchParams({category: zone.dataset.allProjectsCategory})
-                            });
-                            if (!response.ok) {
-                                let message = 'Could not move task.';
-                                try { const error = await response.json(); if (typeof error.message === 'string') message = error.message; } catch (_) {}
-                                throw new Error(message);
-                            }
-                        } catch (error) {
-                            if (window.showToast) window.showToast(error.message || 'Could not move task.', 'failed');
-                        } finally {
-                            drag.card.removeAttribute('aria-busy');
-                            state.moving = false;
-                            state.deferred = true;
-                            state.revision++;
-                            if (drag.card.contains(document.activeElement)) document.activeElement.blur();
-                            retryAllProjectsRefresh(drag.root);
-                        }
-                    }
-                    document.addEventListener('pointerup', finishAllProjectsDrag, true);
-                    document.addEventListener('pointercancel', finishAllProjectsDrag, true);
-                    window.addEventListener('blur', finishAllProjectsDrag);
-                    document.addEventListener('keydown', function(event) {
-                        if (event.key === 'Escape') finishAllProjectsDrag(event);
-                    });
-                    document.addEventListener('click', function(event) {
-                        if (suppressedAllProjectsClick && suppressedAllProjectsClick.contains(event.target)) {
-                            event.preventDefault(); event.stopImmediatePropagation();
-                        }
-                    }, true);
-                    let allProjectsRefreshTimer = null;
-                    function refreshAllProjectsForEvent(event) {
-                        const root = document.getElementById('all-projects-results');
-                        if (!root) return;
-                        const filter = new URL(root.getAttribute('hx-get'), location.href).searchParams.get('filter_project');
-                        if (filter && event.detail?.project_id && event.detail.project_id !== filter) return;
-                        allProjectsInteraction(root).deferred = true;
-                        allProjectsInteraction(root).revision++;
-                        clearTimeout(allProjectsRefreshTimer);
-                        // Coalesce bursts of change notifications, not a polling loop.
-                        allProjectsRefreshTimer = setTimeout(function() { retryAllProjectsRefresh(root); }, 100);
-                    }
-                    window.addEventListener('sse-task-event', refreshAllProjectsForEvent);
-                    window.addEventListener('sse-live-connected', refreshAllProjectsForEvent);
-                    document.addEventListener('visibilitychange', function() {
-                        if (!document.hidden) {
-                            const root = document.getElementById('all-projects-results');
-                            if (root) retryAllProjectsRefresh(root);
-                        }
-                    });
-                    document.addEventListener('pointerdown', function(event) {
-                        const root = event.target.closest('#all-projects-results');
-                        if (root) allProjectsInteraction(root).pointers.add(event.pointerId);
-                    }, true);
-                    function endAllProjectsPress(event) {
-                        const root = document.getElementById('all-projects-results');
-                        if (!root) return;
-                        allProjectsInteraction(root).pointers.delete(event.pointerId);
-                        retryAllProjectsRefresh(root);
-                    }
-                    document.addEventListener('pointerup', endAllProjectsPress, true);
-                    document.addEventListener('pointercancel', endAllProjectsPress, true);
-                    window.addEventListener('blur', function() {
-                        const root = document.getElementById('all-projects-results');
-                        if (root) { allProjectsInteraction(root).pointers.clear(); retryAllProjectsRefresh(root); }
-                    });
-                    document.addEventListener('focusout', function(event) {
-                        const root = event.target.closest('#all-projects-results');
-                        if (root) retryAllProjectsRefresh(root);
-                    });
                     document.addEventListener('htmx:beforeSwap', function(event) {
                         const detail = event.detail;
-                        const recovery = detail.xhr && detail.xhr.getResponseHeader('X-OpenVibely-All-Projects-Location');
-                        if (recovery) {
-                            detail.shouldSwap = false;
-                            event.preventDefault();
-                            // Only a poll from the still-current view may initiate recovery.
-                            if (detail.target && detail.target.isConnected && detail.target === document.getElementById('all-projects-results') && detail.xhr.openVibelyOriginPageRequest === currentPageRequest) {
-                                window.openVibelyNavigate(recovery).catch(function() {
-                                    if (window.showToast) window.showToast('Could not refresh All projects. Try again.', 'failed');
-                                });
-                            } else if (detail.target && detail.target.isConnected && detail.target === document.getElementById('all-projects-results')) {
-                                allProjectsInteraction(detail.target).deferred = true;
-                            }
-                            return;
-                        }
-                        if (detail.target && detail.target.id === 'all-projects-results' && detail.shouldSwap) {
-                            const root = detail.target;
-                            const incoming = new DOMParser().parseFromString(detail.serverResponse, 'text/html').getElementById('all-projects-results');
-                            const state = allProjectsInteraction(root);
-                            const stale = root !== document.getElementById('all-projects-results') || detail.xhr.openVibelyOriginPageRequest !== currentPageRequest;
-                            const unchanged = incoming && incoming.innerHTML === root.innerHTML;
-                            const newerEvent = state.revision !== detail.xhr.openVibelyAllProjectsRevision;
-                            const interacting = state.moving || state.pointers.size > 0 || root.contains(document.activeElement);
-                            if (stale || unchanged || interacting || newerEvent) {
-                                detail.shouldSwap = false;
-                                event.preventDefault();
-                                if (!stale) { state.deferred = newerEvent || (!unchanged && interacting); if (newerEvent) retryAllProjectsRefresh(root); }
-                                else if (root.isConnected && root === document.getElementById('all-projects-results')) state.deferred = true;
-                            }
-                        }
                         if (detail.target && detail.target.id === 'main-content' && detail.xhr !== currentPageRequest) {
                             detail.shouldSwap = false;
                             event.preventDefault();

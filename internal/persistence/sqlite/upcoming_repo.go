@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -140,6 +141,9 @@ func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID
 }
 
 func (r *UpcomingRepo) listUpcomingTasks(ctx context.Context, query string, args ...any) ([]models.UpcomingTask, error) {
+	if len(args) > 1 && args[1] == models.AllProjectsID {
+		query = strings.ReplaceAll(query, "t.project_id = ?", "? = '__all_projects__'")
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -174,7 +178,7 @@ func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID strin
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 LEFT JOIN agent_configs ac ON ac.id = e.agent_config_id
-		 WHERE t.project_id = ? AND t.category != 'chat' AND e.started_at >= ?
+		 WHERE `+analyticsProjectPredicate("t.project_id", projectID)+` AND t.category != 'chat' AND e.started_at >= ?
 		 ORDER BY e.started_at DESC
 		 LIMIT ?`,
 		historyOutputPreviewLen, historyErrorPreviewLen, projectID, since, historyExecutionLimit)
@@ -214,7 +218,7 @@ func (r *UpcomingRepo) GetHistorySummary(ctx context.Context, projectID string, 
 			COALESCE(AVG(CASE WHEN e.duration_ms > 0 THEN e.duration_ms END), 0) as avg_duration
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category != 'chat' AND e.started_at >= ?`,
+		 WHERE `+analyticsProjectPredicate("t.project_id", projectID)+` AND t.category != 'chat' AND e.started_at >= ?`,
 		projectID, since).
 		Scan(&s.TotalExecutions, &s.SuccessCount, &s.FailureCount, &s.CancelledCount,
 			&s.TotalDurationMs, &avgDuration)
@@ -232,7 +236,7 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 	// Get counts by status (excluding chat and completed-category tasks)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT status, COUNT(*) FROM tasks
-		 WHERE project_id = ? AND category != 'chat'
+		 WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND category != 'chat'
 		 GROUP BY status`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting task status counts: %w", err)
@@ -264,7 +268,7 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 	// Get counts by category (excluding chat)
 	rows, err = r.db.QueryContext(ctx,
 		`SELECT category, COUNT(*) FROM tasks
-		 WHERE project_id = ? AND category != 'chat'
+		 WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND category != 'chat'
 		 GROUP BY category`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting task category counts: %w", err)
@@ -290,7 +294,7 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 	// Get counts by priority for non-completed tasks (active + backlog + scheduled)
 	rows, err = r.db.QueryContext(ctx,
 		`SELECT priority, COUNT(*) FROM tasks
-		 WHERE project_id = ? AND category IN ('active', 'backlog', 'scheduled')
+		 WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND category IN ('active', 'backlog', 'scheduled')
 		   AND status NOT IN ('completed', 'cancelled')
 		 GROUP BY priority`, projectID)
 	if err != nil {
@@ -327,7 +331,7 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 			COALESCE(SUM(CASE WHEN s.next_run < ? THEN 1 ELSE 0 END), 0)
 		 FROM tasks t
 		 JOIN schedules s ON s.task_id = t.id
-		 WHERE t.project_id = ? AND s.enabled = 1 AND s.next_run IS NOT NULL`,
+		 WHERE `+analyticsProjectPredicate("t.project_id", projectID)+` AND s.enabled = 1 AND s.next_run IS NOT NULL`,
 		endOfToday, endOfWeek, now, projectID).
 		Scan(&s.ScheduledToday, &s.ScheduledThisWeek, &s.OverdueCount)
 	if err != nil {

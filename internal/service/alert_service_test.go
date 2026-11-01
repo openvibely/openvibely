@@ -388,3 +388,43 @@ func TestAlertService_DeleteAll(t *testing.T) {
 		t.Fatalf("expected 0 unread after delete all, got %d", count)
 	}
 }
+
+func TestAlertServiceAllProjectsMutationsNotifyRealOwners(t *testing.T) {
+	env := teststores.New(t)
+	ctx := t.Context()
+	second := &models.Project{Name: "Second alert owner"}
+	if err := env.Stores.Projects.Create(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	bus := events.NewBroadcaster()
+	svc := NewAlertService(env.Stores.Alerts, bus)
+	owners := []string{"default", second.ID}
+	subscribers := map[string]events.Subscriber{}
+	for _, owner := range owners {
+		alert := &models.Alert{ProjectID: owner, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: owner}
+		if err := env.Stores.Alerts.Create(ctx, alert); err != nil {
+			t.Fatal(err)
+		}
+		sub, err := bus.SubscribeProject(owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer bus.Unsubscribe(sub)
+		subscribers[owner] = sub
+	}
+	for _, action := range []func(context.Context, string) error{svc.MarkAllRead, svc.DeleteAll} {
+		if err := action(ctx, models.AllProjectsID); err != nil {
+			t.Fatal(err)
+		}
+		for owner, sub := range subscribers {
+			select {
+			case event := <-sub:
+				if event.ProjectID != owner || event.Type != events.AlertCreated {
+					t.Fatalf("wrong owner event: %#v", event)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("no update for %s", owner)
+			}
+		}
+	}
+}

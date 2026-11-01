@@ -20,8 +20,9 @@ type ScheduleCalendarState struct {
 }
 
 type ScheduleCalendarAction struct {
-	Action      string               `json:"action"`
-	ScheduleIDs []string             `json:"schedule_ids,omitempty"`
-	Skips       []ScheduleSkip       `json:"skips,omitempty"`
-	Changes     []ScheduleSkipChange `json:"changes,omitempty"`
+	ProjectActions map[string]ScheduleCalendarAction `json:"project_actions,omitempty"`
+	Action         string                            `json:"action"`
+	ScheduleIDs    []string                          `json:"schedule_ids,omitempty"`
+	Skips          []ScheduleSkip                    `json:"skips,omitempty"`
+	Changes        []ScheduleSkipChange              `json:"changes,omitempty"`
 }

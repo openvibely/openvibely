@@ -579,7 +579,7 @@ func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]
 
 	rows, err := r.db.QueryContext(ctx, `SELECT `+taskReferenceSelectColumns+`
 		FROM tasks t
-		WHERE t.project_id = ? AND t.category != 'chat'
+		WHERE `+analyticsProjectPredicate("t.project_id", projectID)+` AND t.category != 'chat'
 		ORDER BY t.display_order ASC, t.created_at ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing task references: %w", err)
@@ -1094,7 +1094,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 				return fmt.Errorf("duplicate task in active lane move: %s", move.ID)
 			}
 			seen[move.ID] = struct{}{}
-			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND project_id = ?`, move.ID, projectID)
+			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND `+analyticsProjectPredicate("project_id", projectID), move.ID, projectID)
 			if err != nil {
 				return fmt.Errorf("loading active lane task %s: %w", move.ID, err)
 			}
@@ -1133,9 +1133,14 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
 		for i := range candidates {
+			if projectID == models.AllProjectsID {
+				if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, candidates[i].ProjectID).Scan(&nextOrder); err != nil {
+					return err
+				}
+			}
 			if _, err := exec.ExecContext(ctx, `UPDATE tasks
 				SET category = 'active', status = ?, display_order = ?, completed_at = NULL, updated_at = datetime('now')
-				WHERE id = ? AND project_id = ?`, status, nextOrder+i, candidates[i].ID, projectID); err != nil {
+				WHERE id = ? AND project_id = ?`, status, nextOrder+i, candidates[i].ID, candidates[i].ProjectID); err != nil {
 				return fmt.Errorf("moving task %s to active lane: %w", candidates[i].ID, err)
 			}
 			candidates[i].Category = models.CategoryActive
@@ -2530,6 +2535,9 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 }
 
 func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, projectID string) ([]persistence.TaskWithSchedule, error) {
+	if projectID == models.AllProjectsID {
+		query = strings.ReplaceAll(query, "t.project_id = ?", "? = '__all_projects__'")
+	}
 	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
@@ -2713,7 +2721,7 @@ func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context, projectID
 	}
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = 'completed', updated_at = datetime('now'), completed_at = datetime('now')
-		 WHERE project_id = ? AND category = 'active' AND status = 'completed'`, projectID)
+		 WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND category = 'active' AND status = 'completed'`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("moving completed active tasks to completed: %w", err)
 	}
@@ -2820,7 +2828,7 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 	var activated []models.Task
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		rows, err := exec.QueryContext(ctx, `SELECT id, project_id, title, status, display_order FROM tasks
-			WHERE category = 'backlog' AND project_id = ?
+			WHERE category = 'backlog' AND `+analyticsProjectPredicate("project_id", projectID)+`
 			  AND (status != 'blocked' OR swarm_role = 'swarm_parent')
 			ORDER BY display_order ASC, created_at ASC, id ASC`, projectID)
 		if err != nil {
@@ -2850,9 +2858,14 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
 		for i := range activated {
+			if projectID == models.AllProjectsID {
+				if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, activated[i].ProjectID).Scan(&nextOrder); err != nil {
+					return err
+				}
+			}
 			if _, err := exec.ExecContext(ctx, `UPDATE tasks
 				SET category = 'active', status = 'pending', display_order = ?, completed_at = NULL, updated_at = datetime('now')
-				WHERE id = ? AND project_id = ? AND category = 'backlog'`, nextOrder+i, activated[i].ID, projectID); err != nil {
+				WHERE id = ? AND project_id = ? AND category = 'backlog'`, nextOrder+i, activated[i].ID, activated[i].ProjectID); err != nil {
 				return fmt.Errorf("activating backlog task %s: %w", activated[i].ID, err)
 			}
 			activated[i].Category = models.CategoryActive
@@ -2922,7 +2935,10 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 // ReorderTask moves a task to a new position within its category.
 // The newPosition is the target display_order (0-indexed).
 // All tasks between the old and new positions will have their display_order adjusted.
-func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition int) error {
+func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition int, projectScope ...string) error {
+	if len(projectScope) > 0 && projectScope[0] == models.AllProjectsID {
+		return r.reorderAllProjectsTask(ctx, taskID, newPosition)
+	}
 	// Get the task
 	task, err := r.GetByID(ctx, taskID)
 	if err != nil {
@@ -2976,7 +2992,7 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 // Only returns tasks with status pending, failed, or cancelled (eligible for execution).
 func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, priority int) ([]models.Task, error) {
 	query := `SELECT ` + taskSelectColumns + `
-		 FROM tasks WHERE category = 'backlog' AND project_id = ? AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
+		 FROM tasks WHERE category = 'backlog' AND ` + analyticsProjectPredicate("project_id", projectID) + ` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))`
 	args := []any{projectID}
 
 	if priority > 0 {
@@ -3009,7 +3025,7 @@ func (r *TaskRepo) ListBacklogByPriority(ctx context.Context, projectID string, 
 func (r *TaskRepo) CountBacklogByPriority(ctx context.Context, projectID string) (map[int]int, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT priority, COUNT(*) FROM tasks
-		 WHERE category = 'backlog' AND project_id = ? AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
+		 WHERE category = 'backlog' AND `+analyticsProjectPredicate("project_id", projectID)+` AND (status IN ('pending', 'failed', 'cancelled', 'completed') OR (status = 'blocked' AND swarm_role = 'swarm_parent'))
 		 GROUP BY priority ORDER BY priority DESC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("counting backlog tasks by priority: %w", err)
@@ -3048,7 +3064,7 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 
 	// Apply optional filters
 	if projectID != "" {
-		query += ` AND project_id = ?`
+		query += ` AND ` + analyticsProjectPredicate("project_id", projectID)
 		args = append(args, projectID)
 	}
 

@@ -267,11 +267,17 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, err
 // before a batch category mutation can perform any side effects.
 func (s *TaskService) ValidateTaskIDsForProject(ctx context.Context, projectID string, ids []string) error {
 	for _, id := range ids {
-		task, err := s.repo.GetByIDForProject(ctx, projectID, id)
+		var task *models.Task
+		var err error
+		if projectID == models.AllProjectsID {
+			task, err = s.repo.GetByID(ctx, id)
+		} else {
+			task, err = s.repo.GetByIDForProject(ctx, projectID, id)
+		}
 		if err != nil {
 			return fmt.Errorf("validating task %s for project %s: %w", id, projectID, err)
 		}
-		if task == nil {
+		if task == nil || task.Category == models.CategoryChat {
 			return fmt.Errorf("%w: %s", ErrTaskNotFoundInProject, id)
 		}
 	}
@@ -1076,7 +1082,7 @@ func (s *TaskService) deleteAllByCategory(ctx context.Context, projectID string,
 	deleted := 0
 	var deletionErrors []error
 	for _, task := range tasks {
-		wasDeleted, deleteErr := s.deleteTask(ctx, task.ID, projectID, category)
+		wasDeleted, deleteErr := s.deleteTask(ctx, task.ID, task.ProjectID, category)
 		if wasDeleted {
 			deleted++
 		}
@@ -1133,9 +1139,9 @@ func (s *TaskService) GetTasksWithSchedulesByProject(ctx context.Context, projec
 	return tasks, nil
 }
 
-func (s *TaskService) ReorderTask(ctx context.Context, taskID string, newPosition int) error {
+func (s *TaskService) ReorderTask(ctx context.Context, taskID string, newPosition int, projectScope ...string) error {
 	applog.Infof("[task-svc] ReorderTask id=%s position=%d", taskID, newPosition)
-	if err := s.repo.ReorderTask(ctx, taskID, newPosition); err != nil {
+	if err := s.repo.ReorderTask(ctx, taskID, newPosition, projectScope...); err != nil {
 		applog.Infof("[task-svc] ReorderTask error: %v", err)
 		return err
 	}

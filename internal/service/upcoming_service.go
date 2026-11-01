@@ -317,6 +317,49 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 		return nil, err
 	}
 
+	projectChanges, _ := s.historyProjectChanges(ctx, projectID, since)
+
+	history := &models.History{
+		ProjectID:      projectID,
+		GeneratedAt:    now,
+		TimeRange:      timeRange,
+		Since:          since,
+		Summary:        summary,
+		Executions:     executions,
+		ProjectChanges: projectChanges,
+	}
+
+	applog.Infof("[upcoming-svc] generated history project=%s range=%s executions=%d success=%d failed=%d",
+		projectID, timeRange, summary.TotalExecutions, summary.SuccessCount, summary.FailureCount)
+
+	return history, nil
+}
+
+func (s *UpcomingService) historyProjectChanges(ctx context.Context, projectID string, since time.Time) (*models.ProjectChanges, []string) {
+	if projectID == models.AllProjectsID && s.projectRepo != nil {
+		projects, err := s.projectRepo.ListSelectorOptions(ctx)
+		if err != nil {
+			return nil, nil
+		}
+		var combined *models.ProjectChanges
+		var files []string
+		for _, project := range projects {
+			changes, projectFiles := s.historyProjectChanges(ctx, project.ID, since)
+			if changes == nil {
+				continue
+			}
+			for i := range projectFiles {
+				projectFiles[i] = project.ID + "/" + projectFiles[i]
+			}
+			if combined == nil {
+				combined = changes
+			} else {
+				combined = mergeProjectChangesWithFiles(combined, files, changes, projectFiles)
+			}
+			files = append(files, projectFiles...)
+		}
+		return combined, files
+	}
 	var projectChanges *models.ProjectChanges
 	var projectChangeFiles []string
 	var firstProjectStatProducedAt time.Time
@@ -349,7 +392,7 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 		project, err := s.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
 			applog.Infof("[upcoming-svc] error getting project for git changes (non-fatal): %v", err)
-		} else if project.RepoPath != "" {
+		} else if project != nil && project.RepoPath != "" {
 			changes, changedFiles, err := s.getProjectChangesInRangeWithFiles(project.RepoPath, since, fallbackBefore)
 			if err != nil {
 				applog.Infof("[upcoming-svc] error getting git changes (non-fatal): %v", err)
@@ -362,20 +405,7 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 		}
 	}
 
-	history := &models.History{
-		ProjectID:      projectID,
-		GeneratedAt:    now,
-		TimeRange:      timeRange,
-		Since:          since,
-		Summary:        summary,
-		Executions:     executions,
-		ProjectChanges: projectChanges,
-	}
-
-	applog.Infof("[upcoming-svc] generated history project=%s range=%s executions=%d success=%d failed=%d",
-		projectID, timeRange, summary.TotalExecutions, summary.SuccessCount, summary.FailureCount)
-
-	return history, nil
+	return projectChanges, projectChangeFiles
 }
 
 func computeSince(now time.Time, timeRange models.TimeRange) time.Time {

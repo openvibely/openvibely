@@ -14,10 +14,29 @@ import (
 
 func (r *ScheduleRepo) CalendarState(ctx context.Context, projectID string) (models.ScheduleCalendarState, error) {
 	state := models.ScheduleCalendarState{Skips: []models.ScheduleSkip{}}
-	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_project_pauses WHERE project_id = ?)`, projectID).Scan(&state.Paused); err != nil {
+	if projectID == models.AllProjectsID {
+		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_project_pauses) AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.id != ? AND NOT EXISTS(SELECT 1 FROM schedule_project_pauses paused WHERE paused.project_id=p.id))`, projectID).Scan(&state.Paused); err != nil {
+			return state, err
+		}
+		rows, err := r.db.QueryContext(ctx, `SELECT s.id,k.start_at,k.end_at,k.restored FROM schedule_skips k JOIN tasks t ON t.project_id=k.project_id JOIN schedules s ON s.task_id=t.id WHERE k.schedule_id='' OR k.schedule_id=s.id
+ UNION ALL SELECT s.id,p.started_at,253402300799,0 FROM schedule_project_pauses p JOIN tasks t ON t.project_id=p.project_id JOIN schedules s ON s.task_id=t.id`)
+		if err != nil {
+			return state, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var skip models.ScheduleSkip
+			if err := rows.Scan(&skip.ScheduleID, &skip.StartAt, &skip.EndAt, &skip.Restored); err != nil {
+				return state, err
+			}
+			state.Skips = append(state.Skips, skip)
+		}
+		return state, rows.Err()
+	}
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM schedule_project_pauses WHERE `+analyticsProjectPredicate("project_id", projectID)+`)`, projectID).Scan(&state.Paused); err != nil {
 		return state, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT schedule_id, start_at, end_at, restored FROM schedule_skips WHERE project_id = ? ORDER BY start_at`, projectID)
+	rows, err := r.db.QueryContext(ctx, `SELECT schedule_id, start_at, end_at, restored FROM schedule_skips WHERE `+analyticsProjectPredicate("project_id", projectID)+` ORDER BY start_at`, projectID)
 	if err != nil {
 		return state, err
 	}
@@ -35,8 +54,22 @@ func (r *ScheduleRepo) CalendarState(ctx context.Context, projectID string) (mod
 // ApplyCalendarAction validates the entire selection before changing anything and
 // returns an inverse containing only rows actually changed by this action.
 func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string, action models.ScheduleCalendarAction, now time.Time) (models.ScheduleCalendarAction, error) {
-	inverse := models.ScheduleCalendarAction{}
+	var inverse models.ScheduleCalendarAction
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		if projectID == models.AllProjectsID {
+			inverse, err = applyAllProjectsCalendarAction(ctx, exec, action, now)
+		} else {
+			inverse, err = applyCalendarAction(ctx, exec, projectID, action, now)
+		}
+		return err
+	})
+	return inverse, err
+}
+
+func applyCalendarAction(ctx context.Context, exec sqlExecutor, projectID string, action models.ScheduleCalendarAction, now time.Time) (models.ScheduleCalendarAction, error) {
+	inverse := models.ScheduleCalendarAction{}
+	err := func() error {
 		var exists bool
 		if err := exec.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?)`, projectID).Scan(&exists); err != nil {
 			return err
@@ -243,7 +276,7 @@ func (r *ScheduleRepo) ApplyCalendarAction(ctx context.Context, projectID string
 			return fmt.Errorf("%w: unknown action", persistence.ErrScheduleCalendarSelection)
 		}
 		return nil
-	})
+	}()
 	return inverse, err
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/taskstate"
 )
@@ -410,17 +411,20 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 				<div class="flex items-start justify-between pr-0 sm:pr-24 lg:pr-12">
 					<div class="flex-1 min-w-0">
 					<a
-						href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)) }
-						hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
+						href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks&project_id=%s", task.ID, projectID)) }
+						hx-get={ fmt.Sprintf("/tasks/%s?from=tasks&project_id=%s", task.ID, projectID) }
 						hx-target="#main-content"
 						hx-swap="innerHTML"
-						hx-push-url={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
+						hx-push-url={ fmt.Sprintf("/tasks/%s?from=tasks&project_id=%s", task.ID, projectID) }
 						class="task-card-title-link font-medium cursor-pointer inline-flex items-start gap-2 min-w-0 max-w-full leading-snug"
 					>
 						@TaskStateIcon(task)
 						<span data-task-title class="min-w-0 flex-1 break-words sm:truncate">{ task.Title }</span>
 					</a>
-					if task.Prompt != "" {
+					if label := templateui.ProjectLabel(ctx, task.ProjectID); label != "" {
+                        <span class="text-xs opacity-60" data-project-label>{ label }</span>
+                    }
+                    if task.Prompt != "" {
 						<p data-task-prompt class="text-sm opacity-60 mt-1 line-clamp-3 sm:line-clamp-2 break-words">{ task.Prompt }</p>
 					}
 					<div class="flex gap-1 mt-1 flex-wrap">

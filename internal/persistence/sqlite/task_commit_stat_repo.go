@@ -51,7 +51,7 @@ func (r *TaskCommitStatRepo) FirstProducedCommitStatTime(ctx context.Context, pr
 	err := r.db.QueryRowContext(ctx, `
 		SELECT produced_at
 		FROM task_commit_stats
-		WHERE project_id = ?
+		WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		ORDER BY produced_at ASC
 		LIMIT 1`, projectID).Scan(&producedAt)
 	if err == sql.ErrNoRows {
@@ -68,7 +68,7 @@ func (r *TaskCommitStatRepo) ProducedCommitStatAggregate(ctx context.Context, pr
 	err := r.db.QueryRowContext(ctx, `
 			SELECT COUNT(*), COALESCE(SUM(insertions), 0), COALESCE(SUM(deletions), 0)
 			FROM task_commit_stats
-			WHERE project_id = ? AND produced_at >= ?`, projectID, since).Scan(
+			WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND produced_at >= ?`, projectID, since).Scan(
 		&aggregate.TotalCommits, &aggregate.TotalInsertions, &aggregate.TotalDeletions)
 	if err != nil {
 		return persistence.ProducedCommitStatAggregate{}, fmt.Errorf("summarizing task commit stats: %w", err)
@@ -83,7 +83,7 @@ func (r *TaskCommitStatRepo) ListProducedCommitStatCommits(ctx context.Context, 
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT commit_sha, short_sha, subject, author, produced_at, insertions, deletions, files_changed
 			FROM task_commit_stats
-			WHERE project_id = ? AND produced_at >= ?
+			WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND produced_at >= ?
 			ORDER BY produced_at DESC, created_at DESC, id DESC
 			LIMIT ?`, projectID, since, limit)
 	if err != nil {
@@ -109,7 +109,7 @@ func (r *TaskCommitStatRepo) ForEachProducedCommitStatSubject(ctx context.Contex
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT subject
 			FROM task_commit_stats
-			WHERE project_id = ? AND produced_at >= ?
+			WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND produced_at >= ?
 			ORDER BY produced_at DESC, created_at DESC, id DESC`, projectID, since)
 	if err != nil {
 		return fmt.Errorf("listing task commit stat subjects: %w", err)
@@ -132,7 +132,7 @@ func (r *TaskCommitStatRepo) ForEachProducedCommitStatChangedFilesJSON(ctx conte
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT changed_files_json
 			FROM task_commit_stats
-			WHERE project_id = ? AND produced_at >= ?`, projectID, since)
+			WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND produced_at >= ?`, projectID, since)
 	if err != nil {
 		return fmt.Errorf("listing task commit stat changed files: %w", err)
 	}
@@ -155,7 +155,7 @@ func (r *TaskCommitStatRepo) ListProducedCommitStats(ctx context.Context, projec
 			SELECT id, project_id, task_id, execution_id, commit_sha, short_sha, subject, author,
 				produced_at, insertions, deletions, files_changed, changed_files_json, created_at, updated_at
 			FROM task_commit_stats
-			WHERE project_id = ? AND produced_at >= ?
+			WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND produced_at >= ?
 			ORDER BY produced_at DESC, created_at DESC, id DESC`, projectID, since)
 	if err != nil {
 		return nil, fmt.Errorf("listing task commit stats: %w", err)

@@ -394,18 +394,20 @@ func (r *AutomationRepo) DeleteAutomations(ctx context.Context, projectID string
 		return err
 	}
 	for _, id := range automationIDs {
-		r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: id, VersionID: versions[id]})
+		r.PublishInvalidation(events.AutomationDefinitionUpdated, versions[id].projectID, models.AutomationBinding{AutomationID: id, VersionID: versions[id].versionID})
 	}
-	r.publishDeletedAutomationTasks(projectID, deletedTasks)
+	r.publishDeletedAutomationTasks(deletedTasks)
 	return nil
 }
 
 type deletedAutomationTask struct {
-	id    string
-	title string
+	id        string
+	title     string
+	projectID string
 }
+type deletedAutomationVersion struct{ versionID, projectID string }
 
-func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string, automationIDs []string) (map[string]string, []deletedAutomationTask, error) {
+func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string, automationIDs []string) (map[string]deletedAutomationVersion, []deletedAutomationTask, error) {
 	if len(automationIDs) == 0 {
 		return nil, nil, errors.New("at least one automation is required")
 	}
@@ -420,18 +422,18 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 		args = append(args, id)
 	}
 
-	rows, err := conn.QueryContext(ctx, `SELECT id, COALESCE(published_version_id, '') FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...)
+	rows, err := conn.QueryContext(ctx, `SELECT id, COALESCE(published_version_id, ''), project_id FROM automations WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, nil, err
 	}
-	versions := make(map[string]string, len(automationIDs))
+	versions := make(map[string]deletedAutomationVersion, len(automationIDs))
 	for rows.Next() {
-		var id, versionID string
-		if err := rows.Scan(&id, &versionID); err != nil {
+		var id, versionID, owner string
+		if err := rows.Scan(&id, &versionID, &owner); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
-		versions[id] = versionID
+		versions[id] = deletedAutomationVersion{versionID: versionID, projectID: owner}
 	}
 	if err := rows.Close(); err != nil {
 		return nil, nil, err
@@ -444,10 +446,10 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 	var inFlight int
 	if err := conn.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS (
 		SELECT 1 FROM automation_invocations i LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
-		WHERE i.project_id = ? AND i.automation_id IN (`+placeholders+`) AND ((i.status IN ('claimed','dispatched','running') AND d.id IS NOT NULL) OR d.status IN ('pending','processing','submitted') OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))
+		WHERE `+analyticsProjectPredicate("i.project_id", projectID)+` AND i.automation_id IN (`+placeholders+`) AND ((i.status IN ('claimed','dispatched','running') AND d.id IS NOT NULL) OR d.status IN ('pending','processing','submitted') OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))
 	) OR EXISTS (
 		SELECT 1 FROM automation_activities a JOIN automation_activity_resources ar ON ar.activity_id = a.id AND ar.resource_type = 'execution' JOIN executions e ON e.id = ar.resource_id
-		WHERE a.project_id = ? AND a.automation_id IN (`+placeholders+`) AND e.status = 'running'
+		WHERE `+analyticsProjectPredicate("a.project_id", projectID)+` AND a.automation_id IN (`+placeholders+`) AND e.status = 'running'
 	) THEN 1 ELSE 0 END`, flightArgs...).Scan(&inFlight); err != nil {
 		return nil, nil, err
 	}
@@ -459,7 +461,7 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 		FROM automation_trigger_owners owner
 		JOIN schedules schedule ON schedule.id = owner.schedule_id
 		JOIN tasks task ON task.id = schedule.task_id AND task.project_id = owner.project_id
-		WHERE owner.project_id = ? AND owner.automation_id IN (`+placeholders+`)`, args...)
+		WHERE `+analyticsProjectPredicate("owner.project_id", projectID)+` AND owner.automation_id IN (`+placeholders+`)`, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -476,7 +478,7 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 		return nil, nil, err
 	}
 
-	if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id IN (`+placeholders+`))`, args...); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND automation_id IN (`+placeholders+`))`, args...); err != nil {
 		return nil, nil, err
 	}
 
@@ -492,20 +494,20 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 			deleteArgs = append(deleteArgs, id)
 		}
 		deletedRows, err := conn.QueryContext(ctx, `DELETE FROM tasks AS task
-			WHERE task.project_id = ? AND task.id IN (`+taskPlaceholders+`)
+			WHERE `+analyticsProjectPredicate("task.project_id", projectID)+` AND task.id IN (`+taskPlaceholders+`)
 			  AND NOT EXISTS (SELECT 1 FROM schedules schedule WHERE schedule.task_id = task.id)
 			  AND NOT EXISTS (
 				SELECT 1 FROM automation_definition_resources resource
-				WHERE resource.project_id = ? AND resource.resource_type = 'task' AND resource.resource_id = task.id
+				WHERE `+analyticsProjectPredicate("resource.project_id", projectID)+` AND resource.resource_type = 'task' AND resource.resource_id = task.id
 				  AND resource.automation_id NOT IN (`+placeholders+`)
 			  )
-			RETURNING id, title`, deleteArgs...)
+			RETURNING id, title, project_id`, deleteArgs...)
 		if err != nil {
 			return nil, nil, err
 		}
 		for deletedRows.Next() {
 			var task deletedAutomationTask
-			if err := deletedRows.Scan(&task.id, &task.title); err != nil {
+			if err := deletedRows.Scan(&task.id, &task.title, &task.projectID); err != nil {
 				deletedRows.Close()
 				return nil, nil, err
 			}
@@ -516,7 +518,7 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 		}
 	}
 
-	if _, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE project_id = ? AND id IN (`+placeholders+`)`, args...); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE `+analyticsProjectPredicate("project_id", projectID)+` AND id IN (`+placeholders+`)`, args...); err != nil {
 		return nil, nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
@@ -528,12 +530,12 @@ func (r *AutomationRepo) deleteAutomations(ctx context.Context, projectID string
 	return versions, deletedTasks, nil
 }
 
-func (r *AutomationRepo) publishDeletedAutomationTasks(projectID string, tasks []deletedAutomationTask) {
+func (r *AutomationRepo) publishDeletedAutomationTasks(tasks []deletedAutomationTask) {
 	if r.broadcaster == nil {
 		return
 	}
 	for _, task := range tasks {
-		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.id, TaskName: task.title, ProjectID: projectID})
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.id, TaskName: task.title, ProjectID: task.projectID})
 	}
 }
 
@@ -544,11 +546,11 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 	if err != nil {
 		return err
 	}
-	versionID := versions[automationID]
+	versionID := versions[automationID].versionID
 	automationobs.Event("automation.lifecycle.deleted",
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", versionID), automationobs.String("state", "deleted"))
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID})
-	r.publishDeletedAutomationTasks(projectID, deletedTasks)
+	r.publishDeletedAutomationTasks(deletedTasks)
 	return nil
 }

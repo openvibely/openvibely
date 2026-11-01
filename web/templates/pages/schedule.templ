@@ -3,6 +3,7 @@ package pages
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -731,6 +732,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					hx-swap="outerHTML show:none"
 				>
 					<input type="hidden" name="category" value="scheduled"/>
+                    if projectID(currentProject) == models.AllProjectsID {
+                        <label class="form-control mb-3"><span class="label-text">Project</span>
+                        <select name="destination_project" class="select select-bordered" required onchange="const agents=this.form.querySelector('[name=agent_definition_id]');if(agents){Array.from(agents.options).forEach(option=>{const unavailable=!!option.dataset.projectId &amp;&amp; option.dataset.projectId!==this.value;option.hidden=unavailable;option.disabled=unavailable;});if(agents.selectedOptions[0]?.disabled)agents.value='';}">
+                            <option value="">Choose project</option>
+                            for _, project := range templateui.ProjectOptions(ctx) {
+ <option value={ project.ID }>{ project.Name }</option>
+ }
+                        </select></label>
+                    }
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Title</span></label>
 						<input type="text" name="title" id="sched-task-title-input" class="input input-bordered" required placeholder="Task title"/>
@@ -1772,6 +1782,11 @@ templ SchedulePrimaryAgentOptionSelector(selected *string, agentDefs []persisten
 		for _, ad := range agentDefs {
 			<option
 				value={ ad.ID }
+ data-project-id={ ad.ProjectID }
+ if len(templateui.ProjectOptions(ctx)) > 0 && ad.ProjectID != "" {
+ disabled
+ hidden
+ }
 				if selected != nil && *selected == ad.ID {
 					selected
 				}

@@ -29,7 +29,7 @@ const agentColumns = `id, name, description, system_prompt, model, tools, tool_c
 	`COALESCE(source_refs_json, '[]'), archived_at, ` +
 	`created_at, updated_at`
 
-const agentScheduleOptionColumns = `id, name, model`
+const agentScheduleOptionColumns = `id, name, model, CASE WHEN scope = 'project' THEN COALESCE(project_id, '') ELSE '' END`
 const agentTaskUIOptionColumns = `id, name, model, COALESCE(scope, 'global'), COALESCE(project_id, ''), ` +
 	`COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1), ` +
 	`COALESCE(generated_status, 'user_edited'), archived_at`
@@ -61,7 +61,7 @@ func scanAgentTaskUIOption(row interface{ Scan(dest ...any) error }) (*persisten
 
 func scanAgentScheduleOption(row interface{ Scan(dest ...any) error }) (*persistence.AgentScheduleOption, error) {
 	var option persistence.AgentScheduleOption
-	if err := row.Scan(&option.ID, &option.Name, &option.Model); err != nil {
+	if err := row.Scan(&option.ID, &option.Name, &option.Model, &option.ProjectID); err != nil {
 		return nil, err
 	}
 	return &option, nil
@@ -312,7 +312,7 @@ func (r *AgentRepo) ListScheduleOptions(ctx context.Context, projectID string) (
 		  AND COALESCE(selectable_as_primary, 1) = 1
 		  AND (
 			COALESCE(scope, 'global') <> 'project'
-			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate("project_id", projectID)+`)
 		  )
 		ORDER BY name ASC`, projectID)
 	if err != nil {
@@ -491,7 +491,7 @@ func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agen
 		  AND archived_at IS NULL
 		  AND (
 			COALESCE(scope, 'global') <> 'project'
-			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate("project_id", projectID)+`)
 		  )`, agentID, projectID).Scan(&option.ID, &option.Name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -534,7 +534,7 @@ func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID s
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
 		  AND (
 			COALESCE(scope, 'global') <> 'project'
-			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+			OR (project_id IS NOT NULL AND project_id <> '' AND `+analyticsProjectPredicate("project_id", projectID)+`)
 		  )
 		ORDER BY name ASC`, projectID)
 	if err != nil {

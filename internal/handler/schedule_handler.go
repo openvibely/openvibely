@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -126,7 +127,7 @@ func (h *Handler) requireTaskInRequestProject(ctx context.Context, taskID, proje
 	if task == nil {
 		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	if projectID != "" && task.ProjectID != projectID {
+	if projectID != "" && projectID != models.AllProjectsID && task.ProjectID != projectID {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
 	}
 	return task, nil
@@ -361,6 +362,7 @@ func scheduleWeekOffset(c echo.Context) int {
 }
 
 func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID string) error {
+	projectID = layout.WorkspaceProjectID(c.Request().Context(), projectID)
 	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] renderScheduleContentForProject error listing projects: %v", err)
@@ -370,6 +372,9 @@ func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID stri
 		projectID = projects[0].ID
 	}
 	var currentProject *models.Project
+	if projectID == models.AllProjectsID {
+		currentProject = &models.Project{ID: projectID, Name: "All projects"}
+	}
 	for i := range projects {
 		if projects[i].ID == projectID {
 			currentProject = &projects[i]

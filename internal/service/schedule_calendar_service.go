@@ -10,8 +10,32 @@ import (
 )
 
 func ApplyScheduleCalendarAction(ctx context.Context, repo persistence.ScheduleStore, projectID string, action models.ScheduleCalendarAction) (models.ScheduleCalendarAction, error) {
-	invalid := func() (models.ScheduleCalendarAction, error) {
-		return models.ScheduleCalendarAction{}, fmt.Errorf("%w: choose schedules or dates", persistence.ErrScheduleCalendarSelection)
+	if err := validateScheduleCalendarAction(projectID, action); err != nil {
+		return models.ScheduleCalendarAction{}, err
+	}
+	return repo.ApplyCalendarAction(ctx, projectID, action, time.Now().UTC())
+}
+
+func validateScheduleCalendarAction(projectID string, action models.ScheduleCalendarAction) error {
+	if projectID == models.AllProjectsID && action.Action == "undo_projects" {
+		if len(action.ProjectActions) == 0 || len(action.ProjectActions) > 2000 {
+			return persistence.ErrScheduleCalendarSelection
+		}
+		for id, part := range action.ProjectActions {
+			if id == "" || id == models.AllProjectsID || len(part.ProjectActions) != 0 {
+				return persistence.ErrScheduleCalendarSelection
+			}
+			if err := validateScheduleCalendarAction(id, part); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if len(action.ProjectActions) != 0 {
+		return persistence.ErrScheduleCalendarSelection
+	}
+	invalid := func() error {
+		return fmt.Errorf("%w: choose schedules or dates", persistence.ErrScheduleCalendarSelection)
 	}
 	if projectID == "" || len(action.ScheduleIDs) > 2000 || len(action.Skips) > 2000 || len(action.Changes) > 10000 {
 		return invalid()
@@ -49,5 +73,5 @@ func ApplyScheduleCalendarAction(ctx context.Context, repo persistence.ScheduleS
 	default:
 		return invalid()
 	}
-	return repo.ApplyCalendarAction(ctx, projectID, action, time.Now().UTC())
+	return nil
 }

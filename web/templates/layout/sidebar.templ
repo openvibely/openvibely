@@ -506,7 +506,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								// Only refresh alert badge if this is an alert_created event for the current project.
 								if (eventType === 'alert_created' && projectSelector) {
 									const currentProjectID = projectSelector.value;
-									if (data.project_id === currentProjectID) {
+									if (data.project_id === currentProjectID || currentProjectID === '__all_projects__') {
 										if (data.alert_source === 'account_usage' && typeof window.showToast === 'function') {
 											window.showToast(data.alert_title, data.alert_severity === 'error' ? 'error' : data.alert_severity === 'warning' ? 'warning' : 'info', '', {toastKey:'account-usage:'+data.alert_id, clickURL: data.alert_url && data.alert_url.startsWith('/analytics?') ? data.alert_url : '/alerts'});
 										}

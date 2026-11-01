@@ -192,9 +192,10 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 			}
 		}
 
-		if q == "select id, name, max_workers from projects order by is_default desc, name asc" {
+		projectQuery := strings.ReplaceAll(q, "from projects where id != '__all_projects__'", "from projects")
+		if projectQuery == "select id, name, max_workers from projects order by is_default desc, name asc" {
 			stats.ProjectCapacityReads++
-		} else if strings.Contains(q, "from projects") && strings.Contains(q, "order by is_default desc, name asc") && q != "select id, name, is_default from projects order by is_default desc, name asc, id asc" {
+		} else if strings.Contains(q, "from projects") && strings.Contains(q, "order by is_default desc, name asc") && projectQuery != "select id, name, is_default from projects order by is_default desc, name asc, id asc" {
 			stats.ProjectOtherOrderedReads++
 		}
 		if q == "select project_id, count(*) from tasks where category = 'active' and status in ('pending', 'queued') group by project_id" {
@@ -250,7 +251,7 @@ func (c *ioCounter) Snapshot() storefixture.IOStats {
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from app_settings where key in") {
 			stats.SettingsSnapshotReads++
 		}
-		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from projects order by") {
+		if strings.HasPrefix(q, "select ") && strings.Contains(projectQuery, "from projects order by") {
 			stats.ProjectCatalogReads++
 		}
 		if strings.HasPrefix(q, "select ") && strings.Contains(q, "from telegram_authorized_users") {

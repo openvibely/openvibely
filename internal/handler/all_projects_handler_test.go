@@ -55,14 +55,13 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Contains(t, body, "First workspace task")
 	require.Contains(t, body, "Second workspace task")
 	require.NotContains(t, body, "Private chat title")
-	require.Contains(t, body, `data-owner-project="`+second.ID+`"`)
-	filtered := get("/tasks?project_id=" + models.AllProjectsID + "&filter_project=" + first.ID).Body.String()
-	require.Contains(t, filtered, "First workspace task")
-	require.NotContains(t, filtered, "Second workspace task")
+	require.Contains(t, body, `data-project-label`)
+	require.Contains(t, body, `id="kanban-board"`)
+	require.NotContains(t, body, `id="all-projects-results"`)
 	scoped := get("/tasks?project_id=" + first.ID).Body.String()
 	require.NotContains(t, scoped, "Second workspace task")
 	for _, page := range []string{"analytics", "automations"} {
-		require.Contains(t, get("/"+page+"?project_id="+models.AllProjectsID).Body.String(), `data-all-projects-view="`+page+`"`)
+		require.Contains(t, get("/"+page+"?project_id="+models.AllProjectsID).Body.String(), map[string]string{"tasks": `id="kanban-board"`, "analytics": `id="analytics-data"`, "automations": `id="automations-container"`}[page])
 	}
 
 	for _, endpoint := range []string{"dashboard", "skills", "success-failure-rates", "avg-execution-time-by-task", "avg-execution-time-by-agent", "execution-trends-by-hour", "task-run-activity", "agent-usage-by-project", "most-frequent-tasks", "failed-task-patterns"} {
@@ -72,12 +71,12 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	analytics := get("/analytics?project_id=" + models.AllProjectsID).Body.String()
 	require.Contains(t, analytics, `id="analytics-data" data-project-id="__all_projects__"`)
 	require.Contains(t, get("/api/analytics/usage?project_id="+models.AllProjectsID+"&projection=local").Body.String(), `"total_tokens":200`)
-	require.Contains(t, get("/analytics?project_id="+models.AllProjectsID+"&filter_project="+first.ID).Body.String(), `data-project-id="`+first.ID+`" data-workspace-project-id="__all_projects__"`)
+
 	require.Contains(t, get("/api/analytics/usage?project_id="+first.ID+"&projection=local").Body.String(), `"total_tokens":100`)
-	firstPage := get("/automations?project_id=" + models.AllProjectsID + "&card_page=1&page_size=1").Body.String()
+	firstPage := get("/automations?project_id=" + models.AllProjectsID + "&sort=name_asc&card_page=1&page_size=1").Body.String()
 	require.Contains(t, firstPage, "First workspace automation")
 	require.NotContains(t, firstPage, "Second workspace automation")
-	secondPage := get("/automations?project_id=" + models.AllProjectsID + "&card_page=1&page_size=1&offset=1").Body.String()
+	secondPage := get("/automations?project_id=" + models.AllProjectsID + "&sort=name_asc&card_page=1&page_size=1&offset=1").Body.String()
 	require.Contains(t, secondPage, "Second workspace automation")
 	require.NotContains(t, secondPage, "First workspace automation")
 	chooser := get("/tasks/new?project_id=" + models.AllProjectsID).Body.String()
@@ -87,7 +86,7 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Contains(t, get("/projects/new?project_id="+models.AllProjectsID).Body.String(), `id="new_project_modal"`)
 	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+models.AllProjectsID, nil)
 	req.Header.Set("HX-Request", "true")
-	req.Header.Set("HX-Target", "all-projects-results")
+	req.Header.Set("HX-Target", "kanban-board")
 	rec := httptest.NewRecorder()
 	app.ServeHTTP(rec, req)
 	require.Equal(t, 200, rec.Code)
@@ -98,8 +97,7 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.Equal(t, 400, rec.Code)
 	rec = httptest.NewRecorder()
 	app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks?project_id="+models.AllProjectsID+"&filter_project=missing", nil))
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	require.Equal(t, "/tasks?project_id="+models.AllProjectsID, rec.Header().Get("Location"))
+	require.Equal(t, http.StatusOK, rec.Code)
 	project, err := h.projectSvc.GetByID(t.Context(), models.AllProjectsID)
 	require.NoError(t, err)
 	require.NotNil(t, project)
@@ -135,7 +133,7 @@ func TestAllProjectsSavedSelectionOnWorkspaceEntry(t *testing.T) {
 			rec := httptest.NewRecorder()
 			app.ServeHTTP(rec, req)
 			require.Equal(t, 200, rec.Code)
-			require.Contains(t, rec.Body.String(), `data-all-projects-view="`+page+`"`)
+			require.Contains(t, rec.Body.String(), map[string]string{"tasks": `id="kanban-board"`, "analytics": `id="analytics-data"`, "automations": `id="automations-container"`}[page])
 			require.Equal(t, "needle", req.URL.Query().Get("search"))
 			require.Equal(t, "7d", req.URL.Query().Get("range"))
 		})
@@ -162,36 +160,6 @@ func TestAllProjectsDesktopLaunchKeepsRestorationBootstrap(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `data-openvibely-runtime="desktop"`)
 	require.Contains(t, rec.Body.String(), `/analytics?project_id=__all_projects__&amp;range=7d#usage`)
 	require.Contains(t, rec.Body.String(), `id="chat-form"`)
-}
-
-func TestAllProjectsStaleFilterRefreshesWholeView(t *testing.T) {
-	h, app, _, stores := setupTestHandlerWithStores(t)
-	h.SetAutomationServices(service.NewAutomationGraphService(stores.Automations), nil)
-	h.usageAnalyticsSvc = service.NewUsageAnalyticsService(stores.Usage, stores.LLMConfigs)
-	for _, page := range []string{"tasks", "automations", "analytics"} {
-		for _, target := range []string{"main-content", "all-projects-results"} {
-			t.Run(page+"/"+target, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/"+page+"?project_id="+models.AllProjectsID+"&filter_project=deleted&search=retained&range=7d&offset=20&card_page=1", nil)
-				req.Header.Set("HX-Request", "true")
-				req.Header.Set("HX-Target", target)
-				rec := httptest.NewRecorder()
-				app.ServeHTTP(rec, req)
-				require.Equal(t, 200, rec.Code)
-				if target == "all-projects-results" {
-					require.Equal(t, "/"+page+"?project_id="+models.AllProjectsID+"&range=7d&search=retained", rec.Header().Get("X-OpenVibely-All-Projects-Location"))
-					require.Empty(t, rec.Header().Get("HX-Retarget"))
-					require.Empty(t, rec.Body.String())
-					return
-				}
-				require.Equal(t, "#main-content", rec.Header().Get("HX-Retarget"))
-				require.Equal(t, "innerHTML", rec.Header().Get("HX-Reswap"))
-				require.Equal(t, "/"+page+"?project_id="+models.AllProjectsID+"&range=7d&search=retained", rec.Header().Get("HX-Replace-Url"))
-				require.Contains(t, rec.Body.String(), `data-all-projects-view="`+page+`"`)
-				require.Contains(t, rec.Body.String(), `name="filter_project"`)
-				require.NotContains(t, rec.Body.String(), "filter_project=deleted")
-			})
-		}
-	}
 }
 
 func TestAllProjectsTaskWorkspaceKeepsOwnerForEdits(t *testing.T) {
@@ -352,40 +320,13 @@ func TestAllProjectsNewAndDuplicateAutomationKeepWorkspace(t *testing.T) {
 	seed.Name = "Source A survivor"
 	_, err = compiler.Save(t.Context(), service.AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: seed})
 	require.NoError(t, err)
-	returnList := "/automations?project_id=__all_projects__&search=Source&card_page=1&page_size=1&offset=1&filter_project=" + project.ID
+	returnList := "/automations?project_id=__all_projects__&search=Source"
 	deleted := tc.HTMX().Post("/automations/" + saved.Definition.Automation.ID + "/delete?project_id=__all_projects__&return_list=" + url.QueryEscape(returnList)).Execute()
 	require.Equal(t, http.StatusNoContent, deleted.Code, deleted.Body.String())
 	require.Equal(t, returnList, deleted.Header().Get("HX-Redirect"))
-	for _, target := range []string{"", "main-content", "all-projects-results"} {
-		request := httptest.NewRequest(http.MethodGet, returnList, nil)
-		if target != "" {
-			request.Header.Set("HX-Request", "true")
-			request.Header.Set("HX-Target", target)
-		}
-		response := httptest.NewRecorder()
-		tc.echo.ServeHTTP(response, request)
-		header := "Location"
-		if target == "" {
-			require.Equal(t, http.StatusSeeOther, response.Code)
-		} else {
-			require.Equal(t, http.StatusOK, response.Code)
-			header = "HX-Replace-Url"
-			if target == "all-projects-results" {
-				header = "X-OpenVibely-All-Projects-Location"
-			} else {
-				require.Contains(t, response.Body.String(), "Source A survivor")
-			}
-		}
-		corrected, err := url.Parse(response.Header().Get(header))
-		require.NoError(t, err)
-		require.Equal(t, "0", corrected.Query().Get("offset"))
-		require.Equal(t, "1", corrected.Query().Get("page_size"))
-		require.Equal(t, "Source", corrected.Query().Get("search"))
-		require.Equal(t, project.ID, corrected.Query().Get("filter_project"))
-		final := tc.HTTP().Get(corrected.String()).Execute()
-		require.Equal(t, http.StatusOK, final.Code)
-		require.Contains(t, final.Body.String(), "Source A survivor")
-	}
+	result := tc.HTTP().Get(returnList).Execute()
+	require.Equal(t, http.StatusOK, result.Code)
+	require.Contains(t, result.Body.String(), "Source A survivor")
 
 }
 

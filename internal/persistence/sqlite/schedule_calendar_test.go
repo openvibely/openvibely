@@ -346,3 +346,76 @@ func TestCalendarAdvanceRechecksRestoredOccurrence(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduleCalendarAllProjectsAtomicUndo(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewScheduleRepo(db)
+	tasks := NewTaskRepo(db, nil)
+	ctx := t.Context()
+	_, err := db.ExecContext(ctx, `INSERT INTO projects(id,name) VALUES ('second','Second')`)
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Second)
+	var ids []string
+	for _, project := range []string{"default", "second"} {
+		task := &models.Task{ProjectID: project, Title: project, Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, tasks.Create(ctx, task))
+		schedule := &models.Schedule{TaskID: task.ID, RunAt: now.Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+		require.NoError(t, repo.Create(ctx, schedule))
+		ids = append(ids, schedule.ID)
+	}
+	_, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: "pause", ScheduleIDs: append(append([]string{}, ids...), "missing")}, now)
+	require.ErrorIs(t, err, persistence.ErrScheduleCalendarSelection)
+	for _, id := range ids {
+		schedule, err := repo.GetByID(ctx, id)
+		require.NoError(t, err)
+		require.True(t, schedule.Enabled)
+	}
+	undo, err := repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: "pause", ScheduleIDs: ids}, now)
+	require.NoError(t, err)
+	require.Len(t, undo.ProjectActions, 2)
+	for _, id := range ids {
+		schedule, err := repo.GetByID(ctx, id)
+		require.NoError(t, err)
+		require.False(t, schedule.Enabled)
+	}
+	_, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, undo, now)
+	require.NoError(t, err)
+	for _, id := range ids {
+		schedule, err := repo.GetByID(ctx, id)
+		require.NoError(t, err)
+		require.True(t, schedule.Enabled)
+	}
+	undo, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: "pause_all"}, now)
+	require.NoError(t, err)
+	state, err := repo.CalendarState(ctx, models.AllProjectsID)
+	require.NoError(t, err)
+	require.True(t, state.Paused)
+	_, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, undo, now)
+	require.NoError(t, err)
+	state, err = repo.CalendarState(ctx, models.AllProjectsID)
+	require.NoError(t, err)
+	require.False(t, state.Paused)
+}
+
+func TestScheduleCalendarAllProjectsUndoOmitsUnchangedProjects(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewScheduleRepo(db)
+	ctx := t.Context()
+	_, err := db.ExecContext(ctx, `INSERT INTO projects(id,name) VALUES ('second','Second')`)
+	require.NoError(t, err)
+	now := time.Now().UTC()
+	_, err = repo.ApplyCalendarAction(ctx, "default", models.ScheduleCalendarAction{Action: "pause_all"}, now)
+	require.NoError(t, err)
+	undo, err := repo.ApplyCalendarAction(ctx, models.AllProjectsID, models.ScheduleCalendarAction{Action: "pause_all"}, now)
+	require.NoError(t, err)
+	require.NotContains(t, undo.ProjectActions, "default")
+	require.Contains(t, undo.ProjectActions, "second")
+	_, err = repo.ApplyCalendarAction(ctx, models.AllProjectsID, undo, now)
+	require.NoError(t, err)
+	state, err := repo.CalendarState(ctx, "default")
+	require.NoError(t, err)
+	require.True(t, state.Paused)
+	state, err = repo.CalendarState(ctx, "second")
+	require.NoError(t, err)
+	require.False(t, state.Paused)
+}

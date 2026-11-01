@@ -220,7 +220,7 @@ func TestAgentRepoListScheduleOptionsUsesCompactProjectionAndAvailability(t *tes
 	}
 	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
 	projection := strings.Split(query, " from agents ")[0]
-	if projection != "select id, name, model" {
+	if projection != "select id, name, model, case when scope = 'project' then coalesce(project_id, '') else '' end" {
 		t.Fatalf("schedule projection = %q, want only selector fields: %s", projection, statements[0])
 	}
 	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_by", "absorbed_into", "created_at", "updated_at"} {

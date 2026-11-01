@@ -212,7 +212,7 @@ func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID str
 		`SELECT `+executionSelectColumnsAlias+`
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
+		 WHERE e.id = ? AND `+analyticsProjectPredicate("t.project_id", projectID)+``, id, projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
