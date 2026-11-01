@@ -199,6 +199,11 @@ templ TaskListPanel(currentProjectID string) {
                 var url = detail.xhr?.responseURL;
                 if (!url || !isSettingsURL(url)) return;
                 var main = detail.target;
+                var destinationProject = workspaceProject(url);
+                workspaceURL = workspaceURLs.get(destinationProject) || '/tasks?project_id=' + encodeURIComponent(destinationProject);
+                // A settings page reopened in another project must not retain
+                // the outgoing project's workspace as its return destination.
+                if (destinationProject !== workspaceProject(location.href)) return;
                 if (!settingsPane && inSettings) return;
                 if (!settingsPane) {
                     retainedScroll = [main].concat(Array.from(main.querySelectorAll('*'))).filter(function(el) {
@@ -314,6 +319,11 @@ templ TaskListPanel(currentProjectID string) {
             var contextChanges = null;
             var wasCollapsed = false;
             var workspaceURL = /^\/(themes|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(location.pathname) ? '/tasks' + location.search : location.pathname + location.search + location.hash;
+            var workspaceURLs = new Map();
+            function workspaceProject(value) {
+                return new URL(value, location.href).searchParams.get('project_id') || (document.getElementById('project-selector') || {}).value || '';
+            }
+            workspaceURLs.set(workspaceProject(workspaceURL), workspaceURL);
             var workspaceScroll = 0;
             var boardScroll = new Map();
             var boardScrollSelector = '#tasks-page, #kanban-board, .category-drop-zone, .task-drop-zone';
@@ -326,7 +336,10 @@ templ TaskListPanel(currentProjectID string) {
             document.addEventListener('htmx:beforeRequest', function(e) {
                 if (e.detail.target?.id === 'main-content' && isSettingsURL(e.detail.requestConfig?.path || location.href)) settingsRequest = e.detail.xhr;
                 if (e.detail.target && e.detail.target.id === 'main-content' && !inSettings) {
-                    if (e.detail.elt?.dataset.workspaceHistoryNavigation !== 'true') workspaceURL = location.pathname + location.search + location.hash;
+                    if (e.detail.elt?.dataset.workspaceHistoryNavigation !== 'true') {
+                        workspaceURL = location.pathname + location.search + location.hash;
+                        workspaceURLs.set(workspaceProject(workspaceURL), workspaceURL);
+                    }
                     workspaceScroll = document.getElementById('main-content').scrollTop;
                     boardScroll.clear();
                     document.getElementById('main-content').querySelectorAll(boardScrollSelector).forEach(function(el) {

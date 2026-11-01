@@ -124,6 +124,20 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		b.evaluate(`htmx.ajax('GET','/workers',{target:'#main-content',swap:'innerHTML'});'monitor'`)
 		waitFor("workers remain in settings", `String(!!document.getElementById('worker-settings-content') && document.documentElement.classList.contains('appearance-settings') && !!document.getElementById('limit-input-global') && document.getElementById('limit-input-global').getBoundingClientRect().width>0)`, "true")
 
+		// Project tabs share the shell, but each Settings return belongs to
+		// the workspace in that project, including its filters and hash.
+		b.evaluate(`htmx.ajax('GET','/tasks?project_id=first&category=backlog',{target:'#main-content',swap:'innerHTML'}).then(()=>history.replaceState(history.state,'','/tasks?project_id=first&category=backlog#board'));'first tab'`)
+		waitFor("first project workspace", `String(location.search==='?project_id=first&category=backlog' && !!document.getElementById('settings-workspace'))`, "true")
+		b.evaluate(`window.workspaceNavigation.navigate('/themes?project_id=first',true);'first settings'`)
+		waitFor("first project settings", `String(location.search==='?project_id=first' && !!document.getElementById('settings-retained-workspace'))`, "true")
+		b.evaluate(`htmx.ajax('GET','/tasks?project_id=second',{target:'#main-content',swap:'innerHTML'}).then(()=>history.replaceState(history.state,'','/tasks?project_id=second'));'second tab'`)
+		waitFor("second project workspace", `String(location.search==='?project_id=second' && !document.getElementById('themes-container') && !document.getElementById('settings-retained-workspace'))`, "true")
+		b.evaluate(`window.workspaceNavigation.navigate('/themes?project_id=first',true);'return to first settings'`)
+		waitFor("first settings return destination", `document.querySelector('#appearance-settings-nav [data-settings-back]').getAttribute('href')`, "/tasks?project_id=first&category=backlog#board")
+		waitFor("second workspace is not retained by first settings", `String(!document.getElementById('settings-retained-workspace'))`, "true")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return to first workspace'`)
+		waitFor("first workspace and sidebar restored", `String(location.search==='?project_id=first&category=backlog' && location.hash==='#board' && !document.documentElement.classList.contains('appearance-settings') && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=first')`, "true")
+
 		// Direct Settings links have no retained workspace. A failed fallback
 		// request must stop rather than recursively trying to open Search.
 		failWorkspace.Store(true)
