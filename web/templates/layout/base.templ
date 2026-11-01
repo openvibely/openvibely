@@ -5685,7 +5685,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 										if (seen.has(el)) return;
 										seen.add(el);
 										shape(el);
-										observer.observe(el);
+										// Tab padding changes when selection/hover changes while its
+										// content size stays constant. Track the painted box so the
+										// polygon cannot retain the old width or height.
+										observer.observe(el, {box: 'border-box'});
 									});
 								}
 								attach();

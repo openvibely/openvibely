@@ -3,8 +3,10 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -185,12 +187,43 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.evaluate(`window.savedSpacingTabStyle = document.documentElement.getAttribute('data-tab-style'); 'ready'`)
 				for _, style := range []string{"detached", "attached"} {
 					browser.evaluate(`document.documentElement.setAttribute('data-tab-style', '` + style + `'); 'ready'`)
+					// Selection changes padding without changing the label's content size.
+					browser.click(`[data-project-tab="p01"]`)
+					browser.waitFor("select shape fixture", `new URLSearchParams(location.search).get('project_id')`, "p01")
+					if style == "detached" {
+						browser.waitFor("initially selected tab's clip shrinks on deselection", `String((function(){var tab=document.querySelector('[data-project-tab="p00"]'),points=getComputedStyle(tab).clipPath.match(/[-\d.]+px [-\d.]+px/g);if(!points)return false;var xy=points.map(p=>p.split(' ').map(parseFloat));return Math.abs(Math.max(...xy.map(p=>p[0]))-tab.clientWidth)<0.1 && Math.abs(Math.max(...xy.map(p=>p[1]))-tab.clientHeight)<0.1;})())`, "true")
+					}
+					browser.click(`[data-project-tab="p00"]`)
+					browser.waitFor("deselect shape fixture", `new URLSearchParams(location.search).get('project_id')`, "p00")
 					var spacingPoint struct{ X, Y float64 }
 					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect();return {X:r.left+80,Y:r.top+r.height/2};})())`)), &spacingPoint); err != nil {
 						t.Fatal(err)
 					}
 					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": spacingPoint.X, "y": spacingPoint.Y}, nil)
 					browser.waitFor(style+" highlight has breathing room on both sides", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),r=tab.getBoundingClientRect(),slot=tab.parentElement.getBoundingClientRect(),selected=document.querySelector('[data-project-tab="p00"]').parentElement.getBoundingClientRect();return tab.parentElement.matches(':hover') && r.left-slot.left>=6 && slot.right-r.right>=6 && r.left-selected.right>=6;})())`, "true")
+					if style == "detached" {
+						browser.waitFor("clip follows the highlight's current dimensions", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),points=getComputedStyle(tab).clipPath.match(/[-\d.]+px [-\d.]+px/g);if(!points)return false;var xy=points.map(p=>p.split(' ').map(parseFloat));return Math.abs(Math.max(...xy.map(p=>p[0]))-tab.clientWidth)<0.1 && Math.abs(Math.max(...xy.map(p=>p[1]))-tab.clientHeight)<0.1;})())`, "true")
+					}
+					var rect struct{ X, Y, Width, Height float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').getBoundingClientRect();return {X:r.x,Y:r.y,Width:r.width,Height:r.height};})())`)), &rect); err != nil {
+						t.Fatal(err)
+					}
+					var capture struct{ Data string }
+					browser.call("Page.captureScreenshot", map[string]any{"format": "png", "clip": map[string]any{"x": rect.X, "y": rect.Y, "width": rect.Width, "height": rect.Height, "scale": 2}}, &capture)
+					pixels, err := base64.StdEncoding.DecodeString(capture.Data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					img, err := png.Decode(bytes.NewReader(pixels))
+					if err != nil {
+						t.Fatal(err)
+					}
+					w, h := img.Bounds().Dx(), img.Bounds().Dy()
+					for _, point := range [][2]int{{1, 1}, {w - 2, 1}, {1, h - 2}, {w - 2, h - 2}} {
+						if img.At(point[0], point[1]) == img.At(w/2, 2) {
+							t.Fatalf("%s highlight has a square corner at %v", style, point)
+						}
+					}
 				}
 				browser.evaluate(`if (window.savedSpacingTabStyle === null) document.documentElement.removeAttribute('data-tab-style'); else document.documentElement.setAttribute('data-tab-style', window.savedSpacingTabStyle); delete window.savedSpacingTabStyle; 'restored'`)
 				// Attached-tab highlights are inset; their margins still activate the tab.
