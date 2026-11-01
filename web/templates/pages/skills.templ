@@ -5,11 +5,13 @@ import (
 "strconv"
 
 	"github.com/openvibely/openvibely/internal/models"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 type SkillCard struct {
+ ProjectID string
 	Handle    string
 	Name      string
 	Description string
@@ -134,6 +136,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 						data-skill-name={ skill.Name }
 							data-skill-description={ skill.Description }
 							data-skill-scope={ skill.Scope }
+ data-skill-project={ skill.ProjectID }
 							data-skill-source={ skill.Source }
  data-requires-external-tools={ strconv.FormatBool(skill.RequiresExternalTools) }
 							data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
@@ -143,8 +146,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 						data-search-text={ skillSearchText(skill) }
 						tabindex="-1"
 						if canManage {
-							data-card-select-id={ skill.Scope + ":" + skill.Handle }
-							data-card-select-ref={ `{"handle":"` + skill.Handle + `","scope":"` + skill.Scope + `"}` }
+							data-card-select-id={ skill.ProjectID + ":" + skill.Scope + ":" + skill.Handle }
+							data-card-select-ref={ `{"handle":"` + skill.Handle + `","scope":"` + skill.Scope + `","project_id":"` + skill.ProjectID + `"}` }
 							data-card-select-eligible="true"
 						}
 						onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editSkillFromData(this)"					>
@@ -185,7 +188,11 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 									<p class="text-sm opacity-60 mt-1 line-clamp-2">{ skill.Description }</p>
 								}
 								<div class="flex flex-wrap gap-2 mt-2">
-									<span class="badge badge-outline badge-sm">{ skill.Scope }</span>
+									if templateui.ProjectLabel(ctx, skill.ProjectID) != "" {
+ @components.ProjectBadge(skill.ProjectID)
+ } else {
+ <span class="badge badge-outline badge-sm">{ skill.Scope }</span>
+ }
 									if skill.RequiresExternalTools {
  <span class="badge badge-warning badge-sm">Requires external tools</span>
  }
@@ -214,6 +221,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				@ModalCloseButton("skill_modal", "Close skill dialog")
 				<h3 id="skill_modal_title" class="font-bold text-lg mb-4 pr-10">New Skill</h3>
 				<form id="skill_form" onsubmit="submitSkillForm(event)">
+ @skillProjectChoice(currentProjectID, "skill_project_owner")
  <section id="skill_dependency_details" hidden></section>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
 						<label class="form-control">
@@ -271,6 +279,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				@ModalCloseButton("skill_import_modal", "Close import skill dialog")
 				<h3 class="font-bold text-lg mb-4 pr-10">Import Skill Package</h3>
 				<form id="skill_import_form" onsubmit="submitSkillImportForm(event)">
+ @skillProjectChoice(currentProjectID, "skill_import_project_owner")
 					<label class="form-control">
 						<span class="label-text mb-1">Scope</span>
 						<select id="skill_import_scope" name="scope" class="select select-bordered">
@@ -298,6 +307,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 			<script>
 					var deleteSkillHandle = '';
 					var deleteSkillScope = 'project';
+ var deleteSkillProject = '';
 					var skillDetailRequestGeneration = 0;
 				function defaultSkillTemplate(handle, name, scope, description) {				handle = (handle || 'openvibely_database_migration_workflow').trim();
 				name = (name || 'OpenVibely Database Migration Workflow').trim();
@@ -314,10 +324,10 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 					'---\n\nDescribe when to use this skill and the workflow the agent should follow.\n';
 			}
 
-				function currentSkillsProjectQuery() {
+				function currentSkillsProjectQuery(owner) {
 					var selector = document.getElementById('project-selector');
 					var projectID = selector && selector.value ? selector.value : new URLSearchParams(window.location.search).get('project_id');
-					return projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
+					return projectID ? '?project_id=' + encodeURIComponent(projectID) + (owner ? '&skill_project_id=' + encodeURIComponent(owner) : '') : '';
 				}
 
 				function skillsRefreshURL(url) {
@@ -542,6 +552,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				skillDetailRequestGeneration++;
 				var form = document.getElementById('skill_form');
 				form.dataset.mode = 'create';
+ form.dataset.skillProject = '';
+ var projectChoice = document.getElementById('skill_project_owner'); if(projectChoice){projectChoice.value='';projectChoice.disabled=false;}
  document.getElementById('skill_dependency_details').replaceChildren();
  document.getElementById('skill_dependency_details').hidden=true;
 				form.dataset.originalHandle = '';
@@ -581,6 +593,8 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				var scope = card.dataset.skillScope || 'project';
 				var requestGeneration = ++skillDetailRequestGeneration;
 				form.dataset.mode = 'edit';
+ form.dataset.skillProject = card.dataset.skillProject || '';
+ var projectChoice = document.getElementById('skill_project_owner'); if(projectChoice){projectChoice.value=form.dataset.skillProject;projectChoice.disabled=true;}
 				form.dataset.originalHandle = handle;
 				form.dataset.templateEdited = 'true';
 				var alwaysUse = card.dataset.skillAlwaysUse === 'true';
@@ -602,7 +616,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
-				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
+				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery(card.dataset.skillProject).replace(/^\?/, '&'), {
 					method: 'GET',
 					headers: {'Accept': 'application/json'}
 				}).then(function(resp) {
@@ -633,6 +647,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				function deleteSkill(button) {
 					deleteSkillHandle = button.dataset.skillHandle || '';
 					deleteSkillScope = button.dataset.skillScope || 'project';
+ deleteSkillProject = button.closest('[data-skill-project]')?.dataset.skillProject || '';
 					if (!deleteSkillHandle) return;
 						window.openDestructiveConfirmDialog('delete_skill_confirm_modal', 'delete_skill_confirm_name', button.dataset.skillName || deleteSkillHandle);
 				}
@@ -647,7 +662,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 						if (document.activeElement && modal.contains(document.activeElement)) document.activeElement.blur();
 						modal.close();
 					}
-					htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle) + '?target_scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&')), {
+					htmx.ajax('DELETE', skillsRefreshURL('/skills/' + encodeURIComponent(deleteSkillHandle) + '?target_scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery(deleteSkillProject).replace(/^\?/, '&')), {
 						target: '#skills-container',
 						swap: 'outerHTML show:none'
 					}).catch(function(xhr) {
@@ -665,7 +680,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 if (enable && card?.dataset.requiresExternalTools === 'true') { editSkillFromData(card); return; }
 var action = enable ? 'Enable' : 'Disable';
 				if (!await window.openVibelyConfirm(action + ' skill "' + handle + '"?')) return;
-				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery()), {
+				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery(button.closest('[data-skill-project]')?.dataset.skillProject)), {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({enabled: enable, scope: scope})
@@ -687,7 +702,7 @@ var action = enable ? 'Enable' : 'Disable';
 				if (!handle) return;
 				var action = alwaysUse ? 'Set always use for' : 'Remove always use from';
 				if (!await window.openVibelyConfirm(action + ' skill "' + handle + '"?')) return;
-				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery()), {
+				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery(button.closest('[data-skill-project]')?.dataset.skillProject)), {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify({always_use: alwaysUse, scope: scope})
@@ -716,7 +731,7 @@ var action = enable ? 'Enable' : 'Disable';
 				submit.disabled = true;
 				submit.textContent = 'Importing...';
 				setSkillImportError('');
-				fetch(skillsRefreshURL('/skills/import' + currentSkillsProjectQuery()), {
+				fetch(skillsRefreshURL('/skills/import' + currentSkillsProjectQuery(document.getElementById('skill_import_project_owner')?.value)), {
 					method: 'POST',
 					headers: {'HX-Request': 'true'},
 					body: data
@@ -764,7 +779,7 @@ var action = enable ? 'Enable' : 'Disable';
 				submit.disabled = true;
 				submit.textContent = 'Saving...';
 				setSkillModalError('');
-				fetch(skillsRefreshURL(url + currentSkillsProjectQuery()), {
+				fetch(skillsRefreshURL(url + currentSkillsProjectQuery(mode === "edit" ? form.dataset.skillProject : document.getElementById("skill_project_owner")?.value)), {
 					method: method,
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 					body: JSON.stringify(payload)
@@ -779,7 +794,7 @@ var action = enable ? 'Enable' : 'Disable';
 					if (alwaysUse === originalAlwaysUse) return html;
 					var auHandle = form.dataset.originalHandle || handle;
 					var auScope = document.getElementById('skill_scope').value;
-					return fetch(skillsRefreshURL('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery()), {
+					return fetch(skillsRefreshURL('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery(form.dataset.skillProject || document.getElementById('skill_project_owner')?.value)), {
 						method: 'POST',
 						headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
 						body: JSON.stringify({always_use: alwaysUse, scope: auScope})
@@ -814,4 +829,16 @@ func firstSkillNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+templ skillProjectChoice(projectID, id string) {
+ if projectID == models.AllProjectsID {
+ <label class="form-control mb-3"><span class="label-text">Project (for project-scoped skills)</span>
+ <select id={ id } class="select select-bordered">
+ <option value="">Choose project</option>
+ for _, project := range templateui.ProjectOptions(ctx) {
+ <option value={ project.ID }>{ project.Name }</option>
+ }
+ </select></label>
+ }
 }

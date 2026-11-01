@@ -1,0 +1,9 @@
+package components
+
+import templateui "github.com/openvibely/openvibely/web/templates"
+
+templ ProjectBadge(projectID string) {
+ if label := templateui.ProjectLabel(ctx, projectID); label != "" {
+  <span class="badge badge-outline badge-sm" data-project-label>{ label }</span>
+ }
+}

@@ -6,6 +6,8 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 type authorizedUserCRUD[T any] struct {
@@ -76,7 +78,7 @@ func (crud authorizedUserCRUD[T]) listUsers(c echo.Context, projectID string) er
 }
 
 func (crud authorizedUserCRUD[T]) createUser(c echo.Context, projectID string, create func(context.Context) error) error {
-	if projectID == "" {
+	if projectID == "" || projectID == models.AllProjectsID {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
 	if err := create(c.Request().Context()); err != nil {
@@ -95,7 +97,7 @@ func (crud authorizedUserCRUD[T]) deleteUser(
 	loadProjectID func(context.Context, string) (string, bool, error),
 	deleteUser func(context.Context, string, string) error,
 ) error {
-	if projectID == "" {
+	if projectID == "" || projectID == models.AllProjectsID {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
 	ownerProjectID, found, err := loadProjectID(c.Request().Context(), id)
@@ -112,6 +114,10 @@ func (crud authorizedUserCRUD[T]) deleteUser(
 }
 
 func (crud authorizedUserCRUD[T]) reload(c echo.Context, projectID string) error {
+	if c.FormValue("return_project_id") == models.AllProjectsID {
+		projectID = models.AllProjectsID
+		c.SetRequest(c.Request().WithContext(layout.WithWorkspaceProject(c.Request().Context(), models.AllProjectsID)))
+	}
 	users, err := crud.list(c.Request().Context(), projectID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")

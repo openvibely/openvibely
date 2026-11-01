@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
 	"strings"
 	"time"
 )
@@ -212,7 +213,11 @@ func listAuthorizedUsers[T any](ctx context.Context, db *sql.DB, table, userCol,
 }
 
 func listAuthorizedUsersByProject[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel, projectID string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
-	rows, err := db.QueryContext(ctx, authorizedUsersListByProjectQuery(table, userCol), projectID)
+	query := authorizedUsersListByProjectQuery(table, userCol)
+	if projectID == models.AllProjectsID {
+		query = strings.Replace(query, "project_id = ?", "? = '__all_projects__'", 1)
+	}
+	rows, err := db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", listErrLabel, err)
 	}

@@ -29,7 +29,7 @@ func (r *AutomationRepo) ListBreadcrumbSelector(ctx context.Context, projectID, 
 		limit = 20
 	}
 	search = strings.ToLower(strings.TrimSpace(search))
-	rows, err := r.db.QueryContext(ctx, `SELECT a.id, a.name
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id, a.name, a.project_id
 		FROM automations a
 		JOIN automation_versions v ON v.id = a.published_version_id
 			AND v.project_id = a.project_id AND v.automation_id = a.id AND v.state = 'published'
@@ -45,7 +45,7 @@ func (r *AutomationRepo) ListBreadcrumbSelector(ctx context.Context, projectID, 
 	items := make([]models.BreadcrumbSelectorItem, 0, limit)
 	for rows.Next() {
 		var item models.BreadcrumbSelectorItem
-		if err := rows.Scan(&item.ID, &item.Name); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ProjectID); err != nil {
 			return nil, fmt.Errorf("scanning automation breadcrumb selector: %w", err)
 		}
 		items = append(items, item)

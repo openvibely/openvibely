@@ -316,7 +316,7 @@ func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search
 	return r.listSearchBreadcrumbSelector(ctx, projectID, search, currentID, scheduleOnly, limit)
 }
 
-const breadcrumbSelectorSelectColumns = `id, title, status, category, merge_status,
+const breadcrumbSelectorSelectColumns = `id, title, project_id, status, category, merge_status,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met`
 
 const breadcrumbSelectorCurrentQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
@@ -509,7 +509,7 @@ func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string,
 	items := make([]models.BreadcrumbSelectorItem, 0, capacity)
 	for rows.Next() {
 		var item models.BreadcrumbSelectorItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ProjectID, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet); err != nil {
 			return nil, fmt.Errorf("scanning task breadcrumb selector: %w", err)
 		}
 		items = append(items, item)

@@ -379,7 +379,7 @@ func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, fil
 func buildAgentPageFilteredQuery(limit, offset int, filter persistence.AgentPageFilter) (string, []any) {
 	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
 	args := make([]any, 0, 4)
-	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" {
+	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" && projectID != models.AllProjectsID {
 		query += ` AND (
 			COALESCE(scope, 'global') <> 'project'
 			OR project_id IS NULL

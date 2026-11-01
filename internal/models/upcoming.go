@@ -67,6 +67,7 @@ type Upcoming struct {
 
 // HistoryExecution represents a completed execution with its task info
 type HistoryExecution struct {
+	ProjectID string
 	Execution Execution
 	TaskTitle string
 	AgentName string

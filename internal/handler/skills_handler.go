@@ -150,7 +150,7 @@ func (h *Handler) ListSkills(c echo.Context) error {
 	}
 	pageItems := skills[start:end]
 	pageItems, hasMore := cardPageItems(pageItems, page.PageSize)
-	canManage := h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != ""
+	canManage := h.agentSkillRoot != "" || h.currentProjectSkillRoot(c) != "" || (c.QueryParam("project_id") == models.AllProjectsID && len(allSkills) > 0)
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	listState := pages.CardListState{
 		ProjectID: currentProjectID,
@@ -328,8 +328,9 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 }
 
 type bulkSkillRef struct {
-	Handle string `json:"handle"`
-	Scope  string `json:"scope"`
+	ProjectID string `json:"project_id"`
+	Handle    string `json:"handle"`
+	Scope     string `json:"scope"`
 }
 type bulkSkillsRequest struct {
 	Skills []bulkSkillRef `json:"skills"`
@@ -354,12 +355,25 @@ func (h *Handler) DeleteSkillsBulk(c echo.Context) error {
 		if !validDialogSkillKey(ref.Handle) || (ref.Scope != "global" && ref.Scope != "project") {
 			return echo.NewHTTPError(http.StatusBadRequest, "every skill must have a valid handle and scope")
 		}
-		identity := ref.Scope + ":" + ref.Handle
+		identity := ref.ProjectID + ":" + ref.Scope + ":" + ref.Handle
 		if _, ok := seen[identity]; ok {
 			continue
 		}
 		seen[identity] = struct{}{}
-		root, err := h.rootForDialogScope(c, ref.Scope)
+		scoped := c
+		if c.QueryParam("project_id") == models.AllProjectsID && ref.Scope == "project" {
+			if ref.ProjectID == "" || ref.ProjectID == models.AllProjectsID {
+				return echo.NewHTTPError(http.StatusBadRequest, "Choose a project")
+			}
+			req := c.Request().Clone(c.Request().Context())
+			query := req.URL.Query()
+			query.Set("skill_project_id", ref.ProjectID)
+			req.URL.RawQuery = query.Encode()
+			scoped = c.Echo().NewContext(req, c.Response())
+		} else if ref.ProjectID != "" && ref.ProjectID != c.QueryParam("project_id") {
+			return echo.NewHTTPError(http.StatusBadRequest, "Skill belongs to another project")
+		}
+		root, err := h.rootForDialogScope(scoped, ref.Scope)
 		if err != nil {
 			return err
 		}
@@ -666,7 +680,43 @@ func listStandaloneSkillPackageFiles(skillPath string) []string {
 }
 
 func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error) {
+	if c.QueryParam("project_id") == models.AllProjectsID {
+		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+		if err != nil {
+			return nil, err
+		}
+		result, err := h.listStandaloneSkillsInProject(c)
+		if err != nil {
+			return nil, err
+		}
+		for _, project := range projects {
+			req := c.Request().Clone(c.Request().Context())
+			query := req.URL.Query()
+			query.Set("project_id", project.ID)
+			query.Del("skill_project_id")
+			req.URL.RawQuery = query.Encode()
+			scoped := c.Echo().NewContext(req, c.Response())
+			cards, err := h.listStandaloneSkillsInProject(scoped)
+			if err != nil {
+				return nil, err
+			}
+			for _, card := range cards {
+				if card.Scope == "project" {
+					card.ProjectID = project.ID
+					result = append(result, card)
+				}
+			}
+		}
+		return result, nil
+	}
+	return h.listStandaloneSkillsInProject(c)
+}
+
+func (h *Handler) listStandaloneSkillsInProject(c echo.Context) ([]pages.SkillCard, error) {
 	projectRoot := h.currentProjectSkillRoot(c)
+	if c.QueryParam("project_id") == models.AllProjectsID {
+		projectRoot = ""
+	}
 	catalog, err := agentskills.BuildCatalogAll("skills-page", h.agentSkillRoot, projectRoot)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -680,9 +730,15 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 	for _, entry := range catalog.Entries() {
 		scope := h.scopeForStandaloneSkillPath(c, entry.AbsolutePath)
 		card := pages.SkillCard{
-			Handle:  entry.Handle,
-			Name:    entry.Skill,
-			Scope:   scope,
+			Handle: entry.Handle,
+			Name:   entry.Skill,
+			Scope:  scope,
+			ProjectID: func() string {
+				if scope == "project" {
+					return c.QueryParam("project_id")
+				}
+				return ""
+			}(),
 			Source:  string(entry.Source),
 			Enabled: true, // default to enabled when frontmatter is absent
 		}

@@ -173,7 +173,7 @@ func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID strin
 			SUBSTR(`+executionOutputSelectAlias+`, 1, ?),
 			SUBSTR(e.error_message, 1, ?),
 			e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
-			t.title as task_title,
+			t.title as task_title, t.project_id,
 			COALESCE(ac.name, '') as agent_name
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
@@ -195,7 +195,7 @@ func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID strin
 			&de.Execution.Status, &de.Execution.Output,
 			&de.Execution.ErrorMessage, &de.Execution.TokensUsed, &de.Execution.DurationMs,
 			&de.Execution.StartedAt, &de.Execution.CompletedAt,
-			&de.TaskTitle, &de.AgentName,
+			&de.TaskTitle, &de.ProjectID, &de.AgentName,
 		); err != nil {
 			return nil, fmt.Errorf("scanning history execution: %w", err)
 		}

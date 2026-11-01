@@ -347,7 +347,8 @@ templ upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string,
 						} else {
 							<span class="badge badge-warning badge-sm badge-outline">Pending</span>
 						}
-					<span class="font-medium text-sm truncate">{ bt.Task.Title }</span>
+					@components.ProjectBadge(bt.Task.ProjectID)
+ <span class="font-medium text-sm truncate">{ bt.Task.Title }</span>
 				</div>
 				<div class="flex items-center gap-2 flex-shrink-0">
 					if bt.Task.Priority > 0 {
@@ -390,7 +391,8 @@ templ upcomingScheduledCard(bt models.UpcomingTask, currentProjectID string) {
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3 flex-1 min-w-0">
 					<span class="badge badge-info badge-sm badge-outline">Scheduled</span>
-					<span class="font-medium text-sm truncate">{ bt.Task.Title }</span>
+					@components.ProjectBadge(bt.Task.ProjectID)
+ <span class="font-medium text-sm truncate">{ bt.Task.Title }</span>
 				</div>
 				<div class="flex items-center gap-2 flex-shrink-0">
 					if bt.NextRun != nil {

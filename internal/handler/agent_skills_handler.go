@@ -347,6 +347,9 @@ func (h *Handler) currentProjectSkillRoot(c echo.Context) string {
 		return ""
 	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == models.AllProjectsID {
+		projectID = strings.TrimSpace(c.QueryParam("skill_project_id"))
+	}
 	if projectID == "" && h.projectSvc != nil {
 		projectID, _ = h.getCurrentProjectID(c)
 	}

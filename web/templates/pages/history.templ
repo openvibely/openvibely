@@ -151,7 +151,8 @@ templ historyExecutionCard(de models.HistoryExecution, currentProjectID string) 
 		<div class="card-body p-4">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3 flex-1 min-w-0">
-					@components.ExecutionStatusBadge(de.Execution.Status, "badge-sm")
+					@components.ProjectBadge(de.ProjectID)
+ @components.ExecutionStatusBadge(de.Execution.Status, "badge-sm")
 					<span class="font-medium text-sm truncate">{ de.TaskTitle }</span>
 				</div>				<div class="flex items-center gap-3 flex-shrink-0">
 					if de.AgentName != "" {

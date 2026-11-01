@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
- templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -141,9 +140,6 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 						onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"
 					>
 						<div class="card-body relative">
-                            if label := templateui.ProjectLabel(ctx, card.Automation.ProjectID); label != "" {
-                                <span class="text-xs opacity-60" data-project-label>{ label }</span>
-                            }
 							<div class="absolute top-4 right-4" data-automation-card-action onclick="event.stopPropagation()">
 								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + card.Automation.Name}) {
 									<li>
@@ -213,6 +209,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 									<p class="text-sm opacity-60 mt-1 line-clamp-2">{ card.Automation.Description }</p>
 								}
 								<div class="flex flex-wrap gap-2 mt-2 max-w-full overflow-x-hidden">
+ @components.ProjectBadge(card.Automation.ProjectID)
 									<span class="badge badge-outline badge-sm max-w-full truncate">{ automationAdapterLabel(card.Version.AdapterKey) }</span>
 									<span class="badge badge-outline badge-sm">{ string(card.Automation.LifecycleState) }</span>
 									<span class="badge badge-outline badge-sm">{ string(card.Automation.HealthState) }</span>

@@ -33,7 +33,11 @@ func NewTelegramAuthRepo(db *sql.DB) *TelegramAuthRepo {
 
 // ListByProject returns the authorized Telegram users managed by one project.
 func (r *TelegramAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.TelegramAuthorizedUser, error) {
-	rows, err := r.db.QueryContext(ctx, telegramAuthorizedUsersListByProjectQuery, projectID)
+	query := telegramAuthorizedUsersListByProjectQuery
+	if projectID == models.AllProjectsID {
+		query = strings.Replace(query, "project_id = ?", "? = '__all_projects__'", 1)
+	}
+	rows, err := r.db.QueryContext(ctx, query, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list telegram auth users: %w", err)
 	}

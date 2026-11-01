@@ -24,7 +24,7 @@ func (r *ChannelTargetRepo) SummarizeByProject(ctx context.Context, projectID st
 		       SUM(CASE WHEN is_home THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN name <> '' THEN 1 ELSE 0 END)
 		FROM channel_targets
-		WHERE project_id = ?
+		WHERE `+analyticsProjectPredicate("project_id", projectID)+`
 		GROUP BY platform, target_kind`, projectID)
 	if err != nil {
 		return out, fmt.Errorf("summarize channel targets: %w", err)
@@ -69,7 +69,7 @@ func (r *ChannelTargetRepo) ListByProject(ctx context.Context, projectID string)
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
 			FROM channel_targets
-			WHERE project_id = ?`+channelTargetListByProjectOrder, projectID)
+			WHERE `+analyticsProjectPredicate("project_id", projectID)+channelTargetListByProjectOrder, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list channel targets: %w", err)
 	}

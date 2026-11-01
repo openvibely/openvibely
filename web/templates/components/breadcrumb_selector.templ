@@ -90,6 +90,7 @@ templ BreadcrumbSelectorResults(kind string, currentID string, items []models.Br
 								@TaskStateIcon(models.Task{Status: item.Status, Category: item.Category, MergeStatus: item.MergeStatus, GoalMet: item.GoalMet})
 							}
 							<span class="min-w-0 flex-1 truncate">{ item.Name }</span>
+ @ProjectBadge(item.ProjectID)
 					</a>
 				}
 			</div>

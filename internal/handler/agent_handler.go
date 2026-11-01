@@ -1558,6 +1558,25 @@ func (h *Handler) ListAgents(c echo.Context) error {
 				}
 			}
 		}
+		if projectID == models.AllProjectsID {
+			projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+			if err != nil {
+				return err
+			}
+			// Sync each real project, keeping declarations tied to their owner.
+			for _, project := range projects {
+				full, err := h.projectSvc.GetByID(c.Request().Context(), project.ID)
+				if err != nil {
+					return err
+				}
+				if full != nil && strings.TrimSpace(full.RepoPath) != "" {
+					if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), filepath.Join(full.RepoPath, ".openvibely"), project.ID); err != nil {
+						return err
+					}
+				}
+			}
+			projectID = ""
+		}
 		if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), projectRoot, projectID); err != nil {
 			applog.Infof("[handler] ListAgents sync root declarations warning: %v", err)
 		}

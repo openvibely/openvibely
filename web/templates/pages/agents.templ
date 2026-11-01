@@ -162,6 +162,11 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									<p class="text-sm opacity-60 mt-1 line-clamp-2">{ agent.Description }</p>
 								}
 								<div class="flex flex-wrap gap-2 mt-2 max-w-full overflow-x-hidden">
+ if agent.ProjectID != "" && agent.Scope == models.AgentScopeProject {
+ @components.ProjectBadge(agent.ProjectID)
+ } else {
+ <span class="badge badge-outline badge-sm">Global</span>
+ }
 									if agent.Model != "inherit" {
 										<span class="badge badge-outline badge-sm max-w-full truncate">model: { agent.Model }</span>
 									}

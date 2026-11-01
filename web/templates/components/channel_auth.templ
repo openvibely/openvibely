@@ -1,6 +1,8 @@
 package components
 
 import templpkg "github.com/a-h/templ"
+import "github.com/openvibely/openvibely/internal/models"
+import templateui "github.com/openvibely/openvibely/web/templates"
 
 type channelAuthorizationListConfig struct {
 	ContainerID        string
@@ -34,10 +36,11 @@ templ channelAuthorizationList(config channelAuthorizationListConfig, rows []cha
 				for _, row := range rows {
 					<div data-project-id={ row.ProjectID } class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
 						@row.Identity
+ @ProjectBadge(row.ProjectID)
 						<button
 							type="button"
 							class="btn btn-ghost btn-xs text-error"
-							hx-delete={ row.DeleteEndpoint }
+							hx-delete={ row.DeleteEndpoint + channelAuthorizationReturnScope(addConfig.ProjectID) }
 							hx-target={ "#" + config.ContainerID }
 							hx-swap="outerHTML"
 							hx-confirm={ config.RemoveConfirmation }
@@ -59,7 +62,17 @@ templ channelAuthorizationList(config channelAuthorizationListConfig, rows []cha
 
 templ channelAuthorizationAddControls(containerID string, config channelAuthorizationAddConfig) {
 	<div class="flex gap-2" id={ containerID + "-add-controls" }>
-		<input type="hidden" name="project_id" value={ config.ProjectID }/>
+		if config.ProjectID == models.AllProjectsID {
+ <input type="hidden" name="return_project_id" value={ models.AllProjectsID }/>
+ <select name="project_id" class="select select-bordered select-sm" aria-label="Project" required>
+ <option value="">Choose project</option>
+ for _, project := range templateui.ProjectOptions(ctx) {
+ <option value={ project.ID }>{ project.Name }</option>
+ }
+ </select>
+ } else {
+ <input type="hidden" name="project_id" value={ config.ProjectID }/>
+ }
 		<input
 			type={ config.InputType }
 			name={ config.InputName }
@@ -83,4 +96,9 @@ templ channelAuthorizationAddControls(containerID string, config channelAuthoriz
 			Add
 		</button>
 	</div>
+}
+
+func channelAuthorizationReturnScope(projectID string) string {
+ if projectID == models.AllProjectsID { return "&return_project_id=" + models.AllProjectsID }
+ return ""
 }
