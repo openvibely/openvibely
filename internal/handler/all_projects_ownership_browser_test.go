@@ -37,6 +37,7 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
 		writeStandaloneSkillWithBody(t, filepath.Join(p.RepoPath, ".openvibely"), "same-skill", "Same skill", "Same description", "project", p.Name+" body")
 		require.NoError(t, stores.Webhooks.Create(t.Context(), &models.WebhookEndpoint{ProjectID: p.ID, Name: p.Name + " webhook", Enabled: true, DefaultPriority: 2}))
 	}
+	require.NoError(t, stores.Agents.Create(t.Context(), &models.Agent{Name: "Shared webhook agent", Scope: models.AgentScopeGlobal, Key: "shared-webhook-agent", Model: "inherit", Enabled: true, SelectableAsPrimary: true, SystemPrompt: "Shared"}))
 	runner := `<script>(async function(){
  const wait=p=>new Promise((resolve,reject)=>{const end=Date.now()+15000;(function poll(){if(p()&&!document.querySelector('.htmx-request,.htmx-settling,.htmx-swapping'))return resolve();if(Date.now()>end)return reject(Error('timeout '+p));setTimeout(poll,30)})();});
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)};
@@ -63,8 +64,24 @@ func TestAllProjectsOwnershipInChrome(t *testing.T) {
   await wait(()=>document.getElementById('webhook_form').dataset.webhookDetailReady==='true');
   assert(document.querySelector('#webhook_form [name=project_id]').value===owner,'wrong webhook owner');
   assert(document.getElementById('webhook_project_owner').value===owner,'wrong webhook owner label');
+  assert(document.getElementById('webhook_agent_list').textContent.includes(card.dataset.webhookName.replace(' webhook',' agent')),'owner Agent missing');
+  assert(!document.getElementById('webhook_agent_list').textContent.includes(owner==='` + a.ID + `'?'Owner Beta agent':'Owner Alpha agent'),'foreign Agent offered in editor');
   closeWebhookModal();
  }
+ openWebhookCreateModal();
+ const ownerChoice=document.getElementById('webhook_project_owner');
+ assert(!document.getElementById('webhook_agent_list').textContent.includes('Owner Alpha agent')&&!document.getElementById('webhook_agent_list').textContent.includes('Owner Beta agent'),'unassigned webhook offers project Agents');
+ const shared=Array.from(document.querySelectorAll('#webhook_agent_list .webhook-agent-checkbox')).find(el=>el.parentElement.textContent.includes('Shared webhook agent'));shared.checked=true;shared.dispatchEvent(new Event('change',{bubbles:true}));
+ ownerChoice.value='` + a.ID + `';ownerChoice.dispatchEvent(new Event('change',{bubbles:true}));
+ assert(document.getElementById('webhook_agent_list').textContent.includes('Owner Alpha agent')&&!document.getElementById('webhook_agent_list').textContent.includes('Owner Beta agent'),'wrong creation Agent choices');
+ const owned=Array.from(document.querySelectorAll('#webhook_agent_list .webhook-agent-checkbox')).find(el=>el.parentElement.textContent.includes('Owner Alpha agent'));
+ owned.checked=true;owned.dispatchEvent(new Event('change',{bubbles:true}));
+ ownerChoice.value='` + b.ID + `';ownerChoice.dispatchEvent(new Event('change',{bubbles:true}));
+ serializeWebhookAgentData();
+ assert(document.getElementById('webhook_agent_ids_hidden').value===shared.value,'project switch must clear foreign Agent and preserve global Agent');
+ assert(document.getElementById('webhook_agent_list').textContent.includes('Owner Beta agent'),'new owner Agent missing');
+ assert(!document.getElementById('webhook_agent_list').textContent.includes('Owner Alpha agent'),'previous owner Agent remains');
+ closeWebhookModal();
  window.openVibelyNavigate('/agents?project_id=__all_projects__');
  await wait(()=>document.querySelectorAll('[data-agent-scope="project"]').length===2);
  for(const ownerName of ['Owner Alpha','Owner Beta']) {

@@ -276,3 +276,21 @@ func TestAllProjectsCreateAgentOwner(t *testing.T) {
 		})
 	}
 }
+
+func TestAllProjectsSkillsSavedSelection(t *testing.T) {
+	h, app, _, _ := setupTestHandlerWithStores(t)
+	h.SetAgentSkillRoot(t.TempDir())
+	p := createProject(t, h, "Skill owning project")
+	p.RepoPath = t.TempDir()
+	require.NoError(t, h.projectRepo.Update(t.Context(), p))
+	writeStandaloneSkill(t, filepath.Join(p.RepoPath, ".openvibely"), "owner-skill", "Owner skill", "Owner-only fixture", "project")
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
+	explicit := httptest.NewRecorder()
+	app.ServeHTTP(explicit, httptest.NewRequest(http.MethodGet, "/skills?project_id="+models.AllProjectsID, nil))
+	require.Equal(t, 200, explicit.Code)
+	require.Contains(t, explicit.Body.String(), "Owner-only fixture")
+	implicit := httptest.NewRecorder()
+	app.ServeHTTP(implicit, httptest.NewRequest(http.MethodGet, "/skills", nil))
+	require.Equal(t, 200, implicit.Code)
+	require.Contains(t, implicit.Body.String(), "Owner-only fixture", "Saved All projects selection should load the same skills")
+}

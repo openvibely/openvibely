@@ -208,10 +208,11 @@ func agentsJSON(agents []persistence.AgentPickerOption) string {
 	type agentData struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
+		ProjectID string `json:"project_id"`
 	}
 	data := make([]agentData, len(agents))
 	for i, agent := range agents {
-		data[i] = agentData{ID: agent.ID, Name: agent.Name}
+		data[i] = agentData{ID: agent.ID, Name: agent.Name, ProjectID: agent.ProjectID}
 	}
 	b, err := json.Marshal(data)
 	if err != nil {
@@ -1381,7 +1382,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						<div data-webhook-section-panel="config" class="h-full overflow-y-auto pr-1">
  if view.CurrentProjectID == models.AllProjectsID {
  <label class="form-control mb-3"><span class="label-text">Project</span>
- <select id="webhook_project_owner" class="select select-bordered" required onchange="var f=this.form;f.querySelector('[name=project_id]').value=this.value;if(f.dataset.webhookMode==='create'){f.setAttribute('hx-post','/channels/webhooks?project_id='+encodeURIComponent(this.value));htmx.process(f);}">
+ <select id="webhook_project_owner" class="select select-bordered" required onchange="var f=this.form;f.querySelector('[name=project_id]').value=this.value;if(f.dataset.webhookMode==='create'){f.setAttribute('hx-post','/channels/webhooks?project_id='+encodeURIComponent(this.value));htmx.process(f);}syncWebhookProjectAgents()">
  <option value="">Choose project</option>
  for _, project := range templateui.ProjectOptions(ctx) {
  <option value={ project.ID }>{ project.Name }</option>
@@ -1568,12 +1569,24 @@ templ settingsContent(view ChannelsSettingsView) {
 				});
 			}
 
-			function renderWebhookAgentList() {
+			function webhookAgentAvailable(agent) {
+                const owner = document.querySelector('#webhook_form [name="project_id"]')?.value || '';
+                return !agent.project_id || agent.project_id === owner;
+            }
+
+            function syncWebhookProjectAgents() {
+                initializeWebhookAgents();
+                selectedWebhookAgentIDs = selectedWebhookAgentIDs.filter(id => webhookAvailableAgents.some(agent => agent.id === id && webhookAgentAvailable(agent)));
+                renderWebhookAgentList();
+            }
+
+            function renderWebhookAgentList() {
 				const root = document.getElementById('webhook_agent_list');
 				if (!root) return;
 
 				const searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();
 				const filteredAgents = webhookAvailableAgents.filter(agent => {
+                    if (!webhookAgentAvailable(agent)) return false;
 					if (!searchTerm) return true;
 					return (agent.name || '').toLowerCase().includes(searchTerm) ||
 						(agent.id || '').toLowerCase().includes(searchTerm);

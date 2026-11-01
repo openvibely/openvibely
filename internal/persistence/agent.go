@@ -23,8 +23,9 @@ type AgentRuntimeSummary struct {
 // AgentPickerOption is the compact projection needed by settings pickers that
 // render only an agent identifier and display name.
 type AgentPickerOption struct {
-	ID   string
-	Name string
+	ID        string
+	Name      string
+	ProjectID string
 }
 
 // AgentScheduleOption is the compact projection needed by the Schedule primary

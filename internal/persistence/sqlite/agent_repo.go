@@ -526,10 +526,10 @@ func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]persistence.AgentP
 
 // ListPickerOptionsForProject returns compact options for global agents and
 // project-scoped agents owned by projectID. It intentionally keeps the picker
-// projection small because the settings page only needs IDs and names.
+// projection small: IDs, names, and ownership for filtering combined views.
 func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID string) ([]persistence.AgentPickerOption, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name
+		SELECT id, name, CASE WHEN scope = 'project' THEN COALESCE(project_id, '') ELSE '' END
 		FROM agents
 		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
 		  AND (
@@ -545,7 +545,7 @@ func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID s
 	var options []persistence.AgentPickerOption
 	for rows.Next() {
 		var option persistence.AgentPickerOption
-		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+		if err := rows.Scan(&option.ID, &option.Name, &option.ProjectID); err != nil {
 			return nil, fmt.Errorf("scanning project agent picker option: %w", err)
 		}
 		options = append(options, option)
