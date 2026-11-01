@@ -2168,9 +2168,14 @@ func TestUpdateSchedule_OneTimeRunValidation(t *testing.T) {
 					ctx := context.Background()
 					project := tc.CreateProject().Build()
 					task := tc.CreateTask(project.ID).WithCategory(models.CategoryScheduled).WithStatus(status).Build()
-					original := time.Now().Add(time.Hour).Truncate(time.Minute).Add(30 * time.Second)
+					// Keep form values outside the repeated hour at DST fall-back.
+					// Separate calendar days also keep future edits distinct from the
+					// original, so they cannot take the unchanged-time path.
+					now := time.Now().In(time.Local)
+					noon := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
+					original := noon.AddDate(0, 0, 1).Add(30 * time.Second)
 					if edit == "unchanged historical" {
-						original = original.Add(-2 * time.Hour)
+						original = noon.AddDate(0, 0, -1).Add(30 * time.Second)
 					}
 					schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatOnce).WithRunAt(original).Build()
 					if edit == "unchanged historical" && status == models.StatusCompleted {
@@ -2179,9 +2184,9 @@ func TestUpdateSchedule_OneTimeRunValidation(t *testing.T) {
 					}
 					before, err := tc.scheduleRepo.GetByID(ctx, schedule.ID)
 					require.NoError(t, err)
-					selected := time.Now().Add(-time.Hour).Truncate(time.Minute)
+					selected := noon.AddDate(0, 0, -1)
 					if edit == "future" {
-						selected = selected.Add(3 * time.Hour)
+						selected = noon.AddDate(0, 0, 2)
 					}
 					if edit == "unchanged historical" {
 						selected = original.Truncate(time.Minute)
