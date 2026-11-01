@@ -115,16 +115,18 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar #project-selector-trigger:focus-visible { outline: none; }
   #desktop-project-titlebar [data-project-tab]:focus-visible { outline: none; }
   #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
-  #desktop-project-tabs { position: relative; display: flex; min-width: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; gap: 0; align-self: stretch; padding: 6px 10px 0; }
+  #desktop-project-tabs { position: relative; display: flex; min-width: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
   /* Keep native scrollbars out of the header, including older WebKitGTK. */
   #desktop-project-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
-  /* Contiguous hit areas keep dividers inside a tab, with no hover dead zone. */
-  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 244px; width: 244px; position: relative; border-radius: 16px 16px 0 0; background: transparent; --wails-draggable: no-drag; }
+  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 16px 16px 0 0; background: transparent; --wails-draggable: no-drag; }
   .desktop-project-tab[data-selected="true"] { background: var(--project-tab-selected); z-index: 1; }
   .desktop-project-tab[data-selected="true"]::before, .desktop-project-tab[data-selected="true"]::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
   .desktop-project-tab[data-selected="true"]::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
   .desktop-project-tab[data-selected="true"]::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
-  .desktop-project-tab:not([data-selected="true"])::after { content: ""; position: absolute; right: 1px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: none; }
+  /* Extend only the invisible pointer target across the divider gap. */
+  .desktop-project-tab:not([data-selected="true"])::before { content: ""; position: absolute; top: 0; bottom: 0; right: -4px; width: 4px; --wails-draggable: no-drag; }
+  html[data-shell-frame]:not([data-tab-style="attached"]) .desktop-project-tab:not([data-selected="true"])::before { right: -6px; width: 6px; }
+  .desktop-project-tab:not([data-selected="true"])::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: none; }
   .desktop-project-tab:not([data-selected="true"]):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::before, .desktop-project-tab::after { transition: none; } }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 6px 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.25rem; font-weight: 400; }
@@ -134,7 +136,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab [role="tab"][aria-selected="true"] { color: color-mix(in oklch, oklch(var(--bc)) 70%, black); }
   [data-theme="dark"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: color-mix(in oklch, oklch(var(--bc)) 70%, white); }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: calc(50% - 3px); transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
-  .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; border-width: 1px 6px 7px; padding-top: 0; padding-bottom: 0; padding-left: 10px; padding-right: 34px; }
+  .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; border-width: 1px 2px 7px; padding-top: 0; padding-bottom: 0; padding-left: 14px; padding-right: 38px; }
   .desktop-project-tab[data-selected="true"]:hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:enabled:hover { background: oklch(var(--bc) / .18); }
   [data-theme="light"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background-color: rgba(38, 38, 39, .08); }
@@ -155,7 +157,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background: var(--ov-hover); }
   }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
-  #desktop-project-titlebar [data-project-selector] { position: relative; margin: 0; padding-left: 11px; width: 41px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; align-self: center; gap: 0; }
+  #desktop-project-titlebar [data-project-selector] { position: relative; margin: 0; padding-left: 7px; width: 37px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; align-self: center; gap: 0; }
   #desktop-project-titlebar [data-project-selector] > div:first-child { display: none; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
 	  #desktop-project-titlebar #project-selector-trigger { width: 30px; }
@@ -354,11 +356,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     dragFrame = requestAnimationFrame(dragTick);
    }
    list.addEventListener('pointerdown', function(event) {
-    // The wrapper owns the full hover area, including the inset highlight's margins.
-    // Close buttons must retain their own action without selecting or dragging a tab.
-    if (event.target.closest('[data-close-project]')) return;
-    var wrapper = event.target.closest('.desktop-project-tab');
-    var tab = wrapper && wrapper.querySelector('[data-project-tab]');
+    var tab = event.target.closest('[data-project-tab]') || (event.target.matches('.desktop-project-tab') && event.target.querySelector('[data-project-tab]'));
     if (!tab || event.button !== 0 || !event.isPrimary) return;
     if (!switchProject(tab.dataset.projectTab)) return;
     drag = {pointer: event.pointerId, startX: event.clientX, grabOffset: event.clientX - tab.parentElement.getBoundingClientRect().left, x: event.clientX, wrapper: tab.parentElement, started: false};

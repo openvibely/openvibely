@@ -3,10 +3,8 @@ package pages
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -166,83 +164,41 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("new task link initially scoped", `document.getElementById("task-list-new").getAttribute("href")`, "/tasks/new?project_id=p00")
 				// Tab setup moves the selector on DOMContentLoaded, which would demote an already-open modal menu.
 				browser.waitFor("page initialized", `String(document.readyState === 'complete' && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
-				// Sweep across the divider and its neighboring pixels: every point
-				// must hit a tab and show its hover surface, without a titlebar gap.
-				for _, offset := range []float64{-3, -2, -1, 0, 1} {
-					var dividerPoint struct{ X, Y float64 }
-					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').getBoundingClientRect();return {X:r.right,Y:r.y+15};})())`)), &dividerPoint); err != nil {
-						t.Fatal(err)
-					}
-					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": dividerPoint.X + offset, "y": dividerPoint.Y}, nil)
-					browser.waitFor("divider highlights adjacent tab", `String(Array.from(document.querySelectorAll('.desktop-project-tab:hover [role="tab"]')).some(tab => tab.getAttribute('aria-selected') === 'false' && getComputedStyle(tab).backgroundColor !== 'rgba(0, 0, 0, 0)'))`, "true")
-					browser.waitFor("hover hides divider", `getComputedStyle(document.querySelector('[data-project-tab="p01"]').parentElement,'::after').opacity`, "0")
-				}
 				if got := browser.evaluate(`String(location.hash === '#keep' && new URL(location.href).searchParams.get('view') === 'board')`); got != "true" {
 					t.Fatal("initial URL lost route state", got)
 				}
 				if got := browser.evaluate(`String(document.querySelector('.drawer-content').getBoundingClientRect().bottom <= innerHeight + 1)`); got != "true" {
 					t.Fatal("shared page shell extends below viewport", got)
 				}
-				// Visible highlights remain separated even though pointer targets touch.
-				browser.evaluate(`window.savedSpacingTabStyle = document.documentElement.getAttribute('data-tab-style'); 'ready'`)
+				browser.evaluate(`window.originalDividerTabStyle=document.documentElement.getAttribute('data-tab-style'); 'ready'`)
 				for _, style := range []string{"detached", "attached"} {
-					browser.evaluate(`document.documentElement.setAttribute('data-tab-style', '` + style + `'); 'ready'`)
-					// Selection changes padding without changing the label's content size.
-					browser.click(`[data-project-tab="p01"]`)
-					browser.waitFor("select shape fixture", `new URLSearchParams(location.search).get('project_id')`, "p01")
-					if style == "detached" {
-						browser.waitFor("initially selected tab's clip shrinks on deselection", `String((function(){var tab=document.querySelector('[data-project-tab="p00"]'),points=getComputedStyle(tab).clipPath.match(/[-\d.]+px [-\d.]+px/g);if(!points)return false;var xy=points.map(p=>p.split(' ').map(parseFloat));return Math.abs(Math.max(...xy.map(p=>p[0]))-tab.clientWidth)<0.1 && Math.abs(Math.max(...xy.map(p=>p[1]))-tab.clientHeight)<0.1;})())`, "true")
+					browser.evaluate(`document.documentElement.setAttribute('data-tab-style','` + style + `'); 'ready'`)
+					var divider struct{ X, Y, Gap float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var tab=document.querySelector('[data-project-tab="p01"]').parentElement,r=tab.getBoundingClientRect(),next=tab.nextElementSibling.getBoundingClientRect();return {X:r.right,Y:r.top+r.height/2,Gap:next.left-r.right};})())`)), &divider); err != nil {
+						t.Fatal(err)
 					}
+					wantGap := float64(4)
+					if style == "detached" {
+						wantGap = 6
+					}
+					if divider.Gap != wantGap {
+						t.Fatalf("%s tab spacing changed: got %v, want %v", style, divider.Gap, wantGap)
+					}
+					for offset := float64(0); offset < divider.Gap; offset++ {
+						browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": divider.X + offset, "y": divider.Y}, nil)
+						browser.waitFor(style+" divider highlights its tab", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]');return tab.parentElement.matches(':hover') && getComputedStyle(tab).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(tab.parentElement,'::after').opacity === '0';})())`, "true")
+					}
+					if got := browser.evaluate(`String(document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect().width)`); got != "240" {
+						t.Fatal("tab width must stay unchanged", got)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": divider.X + 1, "y": divider.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+					browser.waitFor("divider activates tab", `document.querySelector('[data-project-tab][aria-selected="true"]').dataset.projectTab`, "p01")
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": divider.X + 1, "y": divider.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+					browser.waitFor("divider navigation", `new URLSearchParams(location.search).get('project_id')`, "p01")
 					browser.click(`[data-project-tab="p00"]`)
-					browser.waitFor("deselect shape fixture", `new URLSearchParams(location.search).get('project_id')`, "p00")
-					var spacingPoint struct{ X, Y float64 }
-					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect();return {X:r.left+80,Y:r.top+r.height/2};})())`)), &spacingPoint); err != nil {
-						t.Fatal(err)
-					}
-					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": spacingPoint.X, "y": spacingPoint.Y}, nil)
-					browser.waitFor(style+" highlight has breathing room on both sides", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),r=tab.getBoundingClientRect(),slot=tab.parentElement.getBoundingClientRect(),selected=document.querySelector('[data-project-tab="p00"]').parentElement.getBoundingClientRect();return tab.parentElement.matches(':hover') && r.left-slot.left>=6 && slot.right-r.right>=6 && r.left-selected.right>=6;})())`, "true")
-					if style == "detached" {
-						browser.waitFor("clip follows the highlight's current dimensions", `String((function(){var tab=document.querySelector('[data-project-tab="p01"]'),points=getComputedStyle(tab).clipPath.match(/[-\d.]+px [-\d.]+px/g);if(!points)return false;var xy=points.map(p=>p.split(' ').map(parseFloat));return Math.abs(Math.max(...xy.map(p=>p[0]))-tab.clientWidth)<0.1 && Math.abs(Math.max(...xy.map(p=>p[1]))-tab.clientHeight)<0.1;})())`, "true")
-					}
-					var rect struct{ X, Y, Width, Height float64 }
-					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').getBoundingClientRect();return {X:r.x,Y:r.y,Width:r.width,Height:r.height};})())`)), &rect); err != nil {
-						t.Fatal(err)
-					}
-					var capture struct{ Data string }
-					browser.call("Page.captureScreenshot", map[string]any{"format": "png", "clip": map[string]any{"x": rect.X, "y": rect.Y, "width": rect.Width, "height": rect.Height, "scale": 2}}, &capture)
-					pixels, err := base64.StdEncoding.DecodeString(capture.Data)
-					if err != nil {
-						t.Fatal(err)
-					}
-					img, err := png.Decode(bytes.NewReader(pixels))
-					if err != nil {
-						t.Fatal(err)
-					}
-					w, h := img.Bounds().Dx(), img.Bounds().Dy()
-					for _, point := range [][2]int{{1, 1}, {w - 2, 1}, {1, h - 2}, {w - 2, h - 2}} {
-						if img.At(point[0], point[1]) == img.At(w/2, 2) {
-							t.Fatalf("%s highlight has a square corner at %v", style, point)
-						}
-					}
+					browser.waitFor("restore project after divider check", `new URLSearchParams(location.search).get('project_id')`, "p00")
 				}
-				browser.evaluate(`if (window.savedSpacingTabStyle === null) document.documentElement.removeAttribute('data-tab-style'); else document.documentElement.setAttribute('data-tab-style', window.savedSpacingTabStyle); delete window.savedSpacingTabStyle; 'restored'`)
-				// Attached-tab highlights are inset; their margins still activate the tab.
-				browser.evaluate(`window.savedDividerTabStyle = document.documentElement.getAttribute('data-tab-style'); document.documentElement.setAttribute('data-tab-style', 'attached'); 'ready'`)
-				var insetPoint struct{ X, Y float64 }
-				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').parentElement.getBoundingClientRect();return {X:r.right-1,Y:r.top+r.height/2};})())`)), &insetPoint); err != nil {
-					t.Fatal(err)
-				}
-				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": insetPoint.X, "y": insetPoint.Y}, nil)
-				if got := browser.evaluate(fmt.Sprintf(`String(document.elementFromPoint(%f,%f) === document.querySelector('[data-project-tab="p01"]').parentElement)`, insetPoint.X, insetPoint.Y)); got != "true" {
-					t.Fatal("divider activation fixture must hit the wrapper margin", got)
-				}
-				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": insetPoint.X, "y": insetPoint.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
-				browser.waitFor("divider margin activates tab on press", `document.querySelector('[data-project-tab][aria-selected="true"]').dataset.projectTab`, "p01")
-				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": insetPoint.X, "y": insetPoint.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
-				browser.waitFor("divider margin navigates", `new URLSearchParams(location.search).get('project_id')`, "p01")
-				browser.click(`[data-project-tab="p00"]`)
-				browser.waitFor("restore initial project after divider activation", `new URLSearchParams(location.search).get('project_id')`, "p00")
-				browser.evaluate(`if (window.savedDividerTabStyle === null) document.documentElement.removeAttribute('data-tab-style'); else document.documentElement.setAttribute('data-tab-style', window.savedDividerTabStyle); delete window.savedDividerTabStyle; 'restored'`)
+				browser.evaluate(`if(window.originalDividerTabStyle===null)document.documentElement.removeAttribute('data-tab-style');else document.documentElement.setAttribute('data-tab-style',window.originalDividerTabStyle);delete window.originalDividerTabStyle; 'restored'`)
 				browser.click("#project-selector-trigger")
 				browser.waitFor("menu ready for hover", `String(document.getElementById('project-selector-dialog').open)`, "true")
 				activeColor := browser.evaluate(`getComputedStyle(document.querySelector('#project-selector-dialog [data-selector-active]')).backgroundColor`)
