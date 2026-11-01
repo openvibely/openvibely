@@ -105,6 +105,11 @@ templ SidePanelScript() {
 		}
 		// Failed requests and rejected refreshes leave the current panel alive.
 		on(document, 'htmx:beforeCleanupElement', function(event) { if (event.target === root || event.target === panel) destroy(); });
+		// HTMX restores response style attributes during settle, after initialization.
+		// Reapply the measured panel space so an open inspector cannot cover its toggle.
+		on(document, 'htmx:afterSettle', function(event) {
+			if (root.isConnected && (event.target === root || event.target.contains(root))) resize(width);
+		});
 		resize(read(options.storageKey));
 		return {resize: resize, width: function() { return width; }, setOpen: setOpen, destroy: destroy};
 	};

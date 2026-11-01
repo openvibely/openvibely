@@ -28,7 +28,7 @@ templ automationNodePanelScript() {
 		var svg = root.querySelector('[data-automation-canvas]');
 		var controller = window.createSidePanel({root:root, panel:panel, opener:closeButton,
 			storageKey:'automation-inspector-width', escapeDocked:true, onClose:close,
-			background:Array.from(root.querySelectorAll('[data-automation-graph-panel], [data-automation-yaml-panel], [data-automation-view-switcher], [data-automation-node-tool]'))});
+			background:Array.from(root.querySelectorAll('[data-automation-graph-panel], [data-automation-yaml-panel], [data-automation-view-switcher], [data-automation-node-tool], [data-automation-footer]'))});
 		function group(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
 		function showSelection() {
 			panel.querySelectorAll('[data-automation-node-detail], [data-automation-live-node-detail]').forEach(function(section) {
@@ -41,6 +41,8 @@ templ automationNodePanelScript() {
 			svg.querySelectorAll('[data-node-key]').forEach(function(node) { node.dataset.selected = String(node.dataset.nodeKey === selected); });
 		}
 		function open(key, focus) {
+            var yamlPanel = root.querySelector('[data-automation-yaml-panel]');
+            if (root.id === 'automation-builder' && yamlPanel && !yamlPanel.hidden) return;
 			var section = panel.querySelector('[data-automation-node-detail="' + CSS.escape(key) + '"], [data-automation-live-node-detail="' + CSS.escape(key) + '"]');
 			if (!section || !group(key)) return;
 			selected = key; lastSelected = key; showSelection(); controller.setOpen(true);

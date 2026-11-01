@@ -94,7 +94,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"tasks-page-header flex items-center justify-between mb-6 flex-shrink-0 gap-3\"><h2 class=\"text-2xl font-bold flex-shrink-0\">Tasks</h2><div class=\"flex flex-1 min-w-0 items-center justify-end gap-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"tasks-page-header flex items-center justify-between mb-6 flex-shrink-0 gap-3\"><h2 class=\"text-2xl font-bold flex-shrink-0\">Tasks</h2><div class=\"icon-action-group flex-1 min-w-0 justify-end\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

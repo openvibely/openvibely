@@ -18,14 +18,14 @@ To reuse an eligible saved design, open its card or Live actions menu and select
 
 ## Build The Graph
 
-The builder has two synchronized views and a node details side panel.
+The builder has two synchronized views and a node details side panel. Graph opens by default. Choose Graph or YAML from the top-right kebab menu; a highlighted row identifies the selected view.
 
 | View | Purpose |
 |---|---|
 | `Graph` | Add, move, delete, and connect nodes on the visual canvas. |
-| `YAML` | Edit the complete Automation definition directly. Switching back to Graph parses and validates the YAML before rebuilding the canvas. |
+| `YAML` | Edit the complete Automation definition directly. The node panel and breadcrumb name editor are unavailable in this view to protect YAML edits. Switching back to Graph parses and validates the YAML before rebuilding the canvas. |
 
-In Graph, select `Add node`, choose a supported capability, and drag from one node's right output handle to the next node's left input handle. Click a node to open its details in the resizable side panel while keeping the graph visible. The panel uses the same tabs, property pickers, and dialogs as task details. **Details** contains compact property rows and prompt/goal editors. **Schedule** appears for nodes with timing settings: click the summary to edit the time, repeat interval, and context behavior. Schedule execution is controlled by the automation’s Pause/Resume state. **Connections** lists incoming and outgoing transitions and links to connected nodes. Adding a node automatically opens its panel and focuses its name editor. Use the panel toggle in the page toolbar to collapse it or reopen the last selected node, or press Escape to close it. On smaller screens it appears as an overlay. Choose a property value or use Apply in a dialog to update the draft; Cancel discards that dialog’s edits. Use Save to persist the automation. Switching nodes keeps the current panel tab when applicable, otherwise returns to Details. The saved automation preview uses the same tabs with read-only values.
+In Graph, select `Add node`, choose a supported capability, and drag from one node's right output handle to the next node's left input handle. Click a node to open its details in the resizable side panel while keeping the graph visible. The panel uses the same tabs, property pickers, and dialogs as task details. **Details** contains compact property rows and prompt/goal editors. **Schedule** appears for nodes with timing settings: click the summary to edit the time, repeat interval, and context behavior. Schedule execution is controlled by the automation’s Pause/Resume state. **Connections** lists incoming and outgoing transitions and links to connected nodes. Adding a node keeps the name entered in the Add node dialog and automatically opens its details panel. Use the panel toggle in the page toolbar to collapse it or reopen the last selected node, or press Escape to close it. On smaller screens it appears as an overlay. Choose a property value or use Apply in a dialog to update the draft; Cancel discards that dialog’s edits. Use Save to persist the automation. Switching nodes keeps the current panel tab when applicable, otherwise returns to Details. The saved automation preview uses the same tabs with read-only values.
 
 | Node | Purpose |
 |---|---|

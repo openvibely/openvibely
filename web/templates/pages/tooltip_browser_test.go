@@ -34,6 +34,12 @@ func TestBrowserFunctional_SharedTooltips(t *testing.T) {
 		b.waitFor("modal close suppresses own and inherited hints", `String(document.getElementById('ov-shared-tooltip').hidden && kebab.getAttribute('aria-label')==='Close dialog')`, "true")
 		b.evaluate(`card.remove();'removed'`)
 
+		b.evaluate(`var toolbar=document.createElement('div');toolbar.dataset.tipSide='top';toolbar.style.cssText='position:fixed;bottom:16px;right:16px;padding:4px';toolbar.innerHTML='<button title="Fit graph">Fit</button>';document.body.appendChild(toolbar);var fit=toolbar.querySelector('button');fit.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:innerWidth-30,clientY:innerHeight-25}));'hover toolbar'`)
+		b.waitFor("toolbar tooltip stays above group", `String(!document.getElementById('ov-shared-tooltip').hidden && document.getElementById('ov-shared-tooltip').getBoundingClientRect().bottom <= toolbar.getBoundingClientRect().top-7)`, "true")
+		b.evaluate(`fit.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:innerWidth-20,clientY:innerHeight-20}));'move'`)
+		b.waitFor("toolbar tooltip does not follow pointer over controls", `String(document.getElementById('ov-shared-tooltip').getBoundingClientRect().bottom <= toolbar.getBoundingClientRect().top-7)`, "true")
+		b.evaluate(`toolbar.remove();document.dispatchEvent(new Event('scroll'));'removed'`)
+
 		b.evaluate(`document.getElementById('native').focus();document.getElementById('native').dispatchEvent(new FocusEvent('focusin',{bubbles:true}));'ready'`)
 
 		b.evaluate(`var control=document.getElementById('native');control.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,clientX:320,clientY:220}));'hover'`)

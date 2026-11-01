@@ -1,0 +1,39 @@
+package pages
+
+// Both graph surfaces share viewing controls; only editing can reset node positions.
+templ automationCanvasControls(editable bool) {
+ <style>
+ /* Measure the footer, not the window: a docked inspector can narrow the canvas. */
+ .automation-canvas-footer { container-type:inline-size; container-name:automation-footer; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:12px; flex-shrink:0; padding:16px 0 8px; }
+ .automation-footer-zoom { grid-column:1; grid-row:1; justify-self:start; }
+ .automation-canvas-footer [data-automation-node-tool] { grid-column:2; grid-row:1; justify-self:center; }
+ .automation-footer-actions { grid-column:3; grid-row:1; justify-self:end; display:flex; align-items:center; gap:8px; }
+ .automation-canvas-footer [hidden] { display:none !important; }
+ @media(max-width:600px) { .automation-canvas-footer { gap:6px; } .automation-canvas-footer .automation-viewport-controls button { width:26px; } .automation-canvas-footer .automation-viewport-divider { margin:0 2px; } .automation-footer-actions { gap:4px; } }
+
+ @container automation-footer (max-width:480px) {
+  .automation-canvas-footer [data-automation-node-tool] { grid-column:1 / -1; grid-row:1; }
+  .automation-footer-zoom { grid-column:1 / 3; grid-row:2; }
+  .automation-footer-actions { grid-column:3; grid-row:2; }
+ }
+ .automation-viewport-controls { position:relative; z-index:10; display:flex; align-items:center; gap:2px; padding:4px; border-radius:18px; corner-shape:superellipse(2); }
+ .automation-viewport-controls button { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; padding:0; border:0; border-radius:12px; corner-shape:superellipse(2); color:inherit; background:transparent; cursor:pointer; transition:background-color .15s,color .15s; }
+ .automation-canvas-shell .automation-viewport-controls button svg,
+ .automation-canvas-shell .automation-viewport-controls button svg:active { cursor:pointer; }
+ .automation-viewport-controls button svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+ @media(hover:hover) { .automation-viewport-controls button:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 8%,transparent); } }
+ .automation-viewport-controls button:focus-visible { outline:1px solid currentColor; outline-offset:-2px; background:var(--ov-hover-subtle); }
+ .automation-viewport-divider { width:1px; height:18px; margin:0 5px; background:var(--ov-border-subtle); }
+ @media(prefers-reduced-motion:reduce) { .automation-viewport-controls button { transition:none; } }
+ </style>
+ <div class="automation-viewport-controls bg-base-100 border border-base-300 shadow-sm" data-tip-side="top" role="group" aria-label="Canvas controls" data-automation-builder-viewport-controls?={ editable } data-automation-live-viewport-controls?={ !editable }>
+  <button type="button" data-automation-zoom-out title="Zoom out" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+  <button type="button" data-automation-zoom-in title="Zoom in" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12M12 6v12"/></svg></button>
+  <span class="automation-viewport-divider" aria-hidden="true"></span>
+  <button type="button" data-automation-fit title="Fit graph" aria-label="Fit graph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
+  if editable {
+   <span class="automation-viewport-divider" aria-hidden="true"></span>
+   <button type="button" data-automation-reset title="Reset layout" aria-label="Reset layout"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2.7 8.4M3 4v6h6"/></svg></button>
+  }
+ </div>
+}

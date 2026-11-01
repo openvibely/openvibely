@@ -154,7 +154,7 @@ nodes:
         instructions: Summarize the proposal that needs a human decision.
         notification_type: approval_request
       position:
-        x: 220
+        x: 270
         "y": 180
     - key: approval
       name: Human Approval
@@ -163,7 +163,7 @@ nodes:
       config:
         approval_method: native_alert
       position:
-        x: 440
+        x: 540
         "y": 180
     - key: inbox
       name: Approved Inbox
@@ -189,7 +189,7 @@ nodes:
         run_at: "10:00"
         target_node_key: inbox
       position:
-        x: 660
+        x: 810
         "y": 270
     - key: implementation
       name: Implementation
@@ -199,7 +199,7 @@ nodes:
         goal: ""
         model_config_id: default
       position:
-        x: 880
+        x: 1080
         "y": 270
     - key: rejected
       name: Rejected
@@ -207,7 +207,7 @@ nodes:
       role: rejected
       config: {}
       position:
-        x: 660
+        x: 810
         "y": 90
     - key: completed
       name: Completed
@@ -215,7 +215,7 @@ nodes:
       role: completed
       config: {}
       position:
-        x: 1100
+        x: 1350
         "y": 270
 edges:
     - key: vision_to_notification

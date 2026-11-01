@@ -3160,7 +3160,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-toggle-fill { fill: currentColor; }
 				html.task-list-collapsed .task-list-toggle-fill { fill: none; }
 				.task-list-brand { font-size: 14px; font-weight: 500; margin-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-				.task-list-actions { display: flex; gap: 2px; }
+				.task-list-actions, .icon-action-group { display: flex; align-items: center; gap: 2px; }
 				html.task-list-collapsed #task-list-header { width: 40px; }
 				html.task-list-collapsed #task-list-header .task-list-brand,
 				html.task-list-collapsed #task-list-header .task-list-actions { display: none; }
@@ -4151,6 +4151,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 dropdown.classList.remove('dropdown-open');
                 dropdown.setAttribute('data-menu-dismissed', '');
             }
+            document.addEventListener('click', function(event) {
+                const choice = event.target.closest('[data-menu-close-on-select]');
+                const owner = choice && menuDropdownForTarget(choice);
+                if (!owner || owner.hasAttribute('data-kanban-menu-key')) return;
+                const trigger = owner.querySelector(':scope > label');
+                if (trigger) trigger.focus({preventScroll: true});
+                closeGenericDropdown(owner);
+            });
             document.addEventListener('pointerdown', function(event) {
                 const owner = menuDropdownForTarget(event.target);
                 document.querySelectorAll('[data-menu-dropdown]:not([data-kanban-menu-key])').forEach(function(dropdown) {

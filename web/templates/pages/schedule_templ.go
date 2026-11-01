@@ -719,7 +719,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div><div id=\"schedule-header-actions\"><button class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-label=\"New Scheduled Task\" data-tooltip-disabled onclick=\"openNewScheduledTaskModal()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div><div id=\"schedule-header-actions\" class=\"icon-action-group\"><button class=\"sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square\" aria-label=\"New Scheduled Task\" data-tooltip-disabled onclick=\"openNewScheduledTaskModal()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

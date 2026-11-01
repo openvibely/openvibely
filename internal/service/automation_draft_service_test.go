@@ -624,7 +624,7 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 
 func TestMaintainedTemplatesLeaveVisibleConnectorRunway(t *testing.T) {
 	registry := NewAutomationAdapterRegistry()
-	const minimumStageSpacing = 220.0 // 170-unit cards plus 50 units of visible connector.
+	const minimumStageSpacing = 270.0 // 170-unit cards plus 100 units of visible connector.
 
 	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC, AutomationAdapterVisionDriver} {
 		adapter, ok := registry.Get(adapterKey)
@@ -638,7 +638,7 @@ func TestMaintainedTemplatesLeaveVisibleConnectorRunway(t *testing.T) {
 			target, targetOK := nodes[edge.To]
 			require.True(t, sourceOK, "%s edge %s source must exist", adapterKey, edge.Key)
 			require.True(t, targetOK, "%s edge %s target must exist", adapterKey, edge.Key)
-			require.GreaterOrEqual(t, target.X-source.X, minimumStageSpacing,
+			require.Equal(t, minimumStageSpacing, target.X-source.X,
 				"%s edge %s must leave a visible line between its node cards", adapterKey, edge.Key)
 		}
 	}

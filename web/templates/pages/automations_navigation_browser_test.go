@@ -708,7 +708,6 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 	for _, want := range []string{
 		`class="mb-6 flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-live-header-actions`,
-		`data-automation-live-edit`,
 		`data-automation-live-menu`,
 	} {
 		if !strings.Contains(header, want) {
@@ -748,12 +747,12 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	}
 	body := out.String()
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
-		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
+		`data-automation-view-graph`, `data-automation-view-yaml`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
 		`style="caret-color: oklch(var(--bc));"`, `data-automation-yaml-key`, `data-automation-yaml-value`, `data-automation-yaml-scalar`, `data-automation-yaml-comment`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
 		`data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`,
-		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
+		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 px-0 py-4 font-mono text-sm leading-6`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
@@ -790,9 +789,8 @@ func TestAutomationViewSwitcherMarkupAndStateHelperAreShared(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"templ automationViewSwitcher(ariaLabel string)",
-		`@automationViewSwitcher("Automation canvas view")`,
-		`@automationViewSwitcher("Automation builder view")`,
+		"templ automationViewMenuItems()",
+		`@automationViewMenuItems()`,
 		"templ automationViewStateScript()",
 		"window.setAutomationCanvasView",
 		"return true;",
@@ -809,7 +807,7 @@ func TestAutomationViewSwitcherMarkupAndStateHelperAreShared(t *testing.T) {
 			t.Errorf("expected shared switcher marker %q to appear once in source, got %d", marker, got)
 		}
 	}
-	for _, update := range []string{`style.display`, `classList.toggle('btn-active'`, `setAttribute('aria-pressed'`} {
+	for _, update := range []string{`style.display`, `setAttribute('aria-pressed'`} {
 		if got := strings.Count(source, update); got != 2 {
 			t.Errorf("expected two shared view-state %q updates in the helper only, got %d", update, got)
 		}
@@ -998,7 +996,7 @@ window.addEventListener('DOMContentLoaded', function() {
     function expectActive(view, label) {
       [[graphButton, 'graph'], [yamlButton, 'yaml']].forEach(function(pair) {
         var selected = pair[1] === view;
-        if (pair[0].classList.contains('btn-active') !== selected) fail(label + ' btn-active mismatch for ' + pair[1]);
+        if (!pair[0].classList.contains('ov-menu-choice')) fail(label + ' missing shared choice style');
         if (pair[0].getAttribute('aria-pressed') !== String(selected)) fail(label + ' aria-pressed mismatch for ' + pair[1]);
       });
     }
@@ -1051,14 +1049,14 @@ window.addEventListener('DOMContentLoaded', function() {
     expectActive('graph', 'Live node details');
     if (!isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('node details must keep graph visible');
     if (detailsPanel.querySelector('input, textarea, select')) fail('preview node fields must be read-only');
-    detailsPanel.querySelector('[data-automation-node-close]').click();
+    document.querySelector('#automation-details-opener').click();
     graphButton.click();
     expectActive('graph', 'selected Live Graph view');
     if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Graph must hide the details and YAML panels and show only the graph panel');
     yamlButton.click();
     expectActive('yaml', 're-selected Live YAML view');
     if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('re-selecting YAML must show only the YAML panel');
-    var freshContainer = document.getElementById('automation-live-fresh-markup');
+    var freshContainer = document.getElementById('automation-live-fresh-markup').content;
     var liveRoot = document.getElementById('automation-live');
     var replacement = freshContainer.querySelector('#automation-live');
     liveRoot.replaceWith(replacement);
@@ -1087,7 +1085,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.whitespace-pre{white-space:pre}.block{display:block}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s<div id="automation-live-fresh-markup" hidden>%s</div></body></html>`, out.String(), runner, fresh.String())
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.whitespace-pre{white-space:pre}.block{display:block}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s<template id="automation-live-fresh-markup">%s</template></body></html>`, out.String(), runner, fresh.String())
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
@@ -1160,16 +1158,11 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 	cardHeader := body[cardStart:viewportStart]
 	breadcrumbHeader := body[:cardStart]
 	for _, want := range []string{
-		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
-		`data-automation-view-switcher`,
 		`data-automation-view-graph`,
 		`data-automation-view-yaml`,
-		`data-automation-live-badges`,
-		`data-automation-live-status`,
-		`data-automation-live-health`,
 	} {
-		if !strings.Contains(cardHeader, want) {
-			t.Errorf("expected Live Automation canvas actions to contain %q", want)
+		if !strings.Contains(breadcrumbHeader, want) {
+			t.Errorf("expected Live Automation menu actions to contain %q", want)
 		}
 	}
 	for _, want := range []string{`data-automation-live-details-panel`, `data-automation-live-node-details`, `data-automation-live-edge-details`, `data-automation-live-node-detail="review"`, `>Prompt</dt>`, `>Review the queue.</dd>`, `window.createAutomationNodePanel(liveRoot`} {
@@ -1183,7 +1176,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 	if detailsPanel < 0 || yamlPanel < 0 || detailsPanel >= yamlPanel {
 		t.Error("expected Live Automation panels in Graph, Details, YAML order")
 	}
-	for _, forbidden := range []string{`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
+	for _, forbidden := range []string{`data-automation-live-badges`, `data-automation-live-health`, `data-automation-live-status`, `Node states`, `A node’s border and label show the highest-priority work state currently present.`,
 		`data-automation-live-legend-row`, `aria-label="Graph status legend"`, `Failed`, `Waiting human`, `Recently Completed`,
 	} {
 		if strings.Contains(cardHeader, forbidden) {
@@ -1192,8 +1185,6 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 	}
 	for _, want := range []string{
 		`data-automation-live-header-actions`,
-		`data-automation-live-edit`,
-		`data-automation-live-run-now="automation-live-actions"`,
 		`data-automation-live-menu`,
 		`class="dropdown dropdown-end shrink-0"`,
 		`aria-label="More actions for Card actions"`,
@@ -1204,32 +1195,31 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, ` data-automation-live-menu`)) {
-		t.Error("expected Live breadcrumb actions in Edit, Run, then kebab order")
+	footerStart := strings.Index(body, `<footer class="automation-canvas-footer"`)
+	if footerStart < 0 {
+		t.Fatal("missing action footer")
 	}
-	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
-	if liveSwitcherStart < 0 {
-		t.Fatal("expected Live Automation canvas view switcher")
-	}
-	liveSwitcherEndOffset := strings.Index(cardHeader[liveSwitcherStart:], `</div>`)
-	if liveSwitcherEndOffset < 0 {
-		t.Fatal("expected Live Automation canvas view switcher end")
-	}
-	liveSwitcher := cardHeader[liveSwitcherStart : liveSwitcherStart+liveSwitcherEndOffset]
-	for _, want := range []string{`>Graph</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
-		if !strings.Contains(liveSwitcher, want) {
-			t.Errorf("expected Live Automation view switcher to contain %q", want)
+	footer := body[footerStart : footerStart+strings.Index(body[footerStart:], `</footer>`)]
+	for _, action := range []string{`data-automation-live-edit`, `data-automation-live-run-now="automation-live-actions"`} {
+		if !strings.Contains(footer, action) || strings.Contains(cardHeader, action) || strings.Contains(breadcrumbHeader, action) {
+			t.Errorf("action %q must be in footer only", action)
 		}
 	}
-	if strings.Contains(liveSwitcher, `onclick=`) || strings.Contains(liveSwitcher, `hx-`) || strings.Contains(liveSwitcher, `form=`) {
-		t.Error("Live Automation view switcher must remain an inert placeholder")
-	}
+
 	menuStart := strings.Index(breadcrumbHeader, `class="dropdown dropdown-end shrink-0"`)
 	menuEndOffset := strings.Index(breadcrumbHeader[menuStart:], `</ul>`)
 	if menuStart < 0 || menuEndOffset < 0 {
 		t.Fatal("expected Live Automation breadcrumb kebab menu")
 	}
 	menu := breadcrumbHeader[menuStart : menuStart+menuEndOffset]
+	for _, want := range []string{`data-automation-view-graph`, `data-automation-view-yaml`, `ov-menu-choice`, `aria-pressed="true"`, `aria-pressed="false"`} {
+		if !strings.Contains(menu, want) {
+			t.Errorf("expected view choices and selection state in kebab menu: %s", want)
+		}
+	}
+	if strings.Contains(cardHeader, `data-automation-view-graph`) || strings.Contains(cardHeader, `data-automation-view-yaml`) {
+		t.Error("view choices must appear only in the kebab menu")
+	}
 	for _, want := range []string{"Disable", "Delete"} {
 		if !strings.Contains(menu, ">"+want+"</button>") {
 			t.Errorf("expected Live Automation kebab to contain %q", want)
@@ -1281,7 +1271,7 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	}
 }
 
-func TestAutomationLiveControlsOverlayGraphViewport(t *testing.T) {
+func TestAutomationLiveControlsUseFooter(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-controls", Name: "Viewport controls", LifecycleState: models.AutomationActive},
 	}
@@ -1299,23 +1289,20 @@ func TestAutomationLiveControlsOverlayGraphViewport(t *testing.T) {
 	if viewportEnd < 0 {
 		t.Fatal("expected Live graph viewport end")
 	}
-	viewport := body[viewportStart : viewportStart+viewportEnd]
-	for _, want := range []string{
-		`data-automation-live-viewport-controls`,
-		`data-automation-zoom-out`,
-		`data-automation-zoom-in`,
-		`data-automation-fit`,
-	} {
-		if !strings.Contains(viewport, want) {
-			t.Errorf("expected Live graph viewport to contain %q", want)
+	footerStart := strings.Index(body, `<footer class="automation-canvas-footer"`)
+	if footerStart < viewportStart+viewportEnd {
+		t.Fatal("expected footer after graph viewport")
+	}
+	footer := body[footerStart : footerStart+strings.Index(body[footerStart:], `</footer>`)]
+	for _, want := range []string{`data-automation-live-viewport-controls`, `data-automation-zoom-out`, `data-automation-zoom-in`, `data-automation-fit`} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer missing %q", want)
 		}
-		if got := strings.Count(body, " "+want); got != 1 {
-			t.Errorf("expected exactly one Live graph control attribute %q, got %d", want, got)
+		if strings.Count(body, " "+want) != 1 {
+			t.Errorf("expected one %q", want)
 		}
 	}
-	if strings.Index(viewport, `data-automation-live-viewport-controls`) > strings.Index(viewport, `<svg`) {
-		t.Error("expected Live graph controls to overlay the viewport outside the SVG")
-	}
+
 }
 
 func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
@@ -1410,8 +1397,8 @@ func TestAutomationBlankBuilderUsesEditableBreadcrumbAndFullHeightEditor(t *test
 		`data-automation-editable-breadcrumb`,
 		`data-automation-name`,
 		`data-automation-builder-save`,
-		`class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`,
-		`class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`,
+		`class="min-w-0 min-h-0 mb-0 flex flex-1 min-h-[20rem] flex-col"`,
+		`class="automation-canvas-shell relative w-full overflow-hidden flex-1 min-h-[20rem]"`,
 		`data-automation-connect-status`,
 	} {
 		if !strings.Contains(body, want) {
@@ -1424,7 +1411,6 @@ func TestAutomationBlankBuilderUsesEditableBreadcrumbAndFullHeightEditor(t *test
 		`Drag nodes to arrange them and empty space to pan.`,
 		`Connect steps:`,
 		`data-automation-builder-card-actions`,
-		`data-automation-builder-actions`,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("blank builder must not retain blank-only canvas chrome %q", forbidden)
@@ -1488,8 +1474,8 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 
 	for _, want := range []string{
 		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
-		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
-		`class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
+		`class="min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
+		`class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation Live viewport-filling layout to contain %q", want)
@@ -1510,7 +1496,7 @@ func TestAutomationBuilderUsesInteractiveGraphAndYAMLEditor(t *testing.T) {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`, `[data-ov-theme-layer="custom"] .automation-canvas-shell`, `[data-ov-theme-layer="custom"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }`, `[data-ov-theme-layer="custom"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }`, `[data-ov-theme-layer="custom"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }`} {
+	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`, `[data-ov-theme-layer="custom"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }`, `[data-ov-theme-layer="custom"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }`, `[data-ov-theme-layer="custom"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }`, `[data-ov-theme-layer="custom"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected interactive YAML builder to contain %q", want)
 		}
@@ -1531,7 +1517,7 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s synchronized YAML builder missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6"`) {
+		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="card flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100 px-0 py-4 font-mono text-sm leading-6"`) {
 			t.Errorf("%s YAML panel must grow to fill the builder card while remaining hidden in Graph mode", source)
 		}
 		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `data-automation-yaml-editor-viewport`) || !strings.Contains(body, `data-automation-yaml-highlight`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
@@ -1542,7 +1528,7 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML editor must render source without wrapping, relying on horizontal scroll: missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls hidden`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
+		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="card flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls hidden`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
 			t.Errorf("%s YAML gutter must reserve a split-diff-style line-number lane and keep the fold-control lane hidden", source)
 		}
 		if !strings.Contains(body, `graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });`) {
@@ -1959,7 +1945,7 @@ window.addEventListener('DOMContentLoaded', function() {
     function expectBuilderActive(view, label) {
       [[graphButton, 'graph'], [yamlButton, 'yaml']].forEach(function(pair) {
         var selected = pair[1] === view;
-        if (pair[0].classList.contains('btn-active') !== selected) fail(label + ' btn-active mismatch for ' + pair[1]);
+        if (!pair[0].classList.contains('ov-menu-choice')) fail(label + ' missing shared choice style');
         if (pair[0].getAttribute('aria-pressed') !== String(selected)) fail(label + ' aria-pressed mismatch for ' + pair[1]);
       });
     }
@@ -2187,7 +2173,7 @@ window.addEventListener('DOMContentLoaded', function() {
     first.dispatchEvent(pointEvent('pointerdown', first, 1));
     for (var dragStep = 1; dragStep <= 12; dragStep++) {
       var stepMove = pointEvent('pointermove', first, 1);
-      Object.defineProperties(stepMove, {clientX: {value: stepMove.clientX + dragStep * 3}, clientY: {value: stepMove.clientY + dragStep * 2}});
+      Object.defineProperties(stepMove, {clientX: {value: stepMove.clientX - dragStep * 3}, clientY: {value: stepMove.clientY + dragStep * 2}});
       first.dispatchEvent(stepMove);
     }
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
@@ -2196,6 +2182,67 @@ window.addEventListener('DOMContentLoaded', function() {
     first.dispatchEvent(pointEvent('pointerup', first, 1));
     highlightObserver.disconnect();
     if (first.getAttribute('transform') === originalTransform) fail('dragging a canvas node did not move it');
+    var curvedEdges = document.querySelectorAll('[data-edge-foreground]');
+    if (!curvedEdges.length) fail('expected connections after node drag');
+    curvedEdges.forEach(function(path) {
+      var hit = document.querySelector('.automation-draft-edge[data-edge-key="' + path.dataset.edgeKey + '"] [data-edge-hit]');
+      if (path.tagName.toLowerCase() !== 'path' || !path.getAttribute('d') || !hit || hit.getAttribute('d') !== path.getAttribute('d')) fail('dragged connection must keep its visible path and click target aligned');
+    });
+    click('[data-automation-view-graph]', 'Graph view for connection hover');
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var hoverPath = document.querySelector('[data-edge-hit]');
+    var hoverKey = hoverPath.closest('[data-edge-key]').dataset.edgeKey;
+    var hoverControls = document.querySelector('[data-edge-controls][data-edge-key="' + hoverKey + '"]');
+    var hoverDelete = hoverControls.querySelector('[data-delete-edge]');
+    var centeredDelete = hoverDelete.getAttribute('transform');
+    function hoverConnectionAt(fraction, offset) {
+      var point = hoverPath.getPointAtLength(hoverPath.getTotalLength() * fraction);
+      var screen = new DOMPoint(point.x + offset, point.y).matrixTransform(hoverPath.getScreenCTM());
+      hoverPath.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse', clientX:screen.x, clientY:screen.y}));
+      return screen;
+    }
+    var hoverScreen = hoverConnectionAt(.35, 3);
+    if (getComputedStyle(hoverDelete).opacity !== '1') fail('near-line hover must reveal connection delete without selection');
+    var buttonMatrix = hoverDelete.getScreenCTM();
+    var pointerInButton = new DOMPoint(hoverScreen.x, hoverScreen.y).matrixTransform(buttonMatrix.inverse());
+    if (Math.hypot(pointerInButton.x, pointerInButton.y) >= 11) fail('revealed delete button must already contain the pointer: ' + JSON.stringify({x:pointerInButton.x,y:pointerInButton.y,transform:hoverDelete.getAttribute('transform')}));
+    var centerOnPath = new DOMPoint(0,0).matrixTransform(hoverDelete.transform.baseVal.consolidate().matrix);
+    var closestDistance = Infinity;
+    for (var sample = 0; sample <= hoverPath.getTotalLength(); sample += .25) {
+      var pathPoint = hoverPath.getPointAtLength(sample);
+      closestDistance = Math.min(closestDistance, Math.hypot(pathPoint.x-centerOnPath.x, pathPoint.y-centerOnPath.y));
+    }
+    if (closestDistance > .3) fail('delete button must be centered on the connection curve');
+    var alongLength = hoverPath.getTotalLength() * .35 + 4;
+    var alongPoint = hoverPath.getPointAtLength(alongLength);
+    var alongScreen = new DOMPoint(alongPoint.x, alongPoint.y).matrixTransform(hoverPath.getScreenCTM());
+    hoverDelete.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse', clientX:alongScreen.x, clientY:alongScreen.y}));
+    var centeredPointer = alongScreen.matrixTransform(hoverDelete.getScreenCTM().inverse());
+    if (Math.hypot(centeredPointer.x, centeredPointer.y) > .3) fail('moving along the connection should center the button beneath the cursor even over the button');
+    var beforeNormal = hoverDelete.transform.baseVal.consolidate().matrix;
+    var tangentBefore = hoverPath.getPointAtLength(alongLength-.1), tangentAfter = hoverPath.getPointAtLength(alongLength+.1);
+    var dx = tangentAfter.x-tangentBefore.x, dy = tangentAfter.y-tangentBefore.y, tangentLength = Math.hypot(dx,dy);
+    var normalScreen = new DOMPoint(alongPoint.x-dy/tangentLength*3,alongPoint.y+dx/tangentLength*3).matrixTransform(hoverPath.getScreenCTM());
+    hoverDelete.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse', clientX:normalScreen.x, clientY:normalScreen.y}));
+    var afterNormal = hoverDelete.transform.baseVal.consolidate().matrix;
+    if (Math.hypot(afterNormal.e-beforeNormal.e,afterNormal.f-beforeNormal.f) > .3) fail('perpendicular movement should leave button on the line');
+    var buttonPosition = hoverDelete.getAttribute('transform');
+    hoverDelete.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse', buttons:1, clientX:hoverScreen.x, clientY:hoverScreen.y}));
+    if (hoverDelete.getAttribute('transform') !== buttonPosition) fail('pressing delete must not move it before click');
+    [0, 1].forEach(function(endpoint) {
+      hoverConnectionAt(.35, 0);
+      var nearPort = hoverPath.getPointAtLength(endpoint ? hoverPath.getTotalLength()-15 : 15);
+      var nearScreen = new DOMPoint(nearPort.x, nearPort.y).matrixTransform(hoverPath.getScreenCTM());
+      hoverDelete.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, pointerType:'mouse', clientX:nearScreen.x, clientY:nearScreen.y}));
+      if (getComputedStyle(hoverDelete).opacity !== '0') fail('delete must disappear before overlapping a connector');
+      var port = hoverPath.getPointAtLength(endpoint ? hoverPath.getTotalLength() : 0);
+      var portScreen = new DOMPoint(port.x,port.y).matrixTransform(hoverPath.getScreenCTM());
+      var target = document.elementFromPoint(portScreen.x,portScreen.y);
+      if (!target || !target.closest('[data-connect-port], [data-reconnect-edge]')) fail('connector must remain the pointer target after approaching along an edge');
+    });
+    document.querySelector('[data-automation-canvas]').dispatchEvent(new PointerEvent('pointerleave'));
+    if (getComputedStyle(hoverDelete).opacity !== '0' || hoverDelete.getAttribute('transform') !== centeredDelete) fail('leaving canvas should hide hover delete and restore keyboard position');
+    click('[data-automation-view-yaml]', 'Restore YAML after connection hover');
     if (editor.value.includes('position: {"x":0,"y":0}')) fail('node drag did not update YAML position: ' + editor.value);
     contains(editor, 'YAML-only configuration', 'node drag discarded YAML-only configuration');
     var yamlNameValueClassAfterDrag = yamlValueClassForLineContaining('Browser YAML');

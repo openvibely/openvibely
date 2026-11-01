@@ -46,7 +46,7 @@
 .ov-menu-actions > :is(a, button):not(.text-error) { color: inherit; }
 .ov-menu .ov-menu-row[data-picker-active],
 .ov-menu .ov-menu-option:is([data-picker-active], [data-selector-active], [data-active]),
-.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible, .active),
+.ov-menu-actions > li:not(.menu-title) > :is(a, button, summary):not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible, .active):where(:not(.ov-menu-choice)),
 .ov-menu-actions > :is(a, button):not(:disabled):is(:hover, :focus-visible),
 .ov-menu-actions .ov-menu-option:not(:disabled):is(:hover, :focus-visible),
 .ov-menu [data-options] > .ov-menu-option:is(:hover, :focus-visible) {
@@ -56,23 +56,27 @@
    distinct from pointer/keyboard navigation, including on the selected row. */
 .ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
 .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
-.ov-menu .ov-mp-provider:is(:hover, [data-picker-active]) {
+.ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
+.ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
   background: var(--ov-menu-active);
 }
 @supports (color: oklch(0 0 0)) {
   .ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
   .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
-  .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]) {
+  .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
+  .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
     background: oklch(var(--bc) / .06);
   }
 }
 .ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
-.ov-menu .ov-mp-row[data-selected="true"] {
+.ov-menu .ov-mp-row[data-selected="true"],
+.ov-menu.ov-menu-actions > li > .ov-menu-choice[aria-pressed="true"] {
   background: var(--ov-menu-active);
 }
 @supports (color: color-mix(in srgb, oklch(0 0 0) 10%, transparent)) {
   .ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
-  .ov-menu .ov-mp-row[data-selected="true"] {
+  .ov-menu .ov-mp-row[data-selected="true"],
+  .ov-menu.ov-menu-actions > li > .ov-menu-choice[aria-pressed="true"] {
     background: var(--shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent));
   }
 }
