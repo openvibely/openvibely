@@ -17,9 +17,21 @@ import (
 )
 
 func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
+	runChangesExplorerBrowser(t, false)
+}
+
+func TestBrowserFunctional_SavedChangesExplorer(t *testing.T) {
+	runChangesExplorerBrowser(t, true)
+}
+
+func runChangesExplorerBrowser(t *testing.T, saved bool) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "explorer-project", Name: "Explorer"}
 	task := &models.Task{ID: "explorer-task", ProjectID: project.ID, Title: "Explore changes", WorktreeBranch: "task/explorer", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+	if saved {
+		task.WorktreeBranch = ""
+		task.MergeStatus = models.MergeStatusMerged
+	}
 	diff := ""
 	for _, path := range []string{"src/first.go", "src/nested/second.go"} {
 		diff += fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,160 +1,160 @@\n", path, path, path, path)
@@ -82,7 +94,11 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 			fmt.Fprint(w, `<textarea id="task-message-input">Keep this draft</textarea>`)
 		case "/tasks/explorer-task/changes":
 			current := currentDiff()
-			if err := TaskChangesWorktreeContent(current, task, nil, nil, nil, false, false).Render(r.Context(), w); err != nil {
+			content := TaskChangesWorktreeContent(current, task, nil, nil, nil, false, false)
+			if saved {
+				content = TaskChangesContent(current, task.ID, nil)
+			}
+			if err := content.Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
 		case "/tasks/explorer-task/changes/file":
@@ -129,6 +145,7 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.evaluate(`document.getElementById('task-list-search-toggle').click();'search again'`)
 		b.waitFor("existing task search stays open and retains query", `String(!document.documentElement.classList.contains('changes-explorer-active') && document.activeElement===document.getElementById('task-list-search-input') && document.getElementById('task-list-search-input').getBoundingClientRect().height>0 && document.getElementById('task-list-search-input').value==='Explore')`, "true")
 		b.evaluate(`document.getElementById('task-list-search-toggle').click();document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'return to changes'`)
+		b.waitFor("changes use shared card-free layout", `String(!!document.querySelector('#changes-content .task-changes-view') && !document.querySelector('#changes-content .card-body') && !document.querySelector('#changes-content > .card'))`, "true")
 		b.waitFor("all inline file cards remain visible", `String(!!document.querySelector('#diff-file-0 .diff-line-content') && ['diff-file-0','diff-file-1'].every(id=>document.getElementById(id).getBoundingClientRect().height>0))`, "true")
 		b.evaluate(`window.retainedDiffBody=document.getElementById('diff-body-0');window.beforeDiffRevision=document.getElementById('diff-viewer').dataset.diffRevision;'capture body'`)
 		b.evaluate(`openInlineCommentForm(document.querySelector('#diff-file-0 tr.diff-review-line'));document.querySelector('.review-comment-form textarea').value='Keep review draft';'open draft'`)
@@ -159,9 +176,11 @@ func TestBrowserFunctional_ChangesExplorer(t *testing.T) {
 		b.evaluate(`document.getElementById('tab-changes').scrollTop=900;'scroll'`)
 		b.waitFor("long diff scrolled", `String(document.getElementById('tab-changes').scrollTop>500)`, "true")
 		b.waitFor("toolbar and file header stack while scrolling", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'), scroll=document.getElementById('tab-changes'), header=document.querySelector('#diff-file-1 .diff-file-header');return (Math.abs(bar.getBoundingClientRect().top-scroll.getBoundingClientRect().top)<2 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2) || JSON.stringify({bar:bar.getBoundingClientRect().toJSON(),scroll:scroll.getBoundingClientRect().toJSON(),header:header.getBoundingClientRect().toJSON(),offset:getComputedStyle(header).top,position:getComputedStyle(bar).position})})())`, "true")
-		b.evaluate(`document.querySelector('[popovertarget="changes-actions-menu"]').click();'actions'`)
-		b.waitFor("actions menu opens while scrolled", `String(document.getElementById('changes-actions-menu').matches(':popover-open'))`, "true")
-		b.evaluate(`document.getElementById('changes-actions-menu').hidePopover();'close actions'`)
+		if !saved {
+			b.evaluate(`document.querySelector('[popovertarget="changes-actions-menu"]').click();'actions'`)
+			b.waitFor("actions menu opens while scrolled", `String(document.getElementById('changes-actions-menu').matches(':popover-open'))`, "true")
+			b.evaluate(`document.getElementById('changes-actions-menu').hidePopover();'close actions'`)
+		}
 		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='360px';'narrow changes'`)
 		b.waitFor("wrapped toolbar updates sticky offset", `String((()=>{const bar=document.querySelector('[data-diff-toolbar]'),header=document.querySelector('#diff-file-1 .diff-file-header');return bar.getBoundingClientRect().height>60 && Math.abs(header.getBoundingClientRect().top-bar.getBoundingClientRect().bottom)<2})())`, "true")
 		b.evaluate(`document.getElementById('tab-changes').style.maxWidth='';'restore changes width'`)

@@ -122,7 +122,7 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 }
 
 templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, localMergeUnavailable bool, conflictRecovery bool, rebaseAvailable bool, diffView string) {
-	<div class="worktree-changes min-w-0 max-w-full">
+	<div class="worktree-changes task-changes-view min-w-0 max-w-full">
 		<div>
 			// Branch context scrolls away; review controls remain in the toolbar.
 			if task.WorktreeBranch != "" {
@@ -145,24 +145,7 @@ templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, f
 					</div>
 				}
 
-			<style>
-				.worktree-changes #diff-viewer > [data-diff-toolbar] {
-					position: sticky;
-					top: 0;
-					z-index: 40;
-					padding: 0.5rem 0 0.75rem;
-					border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
-				}
-				.worktree-changes #diff-viewer .diff-file-header {
-					top: var(--diff-toolbar-height, 0px);
-				}
-				.worktree-changes .diff-file-card {
-					scroll-margin-top: calc(var(--diff-toolbar-height, 0px) + 8px);
-				}
-				.worktree-changes #diff-viewer > [data-diff-toolbar] > :first-child {
-					flex-wrap: wrap;
-				}
-			</style>
+			@taskChangesStyles()
 			// Diff viewer
 			@components.DiffViewer(diffOutput, task.ID, reviewComments, diffView, changesToolbarActions(task, taskPR, localMergeUnavailable, conflictRecovery, rebaseAvailable))
 		</div>
@@ -342,4 +325,26 @@ templ changesActionsPopoverScript() {
   document.addEventListener('htmx:beforeSwap',event=>{const target=event.detail && event.detail.target;const menu=current();if(target && menu && target.contains(menu))close();},true);
  })();
  </script>
+}
+
+// Shared by live worktree changes and saved diffs after cleanup.
+templ taskChangesStyles() {
+			<style>
+				.task-changes-view #diff-viewer > [data-diff-toolbar] {
+					position: sticky;
+					top: 0;
+					z-index: 40;
+					padding: 0.5rem 0 0.75rem;
+					border-bottom: 1px solid var(--fallback-b3, oklch(var(--b3) / 1));
+				}
+				.task-changes-view #diff-viewer .diff-file-header {
+					top: var(--diff-toolbar-height, 0px);
+				}
+				.task-changes-view .diff-file-card {
+					scroll-margin-top: calc(var(--diff-toolbar-height, 0px) + 8px);
+				}
+				.task-changes-view #diff-viewer > [data-diff-toolbar] > :first-child {
+					flex-wrap: wrap;
+				}
+			</style>
 }

@@ -24,14 +24,13 @@ templ TaskChangesContent(diffOutput string, taskID string, reviewComments []mode
 }
 
 templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComments []models.ReviewComment, diffView string) {
-	<div class="card bg-base-100 shadow-sm border border-base-300">
-		<div class="card-body">
-			<h4 class="text-lg font-bold mb-3">File Changes</h4>
-			<div id="diff-viewer-container">
-				@components.DiffViewer(diffOutput, taskID, reviewComments, diffView)
-			</div>
-		</div>
-	</div>
+    <div class="task-changes-view min-w-0 max-w-full">
+        @taskChangesStyles()
+        <h4 class="text-sm font-semibold mb-2">File changes</h4>
+        <div id="diff-viewer-container">
+            @components.DiffViewer(diffOutput, taskID, reviewComments, diffView)
+        </div>
+    </div>
 }
 
 templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment, initialThread ...templ.Component) {

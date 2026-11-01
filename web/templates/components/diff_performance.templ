@@ -182,7 +182,7 @@ templ diffViewerPerformanceScript() {
    }, {root:scroller, rootMargin:-(height + 1)+'px 0px 0px 0px', threshold:[0,1]});
    }
    var stickyObserver = observeStickyHeaders(0);
-   var toolbar = viewer.closest('.worktree-changes') && viewer.querySelector('[data-diff-toolbar]');
+   var toolbar = viewer.closest('.task-changes-view') && viewer.querySelector('[data-diff-toolbar]');
    var toolbarHeight = 0;
    var toolbarObserver = toolbar && new ResizeObserver(function() {
     var height = Math.ceil(toolbar.getBoundingClientRect().height);
