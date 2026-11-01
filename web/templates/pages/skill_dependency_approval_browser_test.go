@@ -99,8 +99,9 @@ func TestBrowserFunctional_SkillDependencyApprovalCard(t *testing.T) {
 		browser.waitFor("answered card removed", `document.getElementById('chat-input-request-request') ? 'waiting' : 'removed'`, "removed")
 		// The old document already satisfies the answered-state predicate. Mark it
 		// so the wait cannot pass before reload commits and the new script loads.
+		// During navigation documentElement can be null; wait for the new DOM first.
 		browser.evaluate(`document.documentElement.dataset.beforeApprovalReload = 'true'; location.reload(); 'reload'`)
-		browser.waitFor("persistent answer after reload", `!document.documentElement.dataset.beforeApprovalReload && typeof window.previewImportedSkillDependencies === 'function' && document.querySelector('[data-execution-pair]')?.dataset.skillApprovalsLoaded === 'project' && !document.getElementById('chat-input-request-request') ? 'ready' : 'waiting'`, "ready")
+		browser.waitFor("persistent answer after reload", `document.readyState === 'complete' && document.documentElement && !document.documentElement.dataset.beforeApprovalReload && typeof window.previewImportedSkillDependencies === 'function' && document.querySelector('[data-execution-pair]')?.dataset.skillApprovalsLoaded === 'project' && !document.getElementById('chat-input-request-request') ? 'ready' : 'waiting'`, "ready")
 		browser.evaluate(`document.body.insertAdjacentHTML('beforeend','<section id="skill_import_dependency_details"></section><button id="skill_import_submit_btn">Import</button>'); window.previewImportedSkillDependencies({files:[new File(['---\ndependencies: []\n---'],'SKILL.md')]}); 'preview'`)
 		browser.waitFor("import dependency preview", `document.getElementById('skill_import_dependency_details').textContent.includes('preview-tool') && !document.getElementById('skill_import_submit_btn').disabled ? 'ready' : 'waiting'`, "ready")
 		mu.Lock()
