@@ -150,7 +150,8 @@ templ TaskListPanel(currentProjectID string) {
         .task-list-drop-targets { position:fixed;z-index:990;box-sizing:border-box;padding:10px;border:1px solid oklch(var(--bc) / .2);border-radius:12px;background:var(--ov-menu-surface, #24212e);color:oklch(var(--bc));box-shadow:0 12px 32px #0005;max-height:calc(100vh - 16px);overflow-y:auto;overscroll-behavior:contain; }
         .task-list-drop-targets:not([hidden]) { display:grid;grid-template-columns:1fr;gap:7px; }
         .task-list-drop-targets[hidden] { display:none !important; }
-        .task-list-drop-targets > div { box-sizing:border-box;min-height:44px;display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid oklch(var(--bc) / .2);border-radius:6px;font-size:12px; }
+        .task-list-drop-targets > .drop-heading { padding:2px 12px; font-size:12px; font-weight:600; opacity:.7; }
+        .task-list-drop-targets > [data-task-list-drop-category] { box-sizing:border-box;min-height:44px;display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid oklch(var(--bc) / .2);border-radius:6px;font-size:12px; }
         .task-list-drop-targets .drop-current { opacity:.5;border-style:dashed; }
         .task-list-drop-targets .drop-current::after { content:'(current)';margin-left:auto;font-size:10px; }
         .task-list-drop-targets .drop-hover { background:oklch(var(--p) / .25);border-color:oklch(var(--p)); }
@@ -629,6 +630,10 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             dropTargets.className = 'task-list-drop-targets ov-menu';
             dropTargets.setAttribute('aria-label', 'Move task to category');
             dropTargets.hidden = true;
+            var dropHeading = document.createElement('div');
+            dropHeading.className = 'drop-heading';
+            dropHeading.textContent = 'Move to';
+            dropTargets.appendChild(dropHeading);
             ['Active', 'Backlog', 'Completed', 'Scheduled'].forEach(function(label) {
                 var target = document.createElement('div');
                 target.dataset.taskListDropCategory = label.toLowerCase();
