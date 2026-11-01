@@ -122,6 +122,26 @@ func TestVacuumFullBatchAndNoProgress(t *testing.T) {
 		assertVacuumPoolBusyTimeout(t, db)
 	}
 }
+func TestVacuumCanCompleteAfterOneSecond(t *testing.T) {
+	db := vacuumFixture(t, 6000, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r := reclaimOnceWithHook(ctx, db, func() {
+		// Simulate a slow attempt without relying on machine or database size.
+		// The former internal one-second deadline expired during this pause.
+		timer := time.NewTimer(1100 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+		}
+	})
+	if r.err != nil || !r.progress() {
+		t.Fatalf("attempt should complete under the caller's deadline: %+v", r)
+	}
+	assertVacuumPoolBusyTimeout(t, db)
+}
+
 func TestVacuumPoolContention(t *testing.T) {
 	db := vacuumFixture(t, 4000, true)
 	db.SetMaxOpenConns(1)

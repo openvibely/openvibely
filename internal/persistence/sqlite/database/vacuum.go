@@ -11,13 +11,12 @@ import (
 )
 
 const (
-	vacuumInterval         = 5 * time.Minute
-	vacuumBatchPages       = 1000
-	vacuumMinPages         = 2500
-	vacuumMinPercent       = 10
-	vacuumActiveInterval   = 250 * time.Millisecond
-	vacuumLockWait         = 25 * time.Millisecond
-	vacuumOperationTimeout = time.Second
+	vacuumInterval       = 5 * time.Minute
+	vacuumBatchPages     = 1000
+	vacuumMinPages       = 2500
+	vacuumMinPercent     = 10
+	vacuumActiveInterval = 250 * time.Millisecond
+	vacuumLockWait       = 25 * time.Millisecond
 )
 
 type vacuumStats struct{ pages, free, pageSize int64 }
@@ -132,24 +131,24 @@ func reclaimOnceWithHook(ctx context.Context, db *sql.DB, beforeWrite func()) (r
 		return
 	}
 	defer conn.Close()
-	opCtx, cancel := context.WithTimeout(ctx, vacuumOperationTimeout)
-	defer cancel()
-	restore, err := bindSQLiteBusyTimeout(opCtx, conn, int(vacuumLockWait/time.Millisecond))
+	// Keep caller cancellation, but do not impose a wall-clock batch deadline:
+	// large databases may need more than one second even with small batches.
+	restore, err := bindSQLiteBusyTimeout(ctx, conn, int(vacuumLockWait/time.Millisecond))
 	if err != nil {
 		r.err = err
 		r.busy = IsSQLiteBusy(err)
 		return
 	}
 	defer restore()
-	r.before, r.err = readVacuumStats(opCtx, conn)
+	r.before, r.err = readVacuumStats(ctx, conn)
 	if r.err == nil && r.before.eligible() {
 		r.attempted = true
 		if beforeWrite != nil {
 			beforeWrite()
 		}
-		r.err = execIncrementalVacuum(opCtx, conn)
+		r.err = execIncrementalVacuum(ctx, conn)
 		if r.err == nil {
-			r.after, r.err = readVacuumStats(opCtx, conn)
+			r.after, r.err = readVacuumStats(ctx, conn)
 		}
 	}
 	r.busy = IsSQLiteBusy(r.err)
