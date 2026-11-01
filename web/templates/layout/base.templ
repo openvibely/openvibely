@@ -4906,7 +4906,17 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						});
 					}
 
+					function kanbanMutationPath(path) {
+                        const page = document.getElementById('tasks-page');
+                        const projectID = page && page.getAttribute('data-project-id');
+                        if (!projectID) return path;
+                        const url = new URL(path, location.href);
+                        url.searchParams.set('project_id', projectID);
+                        return url.pathname + url.search;
+                    }
+
 					function beginKanbanMove(taskIDs, destination, method, path, values, failureMessage) {
+                        path = kanbanMutationPath(path);
 						const board = document.getElementById('kanban-board');
 						const ids = orderKanbanTaskIDs(taskIDs, board);
 						if (!ids.length || ids.some(function(taskID) { return pendingKanbanMoves.has(taskID); })) return false;
@@ -4962,7 +4972,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						// If same category, just reorder
 						if (currentCategory === targetCategory) {
 							if (dropPosition !== null) {
-								htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
+								htmx.ajax('PATCH', kanbanMutationPath(`/tasks/${taskID}/reorder`), {
 									target: '#kanban-board',
 									swap: 'outerHTML',
 									values: dropPosition
@@ -5061,7 +5071,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							}
 						} else if (dropPosition !== null) {
 							// Same category, same status - just reorder
-							htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
+							htmx.ajax('PATCH', kanbanMutationPath(`/tasks/${taskID}/reorder`), {
 								target: '#kanban-board',
 								swap: 'outerHTML',
 								values: dropPosition

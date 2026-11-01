@@ -389,7 +389,7 @@ func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
 			}
 		case "/tasks/drag-a/reorder", "/tasks/drag-a/category":
 			requests.Add(1)
-			if r.Method != http.MethodPatch || r.FormValue("project_id") != models.AllProjectsID {
+			if r.Method != http.MethodPatch || r.URL.Query().Get("project_id") != models.AllProjectsID {
 				t.Errorf("wrong drag request: %s %v", r.Method, r.Form)
 			}
 			if reject.Load() {
@@ -503,4 +503,62 @@ func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
 		}
 		b.waitFor("drag did not navigate", `location.pathname`, "/")
 	})
+}
+
+func TestBrowserFunctional_AllProjectsCompletedMoveScope(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	for _, surface := range []string{"board", "sidebar"} {
+		t.Run(surface, func(t *testing.T) {
+			var moved atomic.Bool
+			project := models.Project{ID: models.AllProjectsID, Name: "All projects"}
+			tasks := func() []models.Task {
+				category := models.CategoryCompleted
+				if moved.Load() {
+					category = models.CategoryBacklog
+				}
+				return []models.Task{{ID: "merged-task", ProjectID: "owner", Title: "Merged task", Category: category, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged}}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
+				switch r.URL.Path {
+				case "/tasks/merged-task/category":
+					if r.URL.Query().Get("project_id") != models.AllProjectsID {
+						http.Error(w, "task not found: missing workspace scope", http.StatusNotFound)
+						return
+					}
+					if r.Method != http.MethodPatch || r.FormValue("category") != "backlog" {
+						t.Errorf("unexpected move: %s %v", r.Method, r.Form)
+						w.WriteHeader(400)
+						return
+					}
+					moved.Store(true)
+					_ = components.KanbanBoard(tasks(), project.ID, "", "", nil, nil).Render(r.Context(), w)
+				case "/tasks/sidebar":
+					_ = layout.TaskListPanelContent(project.ID, layout.TaskListGroups(tasks())).Render(r.Context(), w)
+				case "/tasks":
+					_ = components.KanbanBoard(tasks(), project.ID, "", "", nil, nil).Render(r.Context(), w)
+				case "/":
+					_ = Tasks([]models.Project{{ID: "owner", Name: "Owner"}}, &project, tasks(), nil, nil, "", "").Render(r.Context(), w)
+				default:
+					w.WriteHeader(http.StatusNoContent)
+				}
+			}))
+			defer server.Close()
+			runComposerFocusCDP(t, chrome, server.URL, "all-projects-move-"+surface, func(b *composerFocusCDP) {
+				b.waitFor("sidebar loaded", `String(!!document.querySelector('[data-task-list-row="merged-task"]'))`, "true")
+				if surface == "board" {
+					b.evaluate(`(()=>{var card=document.getElementById('task-merged-task'),zone=document.querySelector('.category-drop-zone[data-category="backlog"]');var r=card.getBoundingClientRect(),z=zone.getBoundingClientRect();card.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+20}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:z.left+20,clientY:z.top+20}));window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:9,clientX:z.left+20,clientY:z.top+20}));return 'dropped'})()`)
+					b.waitFor("board moved", `String(!!document.querySelector('[data-kanban-category="backlog"] #task-merged-task'))`, "true")
+				} else {
+					b.evaluate(`(()=>{var row=document.querySelector('[data-task-list-row="merged-task"]'),r=row.getBoundingClientRect();row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:r.left+40,clientY:r.top+20}));var target=document.querySelector('[data-task-list-drop-category="backlog"]').getBoundingClientRect();window.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:9,clientX:target.left+20,clientY:target.top+10}));return 'dropped'})()`)
+				}
+				b.waitFor("persisted move reaches sidebar", `String(!!document.querySelector('[data-task-list-group="Backlog"] [data-task-list-row="merged-task"]'))`, "true")
+				if !moved.Load() {
+					t.Fatal("move not persisted")
+				}
+			})
+		})
+	}
 }

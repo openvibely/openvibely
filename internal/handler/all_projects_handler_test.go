@@ -407,12 +407,14 @@ func TestAllProjectsChatDoesNotRequireProjectChooser(t *testing.T) {
 
 func TestAllProjectsDragMovePreservesOwnerAndValidatesSchedule(t *testing.T) {
 	h, app, _, stores := setupTestHandlerWithStores(t)
+	require.NoError(t, h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, models.AllProjectsID))
 	project := createProject(t, h, "Move owner")
 	for _, owner := range []string{"default", project.ID} {
-		task := models.Task{ProjectID: owner, Title: "Move task", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+		task := models.Task{ProjectID: owner, Title: "Move task", Category: models.CategoryBacklog, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged, Priority: 2}
 		require.NoError(t, stores.Tasks.Create(t.Context(), &task))
 		move := func(category string) *httptest.ResponseRecorder {
 			req := httptest.NewRequest(http.MethodPatch, "/tasks/"+task.ID+"/category?project_id="+models.AllProjectsID, strings.NewReader("category="+category))
+			req.Header.Set("HX-Request", "true")
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			rec := httptest.NewRecorder()
 			app.ServeHTTP(rec, req)

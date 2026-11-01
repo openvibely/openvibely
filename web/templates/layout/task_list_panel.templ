@@ -711,6 +711,8 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     values.category = destination.category;
                     path += '/category';
                 }
+                // Scope belongs in the URL: ownership middleware does not read form values.
+                path += '?project_id=' + encodeURIComponent(currentProjectID());
                 rowMovePending = true;
                 var failureShown = false;
                 function showMoveFailure(event) {
