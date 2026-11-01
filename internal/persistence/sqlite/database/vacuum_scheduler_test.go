@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 )
@@ -25,7 +26,7 @@ func TestVacuumSchedule(t *testing.T) {
 		}
 	}
 	progress := vacuumResult{attempted: true, before: vacuumStats{pages: 10000, free: 8000}, after: vacuumStats{pages: 9000, free: 7000}}
-	if got := s.next(progress, vacuumInterval, func(int64) int64 { return 0 }); got != vacuumActiveInterval || s.busyBase != 0 {
+	if got := s.next(progress, vacuumInterval, func(int64) int64 { return 0 }); got != 0 || s.busyBase != 0 {
 		t.Fatalf("progress: delay=%s state=%+v", got, s)
 	}
 	if got := s.next(busy, vacuumInterval, func(int64) int64 { return 0 }); got != time.Second {
@@ -104,6 +105,7 @@ func vacuumFixtureWithDelete(t *testing.T, rows int, incremental bool, deletion 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	t.Cleanup(RegisterWriterPriority(db))
 	return db
 }
 func TestVacuumFullBatchAndNoProgress(t *testing.T) {
@@ -211,7 +213,7 @@ func TestVacuumSchedulerRecoversFromPoolContention(t *testing.T) {
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	advance(vacuumActiveInterval)
+	advance(0)
 	conn, err = db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -416,20 +418,49 @@ func TestVacuumWriteMeasurementsIncludeQueuedArrivals(t *testing.T) {
 }
 
 func measureVacuumWrites(ctx context.Context, db *sql.DB, start time.Time, count int, cadence time.Duration) ([]time.Duration, error) {
-	latencies := make([]time.Duration, 0, count)
+	// Independent requests arrive even while previous writes are blocked. This
+	// exercises admission priority with genuinely concurrent queued user writes,
+	// not just a serial worker's catch-up queue or dropped ticker events.
+	latencies := make([]time.Duration, count)
+	var workers sync.WaitGroup
+	var firstError sync.Once
+	var writeErr error
+	recordError := func(err error) { firstError.Do(func() { writeErr = err }) }
+schedule:
 	for i := 0; i < count; i++ {
 		arrival := start.Add(time.Duration(i+1) * cadence)
 		timer := time.NewTimer(max(time.Until(arrival), 0))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return latencies, ctx.Err()
+			recordError(ctx.Err())
+			break schedule
 		case <-timer.C:
 		}
-		if _, err := db.ExecContext(ctx, "INSERT INTO writes(body) VALUES ('write')"); err != nil {
-			return latencies, err
-		}
-		latencies = append(latencies, time.Since(arrival))
+		workers.Add(1)
+		go func(index int, arrival time.Time) {
+			defer workers.Done()
+			conn, release, err := AcquireWriteConn(ctx, db)
+			if err != nil {
+				recordError(err)
+				return
+			}
+			defer release()
+			restore, err := BindSQLiteBusyTimeoutToContext(ctx, conn)
+			if err != nil {
+				recordError(err)
+				return
+			}
+			_, err = conn.ExecContext(ctx, "INSERT INTO writes(body) VALUES ('write')")
+			restore()
+			release()
+			if err != nil {
+				recordError(err)
+				return
+			}
+			latencies[index] = time.Since(arrival)
+		}(i, arrival)
 	}
-	return latencies, nil
+	workers.Wait()
+	return latencies, writeErr
 }

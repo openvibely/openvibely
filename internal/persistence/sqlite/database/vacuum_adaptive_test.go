@@ -156,7 +156,7 @@ func TestVacuumReleasesWriterBetweenAdaptiveBatches(t *testing.T) {
 		expectedPages = nextVacuumPages(expectedPages, r)
 		select {
 		case delay := <-timer.resets:
-			if delay != vacuumActiveInterval {
+			if delay != 0 {
 				t.Fatal(delay)
 			}
 		case <-time.After(time.Second):

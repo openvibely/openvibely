@@ -21,12 +21,17 @@ type queryExecutor interface {
 var dedicatedWriters sync.Map
 
 func RegisterDedicatedWriter(reader, writer *sql.DB) func() {
-	if reader == nil || writer == nil || reader == writer {
+	if reader == nil || writer == nil {
 		return func() {}
+	}
+	unregisterPriority := database.RegisterWriterPriority(writer)
+	if reader == writer {
+		return unregisterPriority
 	}
 	dedicatedWriters.Store(reader, writer)
 	return func() {
 		dedicatedWriters.CompareAndDelete(reader, writer)
+		unregisterPriority()
 	}
 }
 
@@ -88,11 +93,11 @@ func (r *boundSQLiteRow) Scan(dest ...interface{}) error {
 
 func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) error) error {
 	db = writeDatabase(db)
-	conn, err := db.Conn(ctx)
+	conn, closeConn, err := database.AcquireWriteConn(ctx, db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer closeConn()
 	restoreBusyTimeout, err := database.BindSQLiteBusyTimeoutToContext(ctx, conn)
 	if err != nil {
 		return err
@@ -111,13 +116,13 @@ func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) err
 
 func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), error) {
 	db = writeDatabase(db)
-	conn, err := db.Conn(ctx)
+	conn, closeConn, err := database.AcquireWriteConn(ctx, db)
 	if err != nil {
 		return nil, nil, err
 	}
 	restoreBusyTimeout, err := database.BindSQLiteBusyTimeoutToContext(ctx, conn)
 	if err != nil {
-		_ = conn.Close()
+		closeConn()
 		return nil, nil, err
 	}
 	for {
@@ -131,7 +136,7 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 			err = ctx.Err()
 		}
 		restoreBusyTimeout()
-		_ = conn.Close()
+		closeConn()
 		return nil, nil, err
 	}
 	cleaned := false
@@ -144,7 +149,7 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 		defer cancel()
 		_, _ = conn.ExecContext(rollbackCtx, `ROLLBACK`)
 		restoreBusyTimeout()
-		_ = conn.Close()
+		closeConn()
 	}, nil
 }
 

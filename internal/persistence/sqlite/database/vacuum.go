@@ -11,14 +11,13 @@ import (
 )
 
 const (
-	vacuumInterval       = 5 * time.Minute
-	vacuumBatchPages     = 1
-	vacuumMaxBatchPages  = 512
-	vacuumTarget         = 25 * time.Millisecond
-	vacuumMinPages       = 2500
-	vacuumMinPercent     = 10
-	vacuumActiveInterval = 250 * time.Millisecond
-	vacuumLockWait       = 25 * time.Millisecond
+	vacuumInterval      = 5 * time.Minute
+	vacuumBatchPages    = 1
+	vacuumMaxBatchPages = 512
+	vacuumTarget        = 25 * time.Millisecond
+	vacuumMinPages      = 2500
+	vacuumMinPercent    = 10
+	vacuumLockWait      = 25 * time.Millisecond
 )
 
 type vacuumStats struct{ pages, free, pageSize int64 }
@@ -34,6 +33,7 @@ type vacuumResult struct {
 	pages                                        int
 	stage                                        string
 	duration, vacuumDuration, checkpointDuration time.Duration
+	yieldDuration                                time.Duration
 	checkpoint                                   vacuumCheckpoint
 	err                                          error
 }
@@ -85,7 +85,7 @@ func (s *vacuumSchedule) next(r vacuumResult, idle time.Duration, jitter func(in
 	if r.progress() {
 		s.busyBase = 0
 		if r.after.eligible() {
-			return vacuumActiveInterval
+			return 0 // Admission yields to queued application writes, not a fixed sleep.
 		}
 	}
 	return idle
@@ -108,8 +108,10 @@ func StartIncrementalVacuum(ctx context.Context, db *sql.DB) {
 }
 func startIncrementalVacuum(ctx context.Context, db *sql.DB, interval time.Duration, beforeWrite func()) <-chan struct{} {
 	done := make(chan struct{})
+	unregister := RegisterWriterPriority(db)
 	go func() {
 		defer close(done)
+		defer unregister()
 		runVacuum(ctx, realVacuumTimer{time.NewTimer(interval)}, interval, func(pages int) vacuumResult {
 			return reclaimBatch(ctx, db, pages, beforeWrite)
 		}, rand.Int64N)
@@ -135,7 +137,7 @@ func runVacuum(ctx context.Context, timer vacuumTimer, idle time.Duration, batch
 			}
 			delay := schedule.next(r, idle, jitter)
 			pages = nextVacuumPages(pages, r)
-			// Include idle checks and checkpoint deferrals, but never log every 250ms.
+			// Include idle checks and checkpoint deferrals, but not every active batch.
 			if lastLog.IsZero() || time.Since(lastLog) >= time.Minute {
 				lastLog = time.Now()
 				reclaimed, remaining := int64(-1), int64(-1)
@@ -149,7 +151,7 @@ func runVacuum(ctx context.Context, timer vacuumTimer, idle time.Duration, batch
 					remaining = r.after.free * r.after.pageSize
 					statsStage = "after"
 				}
-				applog.Infof("database: incremental vacuum stage=%s batch_pages=%d next_batch_pages=%d duration=%s vacuum_duration=%s checkpoint_duration=%s busy=%t checkpoint_busy=%d wal_frames=%d checkpointed_frames=%d logical_reclaimed_bytes=%d remaining_free_bytes=%d stats=%s next_delay=%s error=%v (bytes=-1 means unknown; logical shrink is not physical file shrink)", r.stage, r.pages, pages, r.duration, r.vacuumDuration, r.checkpointDuration, r.busy, r.checkpoint.busy, r.checkpoint.frames, r.checkpoint.checkpointed, reclaimed, remaining, statsStage, delay, r.err)
+				applog.Infof("database: incremental vacuum stage=%s batch_pages=%d next_batch_pages=%d duration=%s yield_duration=%s vacuum_duration=%s checkpoint_duration=%s busy=%t checkpoint_busy=%d wal_frames=%d checkpointed_frames=%d logical_reclaimed_bytes=%d remaining_free_bytes=%d stats=%s next_delay=%s error=%v (bytes=-1 means unknown; logical shrink is not physical file shrink)", r.stage, r.pages, pages, r.duration, r.yieldDuration, r.vacuumDuration, r.checkpointDuration, r.busy, r.checkpoint.busy, r.checkpoint.frames, r.checkpoint.checkpointed, reclaimed, remaining, statsStage, delay, r.err)
 			}
 			timer.Reset(delay)
 		}
@@ -161,10 +163,21 @@ func reclaimOnceWithHook(ctx context.Context, db *sql.DB, beforeWrite func()) va
 }
 func reclaimBatch(ctx context.Context, db *sql.DB, pages int, beforeWrite func()) (r vacuumResult) {
 	r.pages = min(vacuumMaxBatchPages, max(1, pages))
-	r.stage = "acquire"
+	r.stage = "yield"
 	r.checkpoint = vacuumCheckpoint{frames: -1, checkpointed: -1}
 	started := time.Now()
 	defer func() { r.duration = time.Since(started); r.busy = r.busy || IsSQLiteBusy(r.err) }()
+	// This wait holds neither a pool connection nor a SQLite write lock. The
+	// short pool acquisition timeout starts only after queued application writes
+	// drain. Continuous application traffic may postpone maintenance indefinitely.
+	releaseAdmission, err := yieldToApplicationWrites(ctx, db)
+	r.yieldDuration = time.Since(started)
+	if err != nil {
+		r.err = err
+		return
+	}
+	defer releaseAdmission()
+	r.stage = "acquire"
 	// Pool acquisition is separate from SQLite lock acquisition. Both are short;
 	// execution itself remains cancellable by shutdown without a fixed deadline.
 	acquireCtx, cancelAcquire := context.WithTimeout(ctx, vacuumLockWait)
@@ -232,7 +245,8 @@ func reclaimBatch(ctx context.Context, db *sql.DB, pages int, beforeWrite func()
 		r.stage = "no-progress"
 	}
 	// Restoration and Close run before the caller schedules any pause or next
-	// checkout. No transaction, rows cursor, or writer connection crosses batches.
+	// checkout. Admission is released last, after restoring and closing the
+	// connection, so queued application writes run before another vacuum batch.
 	return
 }
 func readVacuumStats(ctx context.Context, conn *sql.Conn) (s vacuumStats, err error) {
