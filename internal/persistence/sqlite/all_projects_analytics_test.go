@@ -43,11 +43,35 @@ func TestAllProjectsFullAnalytics(t *testing.T) {
 		for _, view := range []string{"", "overview", "outcomes", "agents", "models", "automations", "learning", "usage"} {
 			dashboard, err := executions.GetAnalyticsDashboard(ctx, persistence.AnalyticsDashboardFilter{ProjectID: scope, View: view, Compare: true, DateFrom: time.Now().Add(-time.Hour), DateTo: time.Now().Add(time.Hour)})
 			require.NoError(t, err, "%s/%s", scope, view)
+			switch view {
+			case "overview", "outcomes":
+				require.Equal(t, expected, dashboard.Current.TasksEvaluated, "%s/%s", scope, view)
+				require.NotEmpty(t, dashboard.OutcomeTrend)
+			case "models":
+				require.NotEmpty(t, dashboard.Models)
+				var runs int
+				for _, model := range dashboard.Models {
+					runs += model.RunCount
+				}
+				require.Equal(t, expected, runs, "model chart runs across %s", scope)
+			case "agents":
+				require.NotEmpty(t, dashboard.Agents)
+			case "learning":
+				require.NotEmpty(t, dashboard.SkillOutcomes)
+			case "automations":
+				require.Len(t, dashboard.Workflows, expected)
+			}
 			if view == "" {
 				require.Len(t, dashboard.RecentOutcomes, expected)
 				require.Len(t, dashboard.Workflows, expected)
 			}
 		}
+		activity, err := executions.GetTaskRunActivity(ctx, persistence.AnalyticsDashboardFilter{ProjectID: scope})
+		require.NoError(t, err)
+		require.Len(t, activity.Models, 1)
+		require.Equal(t, expected, activity.Models[0].Runs)
+		require.Len(t, activity.Models[0].Trend, 1)
+		require.Equal(t, expected, activity.Models[0].Trend[0].Completed)
 		totals, err := usage.GetUsageTotals(ctx, persistence.UsageFilter{ProjectID: scope})
 		require.NoError(t, err)
 		require.Equal(t, expected*100, totals.TotalTokens)

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"math"
@@ -68,6 +69,34 @@ func TestTaskRunActivityScopesAndAggregates(t *testing.T) {
 			}
 		} else if len(trend) != 2 || trend[0].Runs != 3 || trend[1].Runs != 1 {
 			t.Fatalf("%s trend: %+v", group, trend)
+		}
+	}
+	f.ProjectID = models.AllProjectsID
+	for _, group := range []string{"day", "week", "month"} {
+		f.GroupBy = group
+		combined, err := r.GetTaskRunActivity(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(combined.Models) != 1 {
+			t.Fatalf("combined models: %+v", combined)
+		}
+		model := combined.Models[0]
+		if model.Runs != 5 || model.DurationSamples != 4 {
+			t.Fatalf("combined counts must include both projects, exclude chat and out-of-range runs: %+v", model)
+		}
+		var runs, completed, failed, cancelled, hours int
+		for _, point := range model.Trend {
+			runs += point.Runs
+			completed += point.Completed
+			failed += point.Failed
+			cancelled += point.Cancelled
+		}
+		for _, n := range combined.Hours {
+			hours += n
+		}
+		if runs != 5 || hours != 5 || completed != 2 || failed != 1 || cancelled != 1 {
+			t.Fatalf("%s combined trend/reliability: %+v", group, combined)
 		}
 	}
 	f.ProjectID = "missing"

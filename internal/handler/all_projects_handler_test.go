@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -427,6 +429,42 @@ func TestAllProjectsDragMovePreservesOwnerAndValidatesSchedule(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, owner, updated.ProjectID)
 			require.Equal(t, category, updated.Category)
+		}
+	}
+}
+
+func TestAllProjectsTaskRunChartsContainBothProjects(t *testing.T) {
+	h, app, _, stores := setupTestHandlerWithStores(t)
+	first, second := createProject(t, h, "First"), createProject(t, h, "Second")
+	config := &models.LLMConfig{Name: "Run chart model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, stores.LLMConfigs.Create(t.Context(), config))
+	for i, project := range []*models.Project{first, second} {
+		task := &models.Task{ProjectID: project.ID, Title: project.Name, Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2}
+		require.NoError(t, stores.Tasks.Create(t.Context(), task))
+		execution := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning}
+		require.NoError(t, stores.Executions.Create(t.Context(), execution))
+		status := models.ExecCompleted
+		if i == 1 {
+			status = models.ExecFailed
+		}
+		require.NoError(t, stores.Executions.Complete(t.Context(), execution.ID, status, "done", "", 10, 1000))
+	}
+	for _, scope := range []string{first.ID, second.ID, models.AllProjectsID} {
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/analytics/task-run-activity?project_id="+scope+"&range=all", nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var data persistence.TaskRunActivity
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &data))
+		require.Len(t, data.Models, 1)
+		expected := 1
+		if scope == models.AllProjectsID {
+			expected = 2
+		}
+		require.Equal(t, expected, data.Models[0].Runs)
+		require.Len(t, data.Models[0].Trend, 1)
+		if scope == models.AllProjectsID {
+			require.Equal(t, 1, data.Models[0].Trend[0].Completed)
+			require.Equal(t, 1, data.Models[0].Trend[0].Failed)
 		}
 	}
 }
