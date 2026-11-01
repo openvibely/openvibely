@@ -1189,6 +1189,17 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<section class={ "min-w-0 min-h-0", templ.KV("mb-5", !automationBuilderUsesEditShell(page)), templ.KV("mb-0", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page)) } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 
 
+                if layout.WorkspaceProjectID(ctx, currentProjectID) == models.AllProjectsID && page.AutomationID == "" {
+                    <label class="mb-3 flex items-center gap-2 text-sm">Project
+                        <select id="automation-destination-project" name="destination_project" form="automation-design-form" class="select select-bordered select-sm" aria-label="Project">
+                            <option value="">Choose project</option>
+                            for _, project := range page.Projects {
+                                <option value={ project.ID } selected?={ project.ID == currentProjectID }>{ project.Name }</option>
+                            }
+                        </select>
+                    </label>
+                }
+
 				<span class="sr-only" data-automation-connect-status aria-live="polite"></span>
 						if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
 						<form id="automation-builder-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, layout.WorkspaceProjectID(ctx, currentProjectID))) }>
@@ -1204,7 +1215,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 										<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
 											<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>											<div class="pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8" aria-label="YAML section controls" data-automation-yaml-fold-controls hidden></div>
 											</div>									<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>										<pre class="absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
-										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: oklch(var(--bc));" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" wrap="off" aria-label="Automation definition.">{ page.YAML }</textarea>
+										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: oklch(var(--bc));" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", layout.WorkspaceProjectID(ctx, currentProjectID)) } spellcheck="false" wrap="off" aria-label="Automation definition.">{ page.YAML }</textarea>
 									</div>							</div>
 							<p class="mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error" role="alert" data-automation-yaml-diagnostic></p>
 							</div>
@@ -1329,6 +1340,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				</div>
 			}
 			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationWorkspacePostURL(ctx, page, currentProjectID)) } hx-post={ automationWorkspacePostURL(ctx, page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
+                <input type="hidden" name="initial_view" value={ page.InitialView } data-automation-initial-view/>
 				<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<input type="hidden" name="builder_source" value={ page.Source }/>
 					<input type="hidden" name="selected_node" value={ page.SelectedNodeKey } data-automation-selected-node/>
@@ -2185,7 +2197,8 @@ yamlViewport.scrollTop = 0;
 						}
 						syncCandidate();
 					});
-						var destinationProject = builder.querySelector('#automation-destination-project');
+						var yamlPanel = builder.querySelector('[data-automation-yaml-panel]');
+                        var destinationProject = builder.querySelector('#automation-destination-project');
                 if (destinationProject) {
                     builder.addEventListener('htmx:configRequest', function(event) {
                         var parameters = event.detail.parameters;
@@ -2205,10 +2218,10 @@ yamlViewport.scrollTop = 0;
                         destinationProject.setCustomValidity('');
                         var form = document.getElementById('automation-design-form');
                         var initial = form.querySelector('[data-automation-initial-view]');
-                        initial.value = yamlPanel && !yamlPanel.hidden ? 'yaml' : detailsPanel && !detailsPanel.hidden ? 'details' : '';
+                        initial.value = yamlPanel && !yamlPanel.hidden ? 'yaml' : '';
                         var previewFields = [];
                         var yamlDisabled = yamlEditor && yamlEditor.disabled;
-                        if (detailsPanel && !detailsPanel.hidden && detailsForm) {
+                        if ((!yamlPanel || yamlPanel.hidden) && detailsForm) {
                             // Both native and HTMX submissions need the Details values.
                             // Exclude stale YAML so the server applies these edited fields.
                             syncCandidate(false);

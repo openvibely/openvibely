@@ -202,7 +202,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  document.querySelector('[data-automation-live-duplicate]').click();
  await wait(()=>document.getElementById('automation-builder'));
  assert(document.getElementById('project-selector').value==='__all_projects__','duplicate switched tabs');
- document.querySelector('[data-automation-view-details]').click();
+ document.getElementById('automation-details-opener').click();
  await wait(()=>document.querySelector('[data-automation-details-panel]') && !document.querySelector('[data-automation-details-panel]').hidden);
  var editedPrompt=document.querySelector('[data-automation-details-form] textarea[name$="_prompt"]');
  editedPrompt.value='Preserve edited task instructions';
@@ -216,16 +216,17 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  await wait(()=>document.getElementById('automation-destination-project')!==previousProjectPicker);
  assert(document.querySelector('[data-automation-details-form] textarea[name$="_prompt"]').value==='Preserve edited task instructions','changing project discarded Details prompt');
  assert(document.querySelector('[data-automation-details-form] textarea[name$="_goal"]').value==='Keep the edited goal too','changing project discarded Details goal');
- assert(!document.querySelector('[data-automation-details-panel]').hidden,'changing project left Details');
+ assert(!document.getElementById('automation-node-panel').hidden,'changing project left Details');
  assert(document.getElementById('project-selector').value==='__all_projects__','changing project left workspace');
  assert(document.getElementById('automation-destination-project'),'changing project saved the draft');
  var unassignedPicker=document.getElementById('automation-destination-project');
  unassignedPicker.value='';
  unassignedPicker.dispatchEvent(new Event('change',{bubbles:true}));
  await wait(()=>document.getElementById('automation-destination-project')!==unassignedPicker);
- document.querySelector('[data-automation-details-form] button[name="remove_node"]').click();
+ document.getElementById('automation-details-opener').click();
+ document.querySelector('[data-delete-node]').dispatchEvent(new MouseEvent('click',{bubbles:true}));
  assert(!document.getElementById('automation-destination-project').validity.customError,'deleting draft node required project');
- await wait(()=>!document.querySelector('[data-automation-node-detail]'));
+ await wait(()=>!document.querySelector('[data-automation-canvas] [data-node-key]'));
  assert(document.getElementById('automation-destination-project').value==='','deleting node selected project');
  assert(document.getElementById('project-selector').value==='__all_projects__','deleting draft node switched workspace');
  document.querySelector('[data-automation-builder-save]').click();
@@ -242,7 +243,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  var draftName=document.querySelector('[data-automation-name]');
  draftName.value='Preserved inline draft';
  draftName.dispatchEvent(new Event('input',{bubbles:true}));
- document.querySelector('[data-automation-view-details]').click();
+ document.getElementById('automation-details-opener').click();
  var projectPicker=document.getElementById('automation-destination-project');
  projectPicker.value=owner;
  projectPicker.dispatchEvent(new Event('change',{bubbles:true}));

@@ -146,7 +146,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page := models.AutomationBuilderPage{Result: *result, Source: source, SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
+	page := models.AutomationBuilderPage{Result: *result, Source: source, InitialView: automationBuilderInitialView(c), SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
@@ -260,7 +260,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return err
 	}
 	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
-		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
+		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, InitialView: automationBuilderInitialView(c), SelectedNodeKey: automationBuilderSelectedNode(c), FocusNode: c.Get("automation_created_node") != nil}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/builder?project_id="+layout.WorkspaceProjectID(c.Request().Context(), projectID))
 	}
