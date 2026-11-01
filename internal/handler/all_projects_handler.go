@@ -71,9 +71,6 @@ func (h *Handler) allProjectsScope(next echo.HandlerFunc) echo.HandlerFunc {
 				return next(c)
 			}
 			if destination == "" {
-				if c.Request().Method == http.MethodGet {
-					return h.AllProjectsChooseProject(c)
-				}
 				return echo.NewHTTPError(http.StatusBadRequest, "Choose a destination project.")
 			}
 			project, err := h.projectSvc.GetByID(c.Request().Context(), destination)
