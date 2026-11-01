@@ -72,6 +72,10 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(link,'native task link missing');link.click();
  await wait(()=>location.pathname==='/tasks/` + task.ID + `' && document.getElementById('task-detail-content'));
  assert(document.getElementById('project-selector').value==='__all_projects__','task switched workspace');
+ const owner=document.querySelector('#task-detail-metrics [data-task-project]');
+ assert(owner && owner.textContent.includes('` + project.Name + `'),'task owner missing from Details');
+ assert(owner.previousElementSibling.tagName==='H3' && owner.previousElementSibling.textContent==='Task','project must follow Task heading');
+
  await navigate('/upcoming','#upcoming-container');
  await navigate('/history','#history-container');
  await navigate('/schedule','#schedule-content');
@@ -93,6 +97,10 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(document.getElementById('project-selector').value==='__all_projects__','automation switched workspace');
  await navigate('/tasks/new','#new-task-project');
  assert(document.getElementById('new-task-project'),'inline destination missing');
+ const projectRow=document.getElementById('new-task-project').closest('.inspector-property-row');
+ assert(projectRow && projectRow.parentElement.id==='task-detail-metrics','project selector must share the task property grid');
+ assert(projectRow.previousElementSibling.tagName==='H3' && projectRow.previousElementSibling.textContent==='Task','new project selector must follow Task heading');
+
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href})}
  })();</script>`

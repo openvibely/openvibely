@@ -165,73 +165,11 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<label class=\"form-control mb-4\" for=\"new-task-project\"><span class=\"label-text mb-2\">Project</span> <select id=\"new-task-project\" name=\"destination_project\" form=\"task-thread-form\" class=\"select select-bordered w-full\" required><option value=\"\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if project.ID == models.AllProjectsID {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, " selected")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, " disabled>Choose a project</option> ")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				for _, destination := range projects {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<option value=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var8 string
-					templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression(destination.ID).Resolve(ctx)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 47, Col: 39}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if destination.ID == project.ID {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " selected")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, ">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var9 string
-					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(destination.Name)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 47, Col: 103}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</option>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</select></label>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = NewTaskDetails(agents, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = NewTaskDetails(agents, agentDefs, NewTaskProjectRow(project, projects)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div><div id=\"tab-attachments\" class=\"task-tab-panel hidden\"><div class=\"flex items-center justify-between mb-3\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Attachments</h3><button id=\"new-task-files\" type=\"button\" class=\"btn btn-ghost btn-xs\" aria-label=\"Add attachments\" onclick=\"document.getElementById('task-thread-form-file-input').click()\">+</button></div><div id=\"draft-panel-attachments\" class=\"space-y-2\" data-image-gallery-group=\"\"><p class=\"text-sm opacity-60\">No attachments</p></div><script>\n      (()=>{\n       const panel=document.getElementById('draft-panel-attachments'),root=panel.closest('#task-detail-content');\n       const update=()=>{const list=root.querySelector('[id$=\"-attachments-list\"]');if(!list)return;panel.replaceChildren(...Array.from(list.children).map(row=>{const clone=row.cloneNode(true);clone.removeAttribute('id');\n        clone.className='attachment-gallery-row';\n        const link=clone.querySelector('a'),size=clone.querySelector(':scope > span:last-child');\n        if(link){link.className='attachment-gallery-open';const name=link.querySelector('span');const text=document.createElement('span');text.className='min-w-0';name.className='block text-sm break-all';text.appendChild(name);if(size){size.className='block text-xs opacity-60';text.appendChild(size);}link.appendChild(text);}\n        return clone;}));if(!panel.children.length)panel.innerHTML='<p class=\"text-sm opacity-60\">No attachments</p>';};\n       const observer=new MutationObserver(()=>{if(!root.isConnected){observer.disconnect();return;}update();});\n       const start=()=>{const list=root.querySelector('[id$=\"-attachments-list\"]');if(list){observer.observe(list,{childList:true,subtree:true});update();}};\n       if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else requestAnimationFrame(start);\n       document.body.addEventListener('htmx:beforeCleanupElement',function cleanup(e){if(e.detail.elt===root){observer.disconnect();document.body.removeEventListener('htmx:beforeCleanupElement',cleanup);}});\n      })();\n     </script></div><div id=\"tab-schedules\" class=\"task-tab-panel hidden\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div><div id=\"tab-attachments\" class=\"task-tab-panel hidden\"><div class=\"flex items-center justify-between mb-3\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Attachments</h3><button id=\"new-task-files\" type=\"button\" class=\"btn btn-ghost btn-xs\" aria-label=\"Add attachments\" onclick=\"document.getElementById('task-thread-form-file-input').click()\">+</button></div><div id=\"draft-panel-attachments\" class=\"space-y-2\" data-image-gallery-group=\"\"><p class=\"text-sm opacity-60\">No attachments</p></div><script>\n      (()=>{\n       const panel=document.getElementById('draft-panel-attachments'),root=panel.closest('#task-detail-content');\n       const update=()=>{const list=root.querySelector('[id$=\"-attachments-list\"]');if(!list)return;panel.replaceChildren(...Array.from(list.children).map(row=>{const clone=row.cloneNode(true);clone.removeAttribute('id');\n        clone.className='attachment-gallery-row';\n        const link=clone.querySelector('a'),size=clone.querySelector(':scope > span:last-child');\n        if(link){link.className='attachment-gallery-open';const name=link.querySelector('span');const text=document.createElement('span');text.className='min-w-0';name.className='block text-sm break-all';text.appendChild(name);if(size){size.className='block text-xs opacity-60';text.appendChild(size);}link.appendChild(text);}\n        return clone;}));if(!panel.children.length)panel.innerHTML='<p class=\"text-sm opacity-60\">No attachments</p>';};\n       const observer=new MutationObserver(()=>{if(!root.isConnected){observer.disconnect();return;}update();});\n       const start=()=>{const list=root.querySelector('[id$=\"-attachments-list\"]');if(list){observer.observe(list,{childList:true,subtree:true});update();}};\n       if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else requestAnimationFrame(start);\n       document.body.addEventListener('htmx:beforeCleanupElement',function cleanup(e){if(e.detail.elt===root){observer.disconnect();document.body.removeEventListener('htmx:beforeCleanupElement',cleanup);}});\n      })();\n     </script></div><div id=\"tab-schedules\" class=\"task-tab-panel hidden\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -239,7 +177,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</div><div id=\"tab-chaining\" class=\"task-tab-panel hidden\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div><div id=\"tab-chaining\" class=\"task-tab-panel hidden\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -247,25 +185,25 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, tab := range []string{"lifecycle"} {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templruntime.NewAttributeExpression("tab-" + tab).Resolve(ctx)
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.NewAttributeExpression("tab-" + tab).Resolve(ctx)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 78, Col: 27}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 68, Col: 27}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"task-tab-panel hidden\"><p class=\"text-sm opacity-60\">Available after the task is created.</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" class=\"task-tab-panel hidden\"><p class=\"text-sm opacity-60\">Available after the task is created.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -276,7 +214,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<div id=\"tab-changes\" class=\"hidden\"></div><div id=\"tab-chat\" class=\"flex flex-col flex-1 min-h-0\"><div id=\"task-thread-messages\" class=\"flex-1 min-h-0 overflow-y-auto\"></div><div id=\"new-task-error\" role=\"alert\" class=\"text-error text-sm\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div id=\"tab-changes\" class=\"hidden\"></div><div id=\"tab-chat\" class=\"flex flex-col flex-1 min-h-0\"><div id=\"task-thread-messages\" class=\"flex-1 min-h-0 overflow-y-auto\"></div><div id=\"new-task-error\" role=\"alert\" class=\"text-error text-sm\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -288,7 +226,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -300,7 +238,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    var destination = root.querySelector('#new-task-project');\n    if (destination) {\n     destination.addEventListener('invalid', function() {\n      window.taskWorkspace.openPanel('details');\n     });\n     root.querySelector('#task-thread-form').addEventListener('htmx:configRequest', function(event) {\n      if (!destination.value) {\n       event.preventDefault();\n       destination.reportValidity();\n      }\n     });\n    }\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    function titleDraftRoot(node) {\n     var candidate = node && node.closest ? node.closest('#task-detail-content') : null;\n     return candidate && candidate.getAttribute('data-task-id') === '' ? candidate : null;\n    }\n    function titleDraftKey(pageRoot) {\n     return 'openvibely.new-task-title.' + pageRoot.getAttribute('data-project-id');\n    }\n    function titleDraftInput(pageRoot) {\n     return pageRoot && pageRoot.querySelector('input[name=\"title\"][form=\"task-thread-form\"]');\n    }\n    function composerDraftKey(pageRoot) {\n     return 'openvibely.new-task-composer.' + pageRoot.getAttribute('data-project-id');\n    }\n    function saveComposerDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     if (!message || !model) return;\n     try { sessionStorage.setItem(composerDraftKey(pageRoot), JSON.stringify({message: message.value, model: model.value})); } catch (_) {}\n    }\n    function hydrateComposerDraft(pageRoot) {\n     if (!pageRoot) return;\n     var saved;\n     try { saved = JSON.parse(sessionStorage.getItem(composerDraftKey(pageRoot))); } catch (_) { return; }\n     if (!saved) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     var picker = pageRoot.querySelector('#task-thread-form-agent-select');\n     if (message && typeof saved.message === 'string') {\n      message.value = saved.message;\n      message.style.height = 'auto';\n      message.style.height = Math.min(message.scrollHeight, 200) + 'px';\n     }\n     if (model && picker && typeof saved.model === 'string') {\n      var exists = Array.from(picker.parentElement.querySelectorAll('li[data-value]')).some(function(option) { return option.dataset.value === saved.model; });\n      if (exists) {\n       model.value = saved.model;\n       if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(picker, saved.model);\n       if (window.ovModelPicker) window.ovModelPicker.changed(picker);\n      }\n     }\n    }\n    function saveTitleDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try { sessionStorage.setItem(titleDraftKey(pageRoot), input.value); } catch (_) {}\n    }\n    function clearTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     pageRoot.__openVibelyTaskCreationSucceeded = true;\n     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); sessionStorage.removeItem(composerDraftKey(pageRoot)); } catch (_) {}\n    }\n    function hydrateTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try {\n      var savedTitle = sessionStorage.getItem(titleDraftKey(pageRoot));\n      input.value = savedTitle === null ? '' : savedTitle;\n     } catch (_) {}\n    }\n    function resetCreationDraft(pageRoot, saveTitle) {\n     if (!pageRoot) return;\n     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) { saveTitleDraft(pageRoot); saveComposerDraft(pageRoot); }\n     pageRoot.__openVibelyTaskTitleSavedForCleanup = true;\n     var pageForm = pageRoot.querySelector('#task-thread-form');\n     if (pageForm) {\n      pageForm.reset();\n      var clear = window[pageForm.getAttribute('data-clear-func-name')];\n      if (clear) clear();\n     }\n     var messageInput = pageRoot.querySelector('#task-message-input');\n     if (messageInput) messageInput.value = '';\n    }\n    function handleTaskCreationAfterRequest(pageRoot, event) {\n     var detail = event.detail || {};\n     var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!submittedForm || detail.elt !== submittedForm) return;\n     var xhr = detail.xhr;\n     // A 204 model-setup guard is successful HTTP, but creates no task.\n     // Normal creation acknowledges the ID; swarm creation redirects to its task.\n     var succeeded = xhr && xhr.status >= 200 && xhr.status < 300 && typeof xhr.getResponseHeader === 'function' &&\n      (xhr.getResponseHeader('X-Created-Task-ID') || (xhr.getResponseHeader('HX-Location') || '').indexOf('/tasks/') === 0);\n     var error = pageRoot.querySelector('#new-task-error');\n     if (succeeded) {\n      clearTitleDraft(pageRoot);\n      if (error) error.textContent = '';\n      return;\n     }\n     if (!error || !pageRoot.isConnected) return;\n     var message = 'Unable to create the task. Please try again.';\n     if (xhr && typeof xhr.getResponseHeader === 'function') {\n      var contentType = xhr.getResponseHeader('Content-Type') || '';\n      if (contentType.indexOf('application/json') !== -1) {\n       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}\n      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {\n       message = xhr.responseText;\n      }\n     }\n     error.textContent = message;\n    }\n    function bindTaskCreationAfterRequest(pageRoot) {\n     var pageForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!pageForm || pageForm.__openVibelyTaskCreationAfterRequestInstalled) return;\n     pageForm.__openVibelyTaskCreationAfterRequestInstalled = true;\n     pageForm.addEventListener('htmx:afterRequest', function(event) {\n      handleTaskCreationAfterRequest(pageRoot, event);\n     });\n    }\n    if (!window.openVibelyNewTaskTitleDraftLifecycleInstalled) {\n     window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;\n     document.body.addEventListener('input', function(event) {\n      var input = event.target;\n      if (!input || !input.matches || !input.matches('input[name=\"title\"][form=\"task-thread-form\"], #task-message-input')) return;\n      var pageRoot = titleDraftRoot(input);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveTitleDraft(pageRoot);\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('chat-select-change', function(event) {\n      if (event.target.id !== 'task-thread-form-agent-select') return;\n      var pageRoot = titleDraftRoot(event.target);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('htmx:beforeHistorySave', function() {\n      resetCreationDraft(titleDraftRoot(document.getElementById('task-detail-content')), true);\n     });\n     document.body.addEventListener('htmx:beforeCleanupElement', function(event) {\n      var pageRoot = document.getElementById('task-detail-content');\n      if (pageRoot && event.detail && event.detail.elt === pageRoot) resetCreationDraft(titleDraftRoot(pageRoot), false);\n     });\n     document.body.addEventListener('htmx:historyRestore', function() {\n      var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));\n      if (restoredRoot) {\n       hydrateTitleDraft(restoredRoot);\n       hydrateComposerDraft(restoredRoot);\n       bindTaskCreationAfterRequest(restoredRoot);\n      }\n     });\n    }\n    bindTaskCreationAfterRequest(titleDraftRoot(root));\n    hydrateTitleDraft(titleDraftRoot(root));\n    hydrateComposerDraft(titleDraftRoot(root));\n    // Keep creation fields out of HTMX history; the app-level lifecycle handler\n    // saves the title, message and model before resetting and restores cached views.\n   })();\n  </script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    var destination = root.querySelector('#new-task-project');\n    if (destination) {\n     destination.addEventListener('invalid', function() {\n      window.taskWorkspace.openPanel('details');\n     });\n     root.querySelector('#task-thread-form').addEventListener('htmx:configRequest', function(event) {\n      if (!destination.value) {\n       event.preventDefault();\n       destination.reportValidity();\n      }\n     });\n    }\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    function titleDraftRoot(node) {\n     var candidate = node && node.closest ? node.closest('#task-detail-content') : null;\n     return candidate && candidate.getAttribute('data-task-id') === '' ? candidate : null;\n    }\n    function titleDraftKey(pageRoot) {\n     return 'openvibely.new-task-title.' + pageRoot.getAttribute('data-project-id');\n    }\n    function titleDraftInput(pageRoot) {\n     return pageRoot && pageRoot.querySelector('input[name=\"title\"][form=\"task-thread-form\"]');\n    }\n    function composerDraftKey(pageRoot) {\n     return 'openvibely.new-task-composer.' + pageRoot.getAttribute('data-project-id');\n    }\n    function saveComposerDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     if (!message || !model) return;\n     try { sessionStorage.setItem(composerDraftKey(pageRoot), JSON.stringify({message: message.value, model: model.value})); } catch (_) {}\n    }\n    function hydrateComposerDraft(pageRoot) {\n     if (!pageRoot) return;\n     var saved;\n     try { saved = JSON.parse(sessionStorage.getItem(composerDraftKey(pageRoot))); } catch (_) { return; }\n     if (!saved) return;\n     var message = pageRoot.querySelector('#task-message-input');\n     var model = pageRoot.querySelector('#task-thread-form-agent-id');\n     var picker = pageRoot.querySelector('#task-thread-form-agent-select');\n     if (message && typeof saved.message === 'string') {\n      message.value = saved.message;\n      message.style.height = 'auto';\n      message.style.height = Math.min(message.scrollHeight, 200) + 'px';\n     }\n     if (model && picker && typeof saved.model === 'string') {\n      var exists = Array.from(picker.parentElement.querySelectorAll('li[data-value]')).some(function(option) { return option.dataset.value === saved.model; });\n      if (exists) {\n       model.value = saved.model;\n       if (window._setChatCustomSelectValue) window._setChatCustomSelectValue(picker, saved.model);\n       if (window.ovModelPicker) window.ovModelPicker.changed(picker);\n      }\n     }\n    }\n    function saveTitleDraft(pageRoot) {\n     if (!pageRoot || pageRoot.__openVibelyTaskCreationSucceeded) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try { sessionStorage.setItem(titleDraftKey(pageRoot), input.value); } catch (_) {}\n    }\n    function clearTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     pageRoot.__openVibelyTaskCreationSucceeded = true;\n     try { sessionStorage.removeItem(titleDraftKey(pageRoot)); sessionStorage.removeItem(composerDraftKey(pageRoot)); } catch (_) {}\n    }\n    function hydrateTitleDraft(pageRoot) {\n     if (!pageRoot) return;\n     var input = titleDraftInput(pageRoot);\n     if (!input) return;\n     try {\n      var savedTitle = sessionStorage.getItem(titleDraftKey(pageRoot));\n      input.value = savedTitle === null ? '' : savedTitle;\n     } catch (_) {}\n    }\n    function resetCreationDraft(pageRoot, saveTitle) {\n     if (!pageRoot) return;\n     if (saveTitle || !pageRoot.__openVibelyTaskTitleSavedForCleanup) { saveTitleDraft(pageRoot); saveComposerDraft(pageRoot); }\n     pageRoot.__openVibelyTaskTitleSavedForCleanup = true;\n     var pageForm = pageRoot.querySelector('#task-thread-form');\n     if (pageForm) {\n      pageForm.reset();\n      var clear = window[pageForm.getAttribute('data-clear-func-name')];\n      if (clear) clear();\n     }\n     var messageInput = pageRoot.querySelector('#task-message-input');\n     if (messageInput) messageInput.value = '';\n    }\n    function handleTaskCreationAfterRequest(pageRoot, event) {\n     var detail = event.detail || {};\n     var submittedForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!submittedForm || detail.elt !== submittedForm) return;\n     var xhr = detail.xhr;\n     // A 204 model-setup guard is successful HTTP, but creates no task.\n     // Normal creation acknowledges the ID; swarm creation redirects to its task.\n     var succeeded = xhr && xhr.status >= 200 && xhr.status < 300 && typeof xhr.getResponseHeader === 'function' &&\n      (xhr.getResponseHeader('X-Created-Task-ID') || (xhr.getResponseHeader('HX-Location') || '').indexOf('/tasks/') === 0);\n     var error = pageRoot.querySelector('#new-task-error');\n     if (succeeded) {\n      clearTitleDraft(pageRoot);\n      if (error) error.textContent = '';\n      return;\n     }\n     if (!error || !pageRoot.isConnected) return;\n     var message = 'Unable to create the task. Please try again.';\n     if (xhr && typeof xhr.getResponseHeader === 'function') {\n      var contentType = xhr.getResponseHeader('Content-Type') || '';\n      if (contentType.indexOf('application/json') !== -1) {\n       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}\n      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {\n       message = xhr.responseText;\n      }\n     }\n     error.textContent = message;\n    }\n    function bindTaskCreationAfterRequest(pageRoot) {\n     var pageForm = pageRoot && pageRoot.querySelector('#task-thread-form');\n     if (!pageForm || pageForm.__openVibelyTaskCreationAfterRequestInstalled) return;\n     pageForm.__openVibelyTaskCreationAfterRequestInstalled = true;\n     pageForm.addEventListener('htmx:afterRequest', function(event) {\n      handleTaskCreationAfterRequest(pageRoot, event);\n     });\n    }\n    if (!window.openVibelyNewTaskTitleDraftLifecycleInstalled) {\n     window.openVibelyNewTaskTitleDraftLifecycleInstalled = true;\n     document.body.addEventListener('input', function(event) {\n      var input = event.target;\n      if (!input || !input.matches || !input.matches('input[name=\"title\"][form=\"task-thread-form\"], #task-message-input')) return;\n      var pageRoot = titleDraftRoot(input);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveTitleDraft(pageRoot);\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('chat-select-change', function(event) {\n      if (event.target.id !== 'task-thread-form-agent-select') return;\n      var pageRoot = titleDraftRoot(event.target);\n      if (!pageRoot) return;\n      pageRoot.__openVibelyTaskTitleSavedForCleanup = false;\n      saveComposerDraft(pageRoot);\n     });\n     document.body.addEventListener('htmx:beforeHistorySave', function() {\n      resetCreationDraft(titleDraftRoot(document.getElementById('task-detail-content')), true);\n     });\n     document.body.addEventListener('htmx:beforeCleanupElement', function(event) {\n      var pageRoot = document.getElementById('task-detail-content');\n      if (pageRoot && event.detail && event.detail.elt === pageRoot) resetCreationDraft(titleDraftRoot(pageRoot), false);\n     });\n     document.body.addEventListener('htmx:historyRestore', function() {\n      var restoredRoot = titleDraftRoot(document.getElementById('task-detail-content'));\n      if (restoredRoot) {\n       hydrateTitleDraft(restoredRoot);\n       hydrateComposerDraft(restoredRoot);\n       bindTaskCreationAfterRequest(restoredRoot);\n      }\n     });\n    }\n    bindTaskCreationAfterRequest(titleDraftRoot(root));\n    hydrateTitleDraft(titleDraftRoot(root));\n    hydrateComposerDraft(titleDraftRoot(root));\n    // Keep creation fields out of HTMX history; the app-level lifecycle handler\n    // saves the title, message and model before resetting and restores cached views.\n   })();\n  </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -325,171 +263,171 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Goal (optional)</span></label> <textarea name=\"goal\" class=\"textarea textarea-bordered h-20\" placeholder=\"Completion condition for automatic continuation\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label> <select name=\"agent_id\" class=\"select select-bordered\"><option value=\"\">Use Default Model</option> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Goal (optional)</span></label> <textarea name=\"goal\" class=\"textarea textarea-bordered h-20\" placeholder=\"Completion condition for automatic continuation\"></textarea></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label> <select name=\"agent_id\" class=\"select select-bordered\"><option value=\"\">Use Default Model</option> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, agent := range agents {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<option value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<option value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
+			var templ_7745c5c3_Var10 string
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templruntime.NewAttributeExpression(agent.ID).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 275, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 265, Col: 33}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var13 string
-			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 276, Col: 22}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, " ")
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 266, Col: 22}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if agent.IsDefault {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "(Default)")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "(Default)")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</option>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</option>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</select></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</select></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(agentDefs) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Agent</span></label> <select name=\"agent_definition_id\" class=\"select select-bordered\" id=\"task-agent-def-select\"><option value=\"\">No Agent</option> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Agent</span></label> <select name=\"agent_definition_id\" class=\"select select-bordered\" id=\"task-agent-def-select\"><option value=\"\">No Agent</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, ad := range agentDefs {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<option value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<option value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ad.ID).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 280, Col: 31}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" data-agent-model=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var13 string
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ad.Model).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 280, Col: 61}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
-				templ_7745c5c3_Var14, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ad.ID).Resolve(ctx)
+				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 290, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 281, Col: 20}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" data-agent-model=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var15 string
-				templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(ad.Model).Resolve(ctx)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 290, Col: 61}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var16 string
-				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 291, Col: 20}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, " ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if ad.Model != "inherit" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "(")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "(")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
+					var templ_7745c5c3_Var15 string
+					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 293, Col: 23}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 283, Col: 23}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, ")")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, ")")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</option>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</option>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</select></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</select></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Category</span></label> <select name=\"category\" class=\"select select-bordered\" id=\"task-category-select\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Category</span></label> <select name=\"category\" class=\"select select-bordered\" id=\"task-category-select\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, cat := range models.SelectableCategories {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<option value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<option value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var18 string
-			templ_7745c5c3_Var18, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(cat)).Resolve(ctx)
+			var templ_7745c5c3_Var16 string
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(string(cat)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 304, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 294, Col: 37}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var19 string
-			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 305, Col: 24}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</option>")
+			var templ_7745c5c3_Var17 string
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 295, Col: 24}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</option>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div></div><div class=\"form-control mt-3\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div></div><div class=\"form-control mt-3\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -522,7 +460,7 @@ func NewTaskAdvancedOptions() templ.Component {
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"mt-3\"><div class=\"space-y-3\"><label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_mode\" id=\"create-task-swarm-mode-toggle\" onchange=\"document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text font-medium\">Swarm mode</span></label><div id=\"create-task-swarm-options\" class=\"hidden space-y-3\"><p class=\"text-xs opacity-70\">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max workers</span></label> <input type=\"number\" name=\"swarm_max_workers\" class=\"input input-bordered\" min=\"1\" max=\"8\" value=\"3\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Worker isolation</span></label> <select name=\"swarm_worker_isolation\" class=\"select select-bordered\"><option value=\"worktree\" selected>Worktree</option> <option value=\"read_only\">Read only</option> <option value=\"shared\">Shared</option></select></div></div><div class=\"flex flex-wrap gap-4\"><input type=\"hidden\" name=\"swarm_reviewer_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_reviewer_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Reviewer enabled</span></label> <input type=\"hidden\" name=\"swarm_merger_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_merger_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Merger enabled</span></label></div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"mt-3\"><div class=\"space-y-3\"><label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_mode\" id=\"create-task-swarm-mode-toggle\" onchange=\"document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text font-medium\">Swarm mode</span></label><div id=\"create-task-swarm-options\" class=\"hidden space-y-3\"><p class=\"text-xs opacity-70\">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max workers</span></label> <input type=\"number\" name=\"swarm_max_workers\" class=\"input input-bordered\" min=\"1\" max=\"8\" value=\"3\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Worker isolation</span></label> <select name=\"swarm_worker_isolation\" class=\"select select-bordered\"><option value=\"worktree\" selected>Worktree</option> <option value=\"read_only\">Read only</option> <option value=\"shared\">Shared</option></select></div></div><div class=\"flex flex-wrap gap-4\"><input type=\"hidden\" name=\"swarm_reviewer_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_reviewer_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Reviewer enabled</span></label> <input type=\"hidden\" name=\"swarm_merger_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_merger_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Merger enabled</span></label></div></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -530,7 +468,7 @@ func NewTaskAdvancedOptions() templ.Component {
 	})
 }
 
-func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption) templ.Component {
+func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTaskUIOption, projectRows ...templ.Component) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -547,55 +485,55 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"min-w-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<div class=\"min-w-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = TaskDetailMetrics(&models.Task{Category: models.CategoryActive, Priority: 2, AgentID: newTaskDefaultModel()}, models.TaskExecutionMetrics{}, agents, "").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TaskDetailMetrics(&models.Task{Category: models.CategoryActive, Priority: 2, AgentID: newTaskDefaultModel()}, models.TaskExecutionMetrics{}, agents, "", projectRows...).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, field := range []struct{ Name, Value string }{{"agent_definition_id", ""}, {"category", "active"}, {"priority", "2"}, {"tag", ""}, {"goal", ""}} {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<input type=\"hidden\" name=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<input type=\"hidden\" name=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var20 string
+			templ_7745c5c3_Var20, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 368, Col: 41}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var21 string
+			templ_7745c5c3_Var21, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Value).Resolve(ctx)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 368, Col: 63}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" data-draft-property=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 378, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 368, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Value).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 378, Col: 63}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" data-draft-property=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var24 string
-			templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(field.Name).Resolve(ctx)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 378, Col: 98}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" form=\"task-thread-form\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" form=\"task-thread-form\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -608,7 +546,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -616,7 +554,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []persistence.AgentTask
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</details></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</details></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -631,6 +569,90 @@ func projectDefaultAgentID(project *models.Project) string {
 		return ""
 	}
 	return *project.DefaultAgentConfigID
+}
+
+// Project selection uses the same compact row as the other Task properties.
+func NewTaskProjectRow(project *models.Project, projects []models.Project) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		ctx = templ.ClearChildren(ctx)
+		if layout.WorkspaceProjectID(ctx, project.ID) == models.AllProjectsID {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<label class=\"inspector-property-row\" for=\"new-task-project\"><span class=\"opacity-60\">Project:</span> <select id=\"new-task-project\" name=\"destination_project\" form=\"task-thread-form\" class=\"w-full min-w-0 cursor-pointer bg-transparent border-0 p-0 text-sm\" style=\"appearance:none\" required><option value=\"\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if project.ID == models.AllProjectsID {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " selected")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " disabled>Choose a project</option> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, destination := range projects {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<option value=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var24 string
+				templ_7745c5c3_Var24, templ_7745c5c3_Err = templruntime.NewAttributeExpression(destination.ID).Resolve(ctx)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 394, Col: 35}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if destination.ID == project.ID {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " selected")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, ">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var25 string
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(destination.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 394, Col: 99}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</option>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</select> <span class=\"opacity-60\" aria-hidden=\"true\">›</span></label>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		return nil
+	})
 }
 
 var _ = templruntime.GeneratedTemplate

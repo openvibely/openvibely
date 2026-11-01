@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+ templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -2177,7 +2178,7 @@ func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.Task
 
 // TaskDetailMetrics renders the status/category/tag/priority/model/agent metrics grid with polling.
 // Polls every 3s to keep status badges up to date when task state changes (e.g., via chat interaction).
-templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string) {
+templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string, projectRows ...templ.Component) {
 	<div
 		id="task-detail-metrics"
 		class="grid gap-3 mb-4 text-sm"
@@ -2197,6 +2198,14 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 			#task-detail-metrics .badge { justify-self:start; margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }
 		</style>
         <h3 class="text-sm font-semibold">Task</h3>
+        for _, row := range projectRows {
+            @row
+        }
+        if label := templateui.ProjectLabel(ctx, task.ProjectID); task.ID != "" && label != "" {
+            <section class="inspector-property-row" data-task-project>
+                <span class="opacity-60">Project:</span><span>{ label }</span>
+            </section>
+        }
         @TaskPropertyRow("Model", "agent_id", detailPointerValue(task.AgentID), taskModelLabel(task, agents))
         @TaskPropertyRow("Agent", "agent_definition_id", detailPointerValue(task.AgentDefinitionID), taskAgentLabel(task, agentLabel))
         @TaskPropertyRow("Category", "category", string(task.Category), string(task.Category))
