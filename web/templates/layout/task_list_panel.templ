@@ -25,7 +25,13 @@ func TaskListGroups(tasks []models.Task) []TaskListGroup {
 		if task.ParentTaskID != nil {
 			continue
 		}
-		byCategory[task.Category] = append(byCategory[task.Category], task)
+		category := task.Category
+		// Scheduled tasks retain their category across runs. Surface admitted
+		// executions in Active until they finish without changing that category.
+		if category == models.CategoryScheduled && (task.Status == models.StatusRunning || task.Status == models.StatusQueued || task.WorkerCapacityQueued || task.AutomationCapacityQueued) {
+			category = models.CategoryActive
+		}
+		byCategory[category] = append(byCategory[category], task)
 	}
 	groups := make([]TaskListGroup, 0, len(order))
 	for _, category := range order {
