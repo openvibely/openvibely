@@ -2936,55 +2936,7 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 // The newPosition is the target display_order (0-indexed).
 // All tasks between the old and new positions will have their display_order adjusted.
 func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition int, projectScope ...string) error {
-	if len(projectScope) > 0 && projectScope[0] == models.AllProjectsID {
-		return r.reorderAllProjectsTask(ctx, taskID, newPosition)
-	}
-	// Get the task
-	task, err := r.GetByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("getting task before reorder: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("task not found: %s", taskID)
-	}
-
-	oldPosition := task.DisplayOrder
-
-	// If position hasn't changed, do nothing
-	if oldPosition == newPosition {
-		return nil
-	}
-
-	// Update positions of affected tasks
-	if newPosition < oldPosition {
-		// Moving up: increment display_order of tasks between newPosition and oldPosition
-		_, err = execBoundSQLite(ctx, r.db,
-			`UPDATE tasks
-			 SET display_order = display_order + 1, updated_at = datetime('now')
-			 WHERE project_id = ? AND category = ? AND display_order >= ? AND display_order < ?`,
-			task.ProjectID, task.Category, newPosition, oldPosition)
-	} else {
-		// Moving down: decrement display_order of tasks between oldPosition and newPosition
-		_, err = execBoundSQLite(ctx, r.db,
-			`UPDATE tasks
-			 SET display_order = display_order - 1, updated_at = datetime('now')
-			 WHERE project_id = ? AND category = ? AND display_order > ? AND display_order <= ?`,
-			task.ProjectID, task.Category, oldPosition, newPosition)
-	}
-
-	if err != nil {
-		return fmt.Errorf("updating task positions: %w", err)
-	}
-
-	// Update the task's position
-	_, err = execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET display_order = ?, updated_at = datetime('now') WHERE id = ?`,
-		newPosition, taskID)
-	if err != nil {
-		return fmt.Errorf("updating task display_order: %w", err)
-	}
-
-	return nil
+	return r.reorderTaskInScope(ctx, taskID, newPosition, len(projectScope) > 0 && projectScope[0] == models.AllProjectsID, "", false)
 }
 
 // ListBacklogByPriority returns backlog tasks for a project, filtered by priority.

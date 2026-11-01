@@ -1551,7 +1551,11 @@ func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, 
 		minFailures = 1
 	}
 
-	rows, err := db.QueryContext(ctx, failedTaskPatternsQuery, projectID, minFailures, limit)
+	query := failedTaskPatternsQuery
+	if projectID == models.AllProjectsID {
+		query = strings.Replace(query, "t.project_id = ?", "? = '__all_projects__' AND t.category != 'chat'", 1)
+	}
+	rows, err := db.QueryContext(ctx, query, projectID, minFailures, limit)
 	if err != nil {
 		return nil, fmt.Errorf("getting failed task patterns: %w", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
@@ -54,19 +53,6 @@ func (h *Handler) RunInsightsAnalysis(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	if projectID == models.AllProjectsID {
-		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		results := make([]templ.Component, 0, len(projects))
-		for _, project := range projects {
-			result, err := h.insightsSvc.RunAnalysis(c.Request().Context(), project.ID)
-			results = append(results, pages.InsightAnalysisResult(result, err))
-		}
-		return render(c, http.StatusOK, templ.Join(results...))
-	}
-
 	report, err := h.insightsSvc.RunAnalysis(c.Request().Context(), projectID)
 	if err != nil {
 		return render(c, http.StatusOK, pages.InsightAnalysisResult(nil, err))
@@ -80,19 +66,6 @@ func (h *Handler) ExtractInsightsKnowledge(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	if projectID == "" || h.insightsSvc == nil {
 		return c.String(http.StatusBadRequest, "missing project_id")
-	}
-
-	if projectID == models.AllProjectsID {
-		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		results := make([]templ.Component, 0, len(projects))
-		for _, project := range projects {
-			result, err := h.insightsSvc.ExtractKnowledge(c.Request().Context(), project.ID)
-			results = append(results, pages.KnowledgeExtractionResult(result, err))
-		}
-		return render(c, http.StatusOK, templ.Join(results...))
 	}
 
 	entries, err := h.insightsSvc.ExtractKnowledge(c.Request().Context(), projectID)
@@ -198,19 +171,6 @@ func (h *Handler) RunHealthCheck(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "missing project_id")
 	}
 
-	if projectID == models.AllProjectsID {
-		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		results := make([]templ.Component, 0, len(projects))
-		for _, project := range projects {
-			result, err := h.insightsSvc.RunHealthCheck(c.Request().Context(), project.ID)
-			results = append(results, pages.HealthCheckResult(result, err))
-		}
-		return render(c, http.StatusOK, templ.Join(results...))
-	}
-
 	hc, err := h.insightsSvc.RunHealthCheck(c.Request().Context(), projectID)
 	if err != nil {
 		return render(c, http.StatusOK, pages.HealthCheckResult(nil, err))
@@ -225,19 +185,6 @@ func (h *Handler) GradeIdeas(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	if projectID == "" || h.insightsSvc == nil {
 		return c.String(http.StatusBadRequest, "missing project_id")
-	}
-
-	if projectID == models.AllProjectsID {
-		projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		results := make([]templ.Component, 0, len(projects))
-		for _, project := range projects {
-			result, err := h.insightsSvc.GradeIdeas(c.Request().Context(), project.ID)
-			results = append(results, pages.IdeaGradeResult(result, err))
-		}
-		return render(c, http.StatusOK, templ.Join(results...))
 	}
 
 	ig, err := h.insightsSvc.GradeIdeas(c.Request().Context(), projectID)

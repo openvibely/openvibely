@@ -59,3 +59,50 @@ func TestAllProjectsAutomationBulkDelete(t *testing.T) {
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations WHERE id IN (?,?)`, first, second).Scan(&count))
 	require.Zero(t, count)
 }
+
+func TestProjectReorderAfterAllProjects(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	repo := NewTaskRepo(db, nil)
+	_, err := db.ExecContext(ctx, `INSERT INTO projects(id,name) VALUES ('second','Second')`)
+	require.NoError(t, err)
+	var tasks []*models.Task
+	for i, owner := range []string{"default", "default", "second", "second"} {
+		task := &models.Task{ProjectID: owner, Title: owner + string(rune('a'+i)), Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, repo.Create(ctx, task))
+		_, err = db.ExecContext(ctx, `UPDATE tasks SET display_order=? WHERE id=?`, i, task.ID)
+		require.NoError(t, err)
+		tasks = append(tasks, task)
+	}
+	require.NoError(t, repo.ReorderTask(ctx, tasks[2].ID, 0, models.AllProjectsID))
+	require.NoError(t, repo.ReorderTask(ctx, tasks[0].ID, 1))
+	list, err := repo.ListByProject(ctx, "default", string(models.CategoryBacklog))
+	require.NoError(t, err)
+	require.Equal(t, tasks[1].ID, list[0].ID, "moving first task down in its project must actually reorder it")
+}
+
+func TestRelativeProjectReorderAfterAllProjects(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := t.Context()
+	repo := NewTaskRepo(db, nil)
+	_, err := db.ExecContext(ctx, `INSERT INTO projects(id,name) VALUES ('second','Second')`)
+	require.NoError(t, err)
+	var tasks []*models.Task
+	for i, owner := range []string{"default", "second", "default", "second"} {
+		task := &models.Task{ProjectID: owner, Title: owner + string(rune('a'+i)), Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, repo.Create(ctx, task))
+		_, err = db.ExecContext(ctx, `UPDATE tasks SET display_order=? WHERE id=?`, i*10, task.ID)
+		require.NoError(t, err)
+		tasks = append(tasks, task)
+	}
+	require.NoError(t, repo.ReorderTaskRelative(ctx, tasks[0].ID, tasks[3].ID, false, models.AllProjectsID))
+	require.NoError(t, repo.ReorderTaskRelative(ctx, tasks[0].ID, tasks[2].ID, true, "default"))
+	list, err := repo.ListByProject(ctx, "default", string(models.CategoryBacklog))
+	require.NoError(t, err)
+	require.Equal(t, tasks[0].ID, list[0].ID)
+	require.NoError(t, repo.ReorderTaskRelative(ctx, tasks[0].ID, tasks[2].ID, false, "default"))
+	list, err = repo.ListByProject(ctx, "default", string(models.CategoryBacklog))
+	require.NoError(t, err)
+	require.Equal(t, tasks[2].ID, list[0].ID)
+	require.Error(t, repo.ReorderTaskRelative(ctx, tasks[0].ID, tasks[1].ID, true, "default"))
+}

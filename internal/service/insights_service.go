@@ -617,7 +617,7 @@ Respond with a JSON array of suggestions. Each suggestion should have:
 
 Respond with ONLY the JSON array, no markdown fences or extra text.`, project.Name, project.RepoPath, bugCount, incompleteCount, debtCount, optCount)
 
-	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), prompt, nil, *agent, project.RepoPath)
+	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), insightsScopePrompt(project.ID, prompt), nil, *agent, project.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("AI suggestion generation failed: %w", err)
 	}
@@ -719,7 +719,7 @@ Respond with a JSON array where each entry has:
 
 Respond with ONLY the JSON array, no markdown fences.`, project.Name, strings.Join(taskSummaries, "\n"))
 
-	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), prompt, nil, *agent, project.RepoPath)
+	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), insightsScopePrompt(project.ID, prompt), nil, *agent, project.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge extraction failed: %w", err)
 	}
@@ -938,7 +938,7 @@ Respond with ONLY the JSON object, no markdown fences or extra text.`,
 		project.Name, total, completed, completionRate, failed, pending, backlog,
 		priorityDesc, tagDesc, activityDesc, failDesc, len(taskSamples), strings.Join(taskSamples, "\n"))
 
-	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), prompt, nil, *agent, project.RepoPath)
+	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), insightsScopePrompt(project.ID, prompt), nil, *agent, project.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("AI health check failed: %w", err)
 	}
@@ -1093,7 +1093,7 @@ Be honest but constructive. Reference SPECIFIC task titles in your feedback.
 Respond with ONLY the JSON object, no markdown fences or extra text.`,
 		project.Name, total, completed, completionRate, failed, tagSummary, len(taskSamples), total, strings.Join(taskSamples, "\n"))
 
-	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), prompt, nil, *agent, project.RepoPath)
+	output, _, err := s.llmSvc.CallAgentDirect(WithDirectUsageProject(ctx, project.ID), insightsScopePrompt(project.ID, prompt), nil, *agent, project.RepoPath)
 	if err != nil {
 		return nil, fmt.Errorf("AI idea grading failed: %w", err)
 	}
@@ -1217,4 +1217,11 @@ func parseIdeaGradeResponse(output string) (*models.IdeaGrade, error) {
 		DiversityScore: ig.DiversityScore,
 		StrategyScore:  ig.StrategyScore,
 	}, nil
+}
+
+func insightsScopePrompt(projectID, prompt string) string {
+	if projectID == models.AllProjectsID {
+		return "This is one combined analysis of all projects. The metrics and tasks below span all projects. Produce one overall assessment, not separate reports per project. Do not treat this scope as a single repository.\n\n" + prompt
+	}
+	return prompt
 }

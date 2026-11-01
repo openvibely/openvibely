@@ -217,7 +217,7 @@ func (r *InsightsRepo) GetLatestReport(ctx context.Context, projectID string) (*
 	var rpt models.InsightReport
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, report_date, summary, insight_ids, stats, analysis_log, created_at
-		FROM insight_reports WHERE `+analyticsProjectPredicate("project_id", projectID)+`
+		FROM insight_reports WHERE project_id = ?
 		ORDER BY created_at DESC LIMIT 1`, projectID,
 	).Scan(&rpt.ID, &rpt.ProjectID, &rpt.ReportDate, &rpt.Summary, &rpt.InsightIDs, &rpt.Stats, &rpt.AnalysisLog, &rpt.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -232,7 +232,7 @@ func (r *InsightsRepo) GetLatestReport(ctx context.Context, projectID string) (*
 func (r *InsightsRepo) ListReports(ctx context.Context, projectID string, limit int) ([]models.InsightReport, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, report_date, summary, insight_ids, stats, analysis_log, created_at
-		FROM insight_reports WHERE `+analyticsProjectPredicate("project_id", projectID)+`
+		FROM insight_reports WHERE project_id = ?
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -337,7 +337,7 @@ func (r *InsightsRepo) GetCompletedBugFixes(ctx context.Context, projectID strin
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, title, prompt, category, status, priority, tag, COALESCE(agent_id, ''), display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, created_via, telegram_chat_id, created_at, updated_at
 		FROM tasks
-		WHERE project_id = ? AND tag = 'bug' AND status = 'completed'
+		WHERE `+insightsTaskPredicate("", projectID)+` AND tag = 'bug' AND status = 'completed'
 		ORDER BY updated_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -371,7 +371,7 @@ func (r *InsightsRepo) GetSlowExecutions(ctx context.Context, projectID string, 
 				CAST((julianday(e.completed_at) - julianday(e.started_at)) * 86400 AS INTEGER) as duration_secs
 			FROM executions e
 			JOIN tasks t ON t.id = e.task_id
-			WHERE t.project_id = ? AND e.status = 'completed' AND e.completed_at IS NOT NULL
+			WHERE `+insightsTaskPredicate("t.", projectID)+` AND e.status = 'completed' AND e.completed_at IS NOT NULL
 		)
 		SELECT t.title, ed.duration_secs, COALESCE(a.name, 'unknown') as agent_name
 		FROM exec_durations ed
@@ -421,7 +421,7 @@ func (r *InsightsRepo) GetLatestHealthCheck(ctx context.Context, projectID strin
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, grade, strengths, improvements, assessment, how_to_improve,
 			tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct, created_at
-		FROM health_checks WHERE `+analyticsProjectPredicate("project_id", projectID)+`
+		FROM health_checks WHERE project_id = ?
 		ORDER BY created_at DESC LIMIT 1`, projectID,
 	).Scan(&hc.ID, &hc.ProjectID, &hc.Grade, &hc.Strengths, &hc.Improvements, &hc.Assessment, &hc.HowToImprove,
 		&hc.TasksTotal, &hc.TasksCompleted, &hc.TasksFailed, &hc.TasksPending, &hc.BacklogSize, &hc.AvgCompletionPct, &hc.CreatedAt)
@@ -438,7 +438,7 @@ func (r *InsightsRepo) ListHealthChecks(ctx context.Context, projectID string, l
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, grade, strengths, improvements, assessment, how_to_improve,
 			tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct, created_at
-		FROM health_checks WHERE `+analyticsProjectPredicate("project_id", projectID)+`
+		FROM health_checks WHERE project_id = ?
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -463,11 +463,11 @@ func (r *InsightsRepo) GetProjectTaskStats(ctx context.Context, projectID string
 	err = r.db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*) as total,
-			SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status = 'pending' AND category = 'active' THEN 1 ELSE 0 END) as pending,
-			SUM(CASE WHEN category = 'backlog' THEN 1 ELSE 0 END) as backlog
-		FROM tasks WHERE project_id = ?`, projectID,
+			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0) as completed,
+			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+			COALESCE(SUM(CASE WHEN status = 'pending' AND category = 'active' THEN 1 ELSE 0 END), 0) as pending,
+			COALESCE(SUM(CASE WHEN category = 'backlog' THEN 1 ELSE 0 END), 0) as backlog
+		FROM tasks WHERE `+insightsTaskPredicate("", projectID)+``, projectID,
 	).Scan(&total, &completed, &failed, &pending, &backlog)
 	return
 }
@@ -475,7 +475,7 @@ func (r *InsightsRepo) GetProjectTaskStats(ctx context.Context, projectID string
 // GetTaskPriorityDistribution returns count by priority for a project
 func (r *InsightsRepo) GetTaskPriorityDistribution(ctx context.Context, projectID string) (map[int]int, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT priority, COUNT(*) FROM tasks WHERE project_id = ? GROUP BY priority`, projectID,
+		SELECT priority, COUNT(*) FROM tasks WHERE `+insightsTaskPredicate("", projectID)+` GROUP BY priority`, projectID,
 	)
 	if err != nil {
 		return nil, err
@@ -501,7 +501,7 @@ func (r *InsightsRepo) GetRecentCompletionRate(ctx context.Context, projectID st
 			THEN CAST(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS REAL) / COUNT(*) * 100
 			ELSE 0 END
 		FROM tasks
-		WHERE project_id = ? AND category IN ('active', 'completed')
+		WHERE `+insightsTaskPredicate("", projectID)+` AND category IN ('active', 'completed')
 			AND created_at >= datetime('now', ?)`,
 		projectID, fmt.Sprintf("-%d days", days),
 	).Scan(&rate)
@@ -521,7 +521,7 @@ func (r *InsightsRepo) GetTaskActivityTrend(ctx context.Context, projectID strin
 }, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT date(created_at) as d, COUNT(*) as c
-		FROM tasks WHERE project_id = ? AND created_at >= datetime('now', ?)
+		FROM tasks WHERE `+insightsTaskPredicate("", projectID)+` AND created_at >= datetime('now', ?)
 		GROUP BY d ORDER BY d`, projectID, fmt.Sprintf("-%d days", days),
 	)
 	if err != nil {
@@ -549,7 +549,7 @@ func (r *InsightsRepo) GetTaskActivityTrend(ctx context.Context, projectID strin
 // GetTagDistribution returns count by tag for a project
 func (r *InsightsRepo) GetTagDistribution(ctx context.Context, projectID string) (map[string]int, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT COALESCE(tag, 'none'), COUNT(*) FROM tasks WHERE project_id = ? GROUP BY tag`, projectID,
+		SELECT COALESCE(tag, 'none'), COUNT(*) FROM tasks WHERE `+insightsTaskPredicate("", projectID)+` GROUP BY tag`, projectID,
 	)
 	if err != nil {
 		return nil, err
@@ -585,7 +585,7 @@ func (r *InsightsRepo) GetLatestIdeaGrade(ctx context.Context, projectID string)
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade,
 			tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score, created_at
-		FROM idea_grades WHERE `+analyticsProjectPredicate("project_id", projectID)+`
+		FROM idea_grades WHERE project_id = ?
 		ORDER BY created_at DESC LIMIT 1`, projectID,
 	).Scan(&ig.ID, &ig.ProjectID, &ig.Grade, &ig.Summary, &ig.Strengths, &ig.Improvements, &ig.HowToNextGrade, &ig.NextGrade,
 		&ig.TasksEvaluated, &ig.ClarityScore, &ig.AmbitionScore, &ig.FollowThrough, &ig.DiversityScore, &ig.StrategyScore, &ig.CreatedAt)
@@ -602,7 +602,7 @@ func (r *InsightsRepo) ListIdeaGrades(ctx context.Context, projectID string, lim
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade,
 			tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score, created_at
-		FROM idea_grades WHERE `+analyticsProjectPredicate("project_id", projectID)+`
+		FROM idea_grades WHERE project_id = ?
 		ORDER BY created_at DESC LIMIT ?`, projectID, limit,
 	)
 	if err != nil {
@@ -633,4 +633,13 @@ func scanInsights(rows *sql.Rows) ([]models.Insight, error) {
 		items = append(items, i)
 	}
 	return items, rows.Err()
+}
+
+// Analysis inputs may span projects; saved reports remain owned by their scope.
+func insightsTaskPredicate(alias, projectID string) string {
+	predicate := analyticsProjectPredicate(alias+"project_id", projectID)
+	if projectID == models.AllProjectsID {
+		predicate += " AND " + alias + "category != 'chat'"
+	}
+	return predicate
 }

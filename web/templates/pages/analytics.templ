@@ -2181,16 +2181,7 @@ templ analyticsContent(currentProject *models.Project) {
 								applyView(validViews.includes(requestedView) ? requestedView : (savedAnalyticsView() || 'usage'), false);
 								restoreAggregateSelectionState();
 						}
-                        document.body.addEventListener('htmx:configRequest', function(event) {
-                            if (!event.detail.elt?.matches('[data-analytics-project-filter]')) return;
-                            const params = new URL(analyticsURL(selectedView), location.href).searchParams;
-                            Object.keys(event.detail.parameters).forEach(function(key) {
-                                if (key !== 'filter_project' && key !== 'project_id') delete event.detail.parameters[key];
-                            });
-                            params.forEach(function(value, key) {
-                                if (key !== 'filter_project' && key !== 'project_id') event.detail.parameters[key] = value;
-                            });
-                        }, {signal: eventSignal});
+
 						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); loadAllData(false); }, { signal: eventSignal }); });
 						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
 						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });

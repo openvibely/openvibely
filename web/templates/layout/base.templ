@@ -4951,7 +4951,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
 									target: '#kanban-board',
 									swap: 'outerHTML',
-									values: { position: dropPosition }
+									values: dropPosition
 								});
 							}
 						} else {
@@ -4976,7 +4976,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 					const taskCards = allCards.filter(card => !card.hidden && !draggedTaskIds.includes(card.getAttribute('data-task-id')));
 
 					if (taskCards.length === 0) {
-						return 0; // Empty zone, position 0
+						return {position: 0}; // Empty zone
 					}
 
 					// Check if we're dragging the last card in the original list
@@ -4996,16 +4996,16 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						const insertBeforeThreshold = rect.top + rect.height * threshold;
 
 						// If mouse is above the threshold of this card, insert before it
-						// Return the card's display_order (not the index in filtered array)
+						// Identify the destination by task, independent of sparse ordering values.
 						if (mouseY < insertBeforeThreshold) {
-							return parseInt(card.getAttribute('data-display-order'));
+							return {before_task_id: card.getAttribute('data-task-id')};
 						}
 					}
 
 					// If we get here, mouse is below all cards, append to end
-					// Return the last card's display_order + 1 to insert after it
+					// Identify the last task instead of calculating an index.
 					const lastCard = taskCards[taskCards.length - 1];
-					return parseInt(lastCard.getAttribute('data-display-order')) + 1;
+					return {after_task_id: lastCard.getAttribute('data-task-id')};
 				}
 
 				// Drop handler for Active column sub-groups (handles cross-column + status changes + reordering)
@@ -5050,7 +5050,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 							htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
 								target: '#kanban-board',
 								swap: 'outerHTML',
-								values: { position: dropPosition }
+								values: dropPosition
 							});
 						}
 					} else {

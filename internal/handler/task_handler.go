@@ -2282,18 +2282,28 @@ func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
 
 func (h *Handler) ReorderTask(c echo.Context) error {
 	taskID := c.Param("taskId")
-	newPosition, err := strconv.Atoi(c.FormValue("position"))
-	if err != nil {
-		applog.Infof("[handler] ReorderTask invalid position: %v", err)
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid position")
+	scope := layout.WorkspaceProjectID(c.Request().Context(), h.mutationProjectID(c))
+	beforeID, afterID := c.FormValue("before_task_id"), c.FormValue("after_task_id")
+	if beforeID != "" && afterID != "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "choose one reorder target")
 	}
-	applog.Infof("[handler] ReorderTask task=%s newPosition=%d", taskID, newPosition)
-
-	if err := h.taskSvc.ReorderTask(c.Request().Context(), taskID, newPosition, layout.WorkspaceProjectID(c.Request().Context(), h.mutationProjectID(c))); err != nil {
-		applog.Infof("[handler] ReorderTask error: %v", err)
+	var err error
+	if beforeID != "" || afterID != "" {
+		anchorID := beforeID
+		if anchorID == "" {
+			anchorID = afterID
+		}
+		err = h.taskSvc.ReorderTaskRelative(c.Request().Context(), taskID, anchorID, beforeID != "", scope)
+	} else {
+		position, parseErr := strconv.Atoi(c.FormValue("position"))
+		if parseErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid position")
+		}
+		err = h.taskSvc.ReorderTask(c.Request().Context(), taskID, position, scope)
+	}
+	if err != nil {
 		return err
 	}
-	applog.Infof("[handler] ReorderTask success task=%s -> position %d", taskID, newPosition)
 
 	// Fetch task to get projectID for kanban board response
 	task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID)

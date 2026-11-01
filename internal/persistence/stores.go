@@ -716,6 +716,7 @@ type TaskStore interface {
 	PrepareSwarmParentForActiveLane(ctx context.Context, id string) error
 	ReclaimStaleQueuedTask(ctx context.Context, id string, staleDuration time.Duration) (bool, error)
 	ReorderTask(ctx context.Context, taskID string, newPosition int, projectScope ...string) error
+	ReorderTaskRelative(ctx context.Context, taskID, anchorID string, before bool, projectScope string) error
 	ReserveCalendarPlanner(ctx context.Context, parentID string, makePlanner func(*models.Task) (*models.Task, error)) (*ActiveLaneTaskAdmission, error)
 	ResetOrphanedRunning(ctx context.Context) (int, error)
 	RestoreBoardState(ctx context.Context, task models.Task) error

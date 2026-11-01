@@ -1139,6 +1139,10 @@ func (s *TaskService) GetTasksWithSchedulesByProject(ctx context.Context, projec
 	return tasks, nil
 }
 
+func (s *TaskService) ReorderTaskRelative(ctx context.Context, taskID, anchorID string, before bool, projectScope string) error {
+	return s.repo.ReorderTaskRelative(ctx, taskID, anchorID, before, projectScope)
+}
+
 func (s *TaskService) ReorderTask(ctx context.Context, taskID string, newPosition int, projectScope ...string) error {
 	applog.Infof("[task-svc] ReorderTask id=%s position=%d", taskID, newPosition)
 	if err := s.repo.ReorderTask(ctx, taskID, newPosition, projectScope...); err != nil {
