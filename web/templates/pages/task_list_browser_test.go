@@ -419,6 +419,28 @@ func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "task-list-drag", func(b *composerFocusCDP) {
 		b.waitFor("drag rows loaded", `String(!!document.querySelector('[data-task-list-row="drag-b"]'))`, "true")
+		// A press that never crosses the drag threshold must release deferred updates too.
+		b.evaluate(`document.body.addEventListener('htmx:beforeSwap',e=>{if(e.detail.target.id==='task-list-groups')window.pressUpdateDeferred=!e.detail.shouldSwap}); 'watch'`)
+		for _, end := range []string{
+			`document.querySelector('[data-task-list-row="drag-a"]').dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerId:21}))`,
+			`document.querySelector('[data-task-list-row="drag-a"]').dispatchEvent(new PointerEvent('pointercancel',{bubbles:true,pointerId:21}))`,
+			`window.dispatchEvent(new Event('blur'))`,
+			`document.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'}))`,
+		} {
+			b.evaluate(`window.pressUpdateDeferred=false;document.querySelector('[data-task-list-row="drag-a"]').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:21})); 'pressed'`)
+			reordered.Store(true)
+			b.evaluate(`htmx.trigger(document.getElementById('task-list-groups'),'taskListRefresh'); 'refresh'`)
+			b.waitFor("refresh deferred during ordinary press", `String(window.pressUpdateDeferred)`, "true")
+			b.waitFor("pressed row retained", `Array.from(document.querySelectorAll('[data-task-list-row]')).map(r=>r.dataset.taskListRow).join(',')`, "drag-a,drag-b")
+			b.evaluate(end + `; 'released'`)
+			b.waitFor("release applies deferred update", `Array.from(document.querySelectorAll('[data-task-list-row]')).map(r=>r.dataset.taskListRow).join(',')`, "drag-b,drag-a")
+			if requests.Load() != 0 {
+				t.Fatal("ordinary press sent a mutation")
+			}
+			reordered.Store(false)
+			b.evaluate(`htmx.trigger(document.getElementById('task-list-groups'),'taskListRefresh'); 'reset'`)
+			b.waitFor("fixture reset", `Array.from(document.querySelectorAll('[data-task-list-row]')).map(r=>r.dataset.taskListRow).join(',')`, "drag-a,drag-b")
+		}
 		start := `(()=>{var row=document.querySelector('[data-task-list-row="drag-a"]'),r=row.getBoundingClientRect();row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:r.left+40,clientY:r.top+20}));return 'started'})()`
 		mouse := func(kind, selector string, bottom bool) {
 			var point struct {

@@ -659,7 +659,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 var state = rowDrag;
                 if (!state) return;
                 rowDrag = null;
-                pressing = false;
+                endPress();
                 cancelAnimationFrame(state.frame);
                 window.removeEventListener('pointermove', moveRowDrag, true);
                 window.removeEventListener('pointerup', endRowDrag, true);
@@ -779,15 +779,12 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             }
             // Shared handlers also close menus on request start and navigation.
             new MutationObserver(function() {
-                if (!taskContextMenuOpen() && deferredRefresh) {
-                    deferredRefresh = false;
-                    refreshSoon(0);
-                }
+                flushDeferredRefresh();
             }).observe(contextMenu, {attributes: true, attributeFilter: ['data-kanban-menu-open']});
             function closeTaskContextMenu(restoreFocus) {
                 if (taskContextMenuOpen() && window.closeKanbanMenu) window.closeKanbanMenu(contextMenu, restoreFocus);
                 else if (restoreFocus && contextRow && contextRow.isConnected) contextRow.focus({preventScroll: true});
-                if (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }
+                flushDeferredRefresh();
             }
             function openTaskContextMenu(row, x, y) {
                 var template = row.nextElementSibling;
@@ -925,18 +922,27 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			// Replacing a row between pointerdown and pointerup makes the browser drop the click.
 			var pressing = false, deferredRefresh = false, lastListHTML = null;
 			groups.addEventListener('pointerdown', function() { pressing = true; });
-			function endPress() {
-				if (!pressing) return;
-				setTimeout(function() {
-					pressing = false;
-					if (deferredRefresh) { deferredRefresh = false; refreshSoon(0); }
-				}, 0);
-			}
+            function flushDeferredRefresh() {
+                if (!deferredRefresh || pressing || rowDrag || rowMovePending || taskContextMenuOpen()) return;
+                deferredRefresh = false;
+                refreshSoon(0);
+            }
+            var pressEndTimer = null;
+            function endPress() {
+                if (pressEndTimer !== null) return;
+                // Let the click finish before a refresh can replace its target row.
+                pressEndTimer = setTimeout(function() {
+                    pressEndTimer = null;
+                    pressing = false;
+                    flushDeferredRefresh();
+                }, 0);
+            }
 			document.addEventListener('pointerup', endPress, true);
 			document.addEventListener('pointercancel', endPress, true);
 			document.body.addEventListener('htmx:beforeSwap', function(e) {
 				if (e.detail.target !== groups) return;
 				if (pressing || rowDrag || rowMovePending || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
+                deferredRefresh = false;
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();
