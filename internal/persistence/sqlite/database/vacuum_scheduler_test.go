@@ -77,6 +77,11 @@ func TestVacuumTimerResetsOnlyAfterBatchAndCancels(t *testing.T) {
 
 func vacuumFixture(t *testing.T, rows int, incremental bool) *sql.DB {
 	t.Helper()
+	return vacuumFixtureWithDelete(t, rows, incremental, "DELETE FROM payload")
+}
+
+func vacuumFixtureWithDelete(t *testing.T, rows int, incremental bool, deletion string) *sql.DB {
+	t.Helper()
 	db, err := newSQLiteDatabase(filepath.Join(t.TempDir(), "vacuum.db"), func(db *sql.DB) error {
 		mode := 0
 		if incremental {
@@ -91,7 +96,7 @@ func vacuumFixture(t *testing.T, rows int, incremental bool) *sql.DB {
 		if err != nil {
 			return err
 		}
-		_, err = db.Exec("DELETE FROM payload")
+		_, err = db.Exec(deletion)
 		return err
 	})
 	if err != nil {
@@ -138,6 +143,62 @@ func TestVacuumPoolContention(t *testing.T) {
 		t.Fatalf("pool cancellation: %+v", r)
 	}
 }
+
+// Drive scheduler time manually while forcing real pool contention. This makes
+// busy/backoff/recovery coverage independent of machine speed and write timing.
+func TestVacuumSchedulerRecoversFromPoolContention(t *testing.T) {
+	db := vacuumFixture(t, 6000, true)
+	db.SetMaxOpenConns(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	timer := &testVacuumTimer{make(chan time.Time), make(chan time.Duration, 1), make(chan struct{})}
+	done := make(chan struct{})
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	go func() {
+		defer close(done)
+		runVacuum(ctx, timer, vacuumInterval, func() vacuumResult {
+			r := reclaimOnceWithHook(ctx, db, nil)
+			if r.err != nil && !r.busy && ctx.Err() == nil {
+				t.Errorf("batch: %v", r.err)
+			}
+			return r
+		}, func(int64) int64 { return 0 })
+	}()
+	defer func() { cancel(); <-done }()
+	advance := func(want time.Duration) {
+		t.Helper()
+		select {
+		case timer.ticks <- time.Now():
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduler did not accept tick")
+		}
+		select {
+		case got := <-timer.resets:
+			if got != want {
+				t.Fatalf("delay=%s, want %s", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduler did not complete attempt")
+		}
+	}
+	advance(time.Second)
+	advance(2 * time.Second)
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	advance(vacuumActiveInterval)
+	conn, err = db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	advance(time.Second) // Successful reclamation reset the busy backoff.
+}
+
 func TestVacuumHeldWriterReturnsBusyWithoutRetry(t *testing.T) {
 	db := vacuumFixture(t, 4000, true)
 	conn, err := db.Conn(context.Background())
@@ -179,74 +240,133 @@ func TestVacuumHeldWriterReturnsBusyWithoutRetry(t *testing.T) {
 	}
 }
 
-// Disposable throughput experiment using the production single-connection writer
-// pool and actual active delays. Timing results are observations, not CI SLOs.
+// Disposable experiments use the production single-connection writer pool and
+// scheduler. Each phase offers 500 writes/s for three seconds. Arrival times are
+// fixed in advance: a slow write leaves a queue of due requests, never dropped
+// ticker events. Latency includes that queue, and all offered writes are drained.
+// These observations are not CI latency/throughput SLOs.
 func TestVacuumConcurrentWriteMeasurements(t *testing.T) {
-	db := vacuumFixture(t, 14000, true)
-	db.SetMaxOpenConns(1)
-	ctx := context.Background()
-	write := func() time.Duration {
-		start := time.Now()
-		if _, err := db.ExecContext(ctx, "INSERT INTO writes(body) VALUES ('write')"); err != nil {
-			t.Error(err)
-		}
-		return time.Since(start)
-	}
-	baseline := make([]time.Duration, 200)
-	baselineTimer := time.NewTicker(2 * time.Millisecond)
-	for i := range baseline {
-		<-baselineTimer.C
-		baseline[i] = write()
-	}
-	baselineTimer.Stop()
-	stop, finished := make(chan struct{}), make(chan []time.Duration, 1)
-	go func() {
-		var latencies []time.Duration
-		timer := time.NewTicker(2 * time.Millisecond)
-		defer timer.Stop()
-		for {
-			select {
-			case <-stop:
-				finished <- latencies
-				return
-			case <-timer.C:
-				latencies = append(latencies, write())
+	for _, fixture := range []struct {
+		name     string
+		rows     int
+		deletion string
+	}{
+		{"fully_deleted", 14000, "DELETE FROM payload"},
+		{"partially_deleted", 28000, "DELETE FROM payload WHERE rowid % 4 != 0"},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			db := vacuumFixtureWithDelete(t, fixture.rows, true, fixture.deletion)
+			db.SetMaxOpenConns(1)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			const samples = 1500
+			const cadence = 2 * time.Millisecond
+			const window = samples * cadence
+			baseline, err := measureVacuumWrites(ctx, db, time.Now(), samples, cadence)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-	}()
-	start := time.Now()
-	var reclaimed int64
-	var batches int
-	var maxBatch time.Duration
-	for i := 0; i < 12; i++ {
-		r := reclaimOnceWithHook(ctx, db, nil)
-		if r.err != nil {
-			t.Errorf("batch: %v", r.err)
-			break
-		}
-		if !r.progress() {
-			t.Errorf("no progress: %+v", r)
-			break
-		}
-		reclaimed += (r.before.pages - r.after.pages) * r.before.pageSize
-		batches++
-		maxBatch = max(maxBatch, r.duration)
-		if i < 11 {
-			time.Sleep(vacuumActiveInterval)
+
+			start := time.Now()
+			cleanupCtx, cancelCleanup := context.WithDeadline(ctx, start.Add(window))
+			defer cancelCleanup()
+			type writeResult struct {
+				latencies []time.Duration
+				err       error
+			}
+			finished := make(chan writeResult, 1)
+			go func() {
+				latencies, err := measureVacuumWrites(ctx, db, start, samples, cadence)
+				finished <- writeResult{latencies, err}
+			}()
+			var reclaimed int64
+			var batches, busy int
+			var maxBatch time.Duration
+			// Run the actual scheduler, including bounded exponential backoff on pool
+			// or SQLite contention. A busy attempt is an expected observation, not a
+			// failure. The experiment window bounds even persistent contention.
+			runVacuum(cleanupCtx, realVacuumTimer{time.NewTimer(0)}, vacuumInterval, func() vacuumResult {
+				r := reclaimOnceWithHook(cleanupCtx, db, nil)
+				if cleanupCtx.Err() != nil {
+					return r
+				}
+				if r.busy {
+					busy++
+				} else if r.err != nil {
+					t.Errorf("batch: %v", r.err)
+				} else if r.attempted && !r.progress() {
+					t.Errorf("no progress: %+v", r)
+				}
+				if r.progress() {
+					reclaimed += (r.before.pages - r.after.pages) * r.before.pageSize
+					batches++
+					maxBatch = max(maxBatch, r.duration)
+				}
+				return r
+			}, func(int64) int64 { return 0 })
+			elapsed := time.Since(start)
+			writes := <-finished
+			if writes.err != nil {
+				t.Fatal(writes.err)
+			}
+			report := func(name string, v []time.Duration) {
+				if len(v) != samples {
+					t.Fatalf("%s completed %d/%d writes", name, len(v), samples)
+				}
+				sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
+				t.Logf("%s arrival-to-completion latency n=%d p50=%s p95=%s p99=%s max=%s", name, len(v), v[len(v)/2], v[len(v)*95/100], v[len(v)*99/100], v[len(v)-1])
+			}
+			report("baseline", baseline)
+			report("cleanup", writes.latencies)
+			t.Logf("logical reclamation: batches=%d busy_attempts=%d bytes=%d elapsed=%s MiB/s=%.2f max_batch=%s workload_drained_after=%s", batches, busy, reclaimed, elapsed, float64(reclaimed)/(1<<20)/elapsed.Seconds(), maxBatch, time.Since(start))
+			var liveRows int
+			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM payload").Scan(&liveRows); err != nil {
+				t.Fatal(err)
+			}
+			wantLive := 0
+			if fixture.name == "partially_deleted" {
+				wantLive = fixture.rows / 4
+			}
+			if liveRows != wantLive {
+				t.Fatalf("live payload rows=%d, want %d", liveRows, wantLive)
+			}
+		})
+	}
+}
+
+func TestVacuumWriteMeasurementsIncludeQueuedArrivals(t *testing.T) {
+	db := vacuumFixture(t, 1, true)
+	// All five arrivals are already due, modeling a worker stalled for 100ms.
+	// Keep every request and include its queue wait in the reported latency.
+	latencies, err := measureVacuumWrites(context.Background(), db, time.Now().Add(-100*time.Millisecond), 5, 2*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(latencies) != 5 {
+		t.Fatalf("completed %d writes, want 5", len(latencies))
+	}
+	for _, latency := range latencies {
+		if latency < 90*time.Millisecond {
+			t.Fatalf("queue wait omitted: %s", latency)
 		}
 	}
-	elapsed := time.Since(start)
-	close(stop)
-	latencies := <-finished
-	report := func(name string, v []time.Duration) {
-		if len(v) == 0 {
-			t.Errorf("no %s samples", name)
-			return
+}
+
+func measureVacuumWrites(ctx context.Context, db *sql.DB, start time.Time, count int, cadence time.Duration) ([]time.Duration, error) {
+	latencies := make([]time.Duration, 0, count)
+	for i := 0; i < count; i++ {
+		arrival := start.Add(time.Duration(i+1) * cadence)
+		timer := time.NewTimer(max(time.Until(arrival), 0))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return latencies, ctx.Err()
+		case <-timer.C:
 		}
-		sort.Slice(v, func(i, j int) bool { return v[i] < v[j] })
-		t.Logf("%s writes n=%d p50=%s p95=%s p99=%s max=%s", name, len(v), v[len(v)/2], v[len(v)*95/100], v[len(v)*99/100], v[len(v)-1])
+		if _, err := db.ExecContext(ctx, "INSERT INTO writes(body) VALUES ('write')"); err != nil {
+			return latencies, err
+		}
+		latencies = append(latencies, time.Since(arrival))
 	}
-	report("baseline", baseline)
-	report("cleanup", latencies)
-	t.Logf("logical reclamation: batches=%d bytes=%d elapsed=%s MiB/s=%.2f max_batch=%s", batches, reclaimed, elapsed, float64(reclaimed)/(1<<20)/elapsed.Seconds(), maxBatch)
+	return latencies, nil
 }
