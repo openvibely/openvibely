@@ -68,8 +68,15 @@ func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
 	if err := <-writerDone; err != nil {
 		t.Fatalf("writer concurrent with incremental vacuum: %v", err)
 	}
+	if _, err := reader.ExecContext(context.Background(), `ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
 	// With both pool connections occupied, cleanup now yields rather than
-	// waiting indefinitely. Model the next scheduled attempt after the writer.
+	// waiting indefinitely. A held reader may also prevent checkpoint completion.
+	// Model the next attempt after both the writer and reader release.
 	if result.busy {
 		result = reclaimOnceWithHook(ctx, db, nil)
 	}
@@ -83,12 +90,6 @@ func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
 	}
 	if freeAfter >= freeBefore {
 		t.Fatalf("incremental vacuum did not reclaim pages: before=%d after=%d", freeBefore, freeAfter)
-	}
-	if _, err := reader.ExecContext(context.Background(), `ROLLBACK`); err != nil {
-		t.Fatal(err)
-	}
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
 	}
 	assertVacuumPoolBusyTimeout(t, db)
 }

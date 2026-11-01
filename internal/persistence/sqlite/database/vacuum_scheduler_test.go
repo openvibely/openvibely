@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -53,7 +54,7 @@ func TestVacuumTimerResetsOnlyAfterBatchAndCancels(t *testing.T) {
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
-		runVacuum(ctx, timer, vacuumInterval, func() vacuumResult { close(entered); <-release; return vacuumResult{busy: true} }, func(int64) int64 { return 0 })
+		runVacuum(ctx, timer, vacuumInterval, func(pages int) vacuumResult { close(entered); <-release; return vacuumResult{busy: true} }, func(int64) int64 { return 0 })
 	}()
 	timer.ticks <- time.Now()
 	<-entered
@@ -180,8 +181,8 @@ func TestVacuumSchedulerRecoversFromPoolContention(t *testing.T) {
 	defer conn.Close()
 	go func() {
 		defer close(done)
-		runVacuum(ctx, timer, vacuumInterval, func() vacuumResult {
-			r := reclaimOnceWithHook(ctx, db, nil)
+		runVacuum(ctx, timer, vacuumInterval, func(pages int) vacuumResult {
+			r := reclaimBatch(ctx, db, pages, nil)
 			if r.err != nil && !r.busy && ctx.Err() == nil {
 				t.Errorf("batch: %v", r.err)
 			}
@@ -261,7 +262,8 @@ func TestVacuumHeldWriterReturnsBusyWithoutRetry(t *testing.T) {
 }
 
 // Disposable experiments use the production single-connection writer pool and
-// scheduler. Each phase offers 500 writes/s for three seconds. Arrival times are
+// scheduler. Each phase offers 500 writes/s (three seconds for small fixtures,
+// ten seconds for the >1 GiB fixture). Arrival times are
 // fixed in advance: a slow write leaves a queue of due requests, never dropped
 // ticker events. Latency includes that queue, and all offered writes are drained.
 // These observations are not CI latency/throughput SLOs.
@@ -270,18 +272,53 @@ func TestVacuumConcurrentWriteMeasurements(t *testing.T) {
 		name     string
 		rows     int
 		deletion string
+		samples  int
 	}{
-		{"fully_deleted", 14000, "DELETE FROM payload"},
-		{"partially_deleted", 28000, "DELETE FROM payload WHERE rowid % 4 != 0"},
+		{"fully_deleted", 14000, "DELETE FROM payload", 1500},
+		{"partially_deleted", 28000, "DELETE FROM payload WHERE rowid % 4 != 0", 1500},
+		{"large_partially_deleted", 262144, "DELETE FROM payload WHERE rowid % 4 != 0", 5000},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
+			if fixture.samples > 1500 && testing.Short() {
+				t.Skip("large disposable-database experiment")
+			}
 			db := vacuumFixtureWithDelete(t, fixture.rows, true, fixture.deletion)
 			db.SetMaxOpenConns(1)
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 			defer cancel()
-			const samples = 1500
+			samples := fixture.samples
 			const cadence = 2 * time.Millisecond
-			const window = samples * cadence
+			window := time.Duration(samples) * cadence
+			var seq int
+			var schema, dbPath string
+			if err := db.QueryRowContext(ctx, "PRAGMA database_list").Scan(&seq, &schema, &dbPath); err != nil {
+				t.Fatal(err)
+			}
+			reportSize := func(label string) {
+				var pages, free, pageSize int64
+				for _, q := range []struct {
+					name  string
+					value *int64
+				}{{"page_count", &pages}, {"freelist_count", &free}, {"page_size", &pageSize}} {
+					if err := db.QueryRowContext(ctx, "PRAGMA "+q.name).Scan(q.value); err != nil {
+						t.Fatal(err)
+					}
+				}
+				info, err := os.Stat(dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				walBytes := int64(0)
+				if wal, err := os.Stat(dbPath + "-wal"); err == nil {
+					walBytes = wal.Size()
+				}
+				t.Logf("%s logical_bytes=%d free_bytes=%d main_file_bytes=%d wal_file_bytes=%d", label, pages*pageSize, free*pageSize, info.Size(), walBytes)
+				if label == "before" && fixture.samples > 1500 && pages*pageSize < 1<<30 {
+					t.Fatal("large fixture must exceed 1 GiB")
+				}
+			}
+			reportSize("before")
+
 			baseline, err := measureVacuumWrites(ctx, db, time.Now(), samples, cadence)
 			if err != nil {
 				t.Fatal(err)
@@ -300,13 +337,14 @@ func TestVacuumConcurrentWriteMeasurements(t *testing.T) {
 				finished <- writeResult{latencies, err}
 			}()
 			var reclaimed int64
-			var batches, busy int
-			var maxBatch time.Duration
+			var batches, busy, maxPages int
+			var maxBatch, maxVacuum, maxCheckpoint time.Duration
+			var sizes []int
 			// Run the actual scheduler, including bounded exponential backoff on pool
 			// or SQLite contention. A busy attempt is an expected observation, not a
 			// failure. The experiment window bounds even persistent contention.
-			runVacuum(cleanupCtx, realVacuumTimer{time.NewTimer(0)}, vacuumInterval, func() vacuumResult {
-				r := reclaimOnceWithHook(cleanupCtx, db, nil)
+			runVacuum(cleanupCtx, realVacuumTimer{time.NewTimer(0)}, vacuumInterval, func(pages int) vacuumResult {
+				r := reclaimBatch(cleanupCtx, db, pages, nil)
 				if cleanupCtx.Err() != nil {
 					return r
 				}
@@ -321,6 +359,10 @@ func TestVacuumConcurrentWriteMeasurements(t *testing.T) {
 					reclaimed += (r.before.pages - r.after.pages) * r.before.pageSize
 					batches++
 					maxBatch = max(maxBatch, r.duration)
+					maxVacuum = max(maxVacuum, r.vacuumDuration)
+					maxCheckpoint = max(maxCheckpoint, r.checkpointDuration)
+					maxPages = max(maxPages, r.pages)
+					sizes = append(sizes, r.pages)
 				}
 				return r
 			}, func(int64) int64 { return 0 })
@@ -338,13 +380,14 @@ func TestVacuumConcurrentWriteMeasurements(t *testing.T) {
 			}
 			report("baseline", baseline)
 			report("cleanup", writes.latencies)
-			t.Logf("logical reclamation: batches=%d busy_attempts=%d bytes=%d elapsed=%s MiB/s=%.2f max_batch=%s workload_drained_after=%s", batches, busy, reclaimed, elapsed, float64(reclaimed)/(1<<20)/elapsed.Seconds(), maxBatch, time.Since(start))
+			t.Logf("logical reclamation: batches=%d busy_attempts=%d bytes=%d elapsed=%s MiB/s=%.2f max_batch=%s max_vacuum=%s max_checkpoint=%s max_pages=%d sizes=%v workload_drained_after=%s", batches, busy, reclaimed, elapsed, float64(reclaimed)/(1<<20)/elapsed.Seconds(), maxBatch, maxVacuum, maxCheckpoint, maxPages, sizes, time.Since(start))
+			reportSize("after")
 			var liveRows int
 			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM payload").Scan(&liveRows); err != nil {
 				t.Fatal(err)
 			}
 			wantLive := 0
-			if fixture.name == "partially_deleted" {
+			if fixture.name != "fully_deleted" {
 				wantLive = fixture.rows / 4
 			}
 			if liveRows != wantLive {
