@@ -140,6 +140,41 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
  assert(new FormData(document.getElementById('task-thread-form')).get('destination_project')==='` + project.ID + `','destination not submitted');
  assert(document.getElementById('project-selector').value==='__all_projects__','project picker switched tabs');
+ // A blocked Send resumes once the destination is selected, exactly once.
+ const draftForm=document.getElementById('task-thread-form');
+ const destination=document.getElementById('new-task-project');
+ destination.value='';
+ document.getElementById('task-message-input').value='Run after choosing the project';
+ let resumedRequests=[];
+ const captureSend=function(event){
+  if(event.detail.elt!==draftForm)return;
+  event.preventDefault();
+  resumedRequests.push(event.detail.requestConfig.parameters);
+ };
+ draftForm.addEventListener('htmx:beforeRequest',captureSend);
+ draftForm.requestSubmit();
+ await wait(()=>projectOption.getClientRects().length>0);
+ assert(resumedRequests.length===0,'request sent before choosing owner');
+ projectOption.click();
+ await wait(()=>resumedRequests.length===1);
+ assert(resumedRequests[0].destination_project==='` + project.ID + `','resumed send lost project');
+ assert(resumedRequests[0].category==='active','resumed send lost Active category');
+ assert(resumedRequests[0].message==='Run after choosing the project','resumed send lost message');
+ destination.dispatchEvent(new Event('change',{bubbles:true}));
+ await new Promise(resolve=>setTimeout(resolve,80));
+ assert(resumedRequests.length===1,'selection sent twice');
+ // Cancelling the picker cancels the pending Send, not the draft.
+ destination.value='';
+ draftForm.requestSubmit();
+ await wait(()=>projectOption.getClientRects().length>0);
+ projectOption.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ projectRow.click();
+ await wait(()=>projectOption.getClientRects().length>0);
+ projectOption.click();
+ await new Promise(resolve=>setTimeout(resolve,80));
+ assert(resumedRequests.length===1,'cancelled send resumed on later selection');
+ draftForm.removeEventListener('htmx:beforeRequest',captureSend);
+
  for (const scope of ['` + project.ID + `','__all_projects__']) {
   window.openVibelyNavigate('/tasks/` + task.ID + `?project_id='+scope);
   await wait(()=>document.getElementById('project-selector').value===scope && location.pathname==='/tasks/` + task.ID + `');

@@ -89,12 +89,33 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      destination.addEventListener('invalid', function() {
       window.taskWorkspace.openPanel('details');
      });
-     root.querySelector('#task-thread-form').addEventListener('htmx:configRequest', function(event) {
+     var form = root.querySelector('#task-thread-form');
+     var pendingSend = false;
+     var projectPicker = root.querySelector('#task-property-picker');
+     form.addEventListener('htmx:configRequest', function(event) {
       if (!destination.value) {
        event.preventDefault();
+       pendingSend = true;
        window.taskWorkspace.openPanel('details');
        root.querySelector('[data-detail-property="destination_project"]').click();
       }
+     });
+     destination.addEventListener('change', function() {
+      if (!pendingSend || !destination.value) return;
+      pendingSend = false;
+      // Let the property picker finish updating the draft and close first.
+      queueMicrotask(function() {
+       if (root.isConnected && destination.value) form.requestSubmit();
+      });
+     });
+     projectPicker.addEventListener('beforetoggle', function(event) {
+      if (event.newState === 'closed' && !destination.value) pendingSend = false;
+     });
+     root.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') pendingSend = false;
+     }, true);
+     root.addEventListener('pointerdown', function(event) {
+      if (!projectPicker.contains(event.target) && !event.target.closest('[data-detail-property="destination_project"]')) pendingSend = false;
      });
     }
     root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
