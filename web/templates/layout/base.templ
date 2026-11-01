@@ -3267,6 +3267,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				   asymmetric transparent borders that distort its rounded ends. */
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"]) [role="tab"] { height: calc(100% - 4px); align-self: flex-start; padding-bottom: 6px; }
 				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { height: 32px; width: calc(100% - 4px); align-self: flex-start; margin: 1px 2px 0; border: 0; padding: 0 38px 0 14px; border-radius: 999px; }
+				html[data-shell-frame][data-tab-style="attached"] #desktop-project-tabs .desktop-project-tab:not([data-selected="true"])[style*="--attached-tab-hover-clip"]:hover [role="tab"] { border-radius: 0; clip-path: var(--attached-tab-hover-clip); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab [data-close-project],
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] .desktop-project-tab:not([data-selected="true"])::after { top: calc(50% - 5px); }
 				html[data-shell-frame][data-openvibely-runtime="desktop"][data-tab-style="attached"] #desktop-project-titlebar #project-selector-trigger { transform: translateY(-5px); }
@@ -5645,9 +5646,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						})();
 						(function() {
 								// x^4 + y^4 = 1 superellipse corners; pixel radii keep long edges straight.
-								function shape(el) {
+								function shape(el, attachedHover) {
 									var w = el.clientWidth, h = el.clientHeight;
 									if (!w || !h) return;
+									// Attached hover surfaces are inset 2px per side and 32px tall.
+									if (attachedHover) { w -= 4; h = 32; }
 									var inspector = el.hasAttribute('data-side-panel');
 									var layout = document.documentElement.getAttribute('data-layout');
 									var unified = layout === 'unified';
@@ -5664,7 +5667,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 											pts.push((c[0] + r * Math.sign(x) * Math.sqrt(Math.abs(x))).toFixed(2) + 'px ' + (c[1] + r * Math.sign(y) * Math.sqrt(Math.abs(y))).toFixed(2) + 'px');
 										}
 									});
-									el.style.setProperty('--superellipse-clip', 'polygon(' + pts.join(',') + ')');
+									el.style.setProperty(attachedHover ? '--attached-tab-hover-clip' : '--superellipse-clip', 'polygon(' + pts.join(',') + ')');
+									if (!attachedHover && el.classList.contains('desktop-project-tab')) shape(el, true);
 								}
 								if (typeof ResizeObserver === 'undefined') return;
 								var observer = new ResizeObserver(function(entries) { entries.forEach(function(e) { shape(e.target); }); });
