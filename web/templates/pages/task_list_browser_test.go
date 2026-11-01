@@ -456,9 +456,13 @@ func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
 			}
 			b.call("Input.dispatchMouseEvent", map[string]any{"type": kind, "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
 		}
+		// Position the source lower down to exercise an upward panel without covering the reorder target.
+		b.evaluate(`document.getElementById('task-list-groups').style.paddingTop='260px';window.dragRowTop=document.querySelector('[data-task-list-row="drag-b"]').getBoundingClientRect().top; 'positioned'`)
 		mouse("mousePressed", `[data-task-list-row="drag-a"]`, false)
 		mouse("mouseMoved", `[data-task-list-row="drag-b"]`, false)
 		b.waitFor("drag exposes empty category targets", `String(!document.querySelector('.task-list-drop-targets').hidden && window.isDragging)`, "true")
+		b.waitFor("panel floats above original entry without shifting rows", `(()=>{var panel=document.querySelector('.task-list-drop-targets'),slot=document.querySelector('[data-pointer-drag-placeholder]');return String(panel.parentElement===document.body && panel.getBoundingClientRect().bottom < slot.getBoundingClientRect().top && Math.abs(document.querySelector('[data-task-list-row="drag-b"]').getBoundingClientRect().top-window.dragRowTop)<2)})()`, "true")
+		b.waitFor("stacked targets match dragged entry width", `(()=>{var targets=Array.from(document.querySelectorAll('[data-task-list-drop-category]')),row=document.querySelector('.task-list-dragging').getBoundingClientRect();return String(targets.every((t,i)=>t.getBoundingClientRect().width>=row.width-1 && (!i || t.getBoundingClientRect().top>=targets[i-1].getBoundingClientRect().bottom)) && document.querySelector('.task-list-drop-targets').children.length===4)})()`, "true")
 		b.waitFor("actual row follows pointer", `String(document.querySelector('[data-task-list-row="drag-a"]').parentElement===document.body && document.querySelector('[data-task-list-row="drag-a"]').style.transform.includes('translate3d') && !!document.querySelector('#task-list-groups [data-pointer-drag-placeholder]'))`, "true")
 		b.evaluate(`document.querySelector('[data-task-list-row="drag-b"]').dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));window.openVibelyTooltip.show(document.querySelector('[data-task-list-row="drag-b"]'),'Task tooltip',false); 'hover during drag'`)
 		b.evaluateAwait(`new Promise(resolve=>setTimeout(()=>resolve('waited for hover delay'),550))`)
@@ -471,7 +475,9 @@ func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
 		}
 		b.waitFor("drag cleanup", `String(!window.isDragging && !document.querySelector('.task-list-dragging') && !document.querySelector('[data-pointer-drag-placeholder]'))`, "true")
 		b.waitFor("row appearance restored after drop", `String(document.querySelector('[data-task-list-row="drag-a"]').closest('#task-list-groups') !== null && !document.querySelector('[data-task-list-row="drag-a"]').hasAttribute('style'))`, "true")
+		b.evaluate(`document.getElementById('task-list-groups').style.paddingTop='';'reset position'`)
 		b.evaluate(start)
+		b.waitFor("panel opens below near viewport top", `String(document.querySelector('.task-list-drop-targets').getBoundingClientRect().top > document.querySelector('[data-pointer-drag-placeholder]').getBoundingClientRect().bottom)`, "true")
 		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'cancelled'`)
 		b.waitFor("Escape cancels drag", `String(!window.isDragging && document.querySelector('.task-list-drop-targets').hidden)`, "true")
 		if requests.Load() != 1 {
