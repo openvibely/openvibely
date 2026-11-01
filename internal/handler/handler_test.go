@@ -9260,7 +9260,10 @@ func TestHandler_NewTaskPausedDraftSchedule(t *testing.T) {
 func TestHandler_NewTaskFutureWeeklyScheduleWaitsForRunAt(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Future scheduled draft")
-	runAt := time.Now().In(time.Local).Add(2 * time.Hour).Truncate(time.Minute)
+	// Use a future local noon so the offset-free form value does not land in
+	// the repeated hour when daylight saving time ends.
+	tomorrow := time.Now().In(time.Local).AddDate(0, 0, 1)
+	runAt := time.Date(tomorrow.Year(), tomorrow.Month(), tomorrow.Day(), 12, 0, 0, 0, time.Local)
 	form := url.Values{"message": {"Run weekly later"}, "category": {"active"}, "add_schedule": {"on"}, "run_at": {runAt.Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"1"}, "clear_context_on_start": {"false"}}
 	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -9283,7 +9286,7 @@ func TestHandler_NewTaskFutureWeeklyScheduleWaitsForRunAt(t *testing.T) {
 	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
 	require.False(t, schedules[0].ClearContextOnStart)
 	require.NotNil(t, schedules[0].NextRun)
-	require.True(t, runAt.Equal(*schedules[0].NextRun))
+	require.True(t, runAt.Equal(*schedules[0].NextRun), "NextRun = %s, want %s", schedules[0].NextRun, runAt)
 	due, err := h.scheduleRepo.ListDue(context.Background(), time.Now())
 	require.NoError(t, err)
 	require.Empty(t, due)
