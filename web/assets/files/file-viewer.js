@@ -26,7 +26,20 @@
  let controller,opener,group,items=[],index=0,ticket=0,currentKind='',pointerOpened=false,owner=null,opening=0,svgPreview=null;
  function mode(raw,key){const url=new URL(raw,location.href);for(const k of ['view','raw','download','thumbnail'])url.searchParams.delete(k);url.searchParams.set(key,'1');return url.href}
  function original(raw){const url=new URL(raw,location.href);return url.origin===location.origin&&/\/(attachments|files)\//.test(url.pathname)?mode(raw,'download'):raw}
+ let borrowedHTML=null;
+ function restoreHTML(){
+  if(!borrowedHTML)return;
+  const {frame,canvas}=borrowedHTML;borrowedHTML=null;frame.hidden=false;
+  if(canvas.isConnected&&frame.isConnected&&canvas.moveBefore)canvas.moveBefore(frame,canvas.firstChild);
+ }
+ function prepareHTMLFrames(root){
+  root.querySelectorAll('iframe').forEach(frame=>{
+   frame.style.visibility='hidden';
+   frame.addEventListener('load',()=>{frame.style.removeProperty('visibility')},{once:true});
+  });
+ }
  function clear(){
+  restoreHTML();
   svgPreview?.dispose();svgPreview=null;
   dialog.querySelectorAll('header [data-sheet-tabs],header [data-sheet-count]').forEach(node=>node.remove());
   content.dispatchEvent(new CustomEvent('ov:file-replace',{bubbles:true}));
@@ -61,7 +74,21 @@
    const response=await fetch(mode(item.raw,'view'),{signal:controller.signal});
    if(!response.ok){let message='Preview unavailable';try{message=(await response.json()).message||message}catch{}throw Error(message)}
    const html=await response.text();if(id!==ticket||!dialog.open)return;
-   content.innerHTML=html;
+   // Parse off-document so the replacement iframe never starts a second load.
+   const template=document.createElement('template');template.innerHTML=html;
+   const canvas=item.element?.closest('.file-html-canvas')||item.element?.nextElementSibling;
+   const liveFrame=canvas?.classList.contains('file-html-canvas')?canvas.querySelector('iframe'):null;
+   const replacement=template.content.querySelector('[data-file-viewer="html"] iframe');
+   let marker;
+   if(replacement&&liveFrame?.isConnected&&content.moveBefore&&liveFrame.src===new URL(replacement.getAttribute('src'),location.href).href){
+    marker=document.createComment('Expanded HTML preview');replacement.replaceWith(marker);
+   }
+   prepareHTMLFrames(template.content);
+   content.replaceChildren(template.content);
+   if(marker){
+    marker.parentNode.moveBefore(liveFrame,marker);marker.remove();
+    borrowedHTML={frame:liveFrame,canvas};
+   }
    const header=content.querySelector('[data-file-header],[data-document-header]');
    if(header){title.textContent=header.querySelector('h3')?.textContent||item.name;download.download=title.textContent;const link=header.querySelector('a');if(link)download.href=link.href;header.remove()}
    // A Files-panel link may not have media metadata. Use the server's renderer kind.
@@ -271,7 +298,7 @@
  const video=file.media_type.startsWith('video/');link.removeAttribute('data-file-preview');link.dataset.imageGalleryItem='';link.dataset.imageName=file.file_name;link.dataset.mediaKind=video?'video':'image';(link.closest('.chat-markdown')||link.parentElement).dataset.imageGalleryGroup='';const preview=document.createElement(video?'video':'img');preview.src=mode(url,video?'raw':'thumbnail');preview.alt=file.file_name;preview.style.cssText='max-width:100%;max-height:400px;object-fit:contain';if(video){preview.muted=true;preview.preload='metadata'}link.prepend(preview);return;
  }
  if(!/^text\/html(?:;|$)/i.test(file.media_type)&&! /\.html?$/i.test(file.file_name))return;
- const canvas=document.createElement('div');canvas.className='file-html-canvas';const frame=document.createElement('iframe');frame.title=file.file_name;frame.setAttribute('sandbox','allow-scripts');frame.referrerPolicy='no-referrer';frame.src=mode(url,'raw');const expand=document.createElement('button');expand.type='button';expand.textContent='Expand';canvas.append(frame,expand);link.after(canvas);
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';const frame=document.createElement('iframe');frame.title=file.file_name;frame.setAttribute('sandbox','allow-scripts');frame.referrerPolicy='no-referrer';frame.src=mode(url,'raw');const expand=document.createElement('button');expand.type='button';expand.textContent='Expand';canvas.append(frame,expand);prepareHTMLFrames(canvas);link.dataset.fileName=file.file_name;link.after(canvas);
  }).catch(()=>{});
  })}
  let scanQueued=false;new MutationObserver(()=>{if(scanQueued)return;scanQueued=true;requestAnimationFrame(()=>{scanQueued=false;scanLinks()})}).observe(document.body,{childList:true,subtree:true});scanLinks();
