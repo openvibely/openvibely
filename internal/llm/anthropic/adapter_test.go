@@ -445,6 +445,76 @@ func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T
 	}
 }
 
+func TestToolSecondaryInfo_NormalizesAndClipsActivityDetails(t *testing.T) {
+	tests := []struct {
+		name  string
+		tool  string
+		input map[string]any
+		want  string
+	}{
+		{
+			name:  "Bash flattens newlines",
+			tool:  "Bash",
+			input: map[string]any{"command": "echo first\necho second"},
+			want:  "$ echo first echo second",
+		},
+		{
+			name:  "Bash clips at 320 characters",
+			tool:  "Bash",
+			input: map[string]any{"command": strings.Repeat("c", 321)},
+			want:  "$ " + strings.Repeat("c", 320) + "…",
+		},
+		{
+			name:  "Grep trims and flattens newlines",
+			tool:  "Grep",
+			input: map[string]any{"pattern": "  error\ncode  "},
+			want:  "error code",
+		},
+		{
+			name:  "Grep clips at 140 characters",
+			tool:  "Grep",
+			input: map[string]any{"pattern": strings.Repeat("p", 141)},
+			want:  strings.Repeat("p", 140) + "…",
+		},
+		{
+			name:  "web search trims and flattens query",
+			tool:  "WebSearch",
+			input: map[string]any{"query": "  docs\napi  "},
+			want:  "docs api",
+		},
+		{
+			name:  "web search clips at 140 characters",
+			tool:  "WebSearch",
+			input: map[string]any{"query": strings.Repeat("q", 141)},
+			want:  strings.Repeat("q", 140) + "…",
+		},
+		{
+			name:  "web fetch trims and flattens URL",
+			tool:  "WebFetch",
+			input: map[string]any{"url": "  https://example.test/\npath  "},
+			want:  "https://example.test/ path",
+		},
+		{
+			name:  "web fetch clips at 140 characters",
+			tool:  "WebFetch",
+			input: map[string]any{"url": "https://example.test/" + strings.Repeat("u", 130)},
+			want:  "https://example.test/" + strings.Repeat("u", 119) + "…",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(tt.input)
+			if err != nil {
+				t.Fatalf("marshal input: %v", err)
+			}
+			if got := toolSecondaryInfo(tt.tool, raw); got != tt.want {
+				t.Fatalf("toolSecondaryInfo(%q, %s) = %q, want %q", tt.tool, raw, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToolSecondaryInfo_LongBashPreservesLaterContext(t *testing.T) {
 	input := map[string]any{
 		"command": "cd /Users/dubee/go/src/github.com/openvibely/openvibely/.worktrees/task_6a40e9f8fefa53ac8d203aa3fd3a70be && rg -n \"toolSecondaryInfo|truncateToolSecondary|task thread\" internal pkg web/templates/components/chat_shared.templ",
