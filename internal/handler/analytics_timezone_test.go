@@ -79,7 +79,7 @@ func TestParseUsageFilter_SevenDayRange(t *testing.T) {
 }
 
 // TestParseUsageFilter_ThirtyDayDefault verifies that the default range (or "30d") sets
-// a 30-day window.
+// a 30-calendar-day window in local time.
 func TestParseUsageFilter_ThirtyDayDefault(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/analytics/usage?group_by=day", nil)
@@ -94,13 +94,10 @@ func TestParseUsageFilter_ThirtyDayDefault(t *testing.T) {
 		t.Fatal("expected non-zero date bounds for default range")
 	}
 
-	// DateFrom should be 30 days before DateTo (within a 1-second window).
-	elapsed := filter.DateTo.Sub(filter.DateFrom)
-	expectedElapsed := 30 * 24 * time.Hour
-	tolerance := time.Second
-	diff := elapsed - expectedElapsed
-	if diff < -tolerance || diff > tolerance {
-		t.Errorf("expected DateTo-DateFrom ≈ 30 days, got %v", elapsed)
+	// Calendar days can span 23 or 25 hours across daylight-saving changes.
+	expectedFrom := filter.DateTo.In(time.Local).AddDate(0, 0, -30)
+	if !filter.DateFrom.Equal(expectedFrom) {
+		t.Errorf("DateFrom=%v, want 30 local calendar days before DateTo: %v", filter.DateFrom, expectedFrom)
 	}
 
 	// DateTo should be within the before/after window.
