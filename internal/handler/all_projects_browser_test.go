@@ -112,6 +112,16 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
  assert(projectRow.querySelector('[data-property-label]').textContent==='Second browser project','project label did not update');
  assert(new FormData(document.getElementById('task-thread-form')).get('destination_project')==='` + project.ID + `','destination not submitted');
  assert(document.getElementById('project-selector').value==='__all_projects__','project picker switched tabs');
+ for (const scope of ['` + project.ID + `','__all_projects__']) {
+  window.openVibelyNavigate('/tasks/` + task.ID + `?project_id='+scope);
+  await wait(()=>document.getElementById('project-selector').value===scope && location.pathname==='/tasks/` + task.ID + `');
+  for (const action of ['merge','rebase','abort','resolve']) {
+   const detail={path:'/tasks/` + task.ID + `/worktree/'+action,verb:'post',parameters:{}};
+   document.body.dispatchEvent(new CustomEvent('htmx:configRequest',{bubbles:true,detail:detail}));
+   assert(new URL(detail.path,location.href).searchParams.get('project_id')===scope,'worktree action missing scope: '+scope+' '+action);
+  }
+ }
+
 
 
  await fetch('/browser-result',{method:'POST',body:'pass'});
