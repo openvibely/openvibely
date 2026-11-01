@@ -68,7 +68,7 @@ func TestVacuumTriggerBudgetAndPendingRemeasurement(t *testing.T) {
 							t.Errorf("new run did not restart at one page: %d", pages)
 						}
 						// Fresh snapshot is ineligible: this run must stop without vacuuming.
-						return vacuumResult{beforeKnown: true, before: vacuumStats{pages: 20000, free: 2499}}
+						return vacuumResult{beforeKnown: true, before: vacuumStats{pages: 20000, free: 0}}
 					}
 					if pending {
 						for i := 0; i < 100; i++ {

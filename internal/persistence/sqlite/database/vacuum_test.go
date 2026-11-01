@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
+func TestReclaimOnceWithConcurrentWriterAndReader(t *testing.T) {
 	db, err := New(filepath.Join(t.TempDir(), "vacuum.db"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -35,8 +35,8 @@ func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeBefore); err != nil {
 		t.Fatalf("freelist before: %v", err)
 	}
-	if freeBefore < vacuumMinPages {
-		t.Skipf("fixture produced only %d free pages; need at least %d to exercise reclaim path", freeBefore, vacuumMinPages)
+	if freeBefore == 0 {
+		t.Fatal("fixture produced no free pages")
 	}
 	reader, err := db.Conn(ctx)
 	if err != nil {

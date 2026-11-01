@@ -149,7 +149,12 @@ func TestDeletionRequestsVacuumOnlyAfterCommit(t *testing.T) {
 			if err := reader.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id=?`, task.ID).Scan(&count); err != nil || count != 0 {
 				t.Fatalf("deletion not committed: count=%d err=%v", count, err)
 			}
-			// Tiny fixture is below threshold, so one check finishes the run.
+			// These small deletions leave no free pages, so the initial check
+			// finishes the run. Do not assume the former size thresholds apply.
+			var free int
+			if err := reader.QueryRow(`SELECT freelist_count FROM pragma_freelist_count`).Scan(&free); err != nil || free != 0 {
+				t.Fatalf("expected empty freelist for no-op trigger assertion: free=%d err=%v", free, err)
+			}
 			if err := remove(); err != nil {
 				t.Fatal(err)
 			}

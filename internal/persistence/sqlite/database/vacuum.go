@@ -15,15 +15,13 @@ const (
 	vacuumBatchPages    = 1
 	vacuumMaxBatchPages = 512
 	vacuumTarget        = 25 * time.Millisecond
-	vacuumMinPages      = 2500
-	vacuumMinPercent    = 10
 	vacuumLockWait      = 25 * time.Millisecond
 )
 
 type vacuumStats struct{ pages, free, pageSize int64 }
 
 func (s vacuumStats) eligible() bool {
-	return s.free >= vacuumMinPages && s.pages > 0 && s.free*100/s.pages >= vacuumMinPercent
+	return s.free > 0
 }
 
 type vacuumResult struct {
