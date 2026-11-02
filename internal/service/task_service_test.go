@@ -2640,6 +2640,59 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testin
 	assert.Equal(t, "stopped by user", paused.Reason)
 }
 
+func TestTaskService_UpdateCategory_SwarmParentCancelsChildren(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusQueued, models.StatusPending, models.StatusBlocked} {
+		for _, destination := range []models.TaskCategory{models.CategoryBacklog, models.CategoryCompleted} {
+			t.Run(string(status)+"/"+string(destination), func(t *testing.T) {
+				env := teststores.New(t)
+				ctx := context.Background()
+				worker := newTestWorkerService(t)
+				svc := NewTaskService(env.Tasks, nil, worker)
+				svc.SetSwarmService(NewSwarmService(svc, env.Tasks, nil, worker))
+				goals := NewTaskGoalService(env.TaskGoals, env.Tasks, nil)
+				svc.SetTaskGoalService(goals)
+				parent := &models.Task{ProjectID: "default", Title: "Parent", Prompt: "test", Category: models.CategoryActive, Status: status, SwarmRole: models.SwarmRoleParent}
+				require.NoError(t, env.Tasks.Create(ctx, parent))
+				_, err := goals.SetGoal(ctx, parent.ID, "Finish swarm", GoalOptions{Actor: "test"})
+				require.NoError(t, err)
+				var children []*models.Task
+				cancelled := false
+				for _, childStatus := range []models.TaskStatus{models.StatusRunning, models.StatusQueued, models.StatusPending, models.StatusBlocked, models.StatusCompleted} {
+					child := &models.Task{ProjectID: "default", Title: string(childStatus), Prompt: "test", Category: models.CategoryActive, Status: childStatus, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker}
+					require.NoError(t, env.Tasks.Create(ctx, child))
+					children = append(children, child)
+					if childStatus == models.StatusRunning {
+						worker.RegisterCancel(child.ID, func() {
+							cancelled = true
+							assert.True(t, worker.IsCancellationRequested(child.ID))
+						})
+					}
+				}
+				require.NoError(t, svc.UpdateCategory(ctx, parent.ID, destination))
+				require.True(t, cancelled, "running child must be stopped")
+				updated, err := env.Tasks.GetByID(ctx, parent.ID)
+				require.NoError(t, err)
+				assert.Equal(t, destination, updated.Category)
+				assert.Equal(t, models.StatusCancelled, updated.Status)
+				goal, err := goals.GetGoal(ctx, parent.ID)
+				require.NoError(t, err)
+				assert.Equal(t, models.TaskGoalStatusPaused, goal.Status)
+				for _, child := range children {
+					updated, err := env.Tasks.GetByID(ctx, child.ID)
+					require.NoError(t, err)
+					if child.Status == models.StatusCompleted {
+						assert.Equal(t, models.StatusCompleted, updated.Status)
+						assert.False(t, worker.IsCancellationRequested(child.ID))
+					} else {
+						assert.Equal(t, models.StatusCancelled, updated.Status)
+						assert.True(t, worker.IsCancellationRequested(child.ID))
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestTaskService_UpdateCategory_FromScheduledCancelsWork(t *testing.T) {
 	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusQueued} {
 		for _, destination := range []models.TaskCategory{models.CategoryBacklog, models.CategoryCompleted} {
