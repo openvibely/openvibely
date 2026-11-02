@@ -618,6 +618,10 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				groupState[label] = Object.assign({}, groupState[label], { browsing: expanded });
 				saveGroupState();
 				syncMore(group);
+                var focusTarget = expanded
+                    ? group.querySelector('[data-task-list-row]:not([hidden])')
+                    : group.querySelector('.task-list-more');
+                if (focusTarget) focusTarget.focus({preventScroll: true});
 			});
 
 			var hoverCard = document.createElement('div');
