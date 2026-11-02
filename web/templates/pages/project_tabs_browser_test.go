@@ -222,7 +222,10 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.evaluate(`if(window.originalDividerTabStyle===null)document.documentElement.removeAttribute('data-tab-style');else document.documentElement.setAttribute('data-tab-style',window.originalDividerTabStyle);delete window.originalDividerTabStyle; 'restored'`)
 				browser.click("#project-selector-trigger")
 				browser.waitFor("menu ready for hover", `String(document.getElementById('project-selector-dialog').open)`, "true")
-				activeColor := browser.evaluate(`getComputedStyle(document.querySelector('#project-selector-dialog [data-selector-active]')).backgroundColor`)
+				// Compare rendered sRGB pixels, since equivalent CSS colors can serialize
+				// as either oklch() or color(srgb ...) depending on their source.
+				browser.evaluate(`window.menuColor = function(selector) { const ctx = document.createElement('canvas').getContext('2d'); ctx.fillStyle = getComputedStyle(document.querySelector(selector)).backgroundColor; ctx.fillRect(0, 0, 1, 1); return Array.from(ctx.getImageData(0, 0, 1, 1).data).join(','); }; 'ready'`)
+				activeColor := browser.evaluate(`window.menuColor('#project-selector-dialog [data-selector-active]')`)
 				for _, selector := range []string{"#new-project-btn", "[data-project-selector-option]", "#new-project-btn"} {
 					var hoverPoint struct{ X, Y float64 }
 					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('`+selector+`').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &hoverPoint); err != nil {
@@ -230,7 +233,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					}
 					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": hoverPoint.X, "y": hoverPoint.Y}, nil)
 					browser.waitFor("one menu highlight", `String(document.querySelectorAll('#project-selector-dialog [data-selector-active]').length===1 && document.querySelector('`+selector+`').hasAttribute('data-selector-active'))`, "true")
-					browser.waitFor("standard menu highlight color", `getComputedStyle(document.querySelector('`+selector+`')).backgroundColor`, activeColor)
+					browser.waitFor("standard menu highlight color", `window.menuColor('`+selector+`')`, activeColor)
 				}
 
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)

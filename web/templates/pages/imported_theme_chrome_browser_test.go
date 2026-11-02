@@ -154,16 +154,16 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("transparent rail restored", `window.computed('#sidebar', 'backgroundColor')`, "rgba(0, 0, 0, 0)")
 		browser.evaluate(`window.openVibelyThemes.apply('vscode-kimbie-dark');'ok'`)
 
-		browser.evaluate(`document.querySelector('[data-kanban-search]').dataset.open = 'true';'ok'`)
+		browser.evaluate(`document.querySelector('#fixture-search [data-kanban-search]').dataset.open = 'true';'ok'`)
 		for _, themeID := range []string{"vscode-dark-2026", "vscode-light-2026", "github-light", "catppuccin-mocha"} {
 			browser.evaluate(`window.openVibelyThemes.apply('` + themeID + `');'ok'`)
 			for _, property := range []string{"backgroundColor", "borderTopColor", "borderTopWidth", "borderRadius", "boxShadow"} {
-				browser.waitFor(themeID+" search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
+				browser.waitFor(themeID+" search matches card search "+property, `String(window.computed('#fixture-search .kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
 			}
-			browser.evaluate(`document.querySelector('.kanban-search-input').focus({preventScroll:true});'ok'`)
-			browser.waitFor(themeID+" focused search retains card border", `String(window.computed('.kanban-search', 'borderTopColor') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement).borderTopColor)`, "true")
-			browser.waitFor(themeID+" search placeholder matches", `String(getComputedStyle(document.querySelector('.kanban-search-input'), '::placeholder').color === getComputedStyle(document.querySelector('[data-card-search="themes"]'), '::placeholder').color)`, "true")
-			browser.evaluate(`document.querySelector('.kanban-search-input').blur();'ok'`)
+			browser.evaluate(`document.querySelector('#fixture-search .kanban-search-input').focus({preventScroll:true});'ok'`)
+			browser.waitFor(themeID+" focused search retains card border", `String(window.computed('#fixture-search .kanban-search', 'borderTopColor') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement).borderTopColor)`, "true")
+			browser.waitFor(themeID+" search placeholder matches", `String(getComputedStyle(document.querySelector('#fixture-search .kanban-search-input'), '::placeholder').color === getComputedStyle(document.querySelector('[data-card-search="themes"]'), '::placeholder').color)`, "true")
+			browser.evaluate(`document.querySelector('#fixture-search .kanban-search-input').blur();'ok'`)
 			browser.waitFor(themeID+" task title inherits normal text", `String(window.computed('#theme-task-card .task-card-title-link', 'color') === window.computed('#theme-task-card .card-body', 'color'))`, "true")
 			for _, selector := range []string{"#theme-task-card [data-task-prompt]", "#theme-card-description"} {
 				browser.waitFor(themeID+selector+" description uses palette", `window.matches('`+selector+`', 'color', 'var(--ov-text-muted)')`, "ok")
@@ -234,11 +234,11 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("running task state uses theme accent", `window.near('#fixture-running', 'color', 'var(--ov-link)')`, "ok")
 		browser.waitFor("primary badge uses theme accent", `window.near('#fixture-primary-badge', 'backgroundColor', 'var(--ov-link)')`, "ok")
 
-		browser.evaluate(`document.querySelector('[data-kanban-search]').dataset.open = 'true';'ok'`)
-		browser.waitFor("task search box surface", `window.matches('.kanban-search', 'backgroundColor', 'var(--ov-surface)')`, "ok")
-		browser.waitFor("task search box border", `window.matches('.kanban-search', 'borderTopColor', 'var(--ov-subtle-border)')`, "ok")
-		browser.waitFor("task search input text", `window.matches('.kanban-search-input', 'color', 'var(--ov-text)')`, "ok")
-		browser.waitFor("task search clear icon", `window.matches('.kanban-search-clear', 'color', 'var(--ov-text-muted)')`, "ok")
+		browser.evaluate(`document.querySelector('#fixture-search [data-kanban-search]').dataset.open = 'true';'ok'`)
+		browser.waitFor("task search box surface", `window.matches('#fixture-search .kanban-search', 'backgroundColor', 'var(--ov-surface)')`, "ok")
+		browser.waitFor("task search box border", `window.matches('#fixture-search .kanban-search', 'borderTopColor', 'var(--ov-subtle-border)')`, "ok")
+		browser.waitFor("task search input text", `window.matches('#fixture-search .kanban-search-input', 'color', 'var(--ov-text)')`, "ok")
+		browser.waitFor("task search clear icon", `window.matches('#fixture-search .kanban-search-clear', 'color', 'var(--ov-text-muted)')`, "ok")
 
 		browser.evaluate(`window.openScheduleDateTime(document.querySelector('[data-run-at-picker]'));'ok'`)
 		browser.waitFor("selected date uses theme button", `window.matches('.schedule-datetime-days [aria-pressed="true"]', 'backgroundColor', 'var(--ov-button-bg)')`, "ok")
@@ -387,8 +387,8 @@ func TestBrowserFunctional_ImportedThemeStylesTitlebarMenusAndSchedulePickers(t 
 		browser.waitFor("native theme menu retains theme surface", `window.computed('#fixture-menu', 'backgroundColor')`, "rgb(25, 30, 36)")
 		browser.waitFor("native theme keeps default deletion count", `window.computed('#fixture-deletions', 'color')`, "rgb(189, 112, 118)")
 		for _, property := range []string{"backgroundColor", "borderTopColor"} {
-			browser.waitFor("native dark search matches card search "+property, `String(window.computed('.kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
+			browser.waitFor("native dark search matches card search "+property, `String(window.computed('#fixture-search .kanban-search', '`+property+`') === getComputedStyle(document.querySelector('[data-card-search="themes"]').parentElement)['`+property+`'])`, "true")
 		}
-		browser.waitFor("native dark search uses card color", `window.near('.kanban-search', 'backgroundColor', '#191e24')`, "ok")
+		browser.waitFor("native dark search uses card color", `window.near('#fixture-search .kanban-search', 'backgroundColor', '#191e24')`, "ok")
 	})
 }

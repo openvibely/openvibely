@@ -2549,7 +2549,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var inspectorBody = document.getElementById('task-inspector-body');
     var bodyBottom = inspectorBody.getBoundingClientRect().bottom - parseFloat(getComputedStyle(inspectorBody).paddingBottom);
     var inspectorRect = inspector.getBoundingClientRect();
-    if (Math.abs(inspectorRect.top) > 1 || Math.abs(inspectorRect.bottom - innerHeight) > 1 || Math.abs(inspectorRect.right - innerWidth) > 1) throw new Error('inspector is not flush with the viewport');
+    if (Math.abs(inspectorRect.top) > 1 || Math.abs(inspectorRect.bottom - innerHeight) > 1 || Math.abs(inspectorRect.right - innerWidth) > 1) throw new Error('inspector is not flush with the viewport: ' + JSON.stringify(inspectorRect) + ' viewport=' + innerWidth + 'x' + innerHeight);
     var cardRect = card.getBoundingClientRect();
     var descriptionRect = description.getBoundingClientRect();
     var firstRowRect = firstRow.getBoundingClientRect();
@@ -2564,7 +2564,9 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-none{flex:none}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.card-body>p{flex-grow:1}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + lifecycleBrowserShell(t) + fragment.String() + runner + "</body></html>"
+	// Match the application shell: only internal panels scroll. A document
+	// scrollbar on Linux otherwise reduces the fixed inspector viewport width.
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;height:100%;overflow:hidden;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-none{flex:none}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.card-body>p{flex-grow:1}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + lifecycleBrowserShell(t) + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-fill.stderr")
 	stderrFile, err := os.Create(stderrPath)

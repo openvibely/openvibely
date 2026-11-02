@@ -36,7 +36,7 @@ func TestBrowserFunctional_NeutralControlFocus(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/audit", "neutral-focus", func(b *composerFocusCDP) {
 		b.waitFor("toolbar", `String(document.readyState==='complete' && !!document.querySelector('#task-details-opener'))`, "true")
-		b.evaluate(`document.querySelector('[data-kanban-search]').dataset.open='true';document.querySelector('#kanban-search-input').value='audit';document.querySelector('#task-change-activity').hidden=false;document.querySelector('[data-change-files]').textContent='1 file';'ready'`)
+		b.evaluate(`document.querySelector('#kanban-search-input').closest('[data-kanban-search]').dataset.open='true';document.querySelector('#kanban-search-input').value='audit';document.querySelector('#task-change-activity').hidden=false;document.querySelector('[data-change-files]').textContent='1 file';'ready'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab"}, nil)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab"}, nil)
 		for _, theme := range []string{"dark", "light"} {
@@ -75,7 +75,7 @@ func TestBrowserFunctional_NeutralControlFocus(t *testing.T) {
 				b.waitFor("thin neutral keyboard feedback in "+theme+" "+workspace, `(function(){
      const reference=document.createElement('span');reference.style.outline='1px solid oklch(var(--bc) / .5)';document.body.append(reference);
      const neutral=getComputedStyle(reference).outlineColor;reference.remove();
-     const selectors=['#task-resource-selector-button','#task-details-opener','#task-change-activity button','.kanban-search-toggle','.kanban-search-clear','[data-breadcrumb-title]','#audit-examples .chat-input-option-btn','#audit-examples summary','#audit-examples a','#audit-examples .stream-tool-output-toggle','#task-workspace-back'];
+     const selectors=['#task-resource-selector-button','#task-details-opener','#task-change-activity button','button.kanban-search-toggle','button.kanban-search-clear','[data-breadcrumb-title]','#audit-examples .chat-input-option-btn','#audit-examples summary','#audit-examples a','#audit-examples .stream-tool-output-toggle','#task-workspace-back'];
      const controls=Array.from(document.querySelectorAll(selectors.join(','))).filter(e=>e.getClientRects().length&&!e.disabled);
      if(controls.length<8)return 'missing controls';
      return controls.map(e=>{e.focus();const s=getComputedStyle(e);if(document.activeElement!==e||!e.matches(':focus-visible'))return e.outerHTML+' not keyboard focused';
