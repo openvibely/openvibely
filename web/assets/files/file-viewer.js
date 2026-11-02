@@ -246,31 +246,41 @@
  function commitStreamInPlace(fragment,previous){
   const moves=fragment._fileStreamMoves||[];
   function patch(parent,desired){
-   let cursor=parent.firstChild;
-   for(const fresh of Array.from(desired.childNodes)){
-    const entry=moves.find(([marker])=>fresh===marker||fresh.contains(marker));
-    let node=fresh;
-    if(entry){
-     const [marker,canvas]=entry;
-     let ancestor=canvas;
+   const children=Array.from(desired.childNodes),groups=new Map();
+   // Plan all destinations before removing anything. Several desired rows can
+   // share one existing live-tail wrapper, which must remain attached as a unit.
+   children.forEach((fresh,index)=>{
+    for(const [marker,retained] of moves){
+     if(fresh!==marker&&!fresh.contains(marker))continue;
+     let ancestor=retained;
      while(ancestor.parentNode&&ancestor.parentNode!==parent)ancestor=ancestor.parentNode;
-     if(ancestor.parentNode===parent&&(fresh===marker||ancestor!==canvas)){
-      node=ancestor;
-      if(fresh!==marker){
-       if(node.nodeName===fresh.nodeName&&node.style?.display!=='contents'){
-        for(const attr of Array.from(node.attributes))if(!fresh.hasAttribute(attr.name))node.removeAttribute(attr.name);
-        for(const attr of fresh.attributes)node.setAttribute(attr.name,attr.value);
-        if(fresh._chatMarkdownSource!==undefined)node._chatMarkdownSource=fresh._chatMarkdownSource;
-        patch(node,fresh);
-       }else{
-        // Completion can remove the live-tail wrapper. Retain that wrapper
-        // rather than disconnecting its browsing context just to flatten it.
-        const wrapper=document.createDocumentFragment();wrapper.append(fresh);patch(node,wrapper);
-       }
-      }
-     }else{
-      marker.replaceWith(canvas);
-      node=fresh===marker?canvas:fresh;
+     if(ancestor.parentNode!==parent||(ancestor===retained&&fresh!==marker))continue;
+     const group=groups.get(ancestor);
+     if(group)group.end=index;else groups.set(ancestor,{node:ancestor,start:index,end:index});
+    }
+   });
+   let cursor=parent.firstChild;
+   for(let index=0;index<children.length;index++){
+    const fresh=children[index],group=Array.from(groups.values()).find(group=>group.start===index);
+    let node=fresh;
+    if(group){
+     node=group.node;
+     if(group.end===index&&fresh.nodeType!==Node.COMMENT_NODE&&node.nodeName===fresh.nodeName&&node.style?.display!=='contents'){
+      for(const attr of Array.from(node.attributes))if(!fresh.hasAttribute(attr.name))node.removeAttribute(attr.name);
+      for(const attr of fresh.attributes)node.setAttribute(attr.name,attr.value);
+      if(fresh._chatMarkdownSource!==undefined)node._chatMarkdownSource=fresh._chatMarkdownSource;
+      patch(node,fresh);
+     }else if(group.end!==index||!moves.some(([marker,retained])=>fresh===marker&&node===retained)){
+      const wrapper=document.createDocumentFragment();
+      for(let i=index;i<=group.end;i++)wrapper.append(children[i]);
+      patch(node,wrapper);
+     }
+     index=group.end;
+    }else{
+     // A genuine Markdown structure change may require a new parent. Ordinary
+     // text deltas and completion retain the planned ancestor groups above.
+     for(const [marker,retained] of moves)if(fresh===marker||fresh.contains(marker)){
+      marker.replaceWith(retained);if(fresh===marker)node=retained;
      }
     }
     if(node.parentNode===parent){
@@ -281,6 +291,58 @@
    while(cursor){const next=cursor.nextSibling;cursor.remove();cursor=next}
   }
   patch(previous,fragment);
+ }
+ // Adopt the existing Markdown element as a virtual row on engines that cannot
+ // move an iframe. Its surrounding wrappers are retained by commitStreamInPlace.
+ function previewRows(owner,models){
+  const result=new Map();
+  if(owner.moveBefore)return result;
+  const candidates=Array.from(new Set(Array.from(owner.querySelectorAll('.file-html-canvas'),canvas=>canvas.closest('.chat-markdown')).filter(Boolean)));
+  if(!candidates.length)return result;
+  // Preserve the text section's position and source, including offscreen rows.
+  // Identical links elsewhere in the response must not claim this section's iframe.
+  const sourceOf=model=>model.segments.map(segment=>segment.content||'').join('').trim();
+  const prior=owner._chatVirtualRows?.filter(row=>row.model.kind==='text');
+  const blocks=Array.from(owner.querySelectorAll('.chat-markdown')).filter(node=>typeof node._chatMarkdownSource==='string');
+  const origins=candidates.map(node=>{
+   const ordinal=prior?prior.findIndex(row=>row.node===node||row.node?.contains(node)):blocks.indexOf(node);
+   return {node,ordinal,source:ordinal>=0&&prior?sourceOf(prior[ordinal].model):(node._chatMarkdownSource||'').trim()};
+  });
+  const texts=models.map((model,index)=>({model,index,source:sourceOf(model)})).filter(entry=>entry.model.kind==='text');
+  // Verify actual Markdown links as well: prose/code mentions are not previews.
+  const identity=link=>new URL(link.getAttribute('href'),location.href).href+'\n'+link.textContent;
+  const projected=new Map();
+  async function linksFor(entry){
+   if(!projected.has(entry.index))projected.set(entry.index,new Set((await modelFileLinks(entry.model)).map(identity)));
+   return projected.get(entry.index);
+  }
+  return (async()=>{
+   for(const origin of origins){
+    const identities=Array.from(origin.node.querySelectorAll('a[data-file-link-bound]')).filter(link=>link.nextElementSibling?.classList.contains('file-html-canvas')).map(identity);
+    const compatible=entry=>!!entry&&!!origin.source&&(entry.source===origin.source||entry.source.startsWith(origin.source));
+    const atOrdinal=texts[origin.ordinal];
+    const preferred=compatible(atOrdinal)?atOrdinal:null;
+    const contextual=texts.filter(entry=>compatible(entry)&&!result.has(entry.index));
+    let destination=preferred&&!result.has(preferred.index)?preferred:contextual.length===1?contextual[0]:null;
+    if(destination){
+     const links=await linksFor(destination);
+     if(!identities.some(key=>links.has(key)))destination=null;
+    }
+    if(!destination){
+     // Source rewrites may change the section ordinal. Reuse only when the
+     // remaining real links identify one destination, never the first duplicate.
+     const matches=[];
+     for(const entry of texts){
+      if(result.has(entry.index))continue;
+      const links=await linksFor(entry);
+      if(identities.some(key=>links.has(key)))matches.push(entry);
+     }
+     if(matches.length===1)destination=matches[0];
+    }
+    if(destination)result.set(destination.index,origin.node);
+   }
+   return result;
+  })();
  }
  function commitStream(fragment,previous){
   if(!previous.moveBefore&&fragment._fileStreamMoves?.length){commitStreamInPlace(fragment,previous);return}
@@ -316,7 +378,7 @@
   else{delete owner._filePreviewPool;delete owner._filePreviewSource}
   return pool;
  }
- window.OVFileViewer={open,mode,prepareStream,commitStream,retainVirtual};
+ window.OVFileViewer={open,mode,prepareStream,commitStream,retainVirtual,previewRows};
  // Events missed while disconnected are not replayed by the live stream.
  window.addEventListener('sse-live-connected',event=>{
   if(!event.detail?.reconnected)return;
@@ -351,7 +413,10 @@
  const video=file.media_type.startsWith('video/');link.removeAttribute('data-file-preview');link.dataset.imageGalleryItem='';link.dataset.imageName=file.file_name;link.dataset.mediaKind=video?'video':'image';(link.closest('.chat-markdown')||link.parentElement).dataset.imageGalleryGroup='';const preview=document.createElement(video?'video':'img');preview.src=mode(url,video?'raw':'thumbnail');preview.alt=file.file_name;preview.style.cssText='max-width:100%;max-height:400px;object-fit:contain';if(video){preview.muted=true;preview.preload='metadata'}link.prepend(preview);return;
  }
  if(!/^text\/html(?:;|$)/i.test(file.media_type)&&! /\.html?$/i.test(file.file_name))return;
- const canvas=document.createElement('div');canvas.className='file-html-canvas';const frame=document.createElement('iframe');frame.title=file.file_name;frame.setAttribute('sandbox','allow-scripts');frame.referrerPolicy='no-referrer';frame.src=mode(url,'raw');const expand=document.createElement('button');expand.type='button';expand.textContent='Expand';canvas.append(frame,expand);prepareHTMLFrames(canvas);link.dataset.fileName=file.file_name;link.after(canvas);
+ link.dataset.fileName=file.file_name;
+ // Thinking links open the viewer on demand without embedding a live mockup.
+ if(link.closest('details.stream-thinking'))return;
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';const frame=document.createElement('iframe');frame.title=file.file_name;frame.setAttribute('sandbox','allow-scripts');frame.referrerPolicy='no-referrer';frame.src=mode(url,'raw');const expand=document.createElement('button');expand.type='button';expand.textContent='Expand';canvas.append(frame,expand);prepareHTMLFrames(canvas);link.after(canvas);
  }).catch(()=>{});
  })}
  let scanQueued=false;new MutationObserver(()=>{
