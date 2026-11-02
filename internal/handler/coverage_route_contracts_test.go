@@ -939,7 +939,7 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 		{name: "list_channels", input: `{}`, want: `"outbound_message_targets"`},
 		{name: "project_info", input: `{}`, want: "Runtime Executor Coverage"}, {name: "get_current_project", input: `{}`, want: "Current project"},
 		{name: "list_projects", input: `{}`, want: "Runtime Executor Coverage"},
-		{name: "switch_project", input: `{"project":"Runtime Executor Coverage"}`, want: "Switched to project"},
+		{name: "switch_project", input: `{"project":"Runtime Executor Coverage"}`, want: `action "switch_project" is not available on web surface`, wantError: true},
 		{name: "list_tasks", input: `{}`, want: `"ok":true`},
 		{name: "create_task", input: `{"title":"Created by runtime executor","prompt":"test prompt","category":"backlog"}`, want: "Created by runtime executor"},
 		{name: "edit_task", input: `{"id":"` + task.ID + `","title":"Runtime executor task edited"}`, want: "Runtime executor task edited"},
@@ -979,6 +979,9 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 			require.True(t, handled)
 			if call.wantError {
 				require.True(t, isErr, out)
+				if call.want != "" {
+					require.Contains(t, out, call.want)
+				}
 				if err == nil {
 					require.NotEmpty(t, out)
 				}

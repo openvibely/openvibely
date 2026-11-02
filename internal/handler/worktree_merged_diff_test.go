@@ -616,7 +616,7 @@ func TestHandler_GetTask_DirectChangesTabLoadsRecoveredChangesRoute(t *testing.T
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
 	}
-	if !strings.Contains(body, `hx-get="/tasks/`+task.ID+`/changes"`) || !strings.Contains(body, `hx-trigger="load"`) {
+	if !strings.Contains(body, `hx-get="/tasks/`+task.ID+`/changes?project_id=`+project.ID+`"`) || !strings.Contains(body, `hx-trigger="load"`) {
 		t.Fatalf("expected direct changes tab to load recovered changes route, body=%s", body)
 	}
 	if strings.Contains(body, "/tasks/"+task.ID+"/worktree/merge") || strings.Contains(body, "Fast-forward only") {

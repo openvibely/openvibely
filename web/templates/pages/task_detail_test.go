@@ -691,9 +691,12 @@ func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
 		t.Fatal("expected offscreen DOM element for pre-swap fingerprint computation")
 	}
 
-	// Must skip DOM mutation entirely when fingerprint matches.
-	if !strings.Contains(output, "// Diff unchanged") {
-		t.Fatal("expected early return path when diff fingerprint is unchanged")
+	// Matching file fingerprints must return before replacing file bodies;
+	// independently changing metadata can still refresh in that branch.
+	matchStart := strings.Index(output, "if (newFp && newFp === _computeDiffFingerprint(changesContent)) {")
+	swapStart := strings.Index(output, "changesContent.replaceChildren(")
+	if matchStart < 0 || swapStart <= matchStart || !strings.Contains(output[matchStart:swapStart], "return;") {
+		t.Fatal("expected fingerprint comparison and early return before replacing diff file bodies")
 	}
 
 	// Must re-process manually inserted HTML so HTMX actions rendered by the Changes
