@@ -440,7 +440,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	}
 	defer releaseTransport()
 	if len(summaryInput) > 0 && summaryInput[0] != nil {
-		items, err := preparedhistory.TakeRows(ctx, summaryInput[0], jsonview.SavedResponses)
+		items, err := preparedhistory.TakeRows(ctx, summaryInput[0], jsonview.ToolOutputs)
 		if err != nil {
 			return "", llmusage.FromTotal(0), fmt.Errorf("decode summary history: %w", err)
 		}
@@ -1494,7 +1494,7 @@ func responsesReplayItems(replay models.ExecutionReplayMessage, borrow bool) ([]
 	for i, raw := range saved.Input {
 		var err error
 		if borrow {
-			out[i], err = jsonview.SavedResponse(raw)
+			out[i], err = jsonview.ToolOutput(raw)
 		} else {
 			err = json.Unmarshal(raw, &out[i])
 		}

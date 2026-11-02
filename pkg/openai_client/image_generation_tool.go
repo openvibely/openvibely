@@ -172,7 +172,7 @@ func (c *Client) runImageGenerationTool(ctx context.Context, opts *AgenticOption
 func recentImageReferences(items []any, count int) []string {
 	var images []string
 	for _, raw := range items {
-		item, ok := responseItemObject(raw)
+		item, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -186,11 +186,11 @@ func recentImageReferences(items []any, count int) []string {
 			continue
 		}
 		for _, rawBlock := range content {
-			block, ok := responseItemObject(rawBlock)
+			block, ok := rawBlock.(map[string]any)
 			if !ok || block["type"] != "input_image" {
 				continue
 			}
-			value := stringFromAny(block["image_url"])
+			value, _ := block["image_url"].(string)
 			if value == "" {
 				continue
 			}

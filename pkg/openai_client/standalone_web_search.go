@@ -157,7 +157,7 @@ func standaloneWebSearchRecentInput(inputItems []any) []any {
 	visible := make([]map[string]any, 0, len(inputItems))
 	userIndexes := make([]int, 0, 2)
 	for _, raw := range inputItems {
-		item, ok := responseItemObject(raw)
+		item, ok := raw.(map[string]any)
 		if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "message") {
 			continue
 		}
@@ -226,7 +226,7 @@ func visibleSearchMessageText(content any, role string) string {
 			wantType = "output_text"
 		}
 		for _, raw := range value {
-			block, ok := responseItemObject(raw)
+			block, ok := raw.(map[string]any)
 			if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(block["type"])), wantType) {
 				continue
 			}

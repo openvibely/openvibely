@@ -1620,7 +1620,8 @@ func responsesStreamTerminalError(eventType string, ev map[string]any) error {
 }
 
 func stringFromAny(v any) string {
-	return jsonview.Text(v)
+	s, _ := v.(string)
+	return s
 }
 
 func intFromAny(v any) int {
