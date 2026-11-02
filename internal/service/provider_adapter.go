@@ -1195,7 +1195,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if !ok || s == nil || s.execRepo == nil {
 		return req
 	}
-	checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(persistence.WithCheckpointRows(req.Ctx), scope.Type, scope.ID)
+	checkpoint, prepared, err := s.loadActiveCheckpoint(persistence.WithCheckpointRows(req.Ctx), scope.Type, scope.ID)
 	if err != nil {
 		applog.Infof("[agent-svc] restore context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
 		return req
@@ -1211,6 +1211,9 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	// settings in the restored copy; do not discard its readable history.
 	compatible := checkpoint.CompatibilityKey == providerCompatibilityKey(req.Agent) &&
 		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
+	if compatible && prepared != nil {
+		req.Ctx = prepared.Context(req.Ctx)
+	}
 	if !compatible {
 		if checkpoint.HasNativeState() {
 			if checkpoint.Strategy != "anthropic_context_management" {

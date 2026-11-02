@@ -34,6 +34,7 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
+	checkpointCache           activeCheckpointCache
 	skillInstallationResult   func(context.Context, llmcontracts.AgentRequest) (string, error)
 	skillInstallationPrompt   func(context.Context, llmcontracts.AgentRequest, skilldeps.InstallationRequest) error
 	taskRuntimeProvider       func(context.Context, models.Task, string, map[string]bool) *llmcontracts.RuntimeTools

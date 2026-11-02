@@ -1,6 +1,7 @@
 // Package preparedhistory shares decoded history between budgeting and sending
-// within one provider call. Sending takes ownership; no decoded cache survives
-// the handoff. Changed history (including compaction) is rebuilt.
+// within one provider call. Sending normally takes ownership. A bounded owner
+// may explicitly reuse immutable native checkpoint state between calls; mutable
+// handoffs then clone containers. Changed history is rebuilt.
 package preparedhistory
 
 import (
@@ -17,10 +18,13 @@ type entry struct {
 	value   any
 }
 type cache struct {
-	mu      sync.Mutex
-	entries map[reflect.Type]entry
-	states  map[reflect.Type]stateEntry
-	rows    map[reflect.Type]rowsEntry
+	statesOwner *cache
+	boundReplay *models.ExecutionReplayMessage
+	reusable    bool
+	mu          sync.Mutex
+	entries     map[reflect.Type]entry
+	states      map[reflect.Type]stateEntry
+	rows        map[reflect.Type]rowsEntry
 }
 
 // WithScope always creates a fresh scope, including for nested provider calls.

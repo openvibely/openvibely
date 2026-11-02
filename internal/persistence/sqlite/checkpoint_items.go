@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
@@ -85,43 +86,73 @@ func checkpointHistoryDigest(c models.ChatCompactionCheckpoint) ([]byte, error) 
 }
 
 func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeType, scopeID string) (*models.ChatCompactionCheckpoint, error) {
+	c, _, err := r.GetChatCompactionCheckpointIfChanged(ctx, scopeType, scopeID, "")
+	return c, err
+}
+
+// GetChatCompactionCheckpointIfChanged checks metadata in the same snapshot as
+// the payload. An unchanged nonempty revision returns no payload.
+func (r *ExecutionRepo) GetChatCompactionCheckpointIfChanged(ctx context.Context, scopeType, scopeID, previous string) (*models.ChatCompactionCheckpoint, string, error) {
 	if r == nil || r.db == nil || strings.TrimSpace(scopeType) == "" || strings.TrimSpace(scopeID) == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer tx.Rollback()
 	var c models.ChatCompactionCheckpoint
 	err = tx.QueryRowContext(ctx, `SELECT scope_type,scope_id,model_config_id,compatibility_key,source_execution_id,summary,strategy,provider_session_state_json,created_at,updated_at FROM chat_compaction_checkpoints WHERE scope_type=? AND scope_id=?`, scopeType, scopeID).Scan(&c.ScopeType, &c.ScopeID, &c.ModelConfigID, &c.CompatibilityKey, &c.SourceExecutionID, &c.Summary, &c.Strategy, &c.ProviderSessionStateJSON, &c.CreatedAt, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, "", nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	var digest []byte
+	var native bool
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(history_digest,''),native_state_exists FROM chat_compaction_checkpoints WHERE scope_type=? AND scope_id=?`, scopeType, scopeID).Scan(&digest, &native); err != nil {
+		return nil, "", err
+	}
+	revision := ""
+	if len(digest) != 0 {
+		// Touch timestamps do not change reusable conversation state.
+		versioned := c
+		versioned.CreatedAt, versioned.UpdatedAt = time.Time{}, time.Time{}
+		metadata, err := json.Marshal(struct {
+			Checkpoint models.ChatCompactionCheckpoint
+			Digest     []byte
+			Native     bool
+		}{versioned, digest, native})
+		if err != nil {
+			return nil, "", err
+		}
+		revision = fmt.Sprintf("%x", sha256.Sum256(metadata))
+	}
+	if revision != "" && revision == previous {
+		return nil, revision, tx.Commit()
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT `+conversationColumns+` FROM conversation_resolved_items WHERE checkpoint_scope_type=? AND checkpoint_scope_id=? AND generation=0 AND is_current=1 AND operation='put' AND item_id LIKE 'checkpoint:%' ORDER BY position,item_id`, scopeType, scopeID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var records []models.ConversationChange
 	for rows.Next() {
 		r, err := scanConversationChange(rows)
 		if err != nil {
 			rows.Close()
-			return nil, err
+			return nil, "", err
 		}
 		records = append(records, r)
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	records, err = expandCheckpointRanges(ctx, tx, records)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if persistence.CheckpointRows(ctx) {
 		var native models.ExecutionReplayMessage
@@ -131,12 +162,12 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 		c.History, c.ProviderStateJSON, err = transcript.RestoreCheckpointRecords(records)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("restore compaction checkpoint: %w", err)
+		return nil, "", fmt.Errorf("restore compaction checkpoint: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return &c, nil
+	return &c, revision, nil
 }
 
 // Session settings have a separate lifetime. Only an incompatible native
