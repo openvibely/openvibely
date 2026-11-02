@@ -720,6 +720,16 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 }
             }, { passive: true, capture: true });
 			groups.addEventListener('click', hideHoverCard);
+            groups.addEventListener('wheel', function(event) {
+                var footer = event.target.closest('.task-list-group[data-browsing]:not([data-searching]) .task-list-browse-controls');
+                if (!footer || event.ctrlKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+                var rows = footer.closest('.task-list-group').querySelector('.task-list-rows');
+                // Match the category's contained scrolling, including at either end.
+                event.preventDefault();
+                var lineHeight = parseFloat(getComputedStyle(rows).lineHeight) || 16;
+                var unit = event.deltaMode === 1 ? lineHeight : event.deltaMode === 2 ? rows.clientHeight : 1;
+                rows.scrollTop += event.deltaY * unit;
+            }, { passive: false });
 
             // Sidebar dragging uses the same category and relative-order endpoints as cards.
             var rowDrag = null, rowMovePending = false, suppressRowClick = false;
