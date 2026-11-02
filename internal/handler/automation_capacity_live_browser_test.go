@@ -158,10 +158,10 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			cmd := exec.Command(chrome,
 				"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
 				"--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check",
-				"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID,
+				"--window-size=1280,900", server.URL+"/tasks?project_id="+project.ID,
 			)
 			cmd.Stderr = stderrFile
-			if err := startHandlerBrowserProcess(cmd); err != nil {
+			if err := startHandlerBrowserProcess(t, cmd); err != nil {
 				_ = stderrFile.Close()
 				t.Fatalf("start Chrome: %v", err)
 			}
@@ -340,9 +340,9 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check",
-		"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/browser-fixture")
+		"--window-size=1280,900", server.URL+"/browser-fixture")
 	cmd.Stderr = stderrFile
-	if err := startHandlerBrowserProcess(cmd); err != nil {
+	if err := startHandlerBrowserProcess(t, cmd); err != nil {
 		_ = stderrFile.Close()
 		t.Fatalf("start Chrome: %v", err)
 	}

@@ -2,9 +2,15 @@
 
 package pages
 
-import "os/exec"
+import (
+	"os/exec"
+	"testing"
 
-func startBrowserProcess(cmd *exec.Cmd) error {
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func startBrowserProcess(t testing.TB, cmd *exec.Cmd) error {
+	testutil.ConfigureBrowserStorage(t, cmd)
 	return cmd.Start()
 }
 

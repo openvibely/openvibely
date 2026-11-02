@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,8 +92,8 @@ func TestCollectionSelectionGutterDoesNotShiftCardContent(t *testing.T) {
 	}))
 	defer fixture.Close()
 
-	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=1024,768", fixture.URL)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--window-size=1024,768", fixture.URL)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	stopped := false
 	defer func() {
 		if !stopped {
@@ -353,11 +352,11 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	}))
 	defer fixture.Close()
 
-	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
+	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--window-size=390,844", fixture.URL+"?provider=openai")
 	var chromeOutput bytes.Buffer
 	cmd.Stdout = &chromeOutput
 	cmd.Stderr = &chromeOutput
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	stopped := false
 	defer func() {
 		if !stopped {

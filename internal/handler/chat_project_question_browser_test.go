@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -107,10 +106,10 @@ func testProjectQuestionPickerInChrome(t *testing.T, all bool) {
 			cmd := exec.Command(chrome,
 				"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 				"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-				"--user-data-dir="+filepath.Join(t.TempDir(), "chat-input-request-profile"),
+
 				fmt.Sprintf("--window-size=%d,844", width), server.URL+"/chat?project_id="+scope,
 			)
-			require.NoError(t, startHandlerBrowserProcess(cmd))
+			require.NoError(t, startHandlerBrowserProcess(t, cmd))
 			stopped := false
 			defer func() {
 				if !stopped {

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -195,11 +194,11 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
 	const scenarioTimeout = 30 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout+scenarioTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/models")
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", server.URL+"/models")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	record("host process started; waiting for document runner")
 	var outcome string
 	startupTimer := time.NewTimer(startupTimeout)

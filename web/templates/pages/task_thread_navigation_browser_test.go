@@ -309,11 +309,11 @@ html, body, #main-content { height: 100%; margin: 0; }
 		"--disable-background-timer-throttling",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "task-thread-navigation-profile"),
+
 		server.URL+"/tasks/task-browser?tab=chat",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome Task Thread navigation fixture: %v", err)
 	}
 

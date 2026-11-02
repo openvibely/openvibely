@@ -223,14 +223,14 @@ window.addEventListener('DOMContentLoaded', function() {
 	stderrFile, err := os.Create(stderrPath)
 	require.NoError(t, err)
 	defer stderrFile.Close()
-	profileDir := t.TempDir()
+
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+profileDir, server.URL+"/channels?project_id="+projectOne.ID,
+		server.URL+"/channels?project_id="+projectOne.ID,
 	)
 	cmd.Stderr = stderrFile
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	defer stopHandlerBrowserProcess(cmd)
 
 	var outcome string

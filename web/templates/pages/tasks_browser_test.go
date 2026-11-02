@@ -628,11 +628,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort), "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort),
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	inputErr := driveNativeTaskDrags(debugPort, server.URL, dragReady)
@@ -800,11 +800,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "backlog-execute-browser-profile"),
+
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string
@@ -997,10 +997,10 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-capacity-browser-profile"), server.URL+"/tasks?project_id="+project.ID,
+		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string
@@ -1095,10 +1095,10 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--no-default-browser-check",
 		fmt.Sprintf("--remote-debugging-port=%d", debugPort),
-		"--user-data-dir="+filepath.Join(t.TempDir(), "primary-action-color-browser-profile"), server.URL,
+		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	defer stopBrowserProcess(cmd)
@@ -1440,11 +1440,11 @@ func TestBrowserFunctional_TaskCardStateIconStaysVisibleWithLongTitleAtMobileWid
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=390,700", "--user-data-dir="+filepath.Join(t.TempDir(), "task-state-mobile-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=390,700",
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string
@@ -1638,12 +1638,12 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", server.URL+"/tasks?project_id="+project.ID)
 	stderrPath := filepath.Join(t.TempDir(), "merge-loader-browser.stderr")
 	stderr, _ := os.Create(stderrPath)
 	defer stderr.Close()
 	cmd.Stderr = stderr
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopBrowserProcess(cmd)
@@ -1901,9 +1901,9 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 	stderrPath := filepath.Join(t.TempDir(), "task-card-merge-browser.stderr")
 	stderr, _ := os.Create(stderrPath)
 	defer stderr.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", fmt.Sprintf("--remote-debugging-port=%d", debugPort), "--window-size=390,760", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", fmt.Sprintf("--remote-debugging-port=%d", debugPort), "--window-size=390,760", server.URL+"/tasks?project_id="+project.ID)
 	cmd.Stderr = stderr
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopBrowserProcess(cmd)
@@ -2248,11 +2248,11 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=900,520", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-menu-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=900,520",
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string
@@ -2521,11 +2521,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-delete-all-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string
@@ -2645,11 +2645,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=375,667", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-delete-all-mobile-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=375,667",
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string

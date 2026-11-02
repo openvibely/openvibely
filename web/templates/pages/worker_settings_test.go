@@ -244,11 +244,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=390,520",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "workers-layout-browser-profile"),
+
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string

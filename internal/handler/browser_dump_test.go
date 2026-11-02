@@ -16,13 +16,13 @@ import (
 // Chrome's dump-dom mode can hang/crash during macOS teardown after emitting
 // the complete document. Own the process lifetime once the dump is complete;
 // callers still assert the page's actual pass/fail result in that document.
-func runHandlerBrowserProcess(cmd *exec.Cmd) ([]byte, error) {
+func runHandlerBrowserProcess(t testing.TB, cmd *exec.Cmd) ([]byte, error) {
 	dump := &browserDOMDump{complete: make(chan struct{})}
 	var stderr bytes.Buffer
 	cmd.Stdout = dump
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = 2 * time.Second
-	if err := startHandlerBrowserProcess(cmd); err != nil {
+	if err := startHandlerBrowserProcess(t, cmd); err != nil {
 		return nil, err
 	}
 	done := make(chan struct{})
@@ -142,7 +142,7 @@ func TestBrowserDumpProcessLifecycle(t *testing.T) {
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestBrowserDumpProcessLifecycle$")
 			cmd.Env = append(os.Environ(), "OPENVIBELY_BROWSER_DUMP_HELPER="+mode)
-			out, err := runHandlerBrowserProcess(cmd)
+			out, err := runHandlerBrowserProcess(t, cmd)
 			if mode == "incomplete" {
 				if err == nil {
 					t.Fatal("truncated DOM accepted")

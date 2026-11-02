@@ -341,15 +341,15 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatal(err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "sidebar-project-selector-browser-profile")
+
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=390,360",
-		"--user-data-dir="+profileDir, server.URL+"/analytics?project_id=default",
+		server.URL+"/analytics?project_id=default",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome project selector fixture: %v", err)
 	}
 	var outcome string

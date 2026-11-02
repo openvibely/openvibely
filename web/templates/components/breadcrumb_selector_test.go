@@ -296,11 +296,11 @@ func runHeadlessChromeCDPFixture(t *testing.T, chrome, targetURL, name string, w
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--no-default-browser-check",
 		fmt.Sprintf("--remote-debugging-port=%d", debugPort),
-		"--user-data-dir="+filepath.Join(t.TempDir(), "breadcrumb-mobile-profile"), "about:blank",
+		"about:blank",
 	)
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome %s fixture: %v", name, err)
 	}
 	defer stopTestBrowserProcess(cmd)

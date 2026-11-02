@@ -287,15 +287,15 @@ func TestBrowserFunctional_AlertsInspectCopyFeedbackInChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stderrFile.Close()
-	profileDir := t.TempDir()
+
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+profileDir, server.URL,
+		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome, lastProgress string
@@ -550,11 +550,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking",
 		"--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "alerts-markdown-browser-profile"),
+
 		server.URL+"/alerts?project_id="+projectID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome, lastProgress string
@@ -691,11 +691,11 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "system-update-surfaces-browser-profile"),
+		"--no-first-run", "--no-default-browser-check",
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string
@@ -1151,11 +1151,11 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "alerts-browser-profile"),
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/alerts?project_id=project-alerts-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string

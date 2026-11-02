@@ -215,12 +215,12 @@ func runReconnectChromeFixture(t *testing.T, body string) string {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"),
+
 		"--virtual-time-budget=8000", "--dump-dom", server.URL,
 	)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	deadline := time.Now().Add(20 * time.Second)

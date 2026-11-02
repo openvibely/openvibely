@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,10 +176,10 @@ async function until(fn,label){for(let i=0;i<600;i++){if(fn())return;await wait(
 	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+url)
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", server.URL+url)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	var result string
 	select {
 	case result = <-results:

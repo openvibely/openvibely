@@ -800,11 +800,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
 		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort),
-		"--user-data-dir="+filepath.Join(t.TempDir(), "card-drag-cursor-browser-profile"),
+
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	nativeInputErr := driveNativeGroupedTaskDrags(debugPort, server.URL, nativeGroupedReady, nativeGroupedMotionObserved)
@@ -1010,9 +1010,9 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatal(err)
 	}
 	defer stderr.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "schedule-multi-profile"), server.URL+"/schedule?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", server.URL+"/schedule?project_id="+project.ID)
 	cmd.Stderr = stderr
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	var outcome string

@@ -393,14 +393,14 @@ func runHandlerChromeFixture(t *testing.T, chrome, targetURL, name string, virtu
 		"--disable-background-networking",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(tempDir, "chrome-profile"),
+
 		fmt.Sprintf("--virtual-time-budget=%d", virtualTimeBudget),
 		"--dump-dom",
 		targetURL,
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	if err := startHandlerBrowserProcess(cmd); err != nil {
+	if err := startHandlerBrowserProcess(t, cmd); err != nil {
 		_ = stdoutFile.Close()
 		_ = stderrFile.Close()
 		t.Fatalf("start Chrome %s fixture: %v", name, err)

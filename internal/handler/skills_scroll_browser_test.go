@@ -181,7 +181,7 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
-		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
+
 		"--headless=new",
 		"--disable-gpu",
 		"--no-sandbox",
@@ -194,7 +194,7 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 		"--dump-dom",
 		srv.URL,
 	)
-	out, err := runHandlerBrowserProcess(cmd)
+	out, err := runHandlerBrowserProcess(t, cmd)
 	dom := string(out)
 	passed := strings.Contains(dom, `id="browser-result" data-status="pass"`)
 	if ctx.Err() != nil {

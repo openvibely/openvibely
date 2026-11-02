@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -138,10 +137,10 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 		cmd := exec.Command(chrome,
 			"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 			"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-			"--user-data-dir="+filepath.Join(t.TempDir(), strings.TrimPrefix(strings.Split(page, "?")[0], "/")+"-project-modal-close-profile"),
+
 			"--window-size=1024,768", server.URL+page,
 		)
-		require.NoError(t, startHandlerBrowserProcess(cmd))
+		require.NoError(t, startHandlerBrowserProcess(t, cmd))
 		stopped := false
 		func() {
 			defer func() {
@@ -259,10 +258,10 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "project-selector-production-page-profile"),
+
 		"--window-size=1024,768", server.URL+"/tasks?project_id=default",
 	)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	stopped := false
 	defer func() {
 		if !stopped {

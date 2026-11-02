@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -156,8 +155,8 @@ window.addEventListener('load', async function() {
 				fmt.Fprint(w, page)
 			}))
 			defer server.Close()
-			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL)
-			require.NoError(t, startHandlerBrowserProcess(cmd))
+			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL)
+			require.NoError(t, startHandlerBrowserProcess(t, cmd))
 			defer stopHandlerBrowserProcess(cmd)
 			select {
 			case got := <-result:

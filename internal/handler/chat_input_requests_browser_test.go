@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -249,10 +248,10 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-input-request-profile"),
+
 		"--window-size=1024,768", server.URL+"/chat?project_id="+project.ID,
 	)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	stopped := false
 	defer func() {
 		if !stopped {
@@ -386,10 +385,10 @@ func TestChatInputRequestBrowserRefreshRestoresPendingControls(t *testing.T) {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-input-refresh-profile"),
+
 		"--window-size=1024,768", server.URL+"/chat?project_id="+project.ID,
 	)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	stopped := false
 	defer func() {
 		if !stopped {

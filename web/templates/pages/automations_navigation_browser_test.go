@@ -1111,11 +1111,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--window-size=1200,700",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-live-view-switcher-profile"),
+
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	defer stopBrowserProcess(cmd)
@@ -1756,11 +1756,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--window-size=1000,700",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-details-header-save-profile"),
+
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	defer stopBrowserProcess(cmd)
@@ -2363,11 +2363,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--no-first-run",
 		"--no-default-browser-check",
 		"--window-size=1200,900",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-yaml-browser-profile"),
+
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	defer stopBrowserProcess(cmd)

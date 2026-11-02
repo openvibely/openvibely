@@ -237,9 +237,9 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 	debugPort := freeTCPPortForActiveLaneBrowser(t)
 	stderrPath := filepath.Join(t.TempDir(), "active-lane.stderr")
 	stderr, _ := os.Create(stderrPath)
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort), "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--window-size=1280,900", fmt.Sprintf("--remote-debugging-port=%d", debugPort), server.URL+"/tasks?project_id="+project.ID)
 	cmd.Stderr = stderr
-	if err := startHandlerBrowserProcess(cmd); err != nil {
+	if err := startHandlerBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	driverErr := driveActiveLaneNativeDrags(debugPort, server.URL, ready, motion)

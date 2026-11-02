@@ -298,7 +298,7 @@ func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virt
 		"--disable-background-networking",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(tempDir, "chrome-profile"),
+
 		fmt.Sprintf("--virtual-time-budget=%d", virtualTimeBudget),
 		"--dump-dom",
 		targetURL,
@@ -306,7 +306,7 @@ func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virt
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		_ = stdoutFile.Close()
 		_ = stderrFile.Close()
 		t.Fatalf("start Chrome %s fixture: %v", name, err)

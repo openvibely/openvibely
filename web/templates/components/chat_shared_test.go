@@ -383,11 +383,11 @@ func TestBrowserFunctional_LatestMessageButtonDynamicBehaviorInChrome(t *testing
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-latest-message-profile"), "--virtual-time-budget=3000", "--dump-dom", server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=3000", "--dump-dom", server.URL)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome latest-message fixture: %v", err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -1230,11 +1230,11 @@ func TestBrowserFunctional_CompletedBubbleSharedHydrationInChrome(t *testing.T) 
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-completed-bubble-profile"), "--virtual-time-budget=5000", "--dump-dom", server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=5000", "--dump-dom", server.URL)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome completed-bubble fixture: %v", err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -1378,10 +1378,10 @@ func TestBrowserFunctional_FailedAssistantTerminalErrorOrderingAndSmartScrollInC
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-terminal-error-profile"), "--virtual-time-budget=20000", "--dump-dom", server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=20000", "--dump-dom", server.URL)
 	cmd.Stdout, cmd.Stderr = stdoutFile, stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome terminal-error fixture: %v", err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -1511,12 +1511,12 @@ func TestBrowserPerformance_CodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome
 		"--run-all-compositor-stages-before-draw",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chrome-slow-code-range-worker-profile"),
+
 		server.URL,
 	)
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome slow-worker fixture: %v", err)
 	}
 	var result slowWorkerResult
@@ -6138,11 +6138,11 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-scroll-profile"), "--virtual-time-budget=5000", "--dump-dom", server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--virtual-time-budget=5000", "--dump-dom", server.URL)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome scroll fixture: %v", err)
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -6455,7 +6455,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--disable-background-networking",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"),
+
 		"--window-size=1280,900",
 		"--virtual-time-budget=10000",
 		"--dump-dom",
@@ -6464,7 +6464,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome fixture: %v", err)
 	}
 	deadline := time.Now().Add(25 * time.Second)

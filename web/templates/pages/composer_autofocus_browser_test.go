@@ -319,10 +319,10 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 		"--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
 		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
 		fmt.Sprintf("--remote-debugging-port=%d", debugPort),
-		"--user-data-dir="+filepath.Join(t.TempDir(), profileName+"-profile"), "about:blank",
+		"about:blank",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	defer stopBrowserProcess(cmd)

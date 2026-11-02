@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -355,10 +354,10 @@ document.addEventListener('htmx:responseError',function(event){
 	defer finishNativeInput.Do(func() { close(nativeInputFinished) })
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path)
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", server.URL+path)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	outcome := waitPagedBrowserResult(ctx, documentReady, results, 40*time.Second)
 	stopHandlerBrowserProcess(cmd)
 	require.Equal(t, "pass", outcome, stderr.String())

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -341,8 +340,8 @@ window.addEventListener('DOMContentLoaded', async function() {
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", fmt.Sprintf("--window-size=%d,900", width), "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), server.URL+"/tasks?project_id="+project.ID)
-	if err := startBrowserProcess(cmd); err != nil {
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", fmt.Sprintf("--window-size=%d,900", width), server.URL+"/tasks?project_id="+project.ID)
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopBrowserProcess(cmd)

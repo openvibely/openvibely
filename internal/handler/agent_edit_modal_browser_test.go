@@ -306,9 +306,9 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-		"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), server.URL+"/agents?project_id="+url.QueryEscape(projectID))
+		"--window-size=1280,900", server.URL+"/agents?project_id="+url.QueryEscape(projectID))
 	cmd.Stderr = stderrFile
-	if err := startHandlerBrowserProcess(cmd); err != nil {
+	if err := startHandlerBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	stopped := false

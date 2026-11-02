@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -90,8 +89,8 @@ func TestChatResponseBrowserScrollsWithoutPaging(t *testing.T) {
 		_, _ = io.WriteString(w, body)
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-extensions", "--no-first-run", "--window-size=1280,1000", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/chat?project_id="+project.ID)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-extensions", "--no-first-run", "--window-size=1280,1000", server.URL+"/chat?project_id="+project.ID)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	defer stopHandlerBrowserProcess(cmd)
 	select {
 	case got := <-result:

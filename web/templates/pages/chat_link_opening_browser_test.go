@@ -83,12 +83,12 @@ func TestBrowserFunctional_ChatRenderedLinksOpenOutsideAppAndDesktopExternalBrow
 		"--disable-background-networking",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-link-opening-profile"),
+
 		server.URL+"/",
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome Chat link fixture: %v", err)
 	}
 

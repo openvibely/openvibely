@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -84,8 +83,8 @@ func TestAppAndLoginPagesLoadWithoutExternalNetworkInChrome(t *testing.T) {
 	for probePath := range pagesUnderTest {
 		cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
 			"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost , EXCLUDE 127.0.0.1",
-			"--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+probePath)
-		if err := startHandlerBrowserProcess(cmd); err != nil {
+			server.URL+probePath)
+		if err := startHandlerBrowserProcess(t, cmd); err != nil {
 			t.Fatalf("start Chrome: %v", err)
 		}
 		select {

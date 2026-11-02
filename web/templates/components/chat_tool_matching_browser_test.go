@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -301,9 +300,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	// Real wall time: under --virtual-time-budget, Chrome stops producing frames
 	// after the large commit, so the frame-gap probe's requestAnimationFrame never fires.
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), fixtureServer.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", fixtureServer.URL)
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopTestBrowserProcess(cmd)

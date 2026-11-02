@@ -5,6 +5,7 @@ package components
 import (
 	"os/exec"
 	"syscall"
+	"testing"
 
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -13,7 +14,8 @@ func configureTestBrowserProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-func startTestBrowserProcess(cmd *exec.Cmd) error {
+func startTestBrowserProcess(t testing.TB, cmd *exec.Cmd) error {
+	testutil.ConfigureBrowserStorage(t, cmd)
 	testutil.GuardBrowserProcess(cmd)
 	return cmd.Start()
 }

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -147,10 +146,10 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
 	if initiallyHidden {
 		initialTab = "changes"
 	}
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path+"?tab="+initialTab)
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", server.URL+path+"?tab="+initialTab)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	var outcome string
 	select {
 	case outcome = <-results:

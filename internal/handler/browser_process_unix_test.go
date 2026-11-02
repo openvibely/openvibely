@@ -5,11 +5,13 @@ package handler
 import (
 	"os/exec"
 	"syscall"
+	"testing"
 
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-func startHandlerBrowserProcess(cmd *exec.Cmd) error {
+func startHandlerBrowserProcess(t testing.TB, cmd *exec.Cmd) error {
+	testutil.ConfigureBrowserStorage(t, cmd)
 	testutil.GuardBrowserProcess(cmd)
 	return cmd.Start()
 }

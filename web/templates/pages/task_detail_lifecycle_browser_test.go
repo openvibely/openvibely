@@ -403,15 +403,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-browser-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle fixture: %v", err)
 	}
 
@@ -587,15 +586,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-refresh-failure-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-refresh-failure-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle refresh failure fixture: %v", err)
 	}
 
@@ -775,15 +773,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-full-refresh-failure-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-full-refresh-failure-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle full refresh failure fixture: %v", err)
 	}
 
@@ -980,15 +977,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-anchor-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-anchor-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle anchor fixture: %v", err)
 	}
 
@@ -1152,15 +1148,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-mixed-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle mixed fixture: %v", err)
 	}
 
@@ -1354,15 +1349,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed-failure-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-mixed-failure-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle mixed failure fixture: %v", err)
 	}
 
@@ -1589,15 +1583,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-reconnect-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-reconnect-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle reconnect fixture: %v", err)
 	}
 
@@ -1788,15 +1781,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-older-failure-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-older-failure-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle older failure fixture: %v", err)
 	}
 
@@ -1996,15 +1988,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-swap-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-htmx-swap-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle HTMX swap fixture: %v", err)
 	}
 
@@ -2203,15 +2194,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-anchor-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-htmx-anchor-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle HTMX anchor fixture: %v", err)
 	}
 
@@ -2429,15 +2419,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-retained-finalization-profile")
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		"--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-retained-finalization-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle retained finalization fixture: %v", err)
 	}
 
@@ -2577,11 +2566,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--window-size=1500,1100", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "task-detail-lifecycle-fill-profile"),
+		"--window-size=1500,1100", "--no-first-run", "--no-default-browser-check",
 		server.URL+"/tasks/task-lifecycle-fill-browser",
 	)
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome lifecycle fill fixture: %v", err)
 	}
 

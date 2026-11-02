@@ -194,8 +194,8 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 	defer server.Close()
 	for _, size := range []string{"1280,900", "390,844"} {
 		t.Run(size, func(t *testing.T) {
-			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--user-data-dir="+t.TempDir(), "--window-size="+size, server.URL+"/analytics?project_id=__all_projects__&range=all&view=usage")
-			require.NoError(t, startHandlerBrowserProcess(cmd))
+			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--window-size="+size, server.URL+"/analytics?project_id=__all_projects__&range=all&view=usage")
+			require.NoError(t, startHandlerBrowserProcess(t, cmd))
 			defer stopHandlerBrowserProcess(cmd)
 			select {
 			case outcome := <-result:

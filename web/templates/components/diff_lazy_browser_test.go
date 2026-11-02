@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -217,9 +216,9 @@ func runDiffLazyBrowser(t *testing.T, scrollKind string) {
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check", server.URL)
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopTestBrowserProcess(cmd)
@@ -294,9 +293,9 @@ func TestBrowserFunctional_DiffOversizedFilePlaceholder(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-networking", "--no-first-run", "--no-default-browser-check", server.URL)
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopTestBrowserProcess(cmd)

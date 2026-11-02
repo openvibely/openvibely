@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -170,8 +169,8 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 				env.Echo.ServeHTTP(w, r)
 			}))
 			defer server.Close()
-			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--window-size=1440,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id=stress-project-0")
-			if err := startHandlerBrowserProcess(cmd); err != nil {
+			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--window-size=1440,900", server.URL+"/tasks?project_id=stress-project-0")
+			if err := startHandlerBrowserProcess(t, cmd); err != nil {
 				t.Fatal(err)
 			}
 			defer stopHandlerBrowserProcess(cmd)

@@ -152,7 +152,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 		_, _ = w.Write([]byte(fixture))
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome"), server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run", server.URL)
 	outputPath := filepath.Join(t.TempDir(), "chrome.log")
 	output, err := os.Create(outputPath)
 	if err != nil {
@@ -161,7 +161,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	defer output.Close()
 	cmd.Stdout, cmd.Stderr = output, output
 	configureTestBrowserProcess(cmd)
-	if err := startTestBrowserProcess(cmd); err != nil {
+	if err := startTestBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	defer stopTestBrowserProcess(cmd)

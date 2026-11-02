@@ -200,10 +200,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks/a")
+	cmd := exec.CommandContext(ctx, chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-background-timer-throttling", "--no-first-run", server.URL+"/tasks/a")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	var outcome string

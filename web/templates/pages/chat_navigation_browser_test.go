@@ -391,12 +391,12 @@ html, body, #main-content { height: 100%; margin: 0; }
 		"--disable-background-timer-throttling",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-navigation-profile"),
+
 		server.URL+"/chat?project_id=project-browser",
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome Chat navigation fixture: %v", err)
 	}
 
@@ -766,12 +766,12 @@ html, body, #main-content { height: 100%; margin: 0; }
 		"--disable-background-timer-throttling",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chat-actions-profile"),
+
 		server.URL+"/chat?project_id=project-actions",
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatalf("start Chrome Chat actions fixture: %v", err)
 	}
 

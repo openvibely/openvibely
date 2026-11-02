@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -143,8 +142,8 @@ window.addEventListener('load',async()=>{
 	}))
 	defer server.Close()
 	defer release()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/chat?project_id=default")
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL+"/chat?project_id=default")
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	defer stopHandlerBrowserProcess(cmd)
 	select {
 	case got := <-result:

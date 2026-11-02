@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -391,10 +390,10 @@ func testScheduleCalendarHeader(t *testing.T, paused, mobile bool) {
 		windowSize = "--window-size=500,900"
 	}
 	// --test-type suppresses the --no-sandbox warning infobar, which can appear mid-test and resize the viewport.
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--test-type", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", windowSize, "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/schedule?project_id="+project.ID)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--test-type", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", windowSize, server.URL+"/schedule?project_id="+project.ID)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := startBrowserProcess(cmd); err != nil {
+	if err := startBrowserProcess(t, cmd); err != nil {
 		t.Fatal(err)
 	}
 	var outcome string

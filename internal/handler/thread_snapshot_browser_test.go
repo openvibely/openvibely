@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -443,8 +442,8 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	defer stopHandlerBrowserProcess(cmd)
 	select {
 	case got := <-result:
@@ -632,8 +631,8 @@ window.WebSocket=class extends NativeSocket {constructor(...args){super(...args)
 	}))
 	defer server.Close()
 	defer unlock()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+path)
-	require.NoError(t, startHandlerBrowserProcess(cmd))
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL+path)
+	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	defer stopHandlerBrowserProcess(cmd)
 	select {
 	case got := <-result:

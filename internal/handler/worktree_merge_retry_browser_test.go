@@ -207,10 +207,10 @@ func TestChangesMergeFailureRetryAndIneligibleStatesInChrome(t *testing.T) {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--no-default-browser-check",
-		"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/",
+		"--window-size=1280,900", server.URL+"/",
 	)
 	cmd.Stderr = stderrFile
-	if err := startHandlerBrowserProcess(cmd); err != nil {
+	if err := startHandlerBrowserProcess(t, cmd); err != nil {
 		_ = stderrFile.Close()
 		t.Fatalf("start Chrome: %v", err)
 	}
