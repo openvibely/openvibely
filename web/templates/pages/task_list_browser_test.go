@@ -134,6 +134,9 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "task-list-extra-search", func(b *composerFocusCDP) {
 		visible := `JSON.stringify(Array.from(document.querySelectorAll('[data-task-list-row]')).filter(e=>getComputedStyle(e).display!=='none').map(e=>e.dataset.taskListRow))`
+		b.waitFor("preview group loaded", `String(!!document.querySelector('.task-list-group'))`, "true")
+		b.evaluate(`var group=document.querySelector('.task-list-group');document.getElementById('task-list-groups').style.maxHeight=(group.querySelector('summary').getBoundingClientRect().height+10+30+7*34)+'px'; 'limit fixture height'`)
+
 		b.waitFor("initial seven rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
 		b.evaluate(`document.getElementById('task-list-search-toggle').click(); var search=document.getElementById('task-list-search-input'); search.value='login'; search.dispatchEvent(new Event('input')); 'searched'`)
 		b.waitFor("only matching rows including eighth task", visible, `["login-first","login-extra"]`)
@@ -159,7 +162,9 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("Done restores focus to Browse all", `String(document.activeElement===document.querySelector('.task-list-more') && getComputedStyle(document.activeElement).visibility==='visible')`, "true")
 		b.waitFor("Done restores seven rows and keeps category open", `String(document.querySelector('.task-list-group').open && !document.querySelector('.task-list-group').hasAttribute('data-browsing') && document.querySelector('.task-list-rows').scrollTop===0)`, "true")
 		b.waitFor("preview restored", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
-		b.evaluate(`document.getElementById('task-list-groups').style.paddingTop='260px';document.querySelector('.task-list-more').click(); var row=document.querySelector('[data-task-list-row="other-6"]'),r=row.getBoundingClientRect(),area=document.querySelector('.task-list-rows').getBoundingClientRect();window.outerScroll=document.getElementById('task-list-groups').scrollTop;row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:area.left+30,clientY:area.bottom-4}));'dragging'`)
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 1200, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.evaluateAwait(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve('resized'))))`)
+		b.evaluate(`document.getElementById('task-list-groups').style.marginTop='260px';document.querySelector('.task-list-more').click(); var row=document.querySelector('[data-task-list-row="other-6"]'),r=row.getBoundingClientRect(),area=document.querySelector('.task-list-rows').getBoundingClientRect();window.outerScroll=document.getElementById('task-list-groups').scrollTop;row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:area.left+30,clientY:area.bottom-4}));'dragging'`)
 		b.waitFor("drag scrolls browsing category", `String(document.querySelector('.task-list-rows').scrollTop>30 && document.getElementById('task-list-groups').scrollTop===window.outerScroll)`, "true")
 		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'cancelled'`)
 		b.waitFor("drag cleanup in scroller", `String(!window.isDragging && !document.querySelector('[data-pointer-drag-placeholder]'))`, "true")
@@ -254,6 +259,7 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "task-list-context-menu", func(b *composerFocusCDP) {
 		b.waitFor("sidebar loaded", `String(!!document.querySelector('[data-task-list-row="menu-task"]'))`, "true")
+		b.evaluate(`document.querySelector('.task-list-group').open=true; 'open category'`)
 		open := `(()=>{var row=document.querySelector('[data-task-list-row="menu-task"]');row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-5,clientY:innerHeight-5}));return 'opened'})()`
 		b.evaluate(open)
 		b.waitFor("shared Git actions loaded", `String(!!document.querySelector('[data-task-list-context-menu] [data-merge-type="ff"]'))`, "true")
@@ -441,6 +447,9 @@ func TestBrowserFunctional_TaskListDragDrop(t *testing.T) {
 	}))
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "task-list-drag", func(b *composerFocusCDP) {
+		b.waitFor("backlog loaded", `String(!!document.querySelector('[data-task-list-group="Backlog"]'))`, "true")
+		b.evaluate(`document.querySelector('[data-task-list-group="Backlog"]').open=true; 'open backlog'`)
+
 		b.waitFor("drag rows loaded", `String(!!document.querySelector('[data-task-list-row="drag-b"]'))`, "true")
 		// A press that never crosses the drag threshold must release deferred updates too.
 		b.evaluate(`document.body.addEventListener('htmx:beforeSwap',e=>{if(e.detail.target.id==='task-list-groups')window.pressUpdateDeferred=!e.detail.shouldSwap}); 'watch'`)
@@ -597,7 +606,7 @@ func TestBrowserFunctional_TaskListBrowseScrollPerProject(t *testing.T) {
 			projectID := r.URL.Query().Get("project_id")
 			var tasks []models.Task
 			for i := 0; i < 30; i++ {
-				tasks = append(tasks, models.Task{ID: fmt.Sprintf("%s-%d", projectID, i), ProjectID: projectID, Title: fmt.Sprintf("Task %d", i), Category: models.CategoryBacklog})
+				tasks = append(tasks, models.Task{ID: fmt.Sprintf("%s-%d", projectID, i), ProjectID: projectID, Title: fmt.Sprintf("Task %d", i), Category: models.CategoryCompleted})
 			}
 			if err := layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil {
 				t.Error(err)
@@ -634,5 +643,56 @@ func TestBrowserFunctional_TaskListBrowseScrollPerProject(t *testing.T) {
 		switchTo(models.AllProjectsID, 0, true)
 		switchTo("first", 0, false)
 		switchTo("second", 70, true)
+	})
+}
+
+func TestBrowserFunctional_TaskListAdaptivePreviews(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			var tasks []models.Task
+			for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryCompleted, models.CategoryBacklog, models.CategoryScheduled} {
+				for i := 0; i < 100; i++ {
+					if category == models.CategoryActive && i >= 20 {
+						continue
+					}
+					tasks = append(tasks, models.Task{ID: fmt.Sprintf("%s-%d", category, i), ProjectID: "project", Title: fmt.Sprintf("%s task %d", category, i), Category: category, Status: models.StatusPending})
+				}
+			}
+			_ = layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w)
+		case "/":
+			_ = layout.Base("Tasks", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(r.Context(), w)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "adaptive-task-previews", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 1200, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("all categories loaded", `String(document.querySelectorAll('.task-list-group').length)`, "4")
+		b.evaluate(`window.groupFor=name=>document.querySelector('[data-task-list-group="'+name+'"]');window.previewCount=name=>groupFor(name).querySelectorAll('[data-task-list-row]:not([data-task-list-extra])').length;'helpers'`)
+		b.waitFor("default categories and larger previews", `String(groupFor('Active').open && groupFor('Completed').open && !groupFor('Backlog').open && !groupFor('Scheduled').open && previewCount('Active')>7 && previewCount('Completed')>7)`, "true")
+		b.evaluate(`window.initialCount=previewCount('Active');groupFor('Backlog').querySelector('summary').click();'open backlog'`)
+		b.waitFor("opening backlog shares space", `String(previewCount('Active')<window.initialCount && previewCount('Backlog')>=3 && groupFor('Completed').open)`, "true")
+		b.evaluate(`window.threeCount=previewCount('Active');groupFor('Scheduled').querySelector('summary').click();'open scheduled'`)
+		b.waitFor("four open categories share space", `String(previewCount('Active')<window.threeCount && previewCount('Scheduled')>=3 && document.getElementById('task-list-groups').scrollHeight<=document.getElementById('task-list-groups').clientHeight+1)`, "true")
+		b.evaluate(`window.previewHeight=groupFor('Active').getBoundingClientRect().height;groupFor('Active').querySelector('.task-list-more').click();'browse'`)
+		b.waitFor("browse preserves allocation", `String(groupFor('Active').hasAttribute('data-browsing') && Math.abs(groupFor('Active').getBoundingClientRect().height-window.previewHeight)<2)`, "true")
+		b.evaluate(`groupFor('Scheduled').querySelector('summary').click();groupFor('Backlog').querySelector('summary').click();'close other categories'`)
+		b.waitFor("space returns while browsing", `String(previewCount('Active')===window.initialCount && groupFor('Active').hasAttribute('data-browsing'))`, "true")
+		b.evaluate(`groupFor('Completed').querySelector('summary').click();'give active all available space'`)
+		b.waitFor("all active tasks fit while browsing", `String(!groupFor('Active').hasAttribute('data-has-overflow') && groupFor('Active').hasAttribute('data-browsing'))`, "true")
+		b.evaluate(`groupFor('Active').querySelector('.task-list-done').focus();'focus done'`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "text": "\r", "windowsVirtualKeyCode": 13}, nil)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
+		b.waitFor("Done focuses header when Browse all is hidden", `String(document.activeElement===groupFor('Active').querySelector('summary') && !groupFor('Active').hasAttribute('data-browsing') && groupFor('Active').open)`, "true")
+		b.evaluate(`groupFor('Completed').querySelector('summary').click();'restore completed'`)
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 500, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.evaluate(`groupFor('Scheduled').open=true;groupFor('Backlog').open=true;'all open in short window'`)
+		b.waitFor("minimum previews scroll instead of disappearing", `String(['Active','Completed','Backlog','Scheduled'].every(name=>previewCount(name)>=3) && document.getElementById('task-list-groups').scrollHeight>document.getElementById('task-list-groups').clientHeight)`, "true")
 	})
 }

@@ -79,7 +79,7 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 		<div class="task-list-empty">No tasks yet.</div>
 	}
 	for _, group := range groups {
-		<details class="task-list-group" open data-task-list-group={ group.Label } data-task-list-project-scope={ projectID }>
+		<details class="task-list-group" open?={ group.Label == "Active" || group.Label == "Completed" } data-task-list-group={ group.Label } data-task-list-project-scope={ projectID }>
 			<summary>
 				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 				<span class="task-list-group-label">{ group.Label }</span>
@@ -119,8 +119,8 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
                 </template>
 			}
 			</div>
-			if len(group.Tasks) > taskListGroupLimit {
-				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>Browse all</button>
+			if len(group.Tasks) > 3 {
+				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks)) }>Browse all</button>
                 <div class="task-list-browse-controls">
                     <span>Scroll to browse</span>
                     <span aria-hidden="true">·</span>
@@ -518,8 +518,12 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 					group.hidden = visible === 0;
 					group.toggleAttribute('data-searching', !!q);
 						if (q) group.open = visible > 0;
-						else if (wasSearching) group.open = !(groupState[label] || {}).closed;
+						else if (wasSearching) {
+                            var saved = groupState[label] || {};
+                            group.open = saved.closed === undefined ? ['Active', 'Completed'].includes(group.dataset.taskListGroup) : !saved.closed;
+                        }
 				});
+                layoutTaskPreviews();
 			}
 			function syncActiveRow() {
 				var m = window.location.pathname.match(/^\/tasks\/([^/]+)$/);
@@ -576,16 +580,55 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				var btn = group.querySelector('.task-list-more');
 				if (btn) btn.setAttribute('aria-expanded', String(group.hasAttribute('data-browsing')));
 			}
+            function layoutTaskPreviews() {
+                if (!groups.clientHeight || searchInput.value.trim() || rowDrag) return;
+                var entries = Array.from(groups.querySelectorAll('.task-list-group')).filter(function(group) { return !group.hidden; }).map(function(group) {
+                    var rows = Array.from(group.querySelectorAll('[data-task-list-row]'));
+                    var sample = rows[0];
+                    var style = sample && getComputedStyle(sample);
+                    var rowHeight = style ? parseFloat(style.height) + parseFloat(style.marginTop) + parseFloat(style.marginBottom) : 34;
+                    var header = group.querySelector('summary');
+                    return {group: group, rows: rows, rowHeight: rowHeight || 34, limit: Math.min(3, rows.length), overhead: header.getBoundingClientRect().height + (parseFloat(getComputedStyle(group).marginBottom) || 0)};
+                });
+                var available = groups.clientHeight;
+                entries.forEach(function(entry) {
+                    available -= entry.overhead;
+                    if (entry.group.open) available -= entry.limit * entry.rowHeight + (entry.rows.length > 3 ? 30 : 0);
+                });
+                var grew = true;
+                while (grew && available > 0) {
+                    grew = false;
+                    entries.forEach(function(entry) {
+                        if (entry.group.open && entry.limit < entry.rows.length && available >= entry.rowHeight) {
+                            entry.limit++; available -= entry.rowHeight; grew = true;
+                        }
+                    });
+                }
+                entries.forEach(function(entry) {
+                    entry.group.style.setProperty('--task-list-preview-height', (entry.limit * entry.rowHeight) + 'px');
+                    entry.group.toggleAttribute('data-has-overflow', entry.rows.length > entry.limit);
+                    entry.rows.forEach(function(row, index) { row.toggleAttribute('data-task-list-extra', index >= entry.limit); });
+                });
+            }
+            var previewFrame;
+            function queuePreviewLayout() {
+                cancelAnimationFrame(previewFrame);
+                previewFrame = requestAnimationFrame(layoutTaskPreviews);
+            }
+            new ResizeObserver(queuePreviewLayout).observe(groups);
+            document.addEventListener('task-pointer-dragend', queuePreviewLayout);
 			function restoreGroups() {
 				groups.querySelectorAll('.task-list-group').forEach(function(group) {
 					var st = groupState[taskListGroupKey(group)] || {};
-					group.open = !st.closed;
+					group.open = st.closed === undefined ? ['Active', 'Completed'].includes(group.dataset.taskListGroup) : !st.closed;
 					group.toggleAttribute('data-browsing', !!st.browsing);
-                    var rows = group.querySelector('.task-list-rows');
-                    rows.scrollTop = browseScroll[taskListGroupKey(group)] || 0;
-					syncMore(group);
-				});
-			}
+                    syncMore(group);
+                });
+                layoutTaskPreviews();
+                groups.querySelectorAll('.task-list-group[data-browsing] .task-list-rows').forEach(function(rows) {
+                    rows.scrollTop = browseScroll[taskListGroupKey(rows.closest('.task-list-group'))] || 0;
+                });
+            }
 			groups.addEventListener('toggle', function(e) {
 				var group = e.target;
 				if (!group.classList || !group.classList.contains('task-list-group')) return;
@@ -594,6 +637,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				var label = taskListGroupKey(group);
 				groupState[label] = Object.assign({}, groupState[label], { closed: !group.open });
 				saveGroupState();
+                queuePreviewLayout();
 			}, true);
 			groups.addEventListener('click', function(e) {
 				if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -623,6 +667,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 var focusTarget = expanded
                     ? group.querySelector('[data-task-list-row]:not([hidden])')
                     : group.querySelector('.task-list-more');
+                if (!focusTarget || !focusTarget.getClientRects().length) focusTarget = group.querySelector('summary');
                 if (focusTarget) focusTarget.focus({preventScroll: true});
 			});
 
