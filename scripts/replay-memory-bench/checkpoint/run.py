@@ -50,7 +50,7 @@ def main():
         subprocess.run(['go', 'test', '-c', '-o', str(app_binary), './internal/service'], cwd=ROOT, env=env, check=True)
         with (output / 'correctness.log').open('w') as log:
             subprocess.run(['go', 'test', './internal/llm/preparedhistory', '-run', '^TestReusableState', '-count=1'], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
-            subprocess.run([str(app_binary), '-test.run=^Test(OrderedReplayHistory|ActiveCheckpoint|PortableCheckpointAcrossSavedModelSelections|CheckpointResumeLoadsOnlyUncoveredReplay|CheckpointBenchmarkUsesProductionReplayRows)', '-test.timeout=10m'], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+            subprocess.run([str(app_binary), '-test.run=^Test(OrderedReplayHistory|ActiveCheckpoint|PortableCheckpointAcrossSavedModelSelections|CheckpointResumeLoadsOnlyUncoveredReplay|CheckpointBenchmark)', '-test.timeout=10m'], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
         for repetition in range(args.runs):
             # Alternate mode order to reduce systematic warm-machine bias.
             for provider in providers:

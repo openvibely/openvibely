@@ -24,7 +24,7 @@ func TestLateSteeringKeepsDurableCurrentExchange(t *testing.T) {
 	prefix := []any{map[string]any{"type": "message", "role": "user", "content": "CURRENT_ORIGINAL"}, map[string]any{"type": "message", "role": "assistant", "content": "TOOL_WORK_ALREADY_COMPLETED"}}
 	a := New(nil, stores.Executions, nil, nil)
 
-	require.NoError(t, a.responsesExchangeRecorder(current.ID, history)(ctx, client.ResponsesReplayUpdate{Prefix: prefix, Items: []any{map[string]any{"type": "message", "role": "user", "content": "LATE_STEER"}}}))
+	require.NoError(t, a.responsesExchangeRecorder(current.ID, history)(ctx, client.ResponsesReplayUpdate{Prefix: prefix, Items: append(append([]any(nil), prefix...), map[string]any{"type": "message", "role": "user", "content": "LATE_STEER"}), CompleteHistory: true}))
 	// A crash here must not erase the already saved work from the active execution.
 	saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{current.ID})
 	require.NoError(t, err)

@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"context"
+	"reflect"
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -17,6 +18,8 @@ type ExchangeUpdate struct {
 	Prefix          []any
 	FirstChanged    int
 	ReplacesHistory bool
+	// CompleteHistory means Items includes Prefix; otherwise Items is current-execution data.
+	CompleteHistory bool
 }
 
 // CanSeparateHistory is a cheap preparation hint. SaveUpdate also verifies the
@@ -55,6 +58,7 @@ type ExchangeRecorder struct {
 	sources          []string
 	taskID           string
 	checked, durable bool
+	replacement      bool
 }
 
 func NewExchangeRecorder(store persistence.ConversationStore, owner models.ConversationOwner, history []models.Execution) *ExchangeRecorder {
@@ -104,17 +108,18 @@ func (r *ExchangeRecorder) prefixIsDurable(ctx context.Context) (bool, error) {
 func (r *ExchangeRecorder) SaveUpdate(ctx context.Context, header, replacement ReplayHeader, u ExchangeUpdate) ([]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !u.ReplacesHistory && len(u.Prefix) > 0 {
-		durable, err := r.prefixIsDurable(ctx)
+	durable := true
+	if len(u.Prefix) > 0 && !u.ReplacesHistory {
+		var err error
+		durable, err = r.prefixIsDurable(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if !durable {
-			u.Items = append(append([]any(nil), u.Prefix...), u.Items...)
-			u.ReplacesHistory = true
-			replacement.NullItems = u.Items == nil
-		}
 	}
+	u = selectExchange(u, durable, r.replacement)
+	r.replacement = u.ReplacesHistory
+	replacement.NullItems = u.Items == nil
+
 	if u.ReplacesHistory {
 		header = replacement
 		u.FirstChanged = 0
@@ -135,4 +140,29 @@ func (r *ExchangeRecorder) SaveChanged(ctx context.Context, header ReplayHeader,
 }
 func (r *ExchangeRecorder) Save(ctx context.Context, header ReplayHeader, items []any) error {
 	return r.SaveChanged(ctx, header, items, 0)
+}
+
+// selectExchange is the single boundary rule for all recorder callers. Inputs
+// may be a complete provider conversation or an already isolated exchange.
+// Rewrites are sticky for this execution: later saves must not revert to deltas.
+func selectExchange(u ExchangeUpdate, durable, replaced bool) ExchangeUpdate {
+	explicitReplacement := u.ReplacesHistory
+	u.ReplacesHistory = u.ReplacesHistory || replaced
+	if u.CompleteHistory {
+		n := len(u.Prefix)
+		if !durable || len(u.Items) < n || (n > 0 && !reflect.DeepEqual(u.Items[:min(len(u.Items), n)], u.Prefix)) {
+			u.ReplacesHistory = true
+		}
+		if !u.ReplacesHistory {
+			u.Items = u.Items[n:]
+			u.FirstChanged = max(0, u.FirstChanged-n)
+		}
+	} else if len(u.Prefix) > 0 && (!durable || replaced) && !explicitReplacement {
+		u.Items = append(append([]any(nil), u.Prefix...), u.Items...)
+		u.ReplacesHistory = true
+	}
+	if u.ReplacesHistory {
+		u.FirstChanged = 0
+	}
+	return u
 }

@@ -179,6 +179,9 @@ func TestCheckpointFollowupMock(t *testing.T) {
 	require.True(t, ok)
 	client := &http.Client{Timeout: 10 * time.Second}
 	var samples []checkpointSample
+	// Two collections clear sync.Pool victims from fixture encoding. A single
+	// collection can lend an 11 MiB encoder buffer to the first measured request.
+	runtime.GC()
 	runtime.GC()
 	var baseline runtime.MemStats
 	runtime.ReadMemStats(&baseline)
@@ -293,4 +296,40 @@ func TestCheckpointBenchmarkUsesProductionReplayRows(t *testing.T) {
 		require.NotNil(t, replay[id][0].Rows)
 		require.Empty(t, replay[id][0].TranscriptJSON, "benchmark must not materialize compatibility JSON")
 	}
+}
+
+// Keep the production encoder fast path visible through instrumentation, too.
+// Hiding it recompacts large JSON payloads and measures a fallback not used by
+// the real SQLite recorder.
+type checkpointEncodedWriter interface {
+	AppendEncodedReplayChanges(context.Context, models.ConversationOwner, []models.ConversationChange) ([]models.ConversationChange, error)
+}
+
+func (s *checkpointBenchmarkStore) AppendEncodedReplayChanges(ctx context.Context, owner models.ConversationOwner, changes []models.ConversationChange) ([]models.ConversationChange, error) {
+	return s.ExecutionStore.(checkpointEncodedWriter).AppendEncodedReplayChanges(ctx, owner, changes)
+}
+func (s *checkpointUncachedStore) AppendEncodedReplayChanges(ctx context.Context, owner models.ConversationOwner, changes []models.ConversationChange) ([]models.ConversationChange, error) {
+	return s.ExecutionStore.(checkpointEncodedWriter).AppendEncodedReplayChanges(ctx, owner, changes)
+}
+
+type checkpointWriterSpy struct {
+	persistence.ExecutionStore
+	calls int
+}
+
+func (s *checkpointWriterSpy) AppendEncodedReplayChanges(context.Context, models.ConversationOwner, []models.ConversationChange) ([]models.ConversationChange, error) {
+	s.calls++
+	return nil, nil
+}
+func TestCheckpointBenchmarkPreservesEncodedWriter(t *testing.T) {
+	spy := &checkpointWriterSpy{}
+	wrappers := []checkpointEncodedWriter{
+		&checkpointBenchmarkStore{&countingCheckpointStore{ExecutionStore: spy}},
+		&checkpointUncachedStore{ExecutionStore: spy},
+	}
+	for _, w := range wrappers {
+		_, err := w.AppendEncodedReplayChanges(context.Background(), models.ConversationOwner{}, nil)
+		require.NoError(t, err)
+	}
+	require.Equal(t, 2, spy.calls)
 }

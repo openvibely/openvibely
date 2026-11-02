@@ -159,8 +159,7 @@ func (r *ExecutionRepo) ReplayRowsByExecutionIDs(ctx context.Context, ids []stri
 
 // ReplayContinuationRowsByExecutionIDs skips payloads covered by the newest full
 // snapshot, using headers in the same read transaction as the selected rows.
-// Ordinary exchanges remain chronological. Legacy linked saves alone resolve
-// their bases at the immutable saved revision.
+// Ordinary exchanges remain chronological.
 // IDs must be chronological. Older execution metadata remains with the caller.
 func (r *ExecutionRepo) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
 	return r.readReplayMessages(ctx, ids, true, true)
@@ -172,7 +171,7 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 		return nil, err
 	}
 	defer tx.Rollback()
-	result, err := readReplayMessagesTx(ctx, tx, ids, continuation, map[string]bool{}, 0)
+	result, err := readReplayMessagesTx(ctx, tx, ids, continuation)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +190,7 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 	return result, nil
 }
 
-func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continuation bool, visiting map[string]bool, revision int64) (map[string][]models.ExecutionReplayMessage, error) {
+func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continuation bool) (map[string][]models.ExecutionReplayMessage, error) {
 	var err error
 	result := make(map[string][]models.ExecutionReplayMessage)
 	placeholders, args := uniqueExecutionIDArgs(ids)
@@ -200,11 +199,6 @@ func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continu
 	}
 
 	predicate := `execution_id IN (` + strings.Join(placeholders, ",") + `) AND generation=0 AND is_current=1 AND operation='put' AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%'`
-	if revision > 0 {
-		// A base is pinned to a committed revision, not its mutable current heads.
-		predicate = strings.Replace(predicate, "is_current=1", `sequence=(SELECT max(prior.sequence) FROM conversation_items prior WHERE prior.execution_id=conversation_items.execution_id AND prior.generation=0 AND prior.item_id=conversation_items.item_id AND prior.sequence<=?)`, 1)
-		args = append(append([]any(nil), args...), revision)
-	}
 	if continuation {
 		headerRows, err := tx.QueryContext(ctx, `SELECT execution_id,item_id,payload FROM conversation_items WHERE `+predicate+` AND lane='metadata' AND item_id LIKE '%:header'`, args...)
 		if err != nil {
@@ -228,7 +222,7 @@ func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continu
 				headerRows.Close()
 				return nil, err
 			}
-			if (models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) || (frame.ItemsKey == "responses_delta" && len(frame.Envelope["responses_base_execution_ids"]) > 0)) && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
+			if models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
 				boundary = positions[id]
 				firstFrame = item
 			}
@@ -246,11 +240,6 @@ func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continu
 			placeholders, args = uniqueExecutionIDArgs(selected)
 			predicate = `execution_id IN (` + strings.Join(placeholders, ",") + `) AND generation=0 AND is_current=1 AND operation='put' AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%' AND (execution_id!=? OR item_id>=?)`
 			args = append(args, selected[0], firstFrame)
-			if revision > 0 {
-				predicate = strings.Replace(predicate, "is_current=1", `sequence=(SELECT max(prior.sequence) FROM conversation_items prior WHERE prior.execution_id=conversation_items.execution_id AND prior.generation=0 AND prior.item_id=conversation_items.item_id AND prior.sequence<=?)`, 1)
-				// The revision placeholder precedes the frame selector.
-				args = append(append(append([]any(nil), args[:len(args)-2]...), revision), args[len(args)-2:]...)
-			}
 		}
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT execution_id,item_id,lane,payload FROM conversation_items WHERE `+predicate+` ORDER BY execution_id,item_id`, args...)
@@ -334,62 +323,6 @@ func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continu
 	rows.Close()
 	if err := flush(); err != nil {
 		return nil, err
-	}
-	// Compatibility only: new exchanges do not write base references.
-	for id, messages := range result {
-		for i, m := range messages {
-			if m.Rows == nil || m.Rows.ItemsKey != "responses_delta" || len(m.Rows.Envelope["responses_base_execution_ids"]) == 0 {
-				continue
-			}
-			if visiting[id] || len(visiting) >= models.MaxReplayDeltaDepth {
-				return nil, fmt.Errorf("cyclic or excessive replay dependency at %s", id)
-			}
-			var bases []string
-			if err := json.Unmarshal(m.Rows.Envelope["responses_base_execution_ids"], &bases); err != nil || len(bases) != 1 {
-				return nil, fmt.Errorf("invalid replay base for %s", id)
-			}
-			visiting[id] = true
-			var baseRevision int64
-			if err := json.Unmarshal(m.Rows.Envelope["responses_base_revision"], &baseRevision); err != nil || baseRevision <= 0 {
-				return nil, fmt.Errorf("invalid replay base revision for %s", id)
-			}
-			var sameTask bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM executions a JOIN executions b ON a.task_id=b.task_id WHERE a.id=? AND b.id=?)`, id, bases[0]).Scan(&sameTask); err != nil {
-				return nil, err
-			}
-			if !sameTask {
-				return nil, fmt.Errorf("missing or cross-task replay base %s for %s", bases[0], id)
-			}
-			previous, err := readReplayMessagesTx(ctx, tx, bases, true, visiting, baseRevision)
-			delete(visiting, id)
-			if err != nil {
-				return nil, err
-			}
-			base := previous[bases[0]]
-			if len(base) != 1 || !base[0].HasResponsesInput() {
-				return nil, fmt.Errorf("missing or invalid replay base %s for %s", bases[0], id)
-			}
-			items, _, err := base[0].ResponsesReplay()
-			if err != nil {
-				return nil, err
-			}
-			combined := make([]json.RawMessage, 0, len(items)+len(m.Rows.Items))
-			combined = append(combined, items...)
-			combined = append(combined, m.Rows.Items...)
-			messages[i].Rows = &models.ReplayRows{Format: "envelope", ItemsKey: "responses_input", Items: combined, DeltaDepth: base[0].Rows.DeltaDepth + 1}
-		}
-		var currentRevision int64
-		if revision > 0 {
-			currentRevision = revision
-		} else if err := tx.QueryRowContext(ctx, `SELECT COALESCE(max(sequence),0) FROM conversation_items WHERE execution_id=? AND generation=0 AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%'`, id).Scan(&currentRevision); err != nil {
-			return nil, err
-		}
-		for j := range messages {
-			if messages[j].Rows != nil {
-				messages[j].Rows.Revision = currentRevision
-			}
-		}
-		result[id] = messages
 	}
 	return result, nil
 }

@@ -16,7 +16,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -532,17 +531,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 		}
 		if opts.OnReplayChanged != nil {
-			if compactionGeneration != 0 || len(items) < len(replayPrefix) || (len(replayPrefix) > 0 && !reflect.DeepEqual(items[:min(len(items), len(replayPrefix))], replayPrefix)) {
-				if !replayReplacement {
-					firstChanged = 0
-				}
-				replayReplacement = true
-			}
-			base := len(replayPrefix)
-			if replayReplacement {
-				base = 0
-			}
-			update := ResponsesReplayUpdate{Items: items[base:], FirstChanged: max(0, firstChanged-base), ReplacesHistory: replayReplacement, Prefix: replayPrefix}
+			update := ResponsesReplayUpdate{Items: items, Prefix: replayPrefix, FirstChanged: firstChanged, ReplacesHistory: replayReplacement || compactionGeneration != 0, CompleteHistory: true}
 			if err := opts.OnReplayChanged(ctx, update); err != nil {
 				return err
 			}

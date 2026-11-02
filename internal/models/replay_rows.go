@@ -10,16 +10,9 @@ import (
 	"unsafe"
 )
 
-// MaxReplayDeltaDepth bounds reconstruction of legacy linked exchange records.
-const MaxReplayDeltaDepth = 256
-
 // ReplayRows keeps persisted JSON items separate until a consumer decodes them.
 // It is immutable and may be shared by copied execution histories.
 type ReplayRows struct {
-	// Revision identifies the immutable persisted replay used as a delta base.
-	Revision   int64
-	DeltaDepth int
-
 	Format    string
 	ItemsKey  string
 	NullItems bool
@@ -208,7 +201,7 @@ func (m ExecutionReplayMessage) TranscriptBytes() int {
 
 // ReplayReplacesHistory describes the stored format, not the selected provider.
 // Responses inputs are full snapshots; responses_delta, messages and arrays
-// are incremental exchanges. Only legacy linked deltas require base resolution.
+// are incremental exchanges.
 func ReplayReplacesHistory(format, key string, count int) bool {
 	return format == "envelope" && key == "responses_input" && count > 0
 }

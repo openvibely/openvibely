@@ -92,10 +92,6 @@ func appendConversationChangesEncoded(ctx context.Context, tx sqlExecutor, owner
 	if result, handled, err := insertInitialReplay(ctx, tx, owner, changes, canonical); handled {
 		return result, err
 	}
-	preserveReplay, err := preserveCompletedReplay(ctx, tx, owner, changes)
-	if err != nil {
-		return nil, err
-	}
 	result := make([]models.ConversationChange, 0, len(changes))
 	for _, change := range changes {
 		if strings.TrimSpace(change.MutationID) == "" || (!canonical && !json.Valid(change.Payload)) || change.Generation < 0 || change.Position < 0 || change.PreviousRevision < 0 {
@@ -173,7 +169,7 @@ func appendConversationChangesEncoded(ctx context.Context, tx sqlExecutor, owner
 		} else {
 			snapshot = 0 // A put/remove/reset starts a new reconstruction boundary.
 		}
-		if revision != 0 && (change.Operation == models.ConversationAppend || (preserveReplay && change.Lane != models.ConversationDisplay && strings.HasPrefix(change.ItemID, "replay:"))) {
+		if revision != 0 && change.Operation == models.ConversationAppend {
 			if _, err := tx.ExecContext(ctx, `UPDATE conversation_items SET is_current = 0 WHERE sequence = ?`, revision); err != nil {
 				return nil, err
 			}
@@ -470,21 +466,4 @@ func (r *ExecutionRepo) ConversationRevision(ctx context.Context, owner models.C
 		return 0, nil
 	}
 	return revision, err
-}
-
-// Completed executions can be immutable bases for later exchanges. Retain
-// their replaced replay revisions; deleting the task still removes all of them.
-// Running executions continue to prune transient tool/steering revisions.
-func preserveCompletedReplay(ctx context.Context, tx sqlExecutor, owner models.ConversationOwner, changes []models.ConversationChange) (bool, error) {
-	if owner.ExecutionID == "" {
-		return false, nil
-	}
-	for _, c := range changes {
-		if c.PreviousRevision != 0 && c.Lane != models.ConversationDisplay && strings.HasPrefix(c.ItemID, "replay:") {
-			var completed bool
-			err := tx.QueryRowContext(ctx, `SELECT status='completed' FROM executions WHERE id=?`, owner.ExecutionID).Scan(&completed)
-			return completed, err
-		}
-	}
-	return false, nil
 }

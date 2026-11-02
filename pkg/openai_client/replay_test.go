@@ -213,7 +213,8 @@ func TestResponsesReplayUpdateAppendAndRepair(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, updates)
 			for _, u := range updates {
-				require.Equal(t, tc.replaces, u.ReplacesHistory)
+				require.True(t, u.CompleteHistory)
+				require.Equal(t, tc.resume, u.ReplacesHistory)
 				require.Equal(t, tc.prefix, u.Prefix)
 			}
 			raw, err := json.Marshal(updates[len(updates)-1].Items)
@@ -225,7 +226,7 @@ func TestResponsesReplayUpdateAppendAndRepair(t *testing.T) {
 					require.Contains(t, string(raw), "old")
 				}
 			} else {
-				require.NotContains(t, string(raw), "old")
+				require.Contains(t, string(raw), "old", "selection belongs to the shared recorder")
 				require.Contains(t, string(raw), "new")
 			}
 		})
