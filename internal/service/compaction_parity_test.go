@@ -24,9 +24,11 @@ func TestSummaryReplacementPersistsContextAndUserMetadata(t *testing.T) {
 	svc := NewLLMService(nil, store.Stores.Executions, nil, nil, nil, nil)
 	ctx := managedcontext.With(context.Background(), "permitted index")
 	ctx = attachmentcontext.With(ctx, "/uploads/report.txt")
+	task := &models.Task{ProjectID: "default", Title: "compaction parity", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+	require.NoError(t, store.Stores.Tasks.Create(ctx, task))
 	rawUser := `{"type":"message","id":"user-1","role":"user","content":[{"type":"input_text","text":"keep my request","annotations":[{"source":"reference"}]}],"internal_chat_message_metadata":{"example":"retained"}}`
 	history := []models.Execution{{ID: "source", PromptSent: "keep my request", Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[` + rawUser + `]}`}}}}
-	req := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, TransportScope: "task:parity", WorkDir: t.TempDir(), Agent: models.LLMConfig{Provider: models.ProviderOpenAI, ContextWindow: 200000}, ChatHistory: history}
+	req := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, TransportScope: "task:" + task.ID, WorkDir: t.TempDir(), Agent: models.LLMConfig{Provider: models.ProviderOpenAI, ContextWindow: 200000}, ChatHistory: history}
 	compacted, err := svc.compactRequestHistoryWithLocalSummary(providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		return llmcontracts.AgentResult{Output: "completed work"}, nil
 	}), req)
@@ -39,7 +41,7 @@ func TestSummaryReplacementPersistsContextAndUserMetadata(t *testing.T) {
 	require.JSONEq(t, rawUser, string(compacted.ChatHistory[3].RetainedUserMessage))
 	require.Equal(t, "summary", compacted.ChatHistory[4].ContextKind)
 	require.Empty(t, compacted.ChatHistory[4].Output)
-	svc.persistCompactionCheckpoint(req, compacted, "completed work", "local_summary")
+	require.NoError(t, svc.persistCompactionCheckpoint(req, compacted, "completed work", "local_summary"))
 	restored := svc.restoreCompactionCheckpoint(req)
 	require.Equal(t, compacted.ChatHistory, restored.ChatHistory)
 	hydrated, err := svc.loadProviderReplayHistory(restored)

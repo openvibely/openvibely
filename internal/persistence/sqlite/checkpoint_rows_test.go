@@ -9,7 +9,8 @@ import (
 )
 
 func TestNativeCheckpointRowsAndCompatibility(t *testing.T) {
-	_, repo, _ := conversationTestRepo(t)
+	db, repo, _ := conversationTestRepo(t)
+	createCheckpointTask(t, db, "rows")
 	ctx := context.Background()
 	for _, raw := range []string{`[{"type":"compaction","encrypted_content":"opaque"},{"type":"function_call_output","output":"tool text"}]`, `{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"summary"}]}]}`} {
 		cp := models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "rows", ProviderStateJSON: raw}

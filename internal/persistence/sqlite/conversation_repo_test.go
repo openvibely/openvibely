@@ -115,6 +115,7 @@ func TestConversationChangesBatchRollbackAndLaneIsolation(t *testing.T) {
 
 func TestConversationCheckpointTransaction(t *testing.T) {
 	db, repo, _ := conversationTestRepo(t)
+	createCheckpointTask(t, db, "test-scope")
 	ctx := context.Background()
 	if err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "test-scope"}); err != nil {
 		t.Fatal(err)
@@ -284,5 +285,12 @@ func TestConversationAppendRejectsNonText(t *testing.T) {
 	}
 	if len(p.Items) != 1 || p.Items[0].Revision != result[0].Sequence {
 		t.Fatal("failed append changed head")
+	}
+}
+
+func createCheckpointTask(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO tasks(id,project_id,title) VALUES(?,'default','checkpoint owner')`, id); err != nil {
+		t.Fatal(err)
 	}
 }

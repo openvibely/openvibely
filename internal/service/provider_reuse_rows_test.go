@@ -44,6 +44,8 @@ func TestRestoredNativeRowsBudgetSendAndProviderSwitch(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
 			stores := teststores.New(t).Stores
+			task := &models.Task{ProjectID: "default", Title: "native checkpoint", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+			require.NoError(t, stores.Tasks.Create(context.Background(), task))
 			agent := models.LLMConfig{ID: "model", Provider: provider, Model: "fixture", ContextWindow: 200000}
 			raw := `[{"type":"compaction","encrypted_content":"opaque"},{"type":"function_call_output","call_id":"c","output":"saved text"}]`
 			strategy := "openai_responses"
@@ -51,8 +53,8 @@ func TestRestoredNativeRowsBudgetSendAndProviderSwitch(t *testing.T) {
 				strategy = "anthropic_context_management"
 				raw = `{"version":1,"messages":[{"role":"assistant","content":[{"type":"compaction","content":"saved summary"},{"type":"text","text":"saved answer"}]}]}`
 			}
-			req := llmcontracts.AgentRequest{Ctx: preparedhistory.WithScope(context.Background()), TransportScope: "task:row-test", Agent: agent}
-			cp := models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "row-test", CompatibilityKey: providerCompatibilityKey(agent), ModelConfigID: agent.ID, Strategy: strategy, ProviderStateJSON: raw}
+			req := llmcontracts.AgentRequest{Ctx: preparedhistory.WithScope(context.Background()), TransportScope: "task:" + task.ID, Agent: agent}
+			cp := models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: task.ID, CompatibilityKey: providerCompatibilityKey(agent), ModelConfigID: agent.ID, Strategy: strategy, ProviderStateJSON: raw}
 			require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(req.Ctx, cp))
 			svc := &LLMService{execRepo: stores.Executions}
 			got := svc.restoreCompactionCheckpoint(req)

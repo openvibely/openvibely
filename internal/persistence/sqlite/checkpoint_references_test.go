@@ -12,6 +12,7 @@ import (
 
 func TestCheckpointReferencesSurviveSourceChangesAndDeletion(t *testing.T) {
 	db, repo, owner := conversationTestRepo(t)
+	createCheckpointTask(t, db, "reference-test")
 	ctx := context.Background()
 	recorder := transcript.NewRecorder(repo, owner)
 	header := transcript.ReplayHeader{Format: "array"}
@@ -64,6 +65,7 @@ func TestCheckpointReferencesSurviveSourceChangesAndDeletion(t *testing.T) {
 
 func TestCheckpointReferencesRetirementIsAtomic(t *testing.T) {
 	db, repo, owner := conversationTestRepo(t)
+	createCheckpointTask(t, db, "atomic-references")
 	ctx := context.Background()
 	r := transcript.NewRecorder(repo, owner)
 	require.NoError(t, r.Save(ctx, transcript.ReplayHeader{Format: "array"}, []any{"retained"}))
@@ -91,6 +93,7 @@ func TestCheckpointReferencesRetirementIsAtomic(t *testing.T) {
 
 func TestCheckpointReferenceReplacementReleasesBorrowers(t *testing.T) {
 	db, repo, owner := conversationTestRepo(t)
+	createCheckpointTask(t, db, "native-ref")
 	ctx := context.Background()
 	require.NoError(t, transcript.NewRecorder(repo, owner).Save(ctx, transcript.ReplayHeader{Format: "array"}, []any{"native"}))
 	checkpoint := models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "native-ref", SourceExecutionID: owner.ExecutionID, CompatibilityKey: "a", ProviderStateJSON: `["native"]`}
@@ -139,6 +142,7 @@ func TestStreamingFlushRollbackAndByteCursor(t *testing.T) {
 
 func TestCheckpointDigestSkipsUnchangedHistoryAndInvalidatesOnMutation(t *testing.T) {
 	db, repo, _ := conversationTestRepo(t)
+	createCheckpointTask(t, db, "digest")
 	ctx := t.Context()
 	checkpoint := models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "digest", Summary: "first", History: []models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `["original"]`}}, ReasoningContent: "reason", RetainedUserMessage: json.RawMessage(`{"role":"user","content":"retained"}`)}}}
 	require.NoError(t, repo.UpsertChatCompactionCheckpoint(ctx, checkpoint))
@@ -178,6 +182,7 @@ func TestCheckpointRangeSurvivesMiddleEditDeletionAndRollback(t *testing.T) {
 	for _, inTurn := range []bool{false, true} {
 		t.Run(map[bool]string{false: "source-edit", true: "in-turn-rollback"}[inTurn], func(t *testing.T) {
 			db, repo, owner := conversationTestRepo(t)
+			createCheckpointTask(t, db, "range")
 			ctx := t.Context()
 			recorder := transcript.NewRecorder(repo, owner)
 			items := []any{"zero", "one", "two", "three", "four", "five", "six", "seven"}

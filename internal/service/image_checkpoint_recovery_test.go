@@ -25,8 +25,10 @@ func TestCompletionsSummaryRetainsImagesOnlyInInput(t *testing.T) {
 		compacted := buildCompactedReplacementHistory(recovered.ChatHistory, "edit done")
 
 		stores := teststores.New(t).Stores
-		require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: "images", History: compacted}))
-		saved, err := stores.Executions.GetChatCompactionCheckpoint(context.Background(), "task", "images")
+		task := &models.Task{ProjectID: "default", Title: "image checkpoint", Category: models.CategoryBacklog, Status: models.StatusCompleted}
+		require.NoError(t, stores.Tasks.Create(context.Background(), task))
+		require.NoError(t, stores.Executions.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "task", ScopeID: task.ID, History: compacted}))
+		saved, err := stores.Executions.GetChatCompactionCheckpoint(context.Background(), "task", task.ID)
 		require.NoError(t, err)
 		for _, execution := range saved.History {
 			require.Empty(t, execution.ReplayMessages)
