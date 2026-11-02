@@ -79,7 +79,7 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 		<div class="task-list-empty">No tasks yet.</div>
 	}
 	for _, group := range groups {
-		<details class="task-list-group" open data-task-list-group={ group.Label }>
+		<details class="task-list-group" open data-task-list-group={ group.Label } data-task-list-project-scope={ projectID }>
 			<summary>
 				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 				<span class="task-list-group-label">{ group.Label }</span>
@@ -563,6 +563,11 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			var groupStateKey = 'openvibely.taskListGroups';
 			var groupState = {};
             var browseScroll = {};
+            function browseScrollKey(group) {
+                // The rendered rows can still belong to the outgoing project while
+                // hx-get already points at the incoming project's request.
+                return group.dataset.taskListProjectScope + ':' + group.dataset.taskListGroup;
+            }
 			try { groupState = JSON.parse(localStorage.getItem(groupStateKey) || '{}') || {}; } catch (_) {}
 			function saveGroupState() { try { localStorage.setItem(groupStateKey, JSON.stringify(groupState)); } catch (_) {} }
 			function syncMore(group) {
@@ -575,7 +580,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 					group.open = !st.closed;
 					group.toggleAttribute('data-browsing', !!st.browsing);
                     var rows = group.querySelector('.task-list-rows');
-                    rows.scrollTop = browseScroll[currentProjectID() + ':' + group.dataset.taskListGroup] || 0;
+                    rows.scrollTop = browseScroll[browseScrollKey(group)] || 0;
 					syncMore(group);
 				});
 			}
@@ -660,7 +665,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 hideHoverCard();
                 if (e.target.matches('.task-list-rows')) {
                     var group = e.target.closest('.task-list-group');
-                    browseScroll[currentProjectID() + ':' + group.dataset.taskListGroup] = e.target.scrollTop;
+                    browseScroll[browseScrollKey(group)] = e.target.scrollTop;
                 }
             }, { passive: true, capture: true });
 			groups.addEventListener('click', hideHoverCard);
@@ -1019,7 +1024,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 deferredRefresh = false;
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
                 groups.querySelectorAll('.task-list-group[data-browsing] .task-list-rows').forEach(function(rows) {
-                    browseScroll[currentProjectID() + ':' + rows.closest('.task-list-group').dataset.taskListGroup] = rows.scrollTop;
+                    browseScroll[browseScrollKey(rows.closest('.task-list-group'))] = rows.scrollTop;
                 });
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();
