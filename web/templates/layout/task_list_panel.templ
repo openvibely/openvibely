@@ -120,7 +120,7 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 			}
 			</div>
 			if len(group.Tasks) > taskListGroupLimit {
-				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>{ fmt.Sprintf("Browse all %d", len(group.Tasks)) }</button>
+				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>Browse all</button>
                 <div class="task-list-browse-controls">
                     <span>Scroll to browse</span>
                     <span aria-hidden="true">·</span>
