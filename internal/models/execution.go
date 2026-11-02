@@ -50,8 +50,10 @@ type Execution struct {
 	DispatchID       string                   `json:"dispatch_id,omitempty"`
 	ReasoningContent string                   `json:"-"`
 	ReplayMessages   []ExecutionReplayMessage `json:"-"`
-	StartedAt        time.Time                `json:"started_at"`
-	CompletedAt      *time.Time               `json:"completed_at"`
+	// ReplayMetadataOnly defers legacy prompt/output loading until after checkpoint selection.
+	ReplayMetadataOnly bool       `json:"-"`
+	StartedAt          time.Time  `json:"started_at"`
+	CompletedAt        *time.Time `json:"completed_at"`
 }
 
 // TaskExecutionMetrics is the compact execution projection needed by task

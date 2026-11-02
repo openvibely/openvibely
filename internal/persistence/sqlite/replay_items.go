@@ -158,8 +158,9 @@ func (r *ExecutionRepo) ReplayRowsByExecutionIDs(ctx context.Context, ids []stri
 }
 
 // ReplayContinuationRowsByExecutionIDs skips payloads covered by the newest full
-// snapshot or linked exchange, using headers in the same read transaction as
-// the selected rows. Delta bases are resolved at their immutable saved revision.
+// snapshot, using headers in the same read transaction as the selected rows.
+// Ordinary exchanges remain chronological. Legacy linked saves alone resolve
+// their bases at the immutable saved revision.
 // IDs must be chronological. Older execution metadata remains with the caller.
 func (r *ExecutionRepo) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
 	return r.readReplayMessages(ctx, ids, true, true)
@@ -227,7 +228,7 @@ func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continu
 				headerRows.Close()
 				return nil, err
 			}
-			if (models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) || frame.ItemsKey == "responses_delta") && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
+			if (models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) || (frame.ItemsKey == "responses_delta" && len(frame.Envelope["responses_base_execution_ids"]) > 0)) && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
 				boundary = positions[id]
 				firstFrame = item
 			}
@@ -334,9 +335,10 @@ func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continu
 	if err := flush(); err != nil {
 		return nil, err
 	}
+	// Compatibility only: new exchanges do not write base references.
 	for id, messages := range result {
 		for i, m := range messages {
-			if m.Rows == nil || m.Rows.ItemsKey != "responses_delta" {
+			if m.Rows == nil || m.Rows.ItemsKey != "responses_delta" || len(m.Rows.Envelope["responses_base_execution_ids"]) == 0 {
 				continue
 			}
 			if visiting[id] || len(visiting) >= models.MaxReplayDeltaDepth {

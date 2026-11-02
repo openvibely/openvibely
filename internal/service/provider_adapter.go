@@ -951,6 +951,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		}
 	}
 
+	var historyErr error
+	req, historyErr = s.completeTaskReplayHistory(req)
+	if historyErr != nil {
+		return llmcontracts.AgentResult{}, historyErr
+	}
+
 	installationContinuation := false
 	if s.skillInstallationResult != nil && !req.LifecycleHookCall && req.ExecID != "" {
 		result, err := s.skillInstallationResult(req.Ctx, req)
@@ -1668,6 +1674,26 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 			if reasoning != nil {
 				req.ChatHistory[i].ReasoningContent = reasoning[req.ChatHistory[i].ID]
 			}
+		}
+	}
+	for i := range req.ChatHistory {
+		e := &req.ChatHistory[i]
+		if !e.ReplayMetadataOnly {
+			continue
+		}
+		e.ReplayMetadataOnly = false
+		// An explicit empty slice means selection discarded a covered execution.
+		// Only genuinely absent replay requires legacy UI-text fallback.
+		if e.ReplayMessages != nil {
+			continue
+		}
+		full, err := s.execRepo.GetByID(req.Ctx, e.ID)
+		if err != nil {
+			return req, err
+		}
+		if full != nil {
+			e.PromptSent, e.Output, e.ErrorMessage = full.PromptSent, full.Output, full.ErrorMessage
+			e.ReasoningContent = full.ReasoningContent
 		}
 	}
 	return req, nil

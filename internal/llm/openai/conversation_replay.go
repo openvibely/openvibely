@@ -284,38 +284,34 @@ func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Exec
 		return nil
 	}
 	// A standalone checkpoint or converted/synthetic history is a new base.
-	// Once a native replay exists, the repository restores it as one complete
-	// logical snapshot, even though its payload is stored as linked exchanges.
-	var bases []string
-	var baseRevision int64
+	// Ordinary exchanges use the shared chronological history loader. No
+	// execution IDs or revisions are embedded in newly saved replay data.
+	durableHistory := false
 	var baseTaskID string
 	if e, ok := responsesReplayBase(history); ok && e.ID != execID {
-		bases = []string{e.ID}
-		baseRevision = e.ReplayMessages[0].Rows.Revision
+		durableHistory = true
 		baseTaskID = e.TaskID
 	}
 
-	baseJSON, _ := json.Marshal(bases)
-	revisionJSON, _ := json.Marshal(baseRevision)
 	checkedBase := false
 	recorder := transcript.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
 	return func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
-		if !checkedBase && len(bases) > 0 {
+		if !checkedBase && durableHistory {
 			e, err := a.execRepo.GetByID(persistence.WithExecutionMetadata(context.WithoutCancel(ctx)), execID)
 			if err != nil {
 				return err
 			}
 			if e == nil || e.TaskID != baseTaskID {
-				bases = nil
+				durableHistory = false
 			}
 			checkedBase = true
 		}
-		if len(bases) == 0 && !u.ReplacesHistory {
+		if !durableHistory && !u.ReplacesHistory {
 			u.Items = append(append([]any(nil), u.Prefix...), u.Items...)
 			u.ReplacesHistory = true
 			u.FirstChanged = 0
 		}
-		h := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil, Envelope: map[string]json.RawMessage{"responses_base_execution_ids": baseJSON, "responses_base_revision": revisionJSON}}
+		h := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil}
 		if u.ReplacesHistory {
 			h.ItemsKey = "responses_input"
 			h.Envelope = nil
@@ -334,13 +330,22 @@ func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Exec
 
 func responsesReplayBase(history []models.Execution) (models.Execution, bool) {
 	effective := models.EffectiveReplayHistory(history)
-	if len(effective) == 1 {
-		e := effective[0]
-		if e.Status == models.ExecCompleted && e.ID != "" && e.ContextKind == "" && len(e.ReplayMessages) == 1 && e.ReplayMessages[0].HasResponsesInput() && e.ReplayMessages[0].Rows != nil && e.ReplayMessages[0].Rows.Revision > 0 && e.ReplayMessages[0].Rows.DeltaDepth < models.MaxReplayDeltaDepth {
-			return e, true
+	if len(effective) == 0 {
+		return models.Execution{}, false
+	}
+	taskID := effective[len(effective)-1].TaskID
+	for _, e := range effective {
+		if e.Status != models.ExecCompleted || e.ID == "" || e.TaskID != taskID || e.ContextKind != "" || len(e.ReplayMessages) == 0 {
+			return models.Execution{}, false
+		}
+		for _, replay := range e.ReplayMessages {
+			items, _, err := replay.ResponsesReplay()
+			if err != nil || len(items) == 0 {
+				return models.Execution{}, false
+			}
 		}
 	}
-	return models.Execution{}, false
+	return effective[len(effective)-1], true
 }
 func responsesReplayBaseAvailable(history []models.Execution) bool {
 	_, ok := responsesReplayBase(history)

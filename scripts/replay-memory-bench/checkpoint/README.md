@@ -34,8 +34,10 @@ The peer checks reconstructed context, including incremental WebSocket requests.
 Every run must preserve the image, checkpoint marker, and previous answer, return
 the expected answer, make exactly six requests, and read checkpoint payloads
 exactly as expected. The runner also executes the existing cache/provider-switch
-correctness tests before measurement. These assertions run in CI; RAM/timing
-numbers are diagnostic, not flaky pass/fail thresholds.
+correctness tests before measurement, including chronological reconstruction
+beyond the UI window for every provider. New OpenAI exchanges must not repeat
+the image or write execution links. RAM/timing numbers are diagnostic, not
+flaky pass/fail thresholds. This runner is standalone; it does not modify CI.
 
 Each case writes `result.json` (per-turn allocations, forced-GC retained Go heap,
 request duration, checkpoint reads), `rss.json` (app RSS sampled approximately

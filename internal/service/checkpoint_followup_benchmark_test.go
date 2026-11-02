@@ -217,8 +217,8 @@ func TestCheckpointFollowupMock(t *testing.T) {
 		execution.Status = models.ExecCompleted
 		execution.Output = result.Output
 		require.NoError(t, original.Complete(req.Ctx, execution.ID, models.ExecCompleted, "", "", 0, 0))
-		// Read physical records outside the measured interval. Logical replay
-		// readers intentionally reconstruct a complete snapshot for recovery.
+		// Read physical records outside the measured interval. New exchanges
+		// must neither repeat old payloads nor depend on execution links.
 		if provider == models.ProviderOpenAI && mode == "reuse" && turn > 0 {
 			heads, err := original.ReadConversationHeads(req.Ctx, models.ConversationOwner{ExecutionID: execution.ID}, "", 0)
 			require.NoError(t, err)
@@ -226,6 +226,8 @@ func TestCheckpointFollowupMock(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, frames, 1)
 			require.Contains(t, frames[0].TranscriptJSON, `"responses_delta"`)
+			require.NotContains(t, frames[0].TranscriptJSON, `"responses_base_execution_ids"`)
+			require.NotContains(t, frames[0].TranscriptJSON, `"responses_base_revision"`)
 			require.Less(t, len(frames[0].TranscriptJSON), 64*1024, "ordinary follow-ups must not save the large checkpoint again")
 		}
 		req.ChatHistory = append(req.ChatHistory, execution)

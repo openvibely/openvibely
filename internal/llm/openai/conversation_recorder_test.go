@@ -248,7 +248,8 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: delta, FirstChanged: 1}))
 	loaded, err = reader.ReplayRowsByExecutionIDs(ctx, []string{current.ID})
 	require.NoError(t, err)
-	require.Len(t, loaded[current.ID][0].Rows.Items, 3)
+	require.Len(t, loaded[current.ID][0].Rows.Items, 2)
+	require.NotContains(t, loaded[current.ID][0].FullTranscriptJSON(), "responses_base_execution_ids")
 	replacement := []any{map[string]any{"type": "compaction", "encrypted_content": "replacement"}}
 	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: replacement, ReplacesHistory: true}))
 	require.Equal(t, replacement, recovery)
@@ -258,7 +259,7 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 }
 
 func TestResponsesExchangeRecorderStartsIndependentBase(t *testing.T) {
-	for _, reason := range []string{"cross-task", "depth", "failed"} {
+	for _, reason := range []string{"cross-task", "failed"} {
 		t.Run(reason, func(t *testing.T) {
 			ctx := context.Background()
 			stores := teststores.New(t).Stores
@@ -281,8 +282,6 @@ func TestResponsesExchangeRecorderStartsIndependentBase(t *testing.T) {
 				other := &models.Task{ProjectID: "default", Title: "other", Category: models.CategoryCompleted, Status: models.StatusCompleted}
 				require.NoError(t, stores.Tasks.Create(ctx, other))
 				targetTask = other.ID
-			case "depth":
-				source.ReplayMessages[0].Rows.DeltaDepth = models.MaxReplayDeltaDepth
 			case "failed":
 				source.Status = models.ExecFailed
 			}

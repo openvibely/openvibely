@@ -10,7 +10,7 @@ import (
 	"unsafe"
 )
 
-// MaxReplayDeltaDepth bounds reconstruction work before writing a fresh base.
+// MaxReplayDeltaDepth bounds reconstruction of legacy linked exchange records.
 const MaxReplayDeltaDepth = 256
 
 // ReplayRows keeps persisted JSON items separate until a consumer decodes them.
@@ -208,7 +208,7 @@ func (m ExecutionReplayMessage) TranscriptBytes() int {
 
 // ReplayReplacesHistory describes the stored format, not the selected provider.
 // Responses inputs are full snapshots; responses_delta, messages and arrays
-// are incremental exchanges. The repository resolves pinned delta bases first.
+// are incremental exchanges. Only legacy linked deltas require base resolution.
 func ReplayReplacesHistory(format, key string, count int) bool {
 	return format == "envelope" && key == "responses_input" && count > 0
 }
