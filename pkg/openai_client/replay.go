@@ -35,3 +35,13 @@ func repairInterruptedToolCalls(items []any) []any {
 	}
 	return result
 }
+
+// ResponsesReplayUpdate separates the unchanged request prefix from newly saved
+// exchanges. A rewrite (including compaction) replaces the complete history.
+// Prefix is immutable; Items remain owned by the running client.
+type ResponsesReplayUpdate struct {
+	Items           []any
+	Prefix          []any
+	FirstChanged    int
+	ReplacesHistory bool
+}

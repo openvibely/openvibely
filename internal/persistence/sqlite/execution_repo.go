@@ -1725,12 +1725,16 @@ func modelHistoryQuery(ctx context.Context, query string, alias bool) string {
 		owner, output = "e", executionOutputSelectAlias
 	}
 	// Format and key are fixed constants from ModelHistoryFormat, never input SQL.
+	keyPredicate := "COALESCE(json_extract(c.payload,'$.items_key'),'')='" + itemsKey + "'"
+	if itemsKey == "responses_input" {
+		keyPredicate = "json_extract(c.payload,'$.items_key') IN ('responses_input','responses_delta')"
+	}
 	projection := `CASE WHEN ` + owner + `.status='completed' AND EXISTS (
  SELECT 1 FROM conversation_items c WHERE c.execution_id=` + owner + `.id
  AND c.generation=0 AND c.is_current=1 AND c.operation='put' AND c.lane='metadata'
  AND c.item_id LIKE 'replay:%:header'
  AND json_extract(c.payload,'$.format')='` + format + `'
- AND COALESCE(json_extract(c.payload,'$.items_key'),'')='` + itemsKey + `'
+ AND ` + keyPredicate + `
  AND json_extract(c.payload,'$.item_count')>0
  ) THEN '' ELSE ` + output + ` END`
 	return strings.Replace(query, output, projection, 1)

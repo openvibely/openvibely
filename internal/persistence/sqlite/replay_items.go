@@ -158,24 +158,52 @@ func (r *ExecutionRepo) ReplayRowsByExecutionIDs(ctx context.Context, ids []stri
 }
 
 // ReplayContinuationRowsByExecutionIDs skips payloads covered by the newest full
-// snapshot, using headers in the same read transaction as the selected rows.
+// snapshot or linked exchange, using headers in the same read transaction as
+// the selected rows. Delta bases are resolved at their immutable saved revision.
 // IDs must be chronological. Older execution metadata remains with the caller.
 func (r *ExecutionRepo) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
 	return r.readReplayMessages(ctx, ids, true, true)
 }
 
 func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, direct, continuation bool) (map[string][]models.ExecutionReplayMessage, error) {
-	result := make(map[string][]models.ExecutionReplayMessage)
-	placeholders, args := uniqueExecutionIDArgs(ids)
-	if len(args) == 0 {
-		return result, nil
-	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	result, err := readReplayMessagesTx(ctx, tx, ids, continuation, map[string]bool{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	if !direct {
+		for id, messages := range result {
+			for i := range messages {
+				messages[i].TranscriptJSON = messages[i].FullTranscriptJSON()
+				messages[i].Rows = nil
+			}
+			result[id] = messages
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func readReplayMessagesTx(ctx context.Context, tx *sql.Tx, ids []string, continuation bool, visiting map[string]bool, revision int64) (map[string][]models.ExecutionReplayMessage, error) {
+	var err error
+	result := make(map[string][]models.ExecutionReplayMessage)
+	placeholders, args := uniqueExecutionIDArgs(ids)
+	if len(args) == 0 {
+		return result, nil
+	}
+
 	predicate := `execution_id IN (` + strings.Join(placeholders, ",") + `) AND generation=0 AND is_current=1 AND operation='put' AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%'`
+	if revision > 0 {
+		// A base is pinned to a committed revision, not its mutable current heads.
+		predicate = strings.Replace(predicate, "is_current=1", `sequence=(SELECT max(prior.sequence) FROM conversation_items prior WHERE prior.execution_id=conversation_items.execution_id AND prior.generation=0 AND prior.item_id=conversation_items.item_id AND prior.sequence<=?)`, 1)
+		args = append(append([]any(nil), args...), revision)
+	}
 	if continuation {
 		headerRows, err := tx.QueryContext(ctx, `SELECT execution_id,item_id,payload FROM conversation_items WHERE `+predicate+` AND lane='metadata' AND item_id LIKE '%:header'`, args...)
 		if err != nil {
@@ -199,7 +227,7 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 				headerRows.Close()
 				return nil, err
 			}
-			if models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
+			if (models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) || frame.ItemsKey == "responses_delta") && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
 				boundary = positions[id]
 				firstFrame = item
 			}
@@ -217,55 +245,29 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 			placeholders, args = uniqueExecutionIDArgs(selected)
 			predicate = `execution_id IN (` + strings.Join(placeholders, ",") + `) AND generation=0 AND is_current=1 AND operation='put' AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%' AND (execution_id!=? OR item_id>=?)`
 			args = append(args, selected[0], firstFrame)
-		}
-	}
-	sizes := make(map[string]int)
-	var rows *sql.Rows
-	if !direct {
-		rows, err = tx.QueryContext(ctx, `SELECT execution_id,substr(item_id,1,20),sum(length(CAST(payload AS BLOB))+1)+128 FROM conversation_items WHERE `+predicate+` GROUP BY execution_id,substr(item_id,1,20)`, args...)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var id, prefix string
-			var size int
-			if err := rows.Scan(&id, &prefix, &size); err != nil {
-				rows.Close()
-				return nil, err
+			if revision > 0 {
+				predicate = strings.Replace(predicate, "is_current=1", `sequence=(SELECT max(prior.sequence) FROM conversation_items prior WHERE prior.execution_id=conversation_items.execution_id AND prior.generation=0 AND prior.item_id=conversation_items.item_id AND prior.sequence<=?)`, 1)
+				// The revision placeholder precedes the frame selector.
+				args = append(append(append([]any(nil), args[:len(args)-2]...), revision), args[len(args)-2:]...)
 			}
-			sizes[id+prefix] = size
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, err
 		}
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT execution_id,item_id,lane,payload FROM conversation_items WHERE `+predicate+` ORDER BY execution_id,item_id`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT execution_id,item_id,lane,payload FROM conversation_items WHERE `+predicate+` ORDER BY execution_id,item_id`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var builder *transcript.ReplayBuilder
 	var structured *models.ExecutionReplayMessage
 	var current, prefix string
 	var count, expected int
 	flush := func() error {
-		if builder == nil && structured == nil {
+		if structured == nil {
 			return nil
 		}
 		if count != expected {
 			return fmt.Errorf("replay frame has %d items, expected %d", count, expected)
 		}
-		if structured != nil {
-			result[current] = append(result[current], *structured)
-			return nil
-		}
-		message, err := builder.Finish()
-		if err != nil {
-			return err
-		}
-		result[current] = append(result[current], message)
+		result[current] = append(result[current], *structured)
 		return nil
 	}
 	for rows.Next() {
@@ -296,7 +298,7 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 				return nil, fmt.Errorf("negative replay item count")
 			}
 			current, prefix, count, expected = id, itemID[:20], 0, frame.Count
-			if direct {
+			{
 				h := frame.ReplayHeader
 				switch h.Format {
 				case "array":
@@ -316,21 +318,12 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 					return nil, fmt.Errorf("unknown replay format %q", h.Format)
 				}
 				structured = &models.ExecutionReplayMessage{UserContent: h.UserContent, AssistantContent: h.AssistantContent, ReasoningContent: h.ReasoningContent, Rows: &models.ReplayRows{Format: h.Format, ItemsKey: h.ItemsKey, NullItems: h.NullItems, Envelope: h.Envelope, Items: make([]json.RawMessage, 0, min(frame.Count, 1024))}}
-			} else {
-				builder, err = transcript.NewReplayBuilder(frame.ReplayHeader, sizes[id+prefix])
-			}
-			if err != nil {
-				return nil, err
 			}
 		} else {
-			if (builder == nil && structured == nil) || id != current || itemID != fmt.Sprintf("%sitem:%012d", prefix, count) {
+			if (structured == nil) || id != current || itemID != fmt.Sprintf("%sitem:%012d", prefix, count) {
 				return nil, fmt.Errorf("unexpected replay item %q", itemID)
 			}
-			if structured != nil {
-				structured.Rows.Items = append(structured.Rows.Items, raw)
-			} else if err := builder.AppendValidatedJSON(raw); err != nil {
-				return nil, err
-			}
+			structured.Rows.Items = append(structured.Rows.Items, raw)
 			count++
 		}
 	}
@@ -341,8 +334,60 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 	if err := flush(); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
+	for id, messages := range result {
+		for i, m := range messages {
+			if m.Rows == nil || m.Rows.ItemsKey != "responses_delta" {
+				continue
+			}
+			if visiting[id] || len(visiting) >= models.MaxReplayDeltaDepth {
+				return nil, fmt.Errorf("cyclic or excessive replay dependency at %s", id)
+			}
+			var bases []string
+			if err := json.Unmarshal(m.Rows.Envelope["responses_base_execution_ids"], &bases); err != nil || len(bases) != 1 {
+				return nil, fmt.Errorf("invalid replay base for %s", id)
+			}
+			visiting[id] = true
+			var baseRevision int64
+			if err := json.Unmarshal(m.Rows.Envelope["responses_base_revision"], &baseRevision); err != nil || baseRevision <= 0 {
+				return nil, fmt.Errorf("invalid replay base revision for %s", id)
+			}
+			var sameTask bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM executions a JOIN executions b ON a.task_id=b.task_id WHERE a.id=? AND b.id=?)`, id, bases[0]).Scan(&sameTask); err != nil {
+				return nil, err
+			}
+			if !sameTask {
+				return nil, fmt.Errorf("missing or cross-task replay base %s for %s", bases[0], id)
+			}
+			previous, err := readReplayMessagesTx(ctx, tx, bases, true, visiting, baseRevision)
+			delete(visiting, id)
+			if err != nil {
+				return nil, err
+			}
+			base := previous[bases[0]]
+			if len(base) != 1 || !base[0].HasResponsesInput() {
+				return nil, fmt.Errorf("missing or invalid replay base %s for %s", bases[0], id)
+			}
+			items, _, err := base[0].ResponsesReplay()
+			if err != nil {
+				return nil, err
+			}
+			combined := make([]json.RawMessage, 0, len(items)+len(m.Rows.Items))
+			combined = append(combined, items...)
+			combined = append(combined, m.Rows.Items...)
+			messages[i].Rows = &models.ReplayRows{Format: "envelope", ItemsKey: "responses_input", Items: combined, DeltaDepth: base[0].Rows.DeltaDepth + 1}
+		}
+		var currentRevision int64
+		if revision > 0 {
+			currentRevision = revision
+		} else if err := tx.QueryRowContext(ctx, `SELECT COALESCE(max(sequence),0) FROM conversation_items WHERE execution_id=? AND generation=0 AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%'`, id).Scan(&currentRevision); err != nil {
+			return nil, err
+		}
+		for j := range messages {
+			if messages[j].Rows != nil {
+				messages[j].Rows.Revision = currentRevision
+			}
+		}
+		result[id] = messages
 	}
 	return result, nil
 }

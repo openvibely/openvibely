@@ -66,11 +66,12 @@ func buildCompletionsHistory(history []models.Execution) []openaiclient.Completi
 	for _, exec := range history {
 		restored := false
 		for _, replay := range exec.ReplayMessages {
-			var checkpoint struct {
-				Input []json.RawMessage `json:"responses_input"`
-			}
-			if replay.DecodeTranscript(&checkpoint) == nil && len(checkpoint.Input) > 0 {
-				result = responsesCompletionsMessages(checkpoint.Input)
+			items, replaces, err := replay.ResponsesReplay()
+			if err == nil && len(items) > 0 {
+				if replaces {
+					result = nil
+				}
+				result = append(result, responsesCompletionsMessages(items)...)
 				restored = true
 				continue
 			}
@@ -97,7 +98,10 @@ func historyMessageItems(messages []openaiclient.Message) []any {
 	var items []any
 	for _, m := range messages {
 		if len(m.ResponsesInputItems) > 0 {
-			items = append([]any(nil), m.ResponsesInputItems...)
+			if !m.ResponsesInputAppend {
+				items = nil
+			}
+			items = append(items, m.ResponsesInputItems...)
 		} else {
 			items = append(items, map[string]any{"type": "message", "role": m.Role, "content": m.Content})
 		}
@@ -271,4 +275,74 @@ func ResponsesSummaryMessages(items []json.RawMessage) []openaiclient.Completion
 // conversion. Callers must treat its values as immutable.
 func PreparedResponsesSummaryMessages(items []json.RawMessage) openaiclient.PreparedCompletionsHistory {
 	return openaiclient.PreparedCompletionsMessages(preparedResponsesCompletionsMessages(items))
+}
+
+// responsesExchangeRecorder stores only this invocation's changes unless the
+// client rewrote its prefix. Recovery still sees the complete in-memory state.
+func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Execution) func(context.Context, openaiclient.ResponsesReplayUpdate) error {
+	if a.execRepo == nil || execID == "" {
+		return nil
+	}
+	// A standalone checkpoint or converted/synthetic history is a new base.
+	// Once a native replay exists, the repository restores it as one complete
+	// logical snapshot, even though its payload is stored as linked exchanges.
+	var bases []string
+	var baseRevision int64
+	var baseTaskID string
+	if e, ok := responsesReplayBase(history); ok && e.ID != execID {
+		bases = []string{e.ID}
+		baseRevision = e.ReplayMessages[0].Rows.Revision
+		baseTaskID = e.TaskID
+	}
+
+	baseJSON, _ := json.Marshal(bases)
+	revisionJSON, _ := json.Marshal(baseRevision)
+	checkedBase := false
+	recorder := transcript.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
+	return func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
+		if !checkedBase && len(bases) > 0 {
+			e, err := a.execRepo.GetByID(persistence.WithExecutionMetadata(context.WithoutCancel(ctx)), execID)
+			if err != nil {
+				return err
+			}
+			if e == nil || e.TaskID != baseTaskID {
+				bases = nil
+			}
+			checkedBase = true
+		}
+		if len(bases) == 0 && !u.ReplacesHistory {
+			u.Items = append(append([]any(nil), u.Prefix...), u.Items...)
+			u.ReplacesHistory = true
+			u.FirstChanged = 0
+		}
+		h := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil, Envelope: map[string]json.RawMessage{"responses_base_execution_ids": baseJSON, "responses_base_revision": revisionJSON}}
+		if u.ReplacesHistory {
+			h.ItemsKey = "responses_input"
+			h.Envelope = nil
+		}
+		if err := recorder.SaveChanged(context.WithoutCancel(ctx), h, u.Items, u.FirstChanged); err != nil {
+			return fmt.Errorf("save OpenAI exchange: %w", err)
+		}
+		saved := recorder.Recovery()
+		if !u.ReplacesHistory {
+			saved = append(append([]any(nil), u.Prefix...), saved...)
+		}
+		llmcontracts.RecordResponsesRecovery(ctx, saved)
+		return nil
+	}
+}
+
+func responsesReplayBase(history []models.Execution) (models.Execution, bool) {
+	effective := models.EffectiveReplayHistory(history)
+	if len(effective) == 1 {
+		e := effective[0]
+		if e.Status == models.ExecCompleted && e.ID != "" && e.ContextKind == "" && len(e.ReplayMessages) == 1 && e.ReplayMessages[0].HasResponsesInput() && e.ReplayMessages[0].Rows != nil && e.ReplayMessages[0].Rows.Revision > 0 && e.ReplayMessages[0].Rows.DeltaDepth < models.MaxReplayDeltaDepth {
+			return e, true
+		}
+	}
+	return models.Execution{}, false
+}
+func responsesReplayBaseAvailable(history []models.Execution) bool {
+	_, ok := responsesReplayBase(history)
+	return ok
 }

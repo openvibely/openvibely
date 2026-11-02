@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/transcript"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -15,6 +16,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -158,6 +160,10 @@ type AgenticOptions struct {
 	OnHistory func(context.Context, []any) error
 	// OnHistoryChanged reports the first possibly changed item; the prefix is unchanged.
 	OnHistoryChanged func(context.Context, []any, int) error
+	// OnReplayChanged persists new items, or a replacement after a history rewrite.
+	OnReplayChanged func(context.Context, ResponsesReplayUpdate) error
+	// ReplayBaseAvailable enables incremental persistence against durable history.
+	ReplayBaseAvailable bool
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -365,7 +371,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	userHistoryIndex := 0
 	for _, msg := range c.History {
 		if len(msg.ResponsesInputItems) > 0 {
-			inputItems = append([]any(nil), msg.ResponsesInputItems...)
+			if !msg.ResponsesInputAppend {
+				inputItems = nil
+			}
+			inputItems = append(inputItems, msg.ResponsesInputItems...)
 			continue
 		}
 		role := roleForMessage(msg.Role)
@@ -384,6 +393,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			"content": msg.Content,
 		})
 	}
+	var replayPrefix []any
+	if opts.OnReplayChanged != nil && opts.ReplayBaseAvailable {
+		replayPrefix = transcript.FreezeItems(inputItems)
+	}
+	replayReplacement := opts.ContinueFromHistory || !opts.ReplayBaseAvailable
 	// A locally summarized or otherwise rewritten history may no longer contain
 	// the saved update position. Re-establish the selected effort from the
 	// request we actually reconstructed, not from the transport bookkeeping.
@@ -517,6 +531,22 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return err
 			}
 		}
+		if opts.OnReplayChanged != nil {
+			if compactionGeneration != 0 || len(items) < len(replayPrefix) || (len(replayPrefix) > 0 && !reflect.DeepEqual(items[:min(len(items), len(replayPrefix))], replayPrefix)) {
+				if !replayReplacement {
+					firstChanged = 0
+				}
+				replayReplacement = true
+			}
+			base := len(replayPrefix)
+			if replayReplacement {
+				base = 0
+			}
+			update := ResponsesReplayUpdate{Items: items[base:], FirstChanged: max(0, firstChanged-base), ReplacesHistory: replayReplacement, Prefix: replayPrefix}
+			if err := opts.OnReplayChanged(ctx, update); err != nil {
+				return err
+			}
+		}
 		if opts.OnHistoryChanged != nil {
 			if err := opts.OnHistoryChanged(ctx, items, firstChanged); err != nil {
 				return err
@@ -541,7 +571,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(inputItems) != beforeContext {
 			firstChanged = 0
 		}
-		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil || opts.OnReplayChanged != nil {
 			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
@@ -651,7 +681,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
 		inputItems = append(inputItems, outputItems...)
-		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil || opts.OnReplayChanged != nil {
 			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
 			}
@@ -812,7 +842,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		// Preserve completed tool results even when cancellation or compaction
 		// prevents the next model request from starting.
-		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
+		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil || opts.OnReplayChanged != nil {
 			if err := persistHistory(context.WithoutCancel(ctx), inputItems); err != nil {
 				return nil, err
 			}
@@ -860,7 +890,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 		}
 	}
-	if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil {
+	if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil || opts.OnReplayChanged != nil {
 		if err := persistHistory(ctx, inputItems); err != nil {
 			return nil, err
 		}

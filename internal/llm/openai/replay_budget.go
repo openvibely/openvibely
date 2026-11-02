@@ -42,8 +42,11 @@ func EstimateContinuationReplayTokens(ctx context.Context, history []models.Exec
 	}
 	for _, message := range preparedhistory.Read(ctx, history, buildPreparedHistory) {
 		if len(message.ResponsesInputItems) > 0 {
-			nativeTokens = 0
-			historyTokens = openaiclient.EstimateResponsesInputTokens(message.ResponsesInputItems)
+			if !message.ResponsesInputAppend {
+				nativeTokens = 0
+				historyTokens = 0
+			}
+			historyTokens += openaiclient.EstimateResponsesInputTokens(message.ResponsesInputItems)
 		} else {
 			historyTokens += openaiclient.EstimateResponsesInputTokens([]any{map[string]any{"type": "message", "role": message.Role, "content": message.Content}})
 		}
@@ -63,7 +66,10 @@ func TakeHistoryInputItems(ctx context.Context, history []models.Execution) []an
 	var items []any
 	for _, message := range preparedhistory.Take(ctx, history, buildPreparedHistory) {
 		if len(message.ResponsesInputItems) > 0 {
-			items = append([]any(nil), message.ResponsesInputItems...)
+			if !message.ResponsesInputAppend {
+				items = nil
+			}
+			items = append(items, message.ResponsesInputItems...)
 		} else {
 			items = append(items, map[string]any{"type": "message", "role": message.Role, "content": message.Content})
 		}

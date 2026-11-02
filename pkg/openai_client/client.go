@@ -144,9 +144,10 @@ type OAuthUnauthorizedHandler func(ctx context.Context, tokenUsed string) (OAuth
 // Message is a single conversation message.
 type Message struct {
 	// ResponsesInputItems is a durable native history checkpoint.
-	ResponsesInputItems []any  `json:"-"`
-	Role                string `json:"role"`
-	Content             string `json:"content"`
+	ResponsesInputAppend bool   `json:"-"`
+	ResponsesInputItems  []any  `json:"-"`
+	Role                 string `json:"role"`
+	Content              string `json:"content"`
 }
 
 type CompletionsToolCall struct {
@@ -1351,7 +1352,10 @@ func buildInputItems(history []Message, attachments []*FileAttachment) ([]any, e
 
 	for i, msg := range history {
 		if len(msg.ResponsesInputItems) > 0 {
-			items = append([]any(nil), msg.ResponsesInputItems...)
+			if !msg.ResponsesInputAppend {
+				items = nil
+			}
+			items = append(items, msg.ResponsesInputItems...)
 			continue
 		}
 		role := roleForMessage(msg.Role)

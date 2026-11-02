@@ -622,7 +622,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnHistoryChanged:               a.responsesHistoryChangesRecorder(execID),
+		OnReplayChanged:                a.responsesExchangeRecorder(execID, nil),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -768,7 +768,8 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnHistoryChanged:               a.responsesHistoryChangesRecorder(execID),
+		OnReplayChanged:                a.responsesExchangeRecorder(execID, chatHistory),
+		ReplayBaseAvailable:            responsesReplayBaseAvailable(chatHistory),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -1196,7 +1197,10 @@ func buildHistory(chatHistory []models.Execution, borrow bool) []openaiclient.Me
 		for _, replay := range exec.ReplayMessages {
 			items, err := responsesReplayItems(replay, borrow)
 			if err == nil && len(items) > 0 {
-				messages = []openaiclient.Message{{ResponsesInputItems: items}}
+				if replay.HasResponsesInput() {
+					messages = nil
+				}
+				messages = append(messages, openaiclient.Message{ResponsesInputItems: items, ResponsesInputAppend: !replay.HasResponsesInput()})
 				checkpoint = true
 			} else if items := completionsReplayMessageInput(replay); len(items) > 0 {
 				// Completions records contain this execution only; preserve the prefix.
@@ -1484,14 +1488,12 @@ func webSearchSecondaryFromInput(m map[string]interface{}) string {
 }
 
 func responsesReplayItems(replay models.ExecutionReplayMessage, borrow bool) ([]any, error) {
-	var saved struct {
-		Input []json.RawMessage `json:"responses_input"`
-	}
-	if err := replay.DecodeTranscript(&saved); err != nil {
+	items, _, err := replay.ResponsesReplay()
+	if err != nil {
 		return nil, err
 	}
-	out := make([]any, len(saved.Input))
-	for i, raw := range saved.Input {
+	out := make([]any, len(items))
+	for i, raw := range items {
 		var err error
 		if borrow {
 			out[i], err = jsonview.ToolOutput(raw)

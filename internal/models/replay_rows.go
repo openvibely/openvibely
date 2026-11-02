@@ -10,9 +10,16 @@ import (
 	"unsafe"
 )
 
+// MaxReplayDeltaDepth bounds reconstruction work before writing a fresh base.
+const MaxReplayDeltaDepth = 256
+
 // ReplayRows keeps persisted JSON items separate until a consumer decodes them.
 // It is immutable and may be shared by copied execution histories.
 type ReplayRows struct {
+	// Revision identifies the immutable persisted replay used as a delta base.
+	Revision   int64
+	DeltaDepth int
+
 	Format    string
 	ItemsKey  string
 	NullItems bool
@@ -200,7 +207,8 @@ func (m ExecutionReplayMessage) TranscriptBytes() int {
 }
 
 // ReplayReplacesHistory describes the stored format, not the selected provider.
-// Responses inputs are full snapshots; messages/arrays are incremental exchanges.
+// Responses inputs are full snapshots; responses_delta, messages and arrays
+// are incremental exchanges. The repository resolves pinned delta bases first.
 func ReplayReplacesHistory(format, key string, count int) bool {
 	return format == "envelope" && key == "responses_input" && count > 0
 }
@@ -286,4 +294,14 @@ func (m ExecutionReplayMessage) HasTranscript() bool {
 		return strings.TrimSpace(m.TranscriptJSON) != ""
 	}
 	return m.Rows != nil && m.Rows.Format != "none" && (m.Rows.Format != "opaque" || len(m.Rows.Items) != 0)
+}
+
+// ResponsesReplay returns native Responses items and their replacement semantics.
+func (m ExecutionReplayMessage) ResponsesReplay() ([]json.RawMessage, bool, error) {
+	items, err := m.ReplayArray("responses_input")
+	if err != nil || len(items) > 0 {
+		return items, true, err
+	}
+	items, err = m.ReplayArray("responses_delta")
+	return items, false, err
 }

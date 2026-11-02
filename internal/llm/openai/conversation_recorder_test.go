@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/internal/transcript"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
 
@@ -207,4 +208,93 @@ func (s *recorderStore) AppendConversationChanges(ctx context.Context, _ models.
 		s.raw = messages[0].TranscriptJSON
 	}
 	return changes, nil
+}
+
+func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	task := &models.Task{ProjectID: "default", Title: "delta", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	require.NoError(t, stores.Tasks.Create(ctx, task))
+	old := &models.Execution{TaskID: task.ID, Status: models.ExecCompleted}
+	require.NoError(t, stores.Executions.Create(ctx, old))
+	current := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+	require.NoError(t, stores.Executions.Create(ctx, current))
+	prefix := []any{map[string]any{"type": "message", "role": "user", "content": "old large image"}}
+	adapter := New(nil, stores.Executions, nil, nil)
+	require.NoError(t, adapter.responsesHistoryChangesRecorder(old.ID)(ctx, prefix, 0))
+	reader := stores.Executions.(interface {
+		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+	})
+	loaded, err := reader.ReplayRowsByExecutionIDs(ctx, []string{old.ID})
+	require.NoError(t, err)
+	old.ReplayMessages = loaded[old.ID]
+	var recovery []any
+	ctx = llmcontracts.WithResponsesRecovery(ctx, func(items []any) { recovery = items })
+	save := adapter.responsesExchangeRecorder(current.ID, []models.Execution{*old})
+	delta := []any{map[string]any{"type": "message", "role": "user", "content": "new request"}}
+	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: delta}))
+	heads, err := stores.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: current.ID}, "", 0)
+	require.NoError(t, err)
+	raw, err := transcript.RestoreReplayRecords(heads)
+	require.NoError(t, err)
+	require.Contains(t, raw[0].TranscriptJSON, "responses_delta")
+	require.NotContains(t, raw[0].TranscriptJSON, "old large image")
+	require.Equal(t, append(append([]any(nil), prefix...), delta...), recovery)
+	// Atomic steering writes full state externally; the recorder must reload its
+	// guard and restore delta storage without losing accepted input.
+	all := append(append([]any(nil), prefix...), delta...)
+	require.NoError(t, stores.ThreadInputs.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: current.ID, ResponsesHistory: all}))
+	delta = append(delta, map[string]any{"type": "function_call_output", "call_id": "done", "output": "tool finished"})
+	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: delta, FirstChanged: 1}))
+	loaded, err = reader.ReplayRowsByExecutionIDs(ctx, []string{current.ID})
+	require.NoError(t, err)
+	require.Len(t, loaded[current.ID][0].Rows.Items, 3)
+	replacement := []any{map[string]any{"type": "compaction", "encrypted_content": "replacement"}}
+	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: replacement, ReplacesHistory: true}))
+	require.Equal(t, replacement, recovery)
+	loaded, err = reader.ReplayRowsByExecutionIDs(ctx, []string{current.ID})
+	require.NoError(t, err)
+	require.Len(t, loaded[current.ID][0].Rows.Items, 1)
+}
+
+func TestResponsesExchangeRecorderStartsIndependentBase(t *testing.T) {
+	for _, reason := range []string{"cross-task", "depth", "failed"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			stores := teststores.New(t).Stores
+			task := &models.Task{ProjectID: "default", Title: "base", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+			require.NoError(t, stores.Tasks.Create(ctx, task))
+			source := &models.Execution{TaskID: task.ID, Status: models.ExecCompleted}
+			require.NoError(t, stores.Executions.Create(ctx, source))
+			a := New(nil, stores.Executions, nil, nil)
+			prefix := []any{map[string]any{"type": "message", "role": "user", "content": "base"}}
+			require.NoError(t, a.responsesHistoryChangesRecorder(source.ID)(ctx, prefix, 0))
+			reader := stores.Executions.(interface {
+				ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+			})
+			rows, err := reader.ReplayRowsByExecutionIDs(ctx, []string{source.ID})
+			require.NoError(t, err)
+			source.ReplayMessages = rows[source.ID]
+			targetTask := task.ID
+			switch reason {
+			case "cross-task":
+				other := &models.Task{ProjectID: "default", Title: "other", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+				require.NoError(t, stores.Tasks.Create(ctx, other))
+				targetTask = other.ID
+			case "depth":
+				source.ReplayMessages[0].Rows.DeltaDepth = models.MaxReplayDeltaDepth
+			case "failed":
+				source.Status = models.ExecFailed
+			}
+			e := &models.Execution{TaskID: targetTask, Status: models.ExecRunning}
+			require.NoError(t, stores.Executions.Create(ctx, e))
+			require.NoError(t, a.responsesExchangeRecorder(e.ID, []models.Execution{*source})(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: []any{map[string]any{"role": "user", "content": "next"}}}))
+			heads, err := stores.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: e.ID}, "", 0)
+			require.NoError(t, err)
+			raw, err := transcript.RestoreReplayRecords(heads)
+			require.NoError(t, err)
+			require.Contains(t, raw[0].TranscriptJSON, "responses_input")
+			require.NotContains(t, raw[0].TranscriptJSON, "responses_base_execution_ids")
+		})
+	}
 }

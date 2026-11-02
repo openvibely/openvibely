@@ -35,7 +35,7 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 			// merely to discover their format before the client decodes them.
 			if replay.TranscriptJSON == "" && replay.Rows != nil {
 				r := replay.Rows
-				if (r.Format == "envelope" && len(r.Items) > 0 && ((r.ItemsKey == "responses_input" && provider == models.ProviderOpenAI) || (r.ItemsKey == "messages" && provider == models.ProviderAnthropic))) || (r.Format == "array" && provider != models.ProviderAnthropic) {
+				if (r.Format == "envelope" && len(r.Items) > 0 && (((r.ItemsKey == "responses_input" || r.ItemsKey == "responses_delta") && provider == models.ProviderOpenAI) || (r.ItemsKey == "messages" && provider == models.ProviderAnthropic))) || (r.Format == "array" && provider != models.ProviderAnthropic) {
 					continue
 				}
 			}
@@ -44,7 +44,7 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				Messages    []json.RawMessage `json:"messages"`
 				Environment string            `json:"anthropic_execution_environment"`
 			}
-			envelope.Input, _ = replay.ReplayArray("responses_input")
+			envelope.Input, _, _ = replay.ResponsesReplay()
 			envelope.Messages, _ = replay.ReplayArray("messages")
 			if len(envelope.Messages) > 0 {
 				var metadata struct {

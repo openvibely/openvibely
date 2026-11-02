@@ -209,7 +209,15 @@ func appendReplayPutBatch(ctx context.Context, tx sqlExecutor, owner models.Conv
 	}
 	if remove {
 		// Deletion materializes any checkpoint references through existing triggers.
-		_, err = tx.ExecContext(ctx, `DELETE FROM conversation_items WHERE execution_id=? AND generation=0 AND lane IN ('provider','metadata') AND item_id IN (`+placeholders+`)`, args[:len(changes)+1]...)
+		preserve, checkErr := preserveCompletedReplay(ctx, tx, owner, changes)
+		if checkErr != nil {
+			return nil, true, checkErr
+		}
+		statement := `DELETE FROM conversation_items WHERE execution_id=? AND generation=0 AND lane IN ('provider','metadata') AND item_id IN (` + placeholders + `)`
+		if preserve {
+			statement = `UPDATE conversation_items SET is_current=0 WHERE execution_id=? AND generation=0 AND lane IN ('provider','metadata') AND item_id IN (` + placeholders + `)`
+		}
+		_, err = tx.ExecContext(ctx, statement, args[:len(changes)+1]...)
 		if err != nil {
 			return nil, true, err
 		}

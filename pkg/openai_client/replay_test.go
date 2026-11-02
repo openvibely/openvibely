@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -184,4 +185,49 @@ func TestHistoryContinuationDoesNotAppendConsumedPrompt(t *testing.T) {
 	_, err := client.SendAgentic(context.Background(), "", &AgenticOptions{Model: "gpt-test", DisableTools: true, ContinueFromHistory: true})
 	require.NoError(t, err)
 	require.Len(t, received["input"].([]any), 3, "do not append an empty user message when resuming recorded history")
+}
+
+func TestResponsesReplayUpdateAppendAndRepair(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, buildSSE([]string{`{"type":"response.completed","response":{"id":"ok","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}}`}))
+	}))
+	defer srv.Close()
+	oldURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldURL }()
+	for _, tc := range []struct {
+		name             string
+		prefix           []any
+		resume, replaces bool
+	}{
+		{"append", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, false, false},
+		{"repair", []any{map[string]any{"type": "function_call", "call_id": "unfinished", "name": "read", "arguments": "{}"}, map[string]any{"type": "message", "role": "user", "content": "old"}}, false, true},
+		{"retry", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newHTTPTestAPIKeyClient("key")
+			c.History = []Message{{ResponsesInputItems: tc.prefix}}
+			var updates []ResponsesReplayUpdate
+			_, err := c.SendAgentic(context.Background(), "new", &AgenticOptions{Model: "gpt-test", DisableTools: true, OmitExecutionEnvironment: true, ContinueFromHistory: tc.resume, ReplayBaseAvailable: true, OnReplayChanged: func(_ context.Context, u ResponsesReplayUpdate) error { updates = append(updates, u); return nil }})
+			require.NoError(t, err)
+			require.NotEmpty(t, updates)
+			for _, u := range updates {
+				require.Equal(t, tc.replaces, u.ReplacesHistory)
+				require.Equal(t, tc.prefix, u.Prefix)
+			}
+			raw, err := json.Marshal(updates[len(updates)-1].Items)
+			require.NoError(t, err)
+			if tc.replaces {
+				if tc.name == "repair" {
+					require.Contains(t, string(raw), "aborted")
+				} else {
+					require.Contains(t, string(raw), "old")
+				}
+			} else {
+				require.NotContains(t, string(raw), "old")
+				require.Contains(t, string(raw), "new")
+			}
+		})
+	}
 }

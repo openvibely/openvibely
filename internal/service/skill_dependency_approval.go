@@ -151,7 +151,7 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 		return replay, false, nil
 	}
 	key := rows.ItemsKey
-	if rows.Format == "envelope" && key != "responses_input" && key != "messages" {
+	if rows.Format == "envelope" && key != "responses_input" && key != "responses_delta" && key != "messages" {
 		return replay, false, nil
 	}
 	items := make([]any, len(rows.Items))
@@ -241,7 +241,7 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 	replaced := false
 	awaitingSibling := false
 	batchStart := target.index
-	if key == "responses_input" {
+	if key == "responses_input" || key == "responses_delta" {
 		for batchStart > 0 {
 			prev := asMap(items[batchStart-1])
 			if prev["type"] != "function_call" && prev["type"] != "reasoning" {
@@ -317,7 +317,7 @@ func completeSkillToolReplay(replay models.ExecutionReplayMessage, question stri
 	addResult := func(id, text string, failed bool, callIndex int) {
 		var result any
 		switch key {
-		case "responses_input":
+		case "responses_input", "responses_delta":
 			result = map[string]any{"type": "function_call_output", "call_id": id, "output": text}
 		case "messages":
 			block := map[string]any{"type": "tool_result", "tool_use_id": id, "content": text, "is_error": failed}

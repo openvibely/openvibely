@@ -22,6 +22,7 @@ func TestResponsesHistoryKeepsFallbackOutput(t *testing.T) {
 		omitted           bool
 	}{
 		{"native", "envelope", "responses_input", 1, models.ExecCompleted, true},
+		{"incremental", "envelope", "responses_delta", 1, models.ExecCompleted, true},
 		{"failed", "envelope", "responses_input", 1, models.ExecFailed, false},
 		{"empty", "envelope", "responses_input", 0, models.ExecCompleted, false},
 		{"foreign", "envelope", "messages", 1, models.ExecCompleted, false},

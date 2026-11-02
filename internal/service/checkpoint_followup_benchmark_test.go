@@ -20,6 +20,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
+	"github.com/openvibely/openvibely/internal/transcript"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
@@ -215,6 +216,18 @@ func TestCheckpointFollowupMock(t *testing.T) {
 		allocated := after.TotalAlloc - before.TotalAlloc
 		execution.Status = models.ExecCompleted
 		execution.Output = result.Output
+		require.NoError(t, original.Complete(req.Ctx, execution.ID, models.ExecCompleted, "", "", 0, 0))
+		// Read physical records outside the measured interval. Logical replay
+		// readers intentionally reconstruct a complete snapshot for recovery.
+		if provider == models.ProviderOpenAI && mode == "reuse" && turn > 0 {
+			heads, err := original.ReadConversationHeads(req.Ctx, models.ConversationOwner{ExecutionID: execution.ID}, "", 0)
+			require.NoError(t, err)
+			frames, err := transcript.RestoreReplayRecords(heads)
+			require.NoError(t, err)
+			require.Len(t, frames, 1)
+			require.Contains(t, frames[0].TranscriptJSON, `"responses_delta"`)
+			require.Less(t, len(frames[0].TranscriptJSON), 64*1024, "ordinary follow-ups must not save the large checkpoint again")
+		}
 		req.ChatHistory = append(req.ChatHistory, execution)
 		runtime.GC()
 		runtime.ReadMemStats(&after)

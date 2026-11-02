@@ -50,7 +50,7 @@ func SplitReplay(message models.ExecutionReplayMessage) (ReplayHeader, []json.Ra
 		if err := jsonview.Object(raw, func(k string, v json.RawMessage) error { envelope[k] = v; return nil }); err != nil {
 			return h, nil, err
 		}
-		for _, key := range []string{"responses_input", "messages"} {
+		for _, key := range []string{"responses_input", "responses_delta", "messages"} {
 			if value, ok := envelope[key]; ok {
 				items, err := jsonview.Array(value)
 				if err != nil {
