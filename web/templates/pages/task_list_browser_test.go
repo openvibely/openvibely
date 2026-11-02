@@ -578,3 +578,46 @@ func TestBrowserFunctional_AllProjectsCompletedMoveScope(t *testing.T) {
 		})
 	}
 }
+
+func TestBrowserFunctional_TaskListBrowseScrollPerProject(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			projectID := r.URL.Query().Get("project_id")
+			var tasks []models.Task
+			for i := 0; i < 30; i++ {
+				tasks = append(tasks, models.Task{ID: fmt.Sprintf("%s-%d", projectID, i), ProjectID: projectID, Title: fmt.Sprintf("Task %d", i), Category: models.CategoryBacklog})
+			}
+			if err := layout.TaskListPanelContent(projectID, layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		case "/":
+			if err := layout.Base("Tasks", []models.Project{{ID: "first", Name: "First"}, {ID: "second", Name: "Second"}}, "first").Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-list-project-scroll", func(b *composerFocusCDP) {
+		b.waitFor("first project loaded", `String(!!document.querySelector('[data-task-list-row="first-0"]'))`, "true")
+		b.evaluate(`document.querySelector('.task-list-more').click();document.querySelector('.task-list-rows').scrollTop=180;'browsing first'`)
+		b.waitFor("first position", `String(document.querySelector('.task-list-rows').scrollTop)`, "180")
+		switchTo := func(project string, scroll int) {
+			// Use the actual project synchronization path: the request scope changes
+			// before the outgoing rows are replaced by the HTTP response.
+			b.evaluate(fmt.Sprintf(`history.replaceState({},'', '/?project_id=%s');window.dispatchEvent(new PopStateEvent('popstate'));'switched'`, project))
+			b.waitFor("incoming rows and independent position", `JSON.stringify({project:document.querySelector('.task-list-group').dataset.taskListProjectScope,scroll:document.querySelector('.task-list-rows').scrollTop})`, fmt.Sprintf(`{"project":%q,"scroll":%d}`, project, scroll))
+		}
+		switchTo("second", 0)
+		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=70;'browsing second'`)
+		b.waitFor("second position", `String(document.querySelector('.task-list-rows').scrollTop)`, "70")
+		switchTo("first", 180)
+		switchTo("second", 70)
+	})
+}
