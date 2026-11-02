@@ -539,11 +539,29 @@ templ TaskListPanel(currentProjectID string) {
             new MutationObserver(syncSidebarSearch).observe(root, {attributes:true,attributeFilter:['class']});
             syncSidebarSearch();
             document.body.addEventListener('htmx:afterSettle', function() { syncSidebarSearch(); if (searchMode === 'settings') applySidebarSearch(); });
+            var searchPointerActive = false;
+            function dismissEmptySearch() {
+                if (searchPointerActive || window.isDragging) return;
+                if (openSearch(false) && document.activeElement === searchInput) searchInput.blur();
+            }
             document.addEventListener('pointerdown', function(event) {
                 if (searchBox.dataset.open !== 'true' || searchBox.contains(event.target) || event.target.closest('#task-list-search-toggle')) return;
-                if (openSearch(false) && document.activeElement === searchInput) searchInput.blur();
+                // Keep the rows stationary through mouse-up and the resulting click.
+                searchPointerActive = true;
+            }, true);
+            function finishSearchPointer() {
+                if (!searchPointerActive) return;
+                setTimeout(function() {
+                    searchPointerActive = false;
+                    dismissEmptySearch();
+                }, 0);
+            }
+            window.addEventListener('pointerup', finishSearchPointer);
+            window.addEventListener('pointercancel', finishSearchPointer);
+            window.addEventListener('blur', finishSearchPointer);
+            searchBox.addEventListener('focusout', function(event) {
+                if (!searchBox.contains(event.relatedTarget) && event.relatedTarget !== document.getElementById('task-list-search-toggle')) dismissEmptySearch();
             });
-            searchBox.addEventListener('focusout', function(event) { if (!searchBox.contains(event.relatedTarget) && event.relatedTarget !== document.getElementById('task-list-search-toggle')) openSearch(false); });
             searchBox.addEventListener('mousedown', function(event) { if (event.target.closest('button') && searchBox.dataset.open === 'true') event.preventDefault(); });
             document.getElementById('task-list-search-clear').addEventListener('click', function() { searchInput.value = ''; applySidebarSearch(); searchInput.focus(); });
 

@@ -174,10 +174,10 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("preview restored", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 1200, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.evaluateAwait(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve('resized'))))`)
-		b.evaluate(`search.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));document.getElementById('task-list-groups').style.marginTop='260px';'positioned'`)
+		b.evaluate(`document.querySelector('.task-list-more').click();if(document.getElementById('task-list-search-toggle').getAttribute('aria-expanded')!=='true') document.getElementById('task-list-search-toggle').click();document.getElementById('task-list-groups').style.marginTop='260px';'positioned'`)
 		b.evaluateAwait(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve('layout settled'))))`)
-		b.evaluate(`document.querySelector('.task-list-more').click(); var row=document.querySelector('[data-task-list-row="other-6"]'),r=row.getBoundingClientRect(),area=document.querySelector('.task-list-rows').getBoundingClientRect();window.outerScroll=document.getElementById('task-list-groups').scrollTop;row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:area.left+30,clientY:area.bottom-4}));'dragging'`)
-		b.waitFor("drag scrolls browsing category", `String(document.querySelector('.task-list-rows').scrollTop>30 && document.getElementById('task-list-groups').scrollTop===window.outerScroll)`, "true")
+		b.evaluate(`var row=document.querySelector('[data-task-list-row="other-6"]'),r=row.getBoundingClientRect(),area=document.querySelector('.task-list-rows').getBoundingClientRect();window.outerScroll=document.getElementById('task-list-groups').scrollTop;row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:area.left+30,clientY:area.bottom-4}));'dragging'`)
+		b.waitFor("drag scrolls browsing category with empty search still open", `String(document.getElementById('task-list-search-toggle').getAttribute('aria-expanded')==='true' && document.querySelector('.task-list-rows').scrollTop>30 && document.getElementById('task-list-groups').scrollTop===window.outerScroll)`, "true")
 		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'cancelled'`)
 		b.waitFor("drag cleanup in scroller", `String(!window.isDragging && !document.querySelector('[data-pointer-drag-placeholder]'))`, "true")
 
@@ -730,9 +730,17 @@ func TestBrowserFunctional_SidebarContextSearch(t *testing.T) {
 		b.evaluate(`window.search=document.getElementById('task-list-search-input');window.toggle=document.getElementById('task-list-search-toggle');toggle.click();'open'`)
 		b.waitFor("input opens in sidebar", `String(document.activeElement===search && !!search.closest('#task-list-panel') && toggle.getAttribute('aria-expanded')==='true')`, "true")
 		b.waitFor("search fits the sidebar", `(()=>{var panel=document.getElementById('task-list-panel').getBoundingClientRect(),field=search.getBoundingClientRect();return String(field.width>60 && field.left>=panel.left && field.right<=panel.right && field.top>=panel.top)})()`, "true")
-		b.evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));'outside'`)
+		b.evaluate(`window.searchClick='';document.addEventListener('click',function(e){window.searchClick=e.target.closest('[data-task-list-row]')?.dataset.taskListRow || '';e.preventDefault();e.stopImmediatePropagation();},{capture:true,once:true});'capture click'`)
+		var point struct{ X, Y float64 }
+		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('[data-task-list-row="search-one"]').getBoundingClientRect();window.rowTop=r.top;return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`)), &point); err != nil {
+			t.Fatal(err)
+		}
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "button": "left", "clickCount": 1, "x": point.X, "y": point.Y}, nil)
+		b.waitFor("search stays open and row stationary during press", `String(toggle.getAttribute('aria-expanded')==='true' && document.querySelector('[data-task-list-row="search-one"]').getBoundingClientRect().top===window.rowTop)`, "true")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "button": "left", "clickCount": 1, "x": point.X, "y": point.Y}, nil)
+		b.waitFor("click reaches original task", `window.searchClick`, "search-one")
 		b.waitFor("empty search collapses outside", `toggle.getAttribute('aria-expanded')`, "false")
-		b.evaluate(`toggle.click();search.value='sidebar';search.dispatchEvent(new Event('input'));document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));'filter'`)
+		b.evaluate(`toggle.click();search.value='sidebar';search.dispatchEvent(new Event('input'));document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));document.body.dispatchEvent(new PointerEvent('pointerup',{bubbles:true}));'filter'`)
 		b.waitFor("query remains visible", `String(toggle.getAttribute('aria-expanded')==='true' && document.querySelector('[data-task-list-row="search-two"]').hidden)`, "true")
 		b.evaluate(`document.getElementById('task-list-search-clear').click();'clear'`)
 		b.waitFor("clear restores tasks and focus", `String(!document.querySelector('[data-task-list-row="search-two"]').hidden && document.activeElement===search)`, "true")
