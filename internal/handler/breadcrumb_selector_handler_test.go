@@ -219,14 +219,16 @@ func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveVi
 	}
 	insertPublished(foreign.ID, "foreign-automation", "Selector Automation foreign secret")
 
+	// The selected item is always included; other items can fall outside the
+	// bounded result when fixture creation crosses an updated_at timestamp boundary.
 	for _, test := range []struct {
 		name         string
 		view         string
 		wantURL      string
 		forbiddenURL string
 	}{
-		{name: "live", view: "live", wantURL: "/automations/automation-01?project_id=" + owning.ID, forbiddenURL: "/builder"},
-		{name: "edit", view: "edit", wantURL: "/automations/automation-01/builder?project_id=" + owning.ID},
+		{name: "live", view: "live", wantURL: "/automations/automation-23?project_id=" + owning.ID, forbiddenURL: "/builder"},
+		{name: "edit", view: "edit", wantURL: "/automations/automation-23/builder?project_id=" + owning.ID},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/automations?project_id="+owning.ID+"&current_id=automation-23&search=selector&view="+test.view, nil)

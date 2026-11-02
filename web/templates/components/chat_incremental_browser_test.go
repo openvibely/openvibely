@@ -215,7 +215,7 @@ func TestBrowserFunctional_IncrementalChatRendering(t *testing.T) {
  assert(stream.querySelectorAll('pre code').length === full.querySelectorAll('pre code').length, 'final fences differ');
  assert(stream.querySelector('details.stream-thinking').open, 'thinking state lost at finish');
  assert(stream.querySelectorAll('.stream-tool').length === 2, 'tool calls duplicated');
- assert(stream.querySelector('a[href="/tasks/abc123"]'), 'task link missing');
+ assert(stream.querySelector('a[href="/tasks/abc123?from=chat"]'), 'task link missing');
  const actual = stream.cloneNode(true), expected = full.cloneNode(true);
  actual.querySelectorAll('details').forEach(el=>el.removeAttribute('open'));
  expected.querySelectorAll('details').forEach(el=>el.removeAttribute('open'));

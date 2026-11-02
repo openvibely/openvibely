@@ -6319,7 +6319,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var bareCRPreview = bareCRTool && bareCRTool.querySelector('pre.stream-tool-output-preview');
     if (!bareCRToggle || bareCRToggle.textContent !== 'Show output (40 lines)' || bareCRToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll')) fail('vertically overflowing bare-CR output did not start collapsed');
     if (!bareCRPreview || bareCRPreview.textContent.indexOf('bare-cr row\rbare-cr row') !== 0) fail('bare-CR output preview did not preserve actual output');
-    if (!container.querySelector('a[href="/tasks/assistant%2Fcreate"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit"]')) fail('assistant task links were not hydrated');
+    if (!container.querySelector('a[href="/tasks/assistant%2Fcreate?from=chat"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit?from=chat"]')) fail('assistant task links were not hydrated');
 
     var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
@@ -6364,10 +6364,10 @@ window.addEventListener('DOMContentLoaded', function() {
     var expandedPreview = expandedContent.querySelector('.stream-tool-output-preview');
     if (!expandedPreview || !expandedPreview.hidden) fail('expansion did not hide the collapsed output preview');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
-    if (!expandedContent.querySelector('a[href="/tasks/boundary%2Fcreate"]') || !expandedContent.querySelector('a[href="/tasks/boundary%2Fedit"]')) {
+    if (!expandedContent.querySelector('a[href="/tasks/boundary%2Fcreate?from=chat"]') || !expandedContent.querySelector('a[href="/tasks/boundary%2Fedit?from=chat"]')) {
       fail('chunk-boundary tool task links were not hydrated; links=' + Array.from(expandedContent.querySelectorAll('a')).map(function(anchor) { return anchor.getAttribute('href'); }).join(',') + '; preNodes=' + expandedContent.querySelector('.stream-tool-body-scroll > pre').childNodes.length);
     }
-    if (expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-create"]') || expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-edit"]')) fail('cross-chunk Markdown-code task marker became a link');
+    if (expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-create?from=chat"]') || expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-edit?from=chat"]')) fail('cross-chunk Markdown-code task marker became a link');
     Array.from(container.querySelectorAll('a')).forEach(function(anchor) { if (/\r|\n/.test(anchor.textContent)) fail('anchor text contains a newline'); });
 
     await Promise.resolve(window.renderStreamingContent(container, transcript, true));

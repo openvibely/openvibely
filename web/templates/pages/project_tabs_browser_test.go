@@ -292,6 +292,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.waitFor("project navigation after press", `new URLSearchParams(location.search).get('project_id')`, id)
 				}
 				// Global shortcuts activate neighboring tabs and wrap in displayed order.
+				// Focus synthetic composers without scrolling the body past the title bar.
 				for _, modifiers := range []int{12, 10} { // Meta+Shift and Control+Shift.
 					for _, key := range []string{"ArrowLeft", "ArrowRight", "ArrowRight", "ArrowLeft"} {
 						want := browser.evaluate(`(function(){var tabs=Array.from(document.querySelectorAll('[data-project-tab]'));var i=tabs.findIndex(t=>t.getAttribute('aria-selected')==='true');return tabs[(i+(` + fmt.Sprintf("%q", key) + `==='ArrowRight'?1:-1)+tabs.length)%tabs.length].dataset.projectTab;})()`)
@@ -299,13 +300,13 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 						if key == "ArrowLeft" {
 							composerID = "task-message-input"
 						}
-						browser.evaluate(`(function(){var input=document.createElement('textarea');input.id=` + fmt.Sprintf("%q", composerID) + `;input.dataset.shortcutFixture='true';document.body.appendChild(input);input.focus();return 'focused';})()`)
+						browser.evaluate(`(function(){var input=document.createElement('textarea');input.id=` + fmt.Sprintf("%q", composerID) + `;input.dataset.shortcutFixture='true';document.body.appendChild(input);input.focus({preventScroll:true});return 'focused';})()`)
 						browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key, "code": key, "modifiers": modifiers}, nil)
 						browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": key}, nil)
 						browser.waitFor("shortcut project navigation", `new URLSearchParams(location.search).get('project_id')`, want)
 						browser.evaluate(`document.querySelectorAll('[data-shortcut-fixture]').forEach(el=>el.remove()); "removed"`)
 					}
-					if got := browser.evaluate(`(function(){var input=document.createElement('textarea');document.body.appendChild(input);input.focus();var event=new KeyboardEvent('keydown',{key:'ArrowLeft',metaKey:` + fmt.Sprint(modifiers == 12) + `,ctrlKey:` + fmt.Sprint(modifiers == 10) + `,shiftKey:true,bubbles:true,cancelable:true});input.dispatchEvent(event);input.remove();return String(event.defaultPrevented);})()`); got != "false" {
+					if got := browser.evaluate(`(function(){var input=document.createElement('textarea');document.body.appendChild(input);input.focus({preventScroll:true});var event=new KeyboardEvent('keydown',{key:'ArrowLeft',metaKey:` + fmt.Sprint(modifiers == 12) + `,ctrlKey:` + fmt.Sprint(modifiers == 10) + `,shiftKey:true,bubbles:true,cancelable:true});input.dispatchEvent(event);input.remove();return String(event.defaultPrevented);})()`); got != "false" {
 						t.Fatal("project shortcut intercepted text selection", got)
 					}
 				}
@@ -327,7 +328,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("inactive tab hover background disappeared over close button", got, tabHoverColor)
 				}
 				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-close-project="p01"]')).backgroundColor`); got == "rgba(0, 0, 0, 0)" || got == tabHoverColor {
-					t.Fatal("close button needs its own hover highlight", got)
+					t.Fatal("close button needs its own hover highlight", got, browser.evaluate(`JSON.stringify((function(){var b=document.querySelector('[data-close-project="p01"]'),r=b.getBoundingClientRect();return {hover:b.matches(':hover'),disabled:b.disabled,protected:window.openVibelyProtectedProjectID,rect:r.toJSON(),hit:document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML};})())`))
 				}
 				// Reorder with real mouse input, in both directions, without navigation.
 				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p02"]').parentElement,'::after').width`); got != "2px" {
@@ -458,7 +459,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("project A schedule", `location.pathname`, "/schedule")
 				browser.click(`[data-project-tab="p01"]`)
 				browser.waitFor("new project starts independently", `location.pathname+location.search`, "/chat?project_id=p01")
-				if got := browser.evaluate(`(function(){var tab=document.querySelector('.desktop-project-tab'),left=getComputedStyle(tab,'::before');return String(left.content==='none');})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var tab=document.querySelector('.desktop-project-tab'),left=getComputedStyle(tab,'::before');return String(left.content==='none' || (left.backgroundImage==='none' && left.backgroundColor==='rgba(0, 0, 0, 0)' && parseFloat(left.borderLeftWidth)===0));})()`); got != "true" {
 					t.Fatal("first inactive tab must not have a leading separator", got)
 				}
 				browser.click(`[data-nav-base="/tasks"]`)
