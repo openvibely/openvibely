@@ -19,13 +19,6 @@ func sidebarProjectDisplayName(projects []models.Project, currentProjectID strin
 	return "No projects available"
 }
 
-func sidebarProjectCheck(current bool) string {
-	if current {
-		return "✓"
-	}
-	return ""
-}
-
 templ Sidebar(projects []models.Project, currentProjectID string) {
 	<aside id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto bg-base-100 w-64 h-screen border-r border-base-300 flex flex-col">
 		<div class="p-4 flex-1 overflow-y-auto overflow-x-hidden sidebar-inner">
@@ -1297,7 +1290,6 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 									data-searchable-selector-id={ p.ID }
 									data-searchable-selector-name={ p.Name }
 								>
-									<span class="ov-menu-check" aria-hidden="true" data-project-selector-current data-searchable-selector-current>{ sidebarProjectCheck(p.ID == currentProjectID) }</span>
 									<span class="min-w-0 break-words">{ p.Name }</span>
 								</button>
 							}

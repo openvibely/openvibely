@@ -209,7 +209,7 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 			await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
 			var visible = visibleOptions();
 			if (visible.length !== 1 || visible[0].dataset.projectId !== 'default') fail('production project search did not paint only the matching current project: query=' + JSON.stringify(search.value) + ', options=' + optionStates() + ', dialog=' + JSON.stringify(dialog.getBoundingClientRect().toJSON()));
-			if (visible[0].getAttribute('aria-selected') !== 'true' || visible[0].querySelector('[data-project-selector-current]').textContent.trim() !== '✓') fail('production matching current project was not shown as selected');
+			if (visible[0].getAttribute('aria-selected') !== 'true' || visible[0].querySelector('.ov-menu-check') !== null) fail('production matching current project was not shown as selected');
 			search.value = '';
 			search.dispatchEvent(new Event('input', {bubbles:true}));
 			if (!document.execCommand('insertText', false, 'swarm')) fail('browser text insertion was not supported');
