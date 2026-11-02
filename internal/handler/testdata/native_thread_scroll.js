@@ -11,7 +11,9 @@
             await new Promise(resolve => requestAnimationFrame(resolve));
             const state = [m.scrollTop,m.scrollHeight,m.clientHeight].join(',');
             const busy = m.dataset.transcriptHydrating === 'true' || m.dataset.earlierAnchorRestoring === 'true' ||
-                window._chatContentRenderActive || window._chatContentRenderQueue?.length;
+                window._chatContentRenderActive || window._chatContentRenderQueue?.length ||
+                Array.from(m.querySelectorAll('[data-chat-virtual-owner]')).some(owner =>
+                    owner._renderingRevision || owner._scheduledChatRender || owner._activeScheduledChatRender);
             stable = !busy && state === previous ? stable+1 : 0;
             if (stable >= 6) return;
             previous = state;
@@ -31,13 +33,16 @@
     // Rendering a newly visited window can rebase its estimated heights. Place
     // the gesture after that work, otherwise CI can start thousands of pixels
     // from the page boundary despite the initial assignment of 160.
-    for(let attempt=0;attempt<6;attempt++) {
-        positionForGesture(160);
-        await renderVisibleChatRows(m);
-        await stableLayout(m);
-        if(Math.abs(m.scrollTop-160)<1) break;
+    async function prepareGesture() {
+        for(let attempt=0;attempt<6;attempt++) {
+            positionForGesture(160);
+            await renderVisibleChatRows(m);
+            await stableLayout(m);
+            if(Math.abs(m.scrollTop-160)<1) return;
+        }
+        throw Error('Could not position native gesture: '+debug());
     }
-    if(Math.abs(m.scrollTop-160)>=1) throw Error('Could not position native gesture: '+debug());
+    await prepareGesture();
     // Native wheel units differ between AppKit, GDK and Windows settings.
     // Measure one trusted event rather than assuming the driver produces pixels
     // at the same scale on every runner. Use downward input away from the loader.
@@ -69,9 +74,10 @@
     wheelScale=40/Math.abs(probe.deltaY);
     if(wheelScale<0.01 || wheelScale>256) throw Error('Invalid native wheel scale: '+wheelScale);
     await stableLayout(m);
-    positionForGesture(160);
-    await stableLayout(m);
-    if(Math.abs(m.scrollTop-160)>=1) throw Error('Native calibration changed starting window: '+debug());
+    // Calibration visits another virtual window. Finish rendering the reset
+    // window as well: unchanged scroll geometry alone can precede queued row
+    // work, which would otherwise leak into the first measured gesture frame.
+    await prepareGesture();
     let input = 0, reachableInput = 0, events = 0, cancelled = 0, loaded = false, measured = 0;
     m.addEventListener('wheel', event => {
         if (!event.isTrusted) return;
