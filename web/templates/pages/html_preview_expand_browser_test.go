@@ -148,3 +148,24 @@ func TestBrowserFunctional_HTMLPreviewExpandedRowStaysMounted(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserFunctional_HTMLPreviewThinkingLinks(t *testing.T) {
+	runHTMLPreviewBrowser(t, func(b *composerFocusCDP, loads *atomic.Int32) {
+		b.waitFor("viewer", `typeof window.OVFileViewer?.open`, "function")
+		b.evaluate(`const thinking=document.createElement('details');thinking.className='stream-thinking';thinking.open=true;thinking.innerHTML='<summary>Thinking</summary><div class="chat-markdown"><a href="/files/abcdef">Mockup</a></div>';document.body.append(thinking);window.thinkingLink=thinking.querySelector('a');'ready'`)
+		b.waitFor("HTML metadata processed", `String(thinkingLink.dataset.fileName)`, "mockup.html")
+		if got := b.evaluate(`String(!document.querySelector('.file-html-canvas') && thinkingLink.hasAttribute('data-file-preview'))`); got != "true" {
+			t.Fatal("thinking link created an inline preview or lost viewer binding")
+		}
+		if loads.Load() != 0 {
+			t.Fatalf("thinking link loaded HTML %d times before opening", loads.Load())
+		}
+		b.evaluate(`thinkingLink.click();'opened'`)
+		b.waitFor("viewer loaded", `String(!!document.querySelector('#image-gallery[open] iframe') && document.querySelector('#image-gallery iframe').style.visibility==='')`, "true")
+		if loads.Load() != 1 {
+			t.Fatalf("opening thinking link requested HTML %d times, want 1", loads.Load())
+		}
+		b.evaluate(`imageGallery.close();const link=document.createElement('a');link.href='/files/abcdef';link.textContent='Final mockup';document.body.append(link);'ready'`)
+		b.waitFor("normal response inline preview", `String(!!document.querySelector('.file-html-canvas iframe'))`, "true")
+	})
+}

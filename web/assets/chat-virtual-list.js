@@ -434,6 +434,8 @@
         });
     };
     window.installChatVirtualRows = function (owner, data, render) {
+        const generation = owner._chatVirtualInstallGeneration = (owner._chatVirtualInstallGeneration || 0) + 1;
+        const renderVersion = owner._streamRenderVersion;
         owner._chatVirtualRender = render;
         const compact = !data.ungrouped && document.documentElement.getAttribute('data-output-detail') === 'compact';
         data.sourceModels ||= data.models;
@@ -450,70 +452,88 @@
             data.activityMode = compact;
         }
 
-        const messages = owner.closest(messagesSelector);
-        const list = ensureList(messages);
-        const width = messages.clientWidth;
-        const restore = saveAnchor(list);
-        // Prepending a byte window shifts row indexes. Reusing those nodes would
-        // apply one tool's DOM/scroll state to another; new nodes recover state
-        // by stable tool ID. Ordinary refreshes retain their existing reuse path.
-        const shiftedWindow = owner._outputWindowSeed && owner._chatVirtualData?.source !== data.source;
-        const active = document.activeElement;
-        let focusedActivityKey = owner.contains(active) && active.matches('.stream-activity-summary')
-            ? active.parentElement.getAttribute('data-tool-disclosure-key') : null;
-        const old = new Map(shiftedWindow ? [] : Array.from(owner.children).filter(el => el.hasAttribute('data-chat-lazy-row')).map(el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
-        const fragment = document.createDocumentFragment();
-        const reused = [];
-        owner._chatVirtualData = data;
-        owner.setAttribute('data-chat-virtual-owner', 'true');
-        owner._chatVirtualRows = data.models.map((model, index) => {
-            const placeholder = document.createElement('div');
-            placeholder.setAttribute('data-virtual-chat-row', String(++nextID));
-            placeholder.setAttribute('data-chat-lazy-row', String(index));
-            placeholder.setAttribute('aria-hidden', 'true');
-            const prior = old.get(index);
-            const node = prior && !prior.hasAttribute('data-virtual-chat-row') ? prior : null;
-            if (!model.height && prior?.dataset.chatRowHeight) {
-                model.height = Number(prior.dataset.chatRowHeight);
-                model.width = Number(prior.dataset.chatRowWidth);
+        const planned = window.OVFileViewer?.previewRows(owner, data.models) || new Map();
+        function commit(previews) {
+            // Link extraction may yield to a newer stream update or mode change.
+            if (!owner.isConnected || generation !== owner._chatVirtualInstallGeneration || renderVersion !== owner._streamRenderVersion) return false;
+            const messages = owner.closest(messagesSelector);
+            const list = ensureList(messages);
+            const width = messages.clientWidth;
+            const restore = saveAnchor(list);
+            // Prepending a byte window shifts row indexes. Reusing those nodes would
+            // apply one tool's DOM/scroll state to another; new nodes recover state
+            // by stable tool ID. Ordinary refreshes retain their existing reuse path.
+            const shiftedWindow = owner._outputWindowSeed && owner._chatVirtualData?.source !== data.source;
+            const active = document.activeElement;
+            let focusedActivityKey = owner.contains(active) && active.matches('.stream-activity-summary')
+                ? active.parentElement.getAttribute('data-tool-disclosure-key') : null;
+            // The fallback retains live-tail wrappers around preview rows, so those
+            // rows can be nested. Modern engines keep the direct-child fast path.
+            const priorRows = owner.moveBefore ? Array.from(owner.children).filter(el => el.hasAttribute('data-chat-lazy-row')) :
+                Array.from(owner.querySelectorAll('[data-chat-lazy-row]')).filter(el => el.closest('[data-chat-virtual-owner]') === owner);
+            const old = new Map(shiftedWindow ? [] : priorRows.map(el => [Number(el.getAttribute('data-chat-lazy-row')), el]));
+            const previewNodes = new Set(previews.values());
+            const previewAncestors = new Set();
+            for (const preview of previewNodes) {
+                for (let node = preview; node && node !== owner; node = node.parentElement) previewAncestors.add(node);
             }
-            const row = {lazy:true, owner, model, index, render, placeholder, node, ready:false};
-            if (focusedActivityKey) row.restoreFocus = () => {
-                if (!focusedActivityKey || !row.node?.isConnected) return;
-                const fold = Array.from(row.node.querySelectorAll('[data-tool-disclosure-key]')).find(el => el.getAttribute('data-tool-disclosure-key') === focusedActivityKey);
-                if (!fold) return;
-                if (document.activeElement === document.body || document.activeElement === active) fold.querySelector('.stream-activity-summary').focus({preventScroll:true});
-                focusedActivityKey = null;
-            };
-            sizePlaceholder(row, estimate(model, width));
-            if (node && owner.isConnected && owner.moveBefore && window.OVFileViewer?.commitStream) {
-                const marker = document.createComment('retained row');
+            const fragment = document.createDocumentFragment();
+            const reused = [];
+            owner._chatVirtualData = data;
+            owner.setAttribute('data-chat-virtual-owner', 'true');
+            owner._chatVirtualRows = data.models.map((model, index) => {
+                const placeholder = document.createElement('div');
+                placeholder.setAttribute('data-virtual-chat-row', String(++nextID));
+                placeholder.setAttribute('data-chat-lazy-row', String(index));
+                placeholder.setAttribute('aria-hidden', 'true');
+                const indexed = old.get(index);
+                const prior = previews.get(index) || (previewAncestors.has(indexed) ? null : indexed);
+                const node = prior && !prior.hasAttribute('data-virtual-chat-row') ? prior : null;
+                if (!model.height && prior?.dataset.chatRowHeight) {
+                    model.height = Number(prior.dataset.chatRowHeight);
+                    model.width = Number(prior.dataset.chatRowWidth);
+                }
+                if (node) node.setAttribute('data-chat-lazy-row', String(index));
+                const row = {lazy:true, owner, model, index, render, placeholder, node, ready:false};
+                if (focusedActivityKey) row.restoreFocus = () => {
+                    if (!focusedActivityKey || !row.node?.isConnected) return;
+                    const fold = Array.from(row.node.querySelectorAll('[data-tool-disclosure-key]')).find(el => el.getAttribute('data-tool-disclosure-key') === focusedActivityKey);
+                    if (!fold) return;
+                    if (document.activeElement === document.body || document.activeElement === active) fold.querySelector('.stream-activity-summary').focus({preventScroll:true});
+                    focusedActivityKey = null;
+                };
+                sizePlaceholder(row, estimate(model, width));
+                if (node && owner.isConnected && (owner.moveBefore || previewNodes.has(node)) && window.OVFileViewer?.commitStream) {
+                    const marker = document.createComment('retained row');
+                    fragment.appendChild(marker);
+                    (fragment._fileStreamMoves ||= []).push([marker, node]);
+                    reused.push(node);
+                } else fragment.appendChild(node || placeholder);
+                list.rows.set(placeholder, row);
+                return row;
+            });
+            // Keep reused rows connected, and preserve equations/previews from
+            // discarded DOM for adoption when the new lazy rows render.
+            const pool = window.OVFileViewer?.retainVirtual(owner, data.source, reused);
+            window.retainChatMathForVirtualRows?.(owner, data.source, reused);
+            if (pool) {
+                const marker = document.createComment('pending previews');
                 fragment.appendChild(marker);
-                (fragment._fileStreamMoves ||= []).push([marker, node]);
-                reused.push(node);
-            } else fragment.appendChild(node || placeholder);
-            list.rows.set(placeholder, row);
-            return row;
-        });
-        // Keep reused rows connected, and preserve equations/previews from
-        // discarded DOM for adoption when the new lazy rows render.
-        const pool = window.OVFileViewer?.retainVirtual(owner, data.source, reused);
-        window.retainChatMathForVirtualRows?.(owner, data.source, reused);
-        if (pool) {
-            const marker = document.createComment('pending previews');
-            fragment.appendChild(marker);
-            (fragment._fileStreamMoves ||= []).push([marker, pool]);
+                (fragment._fileStreamMoves ||= []).push([marker, pool]);
+            }
+            if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(fragment, owner);
+            else owner.replaceChildren(fragment);
+            restore();
+            if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
+            return window.renderVisibleChatRows(messages);
         }
-        if (window.OVFileViewer?.commitStream) window.OVFileViewer.commitStream(fragment, owner);
-        else owner.replaceChildren(fragment);
-        restore();
-        if (messages.getAttribute('data-transcript-hydrating') === 'true') return true;
-        return window.renderVisibleChatRows(messages);
+        return planned?.then ? planned.then(commit) : commit(planned);
     };
     window.discardChatVirtualRows = function (root) {
         const owners = Array.from(root.querySelectorAll('[data-chat-virtual-owner]'));
         if (root.hasAttribute('data-chat-virtual-owner')) owners.push(root);
         owners.forEach(owner => {
+            owner._chatVirtualInstallGeneration = (owner._chatVirtualInstallGeneration || 0) + 1;
             delete owner._chatVirtualData;
             delete owner._chatVirtualRows;
             delete owner._chatMathNodes;
