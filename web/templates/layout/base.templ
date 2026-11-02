@@ -3133,13 +3133,25 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-                .task-list-search { display:none;align-items:center;flex-shrink:0;height:32px;margin:0 10px 10px;border-radius:8px;border:1px solid oklch(var(--b3));background:var(--shell-page);--wails-draggable:no-drag; }
-                .task-list-search[data-open="true"] { display:flex; }
-                .task-list-search input { width:0;flex:1;min-width:0;height:100%;padding:0 10px;background:transparent;border:0;outline:none;font-size:13.5px;--wails-draggable:no-drag; }
-                .task-list-search input::-webkit-search-cancel-button { -webkit-appearance:none; }
-                #task-list-search-clear { flex:0 0 24px;height:24px;margin-right:3px;border-radius:5px; }
-                #task-list-search-clear:hover { background:oklch(var(--bc) / .08); }
-                .task-list-search input:placeholder-shown + #task-list-search-clear { display:none; }
+		.kanban-search { display:flex; align-items:center; flex:0 1 auto; min-width:2rem; max-width:100%; height:2rem; width:2rem; border-radius:var(--rounded-btn,.5rem); overflow:hidden; transition:width .25s ease, background-color .25s ease, box-shadow .25s ease; }
+		.kanban-search[data-open="true"] { width:16rem; height:38px; border:1px solid oklch(var(--b3)); border-radius:var(--rounded-box,1rem); background:oklch(var(--b1)); box-shadow:0 1px 2px 0 rgb(0 0 0 / .05); }
+		.kanban-search-toggle { flex:0 0 2rem; }
+		.kanban-search-toggle:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 1px oklch(var(--bc) / .5); }
+		.kanban-search[data-open="true"] .kanban-search-toggle:hover { background:transparent; }
+		.kanban-search-input { flex:1 1 auto; min-width:0; height:100%; padding-right:.75rem; background:transparent; border:0; outline:none; font-size:.875rem; opacity:0; transition:opacity .2s ease; }
+		.kanban-search[data-open="true"] .kanban-search-input { opacity:1; }
+		.kanban-search-input::-webkit-search-cancel-button { -webkit-appearance:none; appearance:none; }
+		.kanban-search-clear { flex:0 0 1.75rem; height:1.75rem; margin-right:.125rem; display:inline-flex; align-items:center; justify-content:center; border-radius:calc(var(--rounded-btn,.5rem) - .125rem); opacity:.6; transition:opacity .15s ease, background-color .15s ease; }
+		@media (hover: hover) { .kanban-search-clear:hover { opacity:1; background:oklch(var(--bc) / .08); } }
+		.kanban-search-clear:focus-visible { outline:none; opacity:1; box-shadow:inset 0 0 0 1px oklch(var(--bc) / .5); }
+		.kanban-search[data-open="false"] .kanban-search-clear, .kanban-search-input:placeholder-shown + .kanban-search-clear { display:none; }
+		.kanban-search-input:not(:placeholder-shown) { padding-right:0; }
+		@media (max-width: 639px) { .kanban-search-input { font-size:1rem; } }
+		@media (prefers-reduced-motion: reduce) { .kanban-search, .kanban-search-input { transition:none; } }
+                .task-list-search.kanban-search { flex:0 0 auto;min-width:0;width:0;height:0;margin:0 10px;visibility:hidden;transition:width .25s ease,height .25s ease,margin-bottom .25s ease,background-color .25s ease,box-shadow .25s ease,visibility 0s .25s;--wails-draggable:no-drag; }
+                .task-list-search.kanban-search[data-open="true"] { width:calc(100% - 20px);height:38px;margin-bottom:10px;visibility:visible;transition-delay:0s; }
+                .task-list-search .kanban-search-toggle { display:flex;align-items:center;justify-content:center; }
+                .task-list-search input { --wails-draggable:no-drag; }
                 #appearance-settings-nav [hidden] { display:none !important; }
                 @media (prefers-reduced-motion: reduce) { .task-list-search { transition:none; } }
 

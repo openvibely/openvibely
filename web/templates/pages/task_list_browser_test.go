@@ -147,6 +147,7 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("show more reveals all nine rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
 		b.waitFor("browse hint and Done share footer outside scroller", `(()=>{var group=document.querySelector('.task-list-group'),footer=group.querySelector('.task-list-browse-controls');return String(getComputedStyle(footer).display==='flex' && Array.from(footer.children).map(el=>el.textContent.trim()).join(' ')==='Scroll to browse · Done' && footer.previousElementSibling.matches('.task-list-more') && !group.querySelector('summary .task-list-done') && footer.getBoundingClientRect().top>=group.querySelector('.task-list-rows').getBoundingClientRect().bottom && getComputedStyle(group.querySelector('.task-list-more')).display==='none')})()`, "true")
 		b.waitFor("browsing keeps preview height", `String(Math.abs(document.querySelector('.task-list-group').getBoundingClientRect().height-window.previewHeight)<2)`, "true")
+		b.evaluateAwait(`Promise.all(document.querySelector(".task-list-search").getAnimations({subtree:true}).map(animation=>animation.finished.catch(()=>{}))).then(()=>"search animation settled")`)
 		var footerPoint struct{ X, Y float64 }
 		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('.task-list-done').getBoundingClientRect();window.footerTop=r.top;window.sidebarScroll=document.getElementById('task-list-groups').scrollTop;return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`)), &footerPoint); err != nil {
 			t.Fatal(err)
@@ -176,6 +177,7 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.evaluateAwait(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve('resized'))))`)
 		b.evaluate(`document.querySelector('.task-list-more').click();if(document.getElementById('task-list-search-toggle').getAttribute('aria-expanded')!=='true') document.getElementById('task-list-search-toggle').click();document.getElementById('task-list-groups').style.marginTop='260px';'positioned'`)
 		b.evaluateAwait(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve('layout settled'))))`)
+		b.evaluateAwait(`Promise.all(document.querySelector(".task-list-search").getAnimations({subtree:true}).map(animation=>animation.finished.catch(()=>{}))).then(()=>"search animation settled")`)
 		b.evaluate(`var row=document.querySelector('[data-task-list-row="other-6"]'),r=row.getBoundingClientRect(),area=document.querySelector('.task-list-rows').getBoundingClientRect();window.outerScroll=document.getElementById('task-list-groups').scrollTop;row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:area.left+30,clientY:area.bottom-4}));'dragging'`)
 		b.waitFor("drag scrolls browsing category with empty search still open", `String(document.getElementById('task-list-search-toggle').getAttribute('aria-expanded')==='true' && document.querySelector('.task-list-rows').scrollTop>30 && document.getElementById('task-list-groups').scrollTop===window.outerScroll)`, "true")
 		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'cancelled'`)
@@ -731,6 +733,7 @@ func TestBrowserFunctional_SidebarContextSearch(t *testing.T) {
 		b.waitFor("input opens in sidebar", `String(document.activeElement===search && !!search.closest('#task-list-panel') && toggle.getAttribute('aria-expanded')==='true')`, "true")
 		b.waitFor("search fits the sidebar", `(()=>{var panel=document.getElementById('task-list-panel').getBoundingClientRect(),field=search.getBoundingClientRect();return String(field.width>60 && field.left>=panel.left && field.right<=panel.right && field.top>=panel.top)})()`, "true")
 		b.evaluate(`window.searchClick='';document.addEventListener('click',function(e){window.searchClick=e.target.closest('[data-task-list-row]')?.dataset.taskListRow || '';e.preventDefault();e.stopImmediatePropagation();},{capture:true,once:true});'capture click'`)
+		b.evaluateAwait(`Promise.all(document.querySelector(".task-list-search").getAnimations({subtree:true}).map(animation=>animation.finished.catch(()=>{}))).then(()=>"search animation settled")`)
 		var point struct{ X, Y float64 }
 		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('[data-task-list-row="search-one"]').getBoundingClientRect();window.rowTop=r.top;return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`)), &point); err != nil {
 			t.Fatal(err)
