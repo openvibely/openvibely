@@ -3133,17 +3133,13 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-                .task-list-search { display:flex;align-items:center;width:32px;height:32px;min-width:32px;overflow:hidden;border-radius:8px;transition:width .25s ease,background-color .25s ease;--wails-draggable:no-drag; }
-                .task-list-search[data-open="true"] { width:100%;border:1px solid oklch(var(--b3));background:var(--shell-page); }
-                #task-list-header.search-open .task-list-brand { display:none; }
-                #task-list-header.search-open .task-list-actions { flex:1;min-width:0; }
-                #task-list-search-toggle { flex:0 0 32px; }
-                .task-list-search input { width:0;flex:1;min-width:0;height:100%;padding:0 6px;background:transparent;border:0;outline:none;font-size:13.5px;opacity:0;visibility:hidden;--wails-draggable:no-drag; }
-                .task-list-search[data-open="true"] input { opacity:1;visibility:visible; }
+                .task-list-search { display:none;align-items:center;flex-shrink:0;height:32px;margin:0 10px 10px;border-radius:8px;border:1px solid oklch(var(--b3));background:var(--shell-page);--wails-draggable:no-drag; }
+                .task-list-search[data-open="true"] { display:flex; }
+                .task-list-search input { width:0;flex:1;min-width:0;height:100%;padding:0 10px;background:transparent;border:0;outline:none;font-size:13.5px;--wails-draggable:no-drag; }
                 .task-list-search input::-webkit-search-cancel-button { -webkit-appearance:none; }
                 #task-list-search-clear { flex:0 0 24px;height:24px;margin-right:3px;border-radius:5px; }
                 #task-list-search-clear:hover { background:oklch(var(--bc) / .08); }
-                .task-list-search[data-open="false"] #task-list-search-clear, .task-list-search input:placeholder-shown + #task-list-search-clear { display:none; }
+                .task-list-search input:placeholder-shown + #task-list-search-clear { display:none; }
                 #appearance-settings-nav [hidden] { display:none !important; }
                 @media (prefers-reduced-motion: reduce) { .task-list-search { transition:none; } }
 

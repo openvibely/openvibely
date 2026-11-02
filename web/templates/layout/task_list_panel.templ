@@ -133,6 +133,10 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 
 templ TaskListPanel(currentProjectID string) {
 	<aside id="task-list-panel" aria-label="Tasks">
+        <div class="task-list-search" data-open="false">
+            <input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off" tabindex="-1"/>
+            <button type="button" id="task-list-search-clear" aria-label="Clear search" tabindex="-1">×</button>
+        </div>
         <div id="changes-explorer-host"></div>
 		<nav id="appearance-settings-nav" aria-label="Settings">
 			@SettingsLinks(currentProjectID)
@@ -163,7 +167,7 @@ templ TaskListPanel(currentProjectID string) {
         .task-list-row.task-list-dragging { display:flex !important; opacity:1; }
 
         #appearance-settings-nav { display: none; }
-        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host) { display: none !important; }
+        html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host):not(.task-list-search) { display: none !important; }
         html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
         #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; padding: 10px; margin-bottom: 12px; }
         .settings-nav-group { width: 100%; }
@@ -441,7 +445,7 @@ templ TaskListPanel(currentProjectID string) {
 			var panel = document.getElementById('task-list-panel');
 			var groups = document.getElementById('task-list-groups');
 			var divider = document.getElementById('task-list-divider');
-			var searchBox = document.querySelector('#task-list-header .task-list-search');
+			var searchBox = document.querySelector('#task-list-panel .task-list-search');
 			var searchInput = document.getElementById('task-list-search-input');
 			var widthKey = 'openvibely.taskListWidth';
 			var collapsedKey = 'openvibely.taskListCollapsed';
@@ -504,7 +508,6 @@ templ TaskListPanel(currentProjectID string) {
             function openSearch(open, force, focus) {
                 if (!open && !force && searchInput.value.trim()) return false;
                 searchBox.dataset.open = String(open);
-                document.getElementById('task-list-header').classList.toggle('search-open', open);
                 var btn = document.getElementById('task-list-search-toggle');
                 btn.setAttribute('aria-expanded', String(open));
                 searchInput.tabIndex = open ? 0 : -1;
@@ -537,10 +540,10 @@ templ TaskListPanel(currentProjectID string) {
             syncSidebarSearch();
             document.body.addEventListener('htmx:afterSettle', function() { syncSidebarSearch(); if (searchMode === 'settings') applySidebarSearch(); });
             document.addEventListener('pointerdown', function(event) {
-                if (searchBox.dataset.open !== 'true' || searchBox.contains(event.target)) return;
+                if (searchBox.dataset.open !== 'true' || searchBox.contains(event.target) || event.target.closest('#task-list-search-toggle')) return;
                 if (openSearch(false) && document.activeElement === searchInput) searchInput.blur();
             });
-            searchBox.addEventListener('focusout', function(event) { if (!searchBox.contains(event.relatedTarget)) openSearch(false); });
+            searchBox.addEventListener('focusout', function(event) { if (!searchBox.contains(event.relatedTarget) && event.relatedTarget !== document.getElementById('task-list-search-toggle')) openSearch(false); });
             searchBox.addEventListener('mousedown', function(event) { if (event.target.closest('button') && searchBox.dataset.open === 'true') event.preventDefault(); });
             document.getElementById('task-list-search-clear').addEventListener('click', function() { searchInput.value = ''; applySidebarSearch(); searchInput.focus(); });
 
@@ -1169,13 +1172,9 @@ templ TaskListHeaderControls(currentProjectID string) {
 		</button>
 		<span class="task-list-brand">OpenVibely</span>
 		<div class="task-list-actions">
-            <div class="task-list-search" data-open="false">
 			<button type="button" id="task-list-search-toggle" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-expanded="false" aria-controls="task-list-search-input" aria-label="Search tasks" title="Search tasks">
 				<svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg>
 			</button>
-                <input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off" tabindex="-1"/>
-                <button type="button" id="task-list-search-clear" aria-label="Clear search" tabindex="-1">×</button>
-            </div>
 			<a id="task-list-new" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" data-nav-base="/tasks/new" href={ templ.SafeURL("/tasks/new?project_id=" + url.QueryEscape(currentProjectID)) } hx-get={ "/tasks/new?project_id=" + url.QueryEscape(currentProjectID) } hx-target="#main-content" hx-push-url="true" aria-label="New task" title="New task">
 				<svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
 			</a>
