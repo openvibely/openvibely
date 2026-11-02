@@ -142,6 +142,7 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("Browse all focuses first task", `document.activeElement.dataset.taskListRow || ''`, "login-first")
 		b.waitFor("show more reveals all nine rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
+		b.waitFor("browse hint and Done share footer outside scroller", `(()=>{var group=document.querySelector('.task-list-group'),footer=group.querySelector('.task-list-browse-controls');return String(getComputedStyle(footer).display==='flex' && Array.from(footer.children).map(el=>el.textContent.trim()).join(' ')==='Scroll to browse · Done' && footer.previousElementSibling.matches('.task-list-more') && !group.querySelector('summary .task-list-done') && footer.getBoundingClientRect().top>=group.querySelector('.task-list-rows').getBoundingClientRect().bottom && getComputedStyle(group.querySelector('.task-list-more')).display==='none')})()`, "true")
 		b.waitFor("browsing keeps preview height", `String(Math.abs(document.querySelector('.task-list-group').getBoundingClientRect().height-window.previewHeight)<2)`, "true")
 		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=50; 'scrolled'`)
 		b.waitFor("category scrolls independently", `String(document.querySelector('.task-list-rows').scrollTop===50)`, "true")

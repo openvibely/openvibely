@@ -84,9 +84,6 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 				<span class="task-list-group-label">{ group.Label }</span>
 				<span class="task-list-count">{ strconv.Itoa(len(group.Tasks)) }</span>
-                if len(group.Tasks) > taskListGroupLimit {
-                    <button type="button" class="task-list-done">Done</button>
-                }
 			</summary>
 			<div class="task-list-rows">
 			for i, task := range group.Tasks {
@@ -124,6 +121,11 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 			</div>
 			if len(group.Tasks) > taskListGroupLimit {
 				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>{ fmt.Sprintf("Browse all %d", len(group.Tasks)) }</button>
+                <div class="task-list-browse-controls">
+                    <span>Scroll to browse</span>
+                    <span aria-hidden="true">·</span>
+                    <button type="button" class="task-list-done">Done</button>
+                </div>
 			}
 		</details>
 	}
