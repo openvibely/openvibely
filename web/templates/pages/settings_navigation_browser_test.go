@@ -111,8 +111,11 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		waitFor("browser back restores same workspace", `String(!document.documentElement.classList.contains('appearance-settings') && document.getElementById('settings-workspace')===window.originalWorkspace)`, "true")
 		b.evaluate(`document.getElementById('open-settings').click();'settings for search'`)
 		waitFor("settings before search", `String(document.documentElement.classList.contains('appearance-settings'))`, "true")
-		b.evaluate(`document.getElementById('task-list-search-input').value='existing query';document.getElementById('task-list-search-toggle').click();'search'`)
-		waitFor("search exits settings and focuses", `String(!!document.getElementById('settings-workspace') && !document.documentElement.classList.contains('appearance-settings') && document.activeElement===document.getElementById('task-list-search-input') && document.activeElement.value==='existing query')`, "true")
+		b.evaluate(`document.getElementById('task-list-search-toggle').click();var input=document.getElementById('task-list-search-input');input.value='themes';input.dispatchEvent(new Event('input'));'search settings'`)
+		waitFor("search stays in settings and filters navigation", `String(document.documentElement.classList.contains('appearance-settings') && document.activeElement===document.getElementById('task-list-search-input') && document.querySelector('#appearance-settings-nav [data-settings-link="layout"]').hidden)`, "true")
+		b.evaluate(`document.getElementById('task-list-search-input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));document.querySelector('#appearance-settings-nav [data-settings-back]').click();'back after search'`)
+		waitFor("workspace restored after settings search", `String(!!document.getElementById('settings-workspace') && !document.documentElement.classList.contains('appearance-settings'))`, "true")
+
 		if n := workspaceRequests.Load(); n != 1 {
 			t.Fatalf("workspace reloaded by Back or Search: %d requests", n)
 		}
@@ -151,18 +154,16 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return after browser back'`)
 		waitFor("history return restores first workspace and sidebar", `String(location.search==='?project_id=first&category=backlog' && location.hash==='#board' && !!document.getElementById('settings-workspace') && document.getElementById('settings-workspace')!==window.secondProjectWorkspace && !document.documentElement.classList.contains('appearance-settings') && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=first')`, "true")
 
-		// Direct Settings links have no retained workspace. A failed fallback
-		// request must stop rather than recursively trying to open Search.
+		// Search on a direct Settings link does not need a workspace request.
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		failWorkspace.Store(true)
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/themes"}, nil)
 		waitFor("direct settings ready", `String(!!window.syncAppearanceSettings && !!document.getElementById('themes-container') && !document.getElementById('settings-retained-workspace'))`, "true")
 		before := workspaceRequests.Load()
-		b.evaluate(`window.searchResponse=false;document.addEventListener('htmx:afterRequest',e=>{if(e.detail.xhr.status===500)window.searchResponse=true});document.getElementById('task-list-search-toggle').click();'search fallback'`)
-		waitFor("failed search response handled", `String(window.searchResponse)`, "true")
-		b.call("Runtime.evaluate", map[string]any{"expression": "new Promise(resolve=>setTimeout(resolve,100))", "awaitPromise": true}, nil)
-		if n := workspaceRequests.Load() - before; n != 1 {
-			t.Fatalf("failed Search retried %d times", n)
+		b.evaluate(`document.getElementById('task-list-search-toggle').click();'search direct settings'`)
+		waitFor("direct settings search focused", `String(document.activeElement===document.getElementById('task-list-search-input') && document.documentElement.classList.contains('appearance-settings'))`, "true")
+		if n := workspaceRequests.Load() - before; n != 0 {
+			t.Fatalf("settings Search requested workspace %d times", n)
 		}
-		waitFor("failed fallback leaves settings usable", `String(document.documentElement.classList.contains('appearance-settings') && !!document.getElementById('themes-container'))`, "true")
 	})
 }

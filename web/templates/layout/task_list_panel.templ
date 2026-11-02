@@ -137,9 +137,6 @@ templ TaskListPanel(currentProjectID string) {
 		<nav id="appearance-settings-nav" aria-label="Settings">
 			@SettingsLinks(currentProjectID)
 		</nav>
-		<div class="task-list-search" hidden>
-			<input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off"/>
-		</div>
 		<div
 			id="task-list-groups"
 			hx-get={ fmt.Sprintf("/tasks/sidebar?project_id=%s", currentProjectID) }
@@ -444,7 +441,7 @@ templ TaskListPanel(currentProjectID string) {
 			var panel = document.getElementById('task-list-panel');
 			var groups = document.getElementById('task-list-groups');
 			var divider = document.getElementById('task-list-divider');
-			var searchBox = panel.querySelector('.task-list-search');
+			var searchBox = document.querySelector('#task-list-header .task-list-search');
 			var searchInput = document.getElementById('task-list-search-input');
 			var widthKey = 'openvibely.taskListWidth';
 			var collapsedKey = 'openvibely.taskListCollapsed';
@@ -476,33 +473,79 @@ templ TaskListPanel(currentProjectID string) {
 				}
 				syncToggle();
 			}
-			function openSearch(open) {
-                if (root.classList.contains('appearance-settings') && !root.classList.contains('changes-explorer-active')) {
-                    if (window.workspaceNavigation && window.workspaceNavigation.back()) {
-                        openSearch(true);
-                        return;
-                    }
-                    var back = document.querySelector('#appearance-settings-nav [data-settings-back]');
-                    if (back && window.htmx) {
-                        htmx.ajax('GET', back.getAttribute('href'), {source: back, target: '#main-content', swap: 'innerHTML'}).then(function() {
-                            window.syncAppearanceSettings();
-                            if (!root.classList.contains('appearance-settings') || root.classList.contains('changes-explorer-active')) openSearch(true);
-                        }).catch(function() {});
-                    }
-                    return;
+            var searchMode = 'tasks', settingsOpen = new Map();
+            function currentSearchMode() {
+                return root.classList.contains('changes-explorer-active') ? 'files' : root.classList.contains('appearance-settings') ? 'settings' : 'tasks';
+            }
+            function filterSettings(query) {
+                var nav = document.getElementById('appearance-settings-nav');
+                nav.querySelectorAll('.settings-nav-group').forEach(function(group) {
+                    if (query && !settingsOpen.has(group)) settingsOpen.set(group, group.open);
+                    var title = group.querySelector('summary').textContent.toLowerCase();
+                    var matches = 0;
+                    group.querySelectorAll('a.task-list-row').forEach(function(link) {
+                        link.hidden = !!query && !title.includes(query) && !link.textContent.toLowerCase().includes(query);
+                        if (!link.hidden) matches++;
+                    });
+                    group.hidden = !!query && !title.includes(query) && !matches;
+                    if (query && !group.hidden) group.open = true;
+                    if (!query && settingsOpen.has(group)) { group.open = settingsOpen.get(group); settingsOpen.delete(group); }
+                });
+                nav.querySelectorAll(':scope > a.task-list-row').forEach(function(link) {
+                    link.hidden = !!query && !link.textContent.toLowerCase().includes(query);
+                });
+            }
+            function applySidebarSearch() {
+                document.getElementById('task-list-search-clear').tabIndex = searchBox.dataset.open === 'true' && searchInput.value ? 0 : -1;
+                if (searchMode === 'settings') filterSettings(searchInput.value.trim().toLowerCase());
+                else if (searchMode === 'files') { if (window.setChangesExplorerSearch) window.setChangesExplorerSearch(searchInput.value); }
+                else filter();
+            }
+            function openSearch(open, force, focus) {
+                if (!open && !force && searchInput.value.trim()) return false;
+                searchBox.dataset.open = String(open);
+                document.getElementById('task-list-header').classList.toggle('search-open', open);
+                var btn = document.getElementById('task-list-search-toggle');
+                btn.setAttribute('aria-expanded', String(open));
+                searchInput.tabIndex = open ? 0 : -1;
+                if (open) { setCollapsed(false); if (focus !== false) searchInput.focus(); }
+                else if (force) { searchInput.value = ''; applySidebarSearch(); }
+                return true;
+            }
+            function syncSidebarSearch() {
+                var next = currentSearchMode();
+                if (next !== searchMode) {
+                    openSearch(false, true);
+                    searchMode = next;
                 }
-                if (root.classList.contains('changes-explorer-active') && window.taskWorkspace) {
-                    window.taskWorkspace.openThread();
-                    open = true;
+                var label = {tasks:'Search tasks',settings:'Search settings',files:'Filter files'}[searchMode];
+                searchInput.placeholder = label + '…'; searchInput.setAttribute('aria-label', label);
+                var btn = document.getElementById('task-list-search-toggle');
+                btn.setAttribute('aria-label', label); btn.title = label;
+            }
+            document.addEventListener('changes-explorer-ready', function() {
+                syncSidebarSearch();
+                if (searchMode !== 'files' || !window.getChangesExplorerSearch) return;
+                var query = window.getChangesExplorerSearch();
+                if (searchInput.value !== query) {
+                    searchInput.value = query;
+                    if (query) openSearch(true, false, false);
+                    document.getElementById('task-list-search-clear').tabIndex = query ? 0 : -1;
                 }
-				searchBox.hidden = !open;
-				var btn = document.getElementById('task-list-search-toggle');
-				if (btn) btn.setAttribute('aria-expanded', String(open));
-				if (open) { setCollapsed(false); searchInput.focus(); }
-				else { searchInput.value = ''; filter(); }
-			}
+            });
+            new MutationObserver(syncSidebarSearch).observe(root, {attributes:true,attributeFilter:['class']});
+            syncSidebarSearch();
+            document.body.addEventListener('htmx:afterSettle', function() { syncSidebarSearch(); if (searchMode === 'settings') applySidebarSearch(); });
+            document.addEventListener('pointerdown', function(event) {
+                if (searchBox.dataset.open !== 'true' || searchBox.contains(event.target)) return;
+                if (openSearch(false) && document.activeElement === searchInput) searchInput.blur();
+            });
+            searchBox.addEventListener('focusout', function(event) { if (!searchBox.contains(event.relatedTarget)) openSearch(false); });
+            searchBox.addEventListener('mousedown', function(event) { if (event.target.closest('button') && searchBox.dataset.open === 'true') event.preventDefault(); });
+            document.getElementById('task-list-search-clear').addEventListener('click', function() { searchInput.value = ''; applySidebarSearch(); searchInput.focus(); });
+
 			function filter() {
-				var q = searchInput.value.trim().toLowerCase();
+				var q = searchMode === 'tasks' ? searchInput.value.trim().toLowerCase() : '';
 groups.querySelectorAll('.task-list-group').forEach(function(group) {
 						var label = taskListGroupKey(group);
 						var wasSearching = group.hasAttribute('data-searching');
@@ -536,15 +579,15 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 
 			document.addEventListener('click', function(e) {
 				if (e.target.closest('#task-list-toggle')) { e.preventDefault(); setCollapsed(!root.classList.contains('task-list-collapsed')); }
-				else if (e.target.closest('#task-list-search-toggle')) { e.preventDefault(); openSearch(searchBox.hidden); }
+				else if (e.target.closest('#task-list-search-toggle')) { e.preventDefault(); var opening = searchBox.dataset.open !== 'true'; if (!openSearch(opening)) searchInput.focus(); else if (!opening) e.target.closest('button').focus(); }
 			});
 			document.addEventListener('keydown', function(e) {
 				if (!root.hasAttribute('data-shell-frame') || e.defaultPrevented || e.isComposing || e.repeat || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'b') return;
 				e.preventDefault();
 				setCollapsed(!root.classList.contains('task-list-collapsed'));
 			});
-			searchInput.addEventListener('input', filter);
-			searchInput.addEventListener('keydown', function(e) { if (e.key === 'Escape') { e.preventDefault(); openSearch(false); } });
+			searchInput.addEventListener('input', applySidebarSearch);
+			searchInput.addEventListener('keydown', function(e) { if (e.key === 'Escape') { e.preventDefault(); openSearch(false, true); document.getElementById('task-list-search-toggle').focus(); } });
 
 			var drag = null;
 			divider.addEventListener('pointerdown', function(e) {
@@ -581,7 +624,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				if (btn) btn.setAttribute('aria-expanded', String(group.hasAttribute('data-browsing')));
 			}
             function layoutTaskPreviews() {
-                if (!groups.clientHeight || searchInput.value.trim() || rowDrag) return;
+                if (!groups.clientHeight || (searchMode === 'tasks' && searchInput.value.trim()) || rowDrag) return;
                 var entries = Array.from(groups.querySelectorAll('.task-list-group')).filter(function(group) { return !group.hidden; }).map(function(group) {
                     var rows = Array.from(group.querySelectorAll('[data-task-list-row]'));
                     var sample = rows[0];
@@ -1126,9 +1169,13 @@ templ TaskListHeaderControls(currentProjectID string) {
 		</button>
 		<span class="task-list-brand">OpenVibely</span>
 		<div class="task-list-actions">
-			<button type="button" id="task-list-search-toggle" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-expanded="false" aria-label="Search tasks" title="Search tasks">
+            <div class="task-list-search" data-open="false">
+			<button type="button" id="task-list-search-toggle" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" aria-expanded="false" aria-controls="task-list-search-input" aria-label="Search tasks" title="Search tasks">
 				<svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10" cy="10" r="6"></circle><path d="m15 15 5 5"></path></svg>
 			</button>
+                <input id="task-list-search-input" type="search" placeholder="Search tasks…" aria-label="Search tasks" autocomplete="off" tabindex="-1"/>
+                <button type="button" id="task-list-search-clear" aria-label="Clear search" tabindex="-1">×</button>
+            </div>
 			<a id="task-list-new" class="sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square" data-nav-base="/tasks/new" href={ templ.SafeURL("/tasks/new?project_id=" + url.QueryEscape(currentProjectID)) } hx-get={ "/tasks/new?project_id=" + url.QueryEscape(currentProjectID) } hx-target="#main-content" hx-push-url="true" aria-label="New task" title="New task">
 				<svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
 			</a>

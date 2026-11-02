@@ -706,3 +706,47 @@ func TestBrowserFunctional_TaskListAdaptivePreviews(t *testing.T) {
 		b.waitFor("minimum previews scroll instead of disappearing", `String(['Active','Completed','Backlog','Scheduled'].every(name=>previewCount(name)>=3) && document.getElementById('task-list-groups').scrollHeight>document.getElementById('task-list-groups').clientHeight)`, "true")
 	})
 }
+
+func TestBrowserFunctional_SidebarContextSearch(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/tasks/sidebar":
+			_ = layout.TaskListPanelContent("project", layout.TaskListGroups([]models.Task{{ID: "search-one", Title: "Find sidebar bug", Category: models.CategoryActive}, {ID: "search-two", Title: "Review keyboard", Category: models.CategoryActive}})).Render(r.Context(), w)
+		case "/":
+			_ = layout.Base("Search", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(r.Context(), w)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "sidebar-context-search", func(b *composerFocusCDP) {
+		b.waitFor("task rows", `String(!!document.querySelector('[data-task-list-row="search-one"]'))`, "true")
+		b.evaluate(`window.search=document.getElementById('task-list-search-input');window.toggle=document.getElementById('task-list-search-toggle');toggle.click();'open'`)
+		b.waitFor("input expands in titlebar", `String(document.activeElement===search && !!search.closest('#task-list-header') && toggle.getAttribute('aria-expanded')==='true')`, "true")
+		b.waitFor("search fits the titlebar", `(()=>{var header=document.getElementById('task-list-header').getBoundingClientRect(),field=search.getBoundingClientRect(),plus=document.getElementById('task-list-new').getBoundingClientRect();return String(field.width>60 && field.left>=header.left && plus.right<=header.right+1)})()`, "true")
+		b.evaluate(`document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));'outside'`)
+		b.waitFor("empty search collapses outside", `toggle.getAttribute('aria-expanded')`, "false")
+		b.evaluate(`toggle.click();search.value='sidebar';search.dispatchEvent(new Event('input'));document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));'filter'`)
+		b.waitFor("query remains visible", `String(toggle.getAttribute('aria-expanded')==='true' && document.querySelector('[data-task-list-row="search-two"]').hidden)`, "true")
+		b.evaluate(`document.getElementById('task-list-search-clear').click();'clear'`)
+		b.waitFor("clear restores tasks and focus", `String(!document.querySelector('[data-task-list-row="search-two"]').hidden && document.activeElement===search)`, "true")
+		b.evaluate(`document.getElementById('main-content').innerHTML='<div id="models-container"></div>';window.syncAppearanceSettings();'settings'`)
+		b.waitFor("settings search scope", `search.getAttribute('aria-label')`, "Search settings")
+		b.evaluate(`document.querySelector('#appearance-settings-nav details').open=false;toggle.click();search.value='themes';search.dispatchEvent(new Event('input'));'settings filter'`)
+		b.waitFor("settings child match expands parent", `String(document.querySelector('#appearance-settings-nav details').open && !document.querySelector('#appearance-settings-nav [data-settings-link="themes"]').hidden && document.querySelector('#appearance-settings-nav [data-settings-link="layout"]').hidden && !document.querySelector('[data-task-list-row="search-two"]').hidden)`, "true")
+		b.evaluate(`search.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));'escape'`)
+		b.waitFor("escape restores settings and focus", `String(!document.querySelector('#appearance-settings-nav details').open && !document.querySelector('#appearance-settings-nav [data-settings-link="layout"]').hidden && document.activeElement===toggle && toggle.getAttribute('aria-expanded')==='false')`, "true")
+		b.evaluate(`document.getElementById('main-content').innerHTML='<div id="changes-content" data-task-id="diff-task"><div id="tab-changes"><div id="diff-viewer"><div data-diff-index="0" data-diff-path="src/alpha.go"></div><div data-diff-index="1" data-diff-path="docs/beta.md"></div></div></div></div>';document.documentElement.classList.add('changes-explorer-active');window.syncChangesExplorer(true);'changes'`)
+		b.waitFor("file scope", `search.getAttribute('aria-label')`, "Filter files")
+		b.evaluate(`toggle.click();search.value='alpha';search.dispatchEvent(new Event('input'));'files filter'`)
+		b.waitFor("menu filters actual explorer", `String(document.querySelectorAll('[data-explorer-path]').length===1 && document.querySelector('[data-explorer-path]').dataset.explorerPath==='src/alpha.go' && document.documentElement.classList.contains('changes-explorer-active'))`, "true")
+		b.evaluate(`document.getElementById('task-list-search-clear').click();'clear files'`)
+		b.waitFor("clear restores files", `String(document.querySelectorAll('[data-explorer-path]').length)`, "2")
+		b.evaluate(`document.getElementById('main-content').replaceChildren();window.syncAppearanceSettings();'tasks again'`)
+		b.waitFor("return restores task scope", `String(search.getAttribute('aria-label')==='Search tasks' && toggle.getAttribute('aria-expanded')==='false')`, "true")
+	})
+}

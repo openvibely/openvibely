@@ -7,6 +7,7 @@ templ ChangesExplorerScript() {
         html.changes-explorer-active #appearance-settings-nav, html.changes-explorer-active .settings-mobile-nav { display: none !important; }
         html.changes-explorer-active:not([data-shell-frame]) #changes-explorer-mobile { display: block; max-height: 35vh; overflow: auto; padding: 12px; }
         .changes-explorer .explorer-back { display: block; padding: 10px; margin-bottom: 12px; font-size: 13px; opacity: .75; }
+        html[data-shell-frame] .changes-explorer .explorer-search { display:none; }
         .changes-explorer .explorer-search { width: 100%; margin-bottom: 12px; }
         .changes-explorer summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 10px; font-size: 13px; opacity: .8; overflow-wrap: anywhere; list-style: none; }
         .changes-explorer summary::-webkit-details-marker { display: none; }
@@ -103,6 +104,8 @@ templ ChangesExplorerScript() {
             applySelection(false);
         }
         search.oninput = function() { shownLimit = pageSize; save(); render(); };
+        window.setChangesExplorerSearch = function(query) { search.value = query; shownLimit = pageSize; save(); render(); };
+        window.getChangesExplorerSearch = function() { return search.value; };
         window.syncChangesExplorer = function(active) {
             if (!active) { nav.remove(); return; }
             var host = document.getElementById(document.documentElement.hasAttribute('data-shell-frame') ? 'changes-explorer-host' : 'changes-explorer-mobile');
@@ -122,6 +125,7 @@ templ ChangesExplorerScript() {
             if (!files.some(function(f) { return f.path === selected; })) selected = files.length ? files[0].path : '';
             if (changed || !tree.childElementCount) render();
             applySelection(changed);
+            document.dispatchEvent(new CustomEvent('changes-explorer-ready'));
         };
         document.addEventListener('openvibely:shell-frame-change', function() {
             if (window.syncAppearanceSettings) window.syncAppearanceSettings();
