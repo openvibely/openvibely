@@ -360,7 +360,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in persistence.Au
 			return nil, nil, fmt.Errorf("shared task for node %q cannot use custom topology", write.NodeKey)
 		}
 		if taskRelation != "shared" {
-			query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_id = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
+			query := `UPDATE tasks SET title = ?, title_explicitly_set = 1, prompt = ?, category = ?, priority = ?, agent_id = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
 			args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentID, write.AgentDefinitionID}
 			if write.ApplyTopology {
 				query += `, parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END`

@@ -1744,7 +1744,7 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 	storeEnv := teststores.New(t)
 	llmConfigRepo := storeEnv.Stores.LLMConfigs
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
-	mock := &testutil.MockLLMCaller{Response: `{"subject":"docs: document serve command usage"}`}
+	mock := &testutil.MockLLMCaller{Response: `{"title":"docs: document serve command usage"}`}
 	svc.SetLLMCaller(mock)
 	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
 
@@ -1760,7 +1760,7 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 		t.Fatalf("expected one LLM call, got %d", mock.CallCount())
 	}
 	prompt := mock.LastCall().Prompt
-	for _, want := range []string{"Use an imperative, capitalized subject", `{"subject":"Add concise description"}`, "Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
+	for _, want := range []string{"Use an imperative, capitalized subject", `{"title":"Add concise description"}`, "Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected prompt to contain %q, got:\n%s", want, prompt)
 		}
@@ -1776,17 +1776,17 @@ func TestParseWorktreeCommitSummaryOutputRequiresExactJSONShape(t *testing.T) {
 		output string
 		want   string
 	}{
-		{name: "valid", output: `{"subject":"Centralize channel mutation responses"}`, want: "Centralize channel mutation responses"},
-		{name: "cleans conventional prefix", output: `{"subject":"fix: preserve skills viewport"}`, want: "Preserve skills viewport"},
+		{name: "valid", output: `{"title":"Centralize channel mutation responses"}`, want: "Centralize channel mutation responses"},
+		{name: "cleans conventional prefix", output: `{"title":"fix: preserve skills viewport"}`, want: "Preserve skills viewport"},
 		{name: "plain narration", output: "I'll inspect the worktree diff first.", want: ""},
-		{name: "narration before JSON", output: "I'll inspect the worktree diff first.\n{\"subject\":\"Preserve skills viewport\"}", want: "Preserve skills viewport"},
-		{name: "markdown fence", output: "```json\n{\"subject\":\"Preserve skills viewport\"}\n```", want: "Preserve skills viewport"},
-		{name: "extra field", output: `{"subject":"Preserve skills viewport","notes":"done"}`, want: ""},
-		{name: "ambiguous objects", output: `{"subject":"Preserve skills viewport"} {"subject":"Change another thing"}`, want: ""},
+		{name: "narration before JSON", output: "I'll inspect the worktree diff first.\n{\"title\":\"Preserve skills viewport\"}", want: "Preserve skills viewport"},
+		{name: "markdown fence", output: "```json\n{\"title\":\"Preserve skills viewport\"}\n```", want: "Preserve skills viewport"},
+		{name: "extra field", output: `{"title":"Preserve skills viewport","notes":"done"}`, want: ""},
+		{name: "ambiguous objects", output: `{"title":"Preserve skills viewport"} {"title":"Change another thing"}`, want: ""},
 		{name: "missing field", output: `{"message":"Preserve skills viewport"}`, want: ""},
-		{name: "non-string subject", output: `{"subject":42}`, want: ""},
-		{name: "multiline subject", output: `{"subject":"Preserve skills viewport\nChanged files"}`, want: ""},
-		{name: "too long", output: `{"subject":"This commit subject is deliberately longer than seventy two characters and must be rejected"}`, want: ""},
+		{name: "non-string subject", output: `{"title":42}`, want: ""},
+		{name: "multiline subject", output: `{"title":"Preserve skills viewport\nChanged files"}`, want: ""},
+		{name: "too long", output: `{"title":"This commit subject is deliberately longer than seventy two characters and must be rejected"}`, want: ""},
 	}
 
 	for _, tt := range tests {
@@ -1832,7 +1832,7 @@ func TestSummarizeWorktreeCommitDiff_DoesNotReadUntrackedSymlinkTargets(t *testi
 	storeEnv := teststores.New(t)
 	llmConfigRepo := storeEnv.Stores.LLMConfigs
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
-	mock := &testutil.MockLLMCaller{Response: `{"subject":"Add safe symlink placeholder"}`}
+	mock := &testutil.MockLLMCaller{Response: `{"title":"Add safe symlink placeholder"}`}
 	svc.SetLLMCaller(mock)
 	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
 

@@ -556,11 +556,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		MergeTargetBranch:       c.FormValue("merge_target_branch"),
 	}
 
+	autoName := false
 	if threadDraft {
 		t.Prompt = strings.TrimSpace(c.FormValue("message"))
 		t.Title = strings.TrimSpace(t.Title)
 		if t.Title == "" {
-			t.Title = "New task " + persistence.NewID()[:8]
+			autoName = true
+			t.Title = service.ProvisionalTaskTitle(t.Prompt)
 		}
 	}
 
@@ -589,6 +591,21 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	applog.Infof("[handler] CreateTask project=%s title=%q category=%s priority=%d tag=%s prompt_len=%d",
 		projectID, t.Title, t.Category, t.Priority, t.Tag, len(t.Prompt))
 
+	// Repeated requests may produce the same provisional title. Retry creation
+	// with a unique suffix; explicit user titles retain duplicate validation.
+	createWithTitle := func(create func() error) error {
+		err := create()
+		if autoName && errors.Is(err, service.ErrDuplicateTask) {
+			runes := []rune(t.Title)
+			if len(runes) > 49 {
+				runes = runes[:49]
+			}
+			t.Title = string(runes) + " " + persistence.NewID()[:8]
+			err = create()
+		}
+		return err
+	}
+
 	if isSwarmTaskForm(c) {
 		if h.swarmSvc == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
@@ -599,7 +616,12 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			swarmCategory = models.CategoryBacklog
 		}
 		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
-		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: swarmCategory, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
+		var parent *models.Task
+		err := createWithTitle(func() error {
+			created, createErr := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: swarmCategory, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
+			parent = created
+			return createErr
+		})
 		if err != nil {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -610,7 +632,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			return err
 		}
 		*t = *parent
-	} else if err := h.taskSvc.CreateWithGoal(c.Request().Context(), t, c.FormValue("goal")); err != nil {
+	} else if err := createWithTitle(func() error { return h.taskSvc.CreateWithGoal(c.Request().Context(), t, c.FormValue("goal")) }); err != nil {
 		if errors.Is(err, service.ErrDuplicateTask) {
 			applog.Infof("[handler] CreateTask duplicate title=%q", t.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -670,6 +692,10 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			}
 		}
 		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
+	}
+
+	if autoName && h.llmSvc != nil {
+		h.llmSvc.NameTaskAsync(c.Request().Context(), *t, selectedThreadAgent)
 	}
 
 	if threadDraft && isSwarmTaskForm(c) && category == models.CategoryActive {
@@ -1386,7 +1412,7 @@ func (h *Handler) GetTaskChangesSummary(c echo.Context) error {
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]any{
-		"files": len(files), "insertions": insertions, "deletions": deletions,
+		"title": task.Title, "files": len(files), "insertions": insertions, "deletions": deletions,
 		"review_comments": len(h.loadTaskReviewComments(ctx, task.ID)),
 		"status":          task.Status, "duration": components.FormatDuration(metrics.LatestDurationMs),
 	})
@@ -2725,7 +2751,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid chain configuration")
 	}
 
-	if err := h.taskSvc.Update(c.Request().Context(), task); err != nil {
+	if err := h.taskSvc.UpdatePreservingTitle(c.Request().Context(), task); err != nil {
 		applog.Infof("[handler] UpdateTaskChainConfig error updating task: %v", err)
 		return err
 	}

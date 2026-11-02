@@ -2106,57 +2106,11 @@ func (s *LLMService) SummarizeWorktreeCommitDiff(ctx context.Context, worktreePa
 		return ""
 	}
 	prompt := buildWorktreeCommitSummaryPrompt(diffContext, commitCtx)
-	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	output, _, err := s.CallAgentRawDirectNoTools(summaryCtx, prompt, nil, agent, worktreePath)
-	if err != nil {
-		applog.Infof("[agent-svc] commit diff summary failed worktree=%s: %v", worktreePath, err)
-		return ""
-	}
-	return parseWorktreeCommitSummaryOutput(output)
+	return cleanCommitSubject(s.generateName(ctx, prompt, agent, worktreePath, 72))
 }
 
 func parseWorktreeCommitSummaryOutput(output string) string {
-	match := ""
-	for offset, char := range output {
-		if char != '{' {
-			continue
-		}
-		candidate := parseWorktreeCommitSummaryObject(output[offset:])
-		if candidate == "" {
-			continue
-		}
-		if match != "" {
-			return ""
-		}
-		match = candidate
-	}
-	return match
-}
-
-func parseWorktreeCommitSummaryObject(output string) string {
-	var fields map[string]json.RawMessage
-	decoder := json.NewDecoder(strings.NewReader(output))
-	if err := decoder.Decode(&fields); err != nil || len(fields) != 1 {
-		return ""
-	}
-	rawSubject, ok := fields["subject"]
-	if !ok {
-		return ""
-	}
-	var subject string
-	if err := json.Unmarshal(rawSubject, &subject); err != nil {
-		return ""
-	}
-	subject = strings.TrimSpace(subject)
-	if subject == "" || strings.ContainsAny(subject, "\r\n") {
-		return ""
-	}
-	subject = cleanCommitSubject(subject)
-	if subject == "" || len(subject) > 72 {
-		return ""
-	}
-	return subject
+	return cleanCommitSubject(parseGeneratedName(output, 72))
 }
 
 func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeCommitMessageContext) string {
@@ -2170,7 +2124,7 @@ func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeComm
 	b.WriteString("- The subject must be at most 72 characters.\n")
 	b.WriteString("- If supporting context conflicts with the diff, ignore the supporting context.\n\n")
 	b.WriteString("Return exactly one JSON object with no markdown or other text:\n")
-	b.WriteString(`{"subject":"Add concise description"}`)
+	b.WriteString(`{"title":"Add concise description"}`)
 	b.WriteString("\n\n")
 	if context := buildWorktreeCommitSupportingContext(commitCtx); context != "" {
 		b.WriteString("Supporting context, only if it agrees with the diff:\n")

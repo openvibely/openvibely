@@ -684,7 +684,7 @@ func TestTaskChangesSummaryAuthoritativePreservedDiffAndScope(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := read()
-		for key, want := range map[string]any{"files": float64(2), "insertions": float64(2), "deletions": float64(1), "status": string(status), "review_comments": float64(0)} {
+		for key, want := range map[string]any{"title": task.Title, "files": float64(2), "insertions": float64(2), "deletions": float64(1), "status": string(status), "review_comments": float64(0)} {
 			if got[key] != want {
 				t.Errorf("%s: %s = %v, want %v", status, key, got[key], want)
 			}

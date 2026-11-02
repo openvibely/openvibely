@@ -649,6 +649,8 @@ type TaskPullRequestStore interface {
 
 // TaskStore persists tasks and their lifecycle state.
 type TaskStore interface {
+	UpdatePreservingTitle(ctx context.Context, task *models.Task) error
+	UpdateGeneratedTitle(ctx context.Context, id, expectedTitle, expectedPrompt, title string) (bool, error)
 	TaskModelSettings(ctx context.Context, taskID, selectedID string) (*models.TaskModelSettings, error)
 	SetModelOverrides(ctx context.Context, taskID string, agent models.LLMConfig, effort, tier *string) error
 	ActivateAllBacklog(ctx context.Context, projectID string) (int, error)

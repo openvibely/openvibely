@@ -388,6 +388,14 @@ func (s *TaskService) CreateWithGoalAndCallback(ctx context.Context, t *models.T
 }
 
 func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
+	return s.updateTask(ctx, t, false)
+}
+
+func (s *TaskService) UpdatePreservingTitle(ctx context.Context, t *models.Task) error {
+	return s.updateTask(ctx, t, true)
+}
+
+func (s *TaskService) updateTask(ctx context.Context, t *models.Task, preserveTitle bool) error {
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
@@ -395,7 +403,11 @@ func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
 		return err
 	}
 	applog.Infof("[task-svc] Update id=%s title=%q category=%s", t.ID, t.Title, t.Category)
-	if err := s.repo.Update(ctx, t); err != nil {
+	save := s.repo.Update
+	if preserveTitle {
+		save = s.repo.UpdatePreservingTitle
+	}
+	if err := save(ctx, t); err != nil {
 		if errors.Is(err, persistence.ErrDuplicateTask) {
 			applog.Infof("[task-svc] Update duplicate task title=%q", t.Title)
 			return ErrDuplicateTask

@@ -18,7 +18,7 @@ templ TaskWorkspaceScript() {
 		var signal = abort.signal;
 		var tabNames = ['details', 'schedules', 'chaining', 'attachments', 'lifecycle'];
 		var selected = 'details', scrollState = null, returnFocus = null, composerFocus = null;
-		var summary = null, timer = null, pending = false, dirty = false;
+		var summary = null, timer = null, pending = false, dirty = false, titleVersion = 0;
 		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
 		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
 		var saved = read('task-inspector-tab-' + taskID);
@@ -242,21 +242,44 @@ templ TaskWorkspaceScript() {
 			bar.querySelector('.task-change-review').setAttribute('aria-label', action);
 			bar.querySelector('.task-change-summary').setAttribute('aria-label', action + ': ' + summary.files + ' files changed, ' + summary.insertions + ' lines added, ' + summary.deletions + ' lines removed');
 		}
+		function applyTitle(value) {
+			if (typeof value !== 'string' || !value) return;
+			var title = root.querySelector('#task-breadcrumb-title');
+			if (title) title.textContent = value;
+			var documentTitle = value + ' - OpenVibely';
+			var marker = root.querySelector('[data-openvibely-page-title]');
+			if (marker) marker.setAttribute('data-openvibely-page-title', documentTitle);
+			document.title = documentTitle;
+			var input = root.querySelector('input[name="title"]');
+			if (input && input.value === input.defaultValue) {
+				input.value = value;
+				input.defaultValue = value;
+			}
+		}
 		function refreshSummary() {
 			timer = null;
 			if (!taskID || signal.aborted || !root.isConnected) return;
 			if (pending) { dirty = true; return; }
 			pending = true;
+			var requestedTitleVersion = titleVersion;
 			fetch('/tasks/' + encodeURIComponent(taskID) + '/changes/summary?project_id=' + encodeURIComponent(root.dataset.projectId), {signal:signal}).then(function(response) {
 				if (!response.ok) throw new Error('Summary unavailable');
 				return response.json();
-			}).then(function(value) { if (!signal.aborted) { summary = value; renderSummary(); } }).catch(function() {}).finally(function() {
+			}).then(function(value) { if (!signal.aborted) { summary = value; if (requestedTitleVersion === titleVersion) applyTitle(value.title); renderSummary(); } }).catch(function() {}).finally(function() {
 				pending = false;
 				if (dirty && !signal.aborted) { dirty = false; scheduleSummary(); }
 			});
 		}
 		function scheduleSummary() { if (!timer) timer = setTimeout(refreshSummary, 350); }
-		function invalidation(event) { if (event.detail && event.detail.task_id === taskID) scheduleSummary(); }
+		function invalidation(event) {
+			var data = event.detail;
+			if (!data || data.task_id !== taskID) return;
+			if (data.type === 'task_board_updated' && data.task_name) {
+				titleVersion++;
+				applyTitle(data.task_name);
+			}
+			scheduleSummary();
+		}
 		on(root, 'pointerdown', function(event) {
 			if (event.target.closest('[data-review-changes]')) {
 				var form = root.querySelector('#task-thread-form');

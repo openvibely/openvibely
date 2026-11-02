@@ -542,7 +542,11 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			nonCategoryChanges--
 		}
 		if nonCategoryChanges > 0 {
-			if err := taskSvc.Update(ctx, task); err != nil {
+			save := taskSvc.UpdatePreservingTitle
+			if req.Title != "" {
+				save = taskSvc.Update
+			}
+			if err := save(ctx, task); err != nil {
 				applog.Infof("[task-edit] error updating task %s: %v", req.ID, err)
 				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
 				continue

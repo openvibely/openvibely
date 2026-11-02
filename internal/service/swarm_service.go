@@ -914,7 +914,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	plannerCfg.RerunGeneration = cfg.Generation
 	setPlannerFollowupEffort(&plannerCfg, selection)
 	planner.SwarmConfig, _ = plannerCfg.JSON()
-	if err := s.taskRepo.Update(ctx, planner); err != nil {
+	if err := s.taskRepo.UpdatePreservingTitle(ctx, planner); err != nil {
 		return err
 	}
 	if s.workerSvc != nil {

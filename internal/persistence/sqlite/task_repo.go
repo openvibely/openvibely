@@ -1047,6 +1047,16 @@ func (r *TaskRepo) UpdateDetailProperty(ctx context.Context, id, field, value st
 }
 
 func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
+	return r.updateTask(ctx, t, true)
+}
+
+// UpdatePreservingTitle saves non-title changes without writing a stale title
+// captured before background naming (or an explicit rename) completed.
+func (r *TaskRepo) UpdatePreservingTitle(ctx context.Context, t *models.Task) error {
+	return r.updateTask(ctx, t, false)
+}
+
+func (r *TaskRepo) updateTask(ctx context.Context, t *models.Task, updateTitle bool) error {
 	autoMerge := 0
 	if t.AutoMerge {
 		autoMerge = 1
@@ -1057,11 +1067,11 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	}
 	swarmConfig := defaultJSON(t.SwarmConfig)
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET title = ?, category = ?, priority = ?, status = ?,
+		`UPDATE tasks SET title = CASE WHEN ? THEN ? ELSE title END, title_explicitly_set = CASE WHEN ? THEN 1 ELSE title_explicitly_set END, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
 			 swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
-		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
+		updateTitle, t.Title, updateTitle, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
 		t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
@@ -3391,4 +3401,15 @@ func (r *TaskRepo) CompleteExecutionSuccess(ctx context.Context, executionID, ou
 		}
 	}
 	return outcome, nil
+}
+
+// UpdateGeneratedTitle changes only the title, and only while the original
+// provisional title and prompt still match. Never overwrite execution state.
+func (r *TaskRepo) UpdateGeneratedTitle(ctx context.Context, id, expectedTitle, expectedPrompt, title string) (bool, error) {
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET title = ?, updated_at = datetime('now') WHERE id = ? AND title = ? AND prompt = ? AND title_explicitly_set = 0`, title, id, expectedTitle, expectedPrompt)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n > 0, err
 }
