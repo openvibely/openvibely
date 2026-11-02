@@ -52,6 +52,18 @@ func (s *checkpointUncachedStore) ReplayRowsByExecutionIDs(ctx context.Context, 
 	return checkpointBenchmarkRows(ctx, s.ExecutionStore, ids)
 }
 
+func (s *checkpointBenchmarkStore) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return checkpointBenchmarkContinuation(ctx, s.ExecutionStore, ids)
+}
+func (s *checkpointUncachedStore) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return checkpointBenchmarkContinuation(ctx, s.ExecutionStore, ids)
+}
+func checkpointBenchmarkContinuation(ctx context.Context, store persistence.ExecutionStore, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return store.(interface {
+		ReplayContinuationRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+	}).ReplayContinuationRowsByExecutionIDs(ctx, ids)
+}
+
 func syntheticImageCheckpoint(t testing.TB, cp *models.ChatCompactionCheckpoint, provider models.LLMProvider, encodedBytes int) {
 	t.Helper()
 	var pngData bytes.Buffer
@@ -253,13 +265,14 @@ func TestCheckpointBenchmarkUsesProductionReplayRows(t *testing.T) {
 	cached := &checkpointBenchmarkStore{&countingCheckpointStore{ExecutionStore: original, revisions: original.(checkpointRevisionStore)}}
 	uncached := &checkpointUncachedStore{ExecutionStore: original}
 	type rowReader interface {
+		ReplayContinuationRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
 		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
 	}
 	for _, store := range []persistence.ExecutionStore{cached, uncached} {
 		rows, ok := store.(rowReader)
 		require.True(t, ok)
 		id := req.ChatHistory[0].ID
-		replay, err := rows.ReplayRowsByExecutionIDs(req.Ctx, []string{id})
+		replay, err := rows.ReplayContinuationRowsByExecutionIDs(req.Ctx, []string{id})
 		require.NoError(t, err)
 		require.NotEmpty(t, replay[id])
 		require.NotNil(t, replay[id][0].Rows)

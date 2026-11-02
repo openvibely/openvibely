@@ -3,8 +3,11 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"reflect"
+	"sort"
 	"strings"
+	"unsafe"
 )
 
 // ReplayRows keeps persisted JSON items separate until a consumer decodes them.
@@ -196,16 +199,84 @@ func (m ExecutionReplayMessage) TranscriptBytes() int {
 	return n
 }
 
-// HasResponsesInput inspects native row headers without allocating item slices.
-// Serialized/foreign envelopes retain the decoder's compatibility semantics.
+// ReplayReplacesHistory describes the stored format, not the selected provider.
+// Responses inputs are full snapshots; messages/arrays are incremental exchanges.
+func ReplayReplacesHistory(format, key string, count int) bool {
+	return format == "envelope" && key == "responses_input" && count > 0
+}
+
+// ReplayArray borrows envelope items for metadata inspection. It never decodes
+// message text or images, and serialized replacements take precedence over rows.
+func (m ExecutionReplayMessage) ReplayArray(key string) ([]json.RawMessage, error) {
+	if m.TranscriptJSON == "" && m.Rows != nil {
+		if m.Rows.Format == "envelope" && strings.EqualFold(m.Rows.ItemsKey, key) {
+			return m.Rows.Items, nil
+		}
+		if m.Rows.Format == "array" || m.Rows.Format == "none" {
+			return nil, nil
+		}
+		if m.Rows.Format == "envelope" {
+			// Metadata maps serialize in sorted key order; preserve the decoder's
+			// last case-insensitive match without serializing unrelated fields.
+			var keys []string
+			for k := range m.Rows.Envelope {
+				if strings.EqualFold(k, key) {
+					keys = append(keys, k)
+				}
+			}
+			sort.Strings(keys)
+			var items []json.RawMessage
+			for _, k := range keys {
+				var err error
+				items, err = jsonview.Array(m.Rows.Envelope[k])
+				if err != nil {
+					return nil, err
+				}
+			}
+			return items, nil
+		}
+	}
+	raw := m.TranscriptJSON
+	if raw == "" {
+		raw = m.FullTranscriptJSON()
+	}
+	// A top-level array cannot contain an envelope field. Full validation
+	// remains the responsibility of the consumer that decodes those items.
+	if trimmed := strings.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		return nil, nil
+	}
+	var items []json.RawMessage
+	// Object only reads this view; returned slices share immutable string storage.
+	err := jsonview.Object(unsafe.Slice(unsafe.StringData(raw), len(raw)), func(k string, v json.RawMessage) error {
+		if strings.EqualFold(k, key) {
+			var err error
+			items, err = jsonview.Array(v)
+			return err
+		}
+		return nil
+	})
+	return items, err
+}
+
+// HasResponsesInput inspects snapshot metadata without decoding content.
 func (m ExecutionReplayMessage) HasResponsesInput() bool {
-	if m.TranscriptJSON == "" && m.Rows != nil && m.Rows.Format == "envelope" && m.Rows.ItemsKey == "responses_input" {
-		return len(m.Rows.Items) > 0
+	items, err := m.ReplayArray("responses_input")
+	return err == nil && len(items) > 0
+}
+
+// EffectiveReplayHistory retains the latest complete snapshot and subsequent
+// incremental exchanges. Callers may keep the original execution text for recovery.
+func EffectiveReplayHistory(history []Execution) []Execution {
+	for i := len(history) - 1; i >= 0; i-- {
+		for j := len(history[i].ReplayMessages) - 1; j >= 0; j-- {
+			if history[i].ReplayMessages[j].HasResponsesInput() {
+				result := append([]Execution(nil), history[i:]...)
+				result[0].ReplayMessages = result[0].ReplayMessages[j:]
+				return result
+			}
+		}
 	}
-	var saved struct {
-		Input []json.RawMessage `json:"responses_input"`
-	}
-	return m.DecodeTranscript(&saved) == nil && len(saved.Input) > 0
+	return history
 }
 
 // HasTranscript checks presence without counting or assembling provider items.

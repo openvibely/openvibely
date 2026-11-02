@@ -24,7 +24,7 @@ func normalizeSummaryReplay(provider models.LLMProvider, history []models.Execut
 // Normalize foreign history before either continuation or summary preparation.
 // The source records stay unchanged; only the outgoing copy is converted.
 func normalizeProviderReplay(provider models.LLMProvider, history []models.Execution, forSummary bool) []models.Execution {
-	history = llmopenai.EffectiveReplayHistory(history)
+	history = models.EffectiveReplayHistory(history)
 	out := append([]models.Execution(nil), history...)
 	for i := range out {
 		converted := false
@@ -44,7 +44,15 @@ func normalizeProviderReplay(provider models.LLMProvider, history []models.Execu
 				Messages    []json.RawMessage `json:"messages"`
 				Environment string            `json:"anthropic_execution_environment"`
 			}
-			_ = replay.DecodeTranscript(&envelope)
+			envelope.Input, _ = replay.ReplayArray("responses_input")
+			envelope.Messages, _ = replay.ReplayArray("messages")
+			if len(envelope.Messages) > 0 {
+				var metadata struct {
+					Environment string `json:"anthropic_execution_environment"`
+				}
+				_ = replay.DecodeTranscript(&metadata)
+				envelope.Environment = metadata.Environment
+			}
 			var messages []openaiclient.CompletionsHistoryMessage
 			switch {
 			case len(envelope.Input) > 0:

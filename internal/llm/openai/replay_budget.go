@@ -16,18 +16,7 @@ import (
 // Keep the execution's text fields for last-resort truncation, but don't count
 // them alongside the checkpoint in EstimateHistoryTokens.
 func EffectiveReplayHistory(history []models.Execution) []models.Execution {
-	for i := len(history) - 1; i >= 0; i-- {
-		for j := len(history[i].ReplayMessages) - 1; j >= 0; j-- {
-			replay := history[i].ReplayMessages[j]
-			hasInput := replay.HasResponsesInput()
-			if hasInput {
-				result := append([]models.Execution(nil), history[i:]...)
-				result[0].ReplayMessages = result[0].ReplayMessages[j:]
-				return result
-			}
-		}
-	}
-	return history
+	return models.EffectiveReplayHistory(history)
 }
 
 // EstimateHistoryTokens budgets exactly the history representation built for

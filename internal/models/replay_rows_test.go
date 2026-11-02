@@ -3,6 +3,8 @@ package models
 import (
 	"encoding/json"
 	"github.com/stretchr/testify/require"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +99,55 @@ func TestHasResponsesInputAcrossRepresentations(t *testing.T) {
 	row.Rows.Items = nil
 	if row.HasResponsesInput() {
 		t.Fatal("empty checkpoint")
+	}
+}
+
+func TestReplayMetadataDoesNotCopyLargeContent(t *testing.T) {
+	content := strings.Repeat("x", 2<<20)
+	for _, raw := range []string{
+		`[{"role":"user","content":"` + content + `"}]`,
+		`{"responses_input":[{"role":"user","content":"` + content + `"}]}`,
+	} {
+		replay := ExecutionReplayMessage{TranscriptJSON: raw}
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		for range 4 {
+			_, err := replay.ReplayArray("responses_input")
+			require.NoError(t, err)
+		}
+		runtime.ReadMemStats(&after)
+		require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(256<<10), "metadata lookup copied a multi-megabyte payload")
+	}
+}
+
+func TestReplayArrayMetadataMatchesDecoder(t *testing.T) {
+	for _, raw := range []string{
+		`{"responses_input":[null]}`, `{"responses_input":null}`, `{"responses_input":[]}`,
+		`{"RESPONSES_INPUT":[{"type":"message"}]}`, `{"responses_input":[1],"RESPONSES_INPUT":null}`,
+		`{"responses_input":42}`, `{"responses_input":[1],"responses_input":[2]}`,
+		`{"responses_input":[1],"responses_input":42}`, `{"responses_input":[`,
+		`[{"image_url":"fake"}]`,
+	} {
+		var decoded struct {
+			Input []json.RawMessage `json:"responses_input"`
+		}
+		err := json.Unmarshal([]byte(raw), &decoded)
+		got := (ExecutionReplayMessage{TranscriptJSON: raw}).HasResponsesInput()
+		require.Equal(t, err == nil && len(decoded.Input) > 0, got, raw)
+	}
+}
+
+func TestReplayMetadataFoldedEnvelopeFields(t *testing.T) {
+	for _, rows := range []*ReplayRows{
+		{Format: "envelope", ItemsKey: "messages", Envelope: map[string]json.RawMessage{"RESPONSES_INPUT": json.RawMessage(`[1]`)}},
+		{Format: "envelope", ItemsKey: "messages", Envelope: map[string]json.RawMessage{"RESPONSES_INPUT": json.RawMessage(`[1]`), "responses_input": json.RawMessage(`null`)}},
+		{Format: "envelope", ItemsKey: "RESPONSES_INPUT", Items: []json.RawMessage{json.RawMessage(`null`)}},
+	} {
+		replay := ExecutionReplayMessage{Rows: rows}
+		var saved struct {
+			Input []json.RawMessage `json:"responses_input"`
+		}
+		err := replay.DecodeTranscript(&saved)
+		require.Equal(t, err == nil && len(saved.Input) > 0, replay.HasResponsesInput())
 	}
 }

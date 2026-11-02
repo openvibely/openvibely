@@ -1641,6 +1641,10 @@ func (s *LLMService) loadProviderReplayHistory(req llmcontracts.AgentRequest) (l
 	var replays map[string][]models.ExecutionReplayMessage
 	var err error
 	if reader, ok := s.execRepo.(interface {
+		ReplayContinuationRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+	}); ok {
+		replays, err = reader.ReplayContinuationRowsByExecutionIDs(ctx, ids)
+	} else if reader, ok := s.execRepo.(interface {
 		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
 	}); ok {
 		replays, err = reader.ReplayRowsByExecutionIDs(ctx, ids)

@@ -149,15 +149,22 @@ func syncConversationRecordsWithReferences(ctx context.Context, tx sqlExecutor, 
 }
 
 func (r *ExecutionRepo) ReplayMessagesByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return r.readReplayMessages(ctx, ids, false)
+	return r.readReplayMessages(ctx, ids, false, false)
 }
 
 // ReplayRowsByExecutionIDs avoids assembling full provider JSON during recovery.
 func (r *ExecutionRepo) ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
-	return r.readReplayMessages(ctx, ids, true)
+	return r.readReplayMessages(ctx, ids, true, false)
 }
 
-func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, direct bool) (map[string][]models.ExecutionReplayMessage, error) {
+// ReplayContinuationRowsByExecutionIDs skips payloads covered by the newest full
+// snapshot, using headers in the same read transaction as the selected rows.
+// IDs must be chronological. Older execution metadata remains with the caller.
+func (r *ExecutionRepo) ReplayContinuationRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return r.readReplayMessages(ctx, ids, true, true)
+}
+
+func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, direct, continuation bool) (map[string][]models.ExecutionReplayMessage, error) {
 	result := make(map[string][]models.ExecutionReplayMessage)
 	placeholders, args := uniqueExecutionIDArgs(ids)
 	if len(args) == 0 {
@@ -169,6 +176,49 @@ func (r *ExecutionRepo) readReplayMessages(ctx context.Context, ids []string, di
 	}
 	defer tx.Rollback()
 	predicate := `execution_id IN (` + strings.Join(placeholders, ",") + `) AND generation=0 AND is_current=1 AND operation='put' AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%'`
+	if continuation {
+		headerRows, err := tx.QueryContext(ctx, `SELECT execution_id,item_id,payload FROM conversation_items WHERE `+predicate+` AND lane='metadata' AND item_id LIKE '%:header'`, args...)
+		if err != nil {
+			return nil, err
+		}
+		positions := make(map[string]int, len(ids))
+		for i, id := range ids {
+			positions[id] = i
+		}
+		boundary := -1
+		firstFrame := ""
+		for headerRows.Next() {
+			var id, item string
+			var raw []byte
+			if err := headerRows.Scan(&id, &item, &raw); err != nil {
+				headerRows.Close()
+				return nil, err
+			}
+			var frame transcript.ReplayFrame
+			if err := json.Unmarshal(raw, &frame); err != nil {
+				headerRows.Close()
+				return nil, err
+			}
+			if models.ReplayReplacesHistory(frame.Format, frame.ItemsKey, frame.Count) && (positions[id] > boundary || (positions[id] == boundary && item > firstFrame)) {
+				boundary = positions[id]
+				firstFrame = item
+			}
+		}
+		err = headerRows.Err()
+		headerRows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if boundary >= 0 {
+			for _, id := range ids[:boundary] {
+				result[id] = []models.ExecutionReplayMessage{}
+			}
+			selected := ids[boundary:]
+			placeholders, args = uniqueExecutionIDArgs(selected)
+			predicate = `execution_id IN (` + strings.Join(placeholders, ",") + `) AND generation=0 AND is_current=1 AND operation='put' AND lane IN ('provider','metadata') AND item_id LIKE 'replay:%' AND (execution_id!=? OR item_id>=?)`
+			args = append(args, selected[0], firstFrame)
+		}
+	}
 	sizes := make(map[string]int)
 	var rows *sql.Rows
 	if !direct {

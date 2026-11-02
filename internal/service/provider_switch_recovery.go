@@ -8,23 +8,27 @@ import (
 	"strings"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 func hasOpaqueCompaction(history []models.Execution) bool {
-	for _, exec := range llmopenai.EffectiveReplayHistory(history) {
+	for _, exec := range models.EffectiveReplayHistory(history) {
 		for _, replay := range exec.ReplayMessages {
-			var saved struct {
-				Input []struct{ Type string } `json:"responses_input"`
-			}
-			if replay.DecodeTranscript(&saved) != nil {
+			items, err := replay.ReplayArray("responses_input")
+			if err != nil {
 				continue
 			}
-			for _, item := range saved.Input {
-				if item.Type == "compaction" {
+			for _, item := range items {
+				var kind string
+				err := jsonview.Object(item, func(k string, v json.RawMessage) error {
+					if strings.EqualFold(k, "type") {
+						return json.Unmarshal(v, &kind)
+					}
+					return nil
+				})
+				if err == nil && kind == "compaction" {
 					return true
 				}
 			}
