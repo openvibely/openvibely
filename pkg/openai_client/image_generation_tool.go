@@ -190,7 +190,7 @@ func recentImageReferences(items []any, count int) []string {
 			if !ok || block["type"] != "input_image" {
 				continue
 			}
-			value, _ := block["image_url"].(string)
+			value := stringFromAny(block["image_url"])
 			if value == "" {
 				continue
 			}

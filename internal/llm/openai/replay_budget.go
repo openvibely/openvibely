@@ -114,7 +114,7 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 				if !ok || (part["type"] != "input_text" && part["type"] != "output_text") {
 					continue
 				}
-				if value, ok := part["text"].(string); ok && value != "" {
+				if value := jsonview.Text(part["text"]); value != "" {
 					parts = append(parts, value)
 				}
 			}

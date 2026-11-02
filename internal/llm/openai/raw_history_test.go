@@ -39,3 +39,20 @@ func TestPreparedResponsesPreservesEscapedTextBudgets(t *testing.T) {
 		}
 	}
 }
+
+func TestBorrowedUserTextRetainedDuringCompaction(t *testing.T) {
+	history := []models.Execution{{ReplayMessages: []models.ExecutionReplayMessage{models.ReplayFromRows("responses_input", []json.RawMessage{
+		json.RawMessage(`{"type":"message","role":"user","content":[{"type":"input_text","text":"keep this request"},{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]}`),
+	})}}}
+	users := UserMessageHistory(history)
+	if len(users) != 1 || users[0].PromptSent != "keep this request" {
+		t.Fatalf("user text lost: %#v", users)
+	}
+	var retained map[string]any
+	if err := json.Unmarshal(users[0].RetainedUserMessage, &retained); err != nil {
+		t.Fatal(err)
+	}
+	if len(retained["content"].([]any)) != 1 {
+		t.Fatal("image retained in text-only compaction context")
+	}
+}

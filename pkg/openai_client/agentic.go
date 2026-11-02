@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"image"
 	_ "image/gif"
@@ -1252,6 +1253,9 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 		return 0, 0, 0, 0, false, false
 	}
 	switch typed := value.(type) {
+	case jsonview.Value:
+		n, err := typed.Size()
+		return n, 0, 0, 0, false, err == nil
 	case nil:
 		return len("null"), 0, 0, 0, false, true
 	case bool:
@@ -1317,10 +1321,12 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 		isImage := strings.EqualFold(strings.TrimSpace(stringFromAny(typed["type"])), "input_image")
 		if isImage {
 			urlKey := "image_url"
-			imageURL, hasURL := typed[urlKey].(string)
+			imageURL := stringFromAny(typed[urlKey])
+			hasURL := imageURL != ""
 			if !hasURL || strings.TrimSpace(imageURL) == "" {
 				urlKey = "url"
-				imageURL, hasURL = typed[urlKey].(string)
+				imageURL = stringFromAny(typed[urlKey])
+				hasURL = imageURL != ""
 			}
 			if hasURL && strings.TrimSpace(imageURL) != "" {
 				trimmedURL := strings.TrimSpace(imageURL)
