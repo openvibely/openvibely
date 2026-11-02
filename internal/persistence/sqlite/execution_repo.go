@@ -1120,6 +1120,26 @@ func (r *ExecutionRepo) ListByTaskChronologicalBefore(ctx context.Context, taskI
 	return r.listTaskExecutionPage(ctx, taskID, beforeExecID, limit)
 }
 
+// ListByTaskChronologicalBetween returns a page at or after the checkpoint
+// execution and before the exclusive upper bound. Covered metadata is excluded
+// in SQL, rather than fetched and discarded by the caller.
+func (r *ExecutionRepo) ListByTaskChronologicalBetween(ctx context.Context, taskID, fromExecID, beforeExecID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 || fromExecID == "" || beforeExecID == "" {
+		return []models.Execution{}, nil
+	}
+	query, args := taskExecutionPageSQL(taskID, beforeExecID, limit)
+	boundary := ` AND (started_at, rowid) >= (SELECT started_at, rowid FROM executions WHERE id = ? AND task_id = ?)`
+	order := strings.LastIndex(query, " ORDER BY")
+	query = query[:order] + boundary + query[order:]
+	args = append(args[:len(args)-1], fromExecID, taskID, limit)
+	rows, err := r.db.QueryContext(ctx, modelHistoryQuery(ctx, query, false), args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing checkpoint execution range: %w", err)
+	}
+	defer rows.Close()
+	return scanExecutionsNewestFirstAsChronological(rows)
+}
+
 func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, error) {
 	if limit <= 0 {
 		return []models.Execution{}, nil

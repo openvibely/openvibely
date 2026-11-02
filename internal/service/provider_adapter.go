@@ -951,12 +951,6 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		}
 	}
 
-	var historyErr error
-	req, historyErr = s.completeTaskReplayHistory(req)
-	if historyErr != nil {
-		return llmcontracts.AgentResult{}, historyErr
-	}
-
 	installationContinuation := false
 	if s.skillInstallationResult != nil && !req.LifecycleHookCall && req.ExecID != "" {
 		result, err := s.skillInstallationResult(req.Ctx, req)
@@ -972,6 +966,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	var replayErr error
 	if installationContinuation {
 		// Installation completion edits the existing replay before restoration.
+		req, replayErr = s.completeTaskReplayHistory(req)
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
 		req, replayErr = s.loadProviderReplayHistory(req)
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
@@ -991,6 +989,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	// Apply the saved boundary before conversion can synthesize assistant
 	// messages from aggregate execution output already covered by a summary.
 	req = s.restoreCompactionCheckpoint(req)
+	if req.RestoredCompactionSourceExecutionID == "" && !req.HasNativeState() {
+		req, replayErr = s.completeTaskReplayHistory(req)
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
+	}
 	// Hydrate only the executions that survive the saved boundary. Full replay
 	// remains available on demand if native recovery needs the original history.
 	req, replayErr = s.loadProviderReplayHistory(req)
@@ -1023,7 +1027,11 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return res, err
 	}
 	loadUncompactedHistory := func() ([]models.Execution, error) {
-		loaded, err := s.loadProviderReplayHistory(uncompactedReq)
+		full, err := s.completeTaskReplayHistory(uncompactedReq)
+		if err != nil {
+			return nil, err
+		}
+		loaded, err := s.loadProviderReplayHistory(full)
 		if err != nil {
 			return nil, err
 		}
@@ -1032,7 +1040,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	compactionStrategy := "none"
 	if req.HasNativeState() {
 		compactionStrategy = "provider_native_checkpoint"
-	} else if len(req.ChatHistory) != len(originalHistory) {
+	} else if req.RestoredCompactionSourceExecutionID != "" {
 		compactionStrategy = "textual_checkpoint"
 	}
 	locallyCompactedBeforeProvider := false
@@ -1209,14 +1217,25 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	if checkpoint == nil || (len(checkpoint.History) == 0 && !checkpoint.HasNativeState() && strings.TrimSpace(checkpoint.ProviderSessionStateJSON) == "") {
 		return req
 	}
-	if !s.checkpointWithinCurrentContext(req, scope, checkpoint) {
+	compatible := checkpoint.CompatibilityKey == providerCompatibilityKey(req.Agent) &&
+		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
+	if !compatible && checkpoint.HasNativeState() && checkpoint.Strategy != "anthropic_context_management" {
 		return req
 	}
+	// Extend only as far as the saved boundary. Keep the original request intact
+	// if a clear-context boundary invalidates this checkpoint.
+	expanded, err := s.checkpointTaskHistory(req, scope, checkpoint)
+	if err != nil {
+		applog.Infof("[agent-svc] read checkpoint history range: %v", err)
+		return req
+	}
+	if !s.checkpointWithinCurrentContext(expanded, scope, checkpoint) {
+		return req
+	}
+	req = expanded
 	// Readable history remains portable even when the row also holds reasoning
 	// settings. Reject incompatible native compaction, but only clear session
 	// settings in the restored copy; do not discard its readable history.
-	compatible := checkpoint.CompatibilityKey == providerCompatibilityKey(req.Agent) &&
-		(checkpoint.ModelConfigID == "" || req.Agent.ID == "" || checkpoint.ModelConfigID == req.Agent.ID)
 	if compatible && prepared != nil {
 		req.Ctx = prepared.Context(req.Ctx)
 	}

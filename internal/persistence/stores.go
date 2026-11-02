@@ -340,6 +340,7 @@ type ExecutionStore interface {
 	ListByTask(ctx context.Context, taskID string) ([]models.Execution, error)
 	ListByTaskChronological(ctx context.Context, taskID string) ([]models.Execution, error)
 	ListByTaskChronologicalBefore(ctx context.Context, taskID string, beforeExecID string, limit int) ([]models.Execution, error)
+	ListByTaskChronologicalBetween(ctx context.Context, taskID, fromExecID, beforeExecID string, limit int) ([]models.Execution, error)
 	ListByTaskChronologicalLimit(ctx context.Context, taskID string, limit int) ([]models.Execution, error)
 	ListByTaskChronologicalPage(ctx context.Context, taskID string, offset int, limit int) ([]models.Execution, error)
 	ListChatHistory(ctx context.Context, projectID string, limit int) ([]models.Execution, error)

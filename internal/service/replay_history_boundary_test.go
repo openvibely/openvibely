@@ -28,6 +28,11 @@ func TestOrderedReplayHistoryStopsAtContextReset(t *testing.T) {
 			require.NoError(t, store.Create(req.Ctx, &current))
 			req.ExecID = current.ID
 			req.ChatHistory = req.ChatHistory[len(req.ChatHistory)-20:]
+			// Restoration must discover the reset even when it lies outside the
+			// supplied window, before ordinary fallback expands the history.
+			boundedRestore := svc.restoreCompactionCheckpoint(req)
+			require.False(t, resumeHasSummary(boundedRestore.ChatHistory))
+			require.Empty(t, boundedRestore.RestoredCompactionSourceExecutionID)
 			expanded, err := svc.completeTaskReplayHistory(req)
 			require.NoError(t, err)
 			require.Len(t, expanded.ChatHistory, 127)
