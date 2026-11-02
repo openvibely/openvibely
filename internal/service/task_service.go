@@ -507,6 +507,17 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
 		return err
 	}
+	if category != models.CategoryActive && previousTask != nil && previousTask.SwarmRole == models.SwarmRoleParent && s.swarmSvc != nil {
+		// Keep child callbacks out from the board write through cancellation.
+		// Refresh after acquiring the gate: a callback may have finished while
+		// we waited, changing whether this parent still has cancellable work.
+		s.swarmSvc.orchestration.Lock()
+		defer s.swarmSvc.orchestration.Unlock()
+		previousTask, err = s.repo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
 	if _, guarded := persistence.ActiveLaneExpectedState(ctx, id); guarded && category == models.CategoryActive {
 		if previousTask == nil {
 			return fmt.Errorf("%w: %s", persistence.ErrActiveLaneTaskChanged, id)
@@ -586,9 +597,8 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	if category != models.CategoryActive && isCancellableRunnableWork {
 		applog.Infof("[task-svc] UpdateCategory cancelling runnable task id=%s status=%s (moved to %s)", id, previousTask.Status, category)
 		if isCancellableSwarmParent && s.swarmSvc != nil {
-			// UpdateCategory already holds the parent lifecycle lock. Cascade
-			// under that same gate so a new swarm generation cannot enter.
-			if err := s.swarmSvc.cancelSwarmLocked(ctx, id); err != nil {
+			// Both gates are held from before the board write.
+			if err := s.swarmSvc.cancelSwarmUnderOrchestrationLock(ctx, id); err != nil {
 				return err
 			}
 		}

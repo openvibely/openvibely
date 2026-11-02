@@ -1308,6 +1308,12 @@ func (s *SwarmService) CancelSwarmObservedWithPending(ctx context.Context, obser
 func (s *SwarmService) cancelSwarmLocked(ctx context.Context, parentTaskID string) error {
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
+	return s.cancelSwarmUnderOrchestrationLock(ctx, parentTaskID)
+}
+
+// cancelSwarmUnderOrchestrationLock requires both the parent lifecycle lock and
+// the orchestration lock. Category moves hold both across the board write.
+func (s *SwarmService) cancelSwarmUnderOrchestrationLock(ctx context.Context, parentTaskID string) error {
 	ctx = context.WithoutCancel(ctx)
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parentTaskID)
 	if err != nil {

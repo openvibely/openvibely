@@ -3147,3 +3147,38 @@ func TestCancelSwarmInterruptsQueuedChildAndPurgesWorkerQueue(t *testing.T) {
 	require.Equal(t, models.StatusCancelled, requireFullSwarmTestTask(t, env.Tasks, child.ID).Status)
 	require.Equal(t, models.StatusCancelled, requireFullSwarmTestTask(t, env.Tasks, pending.ID).Status)
 }
+
+func TestSwarmMoveDestinationSurvivesCallbackBeforeCascade(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	worker := newTestWorkerService(t)
+	tasks := NewTaskService(env.Tasks, nil, worker)
+	swarm := NewSwarmService(tasks, env.Tasks, nil, worker)
+	tasks.SetSwarmService(swarm)
+	parent := &models.Task{ProjectID: "default", Title: "Parent", Prompt: "test", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent}
+	require.NoError(t, env.Tasks.Create(ctx, parent))
+	child := &models.Task{ProjectID: "default", Title: "Child", Prompt: "test", Category: models.CategoryActive, Status: models.StatusCancelled, SwarmRole: models.SwarmRoleWorker, ParentTaskID: &parent.ID}
+	require.NoError(t, env.Tasks.Create(ctx, child))
+	callbackDone := make(chan error, 1)
+	tasks.updateCategoryTaskLoader = func(ctx context.Context, id string) (*models.Task, error) {
+		// This hook runs after the board write but before the cancellation cascade.
+		// If callbacks are not excluded, force the formerly failing ordering.
+		if swarm.orchestration.TryLock() {
+			swarm.orchestration.Unlock()
+			callbackDone <- swarm.OnChildCompleted(ctx, child.ID)
+		} else {
+			go func() { callbackDone <- swarm.OnChildCompleted(ctx, child.ID) }()
+		}
+		return env.Tasks.GetByID(ctx, id)
+	}
+	require.NoError(t, tasks.UpdateCategory(ctx, parent.ID, models.CategoryCompleted))
+	select {
+	case err := <-callbackDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("child callback deadlocked with category move")
+	}
+	stored := requireFullSwarmTestTask(t, env.Tasks, parent.ID)
+	require.Equal(t, models.StatusCancelled, stored.Status)
+	require.Equal(t, models.CategoryCompleted, stored.Category)
+}
