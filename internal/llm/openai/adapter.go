@@ -8,6 +8,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
+	"github.com/openvibely/openvibely/internal/transcript"
 	"strings"
 	"sync"
 	"time"
@@ -769,7 +770,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 		OnReplayChanged:                a.responsesExchangeRecorder(execID, chatHistory),
-		ReplayBaseAvailable:            responsesReplayBaseAvailable(chatHistory),
+		ReplayBaseAvailable:            transcript.CanSeparateHistory(execID, chatHistory),
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,

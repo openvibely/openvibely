@@ -63,7 +63,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	}
 
 	if a.execRepo != nil && req.ExecID != "" {
-		ctx = context.WithValue(ctx, conversationRecorderKey{}, conversation.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}))
+		ctx = context.WithValue(ctx, conversationRecorderKey{}, conversation.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}, nil))
 	}
 
 	switch req.Operation {
@@ -908,14 +908,14 @@ func (a *Adapter) replayChangesSaver(ctx context.Context, execID string) func(co
 
 type conversationRecorderKey struct{}
 
-func (a *Adapter) conversationRecorder(ctx context.Context, execID string) *conversation.Recorder {
-	if recorder, ok := ctx.Value(conversationRecorderKey{}).(*conversation.Recorder); ok {
+func (a *Adapter) conversationRecorder(ctx context.Context, execID string) *conversation.ExchangeRecorder {
+	if recorder, ok := ctx.Value(conversationRecorderKey{}).(*conversation.ExchangeRecorder); ok {
 		return recorder
 	}
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	return conversation.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
+	return conversation.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID}, nil)
 }
 
 func buildPreparedClientHistory(history []models.Execution) []openaiclient.PreparedCompletionsHistory {

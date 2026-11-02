@@ -277,77 +277,22 @@ func PreparedResponsesSummaryMessages(items []json.RawMessage) openaiclient.Prep
 	return openaiclient.PreparedCompletionsMessages(preparedResponsesCompletionsMessages(items))
 }
 
-// responsesExchangeRecorder stores only this invocation's changes unless the
-// client rewrote its prefix. Recovery still sees the complete in-memory state.
+// responsesExchangeRecorder supplies Responses headers to the shared execution
+// boundary recorder. Recovery always receives the full in-memory conversation.
 func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Execution) func(context.Context, openaiclient.ResponsesReplayUpdate) error {
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	// A standalone checkpoint or converted/synthetic history is a new base.
-	// Ordinary exchanges use the shared chronological history loader. No
-	// execution IDs or revisions are embedded in newly saved replay data.
-	durableHistory := false
-	var baseTaskID string
-	if e, ok := responsesReplayBase(history); ok && e.ID != execID {
-		durableHistory = true
-		baseTaskID = e.TaskID
-	}
-
-	checkedBase := false
-	recorder := transcript.NewRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
+	recorder := transcript.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID}, history)
 	return func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
-		if !checkedBase && durableHistory {
-			e, err := a.execRepo.GetByID(persistence.WithExecutionMetadata(context.WithoutCancel(ctx)), execID)
-			if err != nil {
-				return err
-			}
-			if e == nil || e.TaskID != baseTaskID {
-				durableHistory = false
-			}
-			checkedBase = true
-		}
-		if !durableHistory && !u.ReplacesHistory {
-			u.Items = append(append([]any(nil), u.Prefix...), u.Items...)
-			u.ReplacesHistory = true
-			u.FirstChanged = 0
-		}
-		h := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil}
-		if u.ReplacesHistory {
-			h.ItemsKey = "responses_input"
-			h.Envelope = nil
-		}
-		if err := recorder.SaveChanged(context.WithoutCancel(ctx), h, u.Items, u.FirstChanged); err != nil {
+		header := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil}
+		replacement := header
+		replacement.ItemsKey = "responses_input"
+		saved, err := recorder.SaveUpdate(context.WithoutCancel(ctx), header, replacement, u)
+		if err != nil {
 			return fmt.Errorf("save OpenAI exchange: %w", err)
-		}
-		saved := recorder.Recovery()
-		if !u.ReplacesHistory {
-			saved = append(append([]any(nil), u.Prefix...), saved...)
 		}
 		llmcontracts.RecordResponsesRecovery(ctx, saved)
 		return nil
 	}
-}
-
-func responsesReplayBase(history []models.Execution) (models.Execution, bool) {
-	effective := models.EffectiveReplayHistory(history)
-	if len(effective) == 0 {
-		return models.Execution{}, false
-	}
-	taskID := effective[len(effective)-1].TaskID
-	for _, e := range effective {
-		if e.Status != models.ExecCompleted || e.ID == "" || e.TaskID != taskID || e.ContextKind != "" || len(e.ReplayMessages) == 0 {
-			return models.Execution{}, false
-		}
-		for _, replay := range e.ReplayMessages {
-			items, _, err := replay.ResponsesReplay()
-			if err != nil || len(items) == 0 {
-				return models.Execution{}, false
-			}
-		}
-	}
-	return effective[len(effective)-1], true
-}
-func responsesReplayBaseAvailable(history []models.Execution) bool {
-	_, ok := responsesReplayBase(history)
-	return ok
 }

@@ -1,5 +1,7 @@
 package openaiclient
 
+import "github.com/openvibely/openvibely/internal/transcript"
+
 // EstimateResponsesInputTokens uses the same image-aware estimator as requests.
 func EstimateResponsesInputTokens(items []any) int {
 	return estimateInputItemsTokens(items)
@@ -39,9 +41,4 @@ func repairInterruptedToolCalls(items []any) []any {
 // ResponsesReplayUpdate separates the unchanged request prefix from newly saved
 // exchanges. A rewrite (including compaction) replaces the complete history.
 // Prefix is immutable; Items remain owned by the running client.
-type ResponsesReplayUpdate struct {
-	Items           []any
-	Prefix          []any
-	FirstChanged    int
-	ReplacesHistory bool
-}
+type ResponsesReplayUpdate = transcript.ExchangeUpdate
