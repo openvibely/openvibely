@@ -3055,3 +3055,95 @@ func TestSwarmServiceFailedWorkerRepairHonorsDisabledRoles(t *testing.T) {
 		})
 	}
 }
+
+func TestSwarmDemotionPreservesStopAfterChildCallbacks(t *testing.T) {
+	for _, destination := range []models.TaskCategory{models.CategoryBacklog, models.CategoryCompleted} {
+		t.Run(string(destination), func(t *testing.T) {
+			env := teststores.New(t)
+			ctx := context.Background()
+			worker := newTestWorkerService(t)
+			tasks := NewTaskService(env.Tasks, nil, worker)
+			swarm := NewSwarmService(tasks, env.Tasks, nil, worker)
+			tasks.SetSwarmService(swarm)
+			parent := &models.Task{ProjectID: "default", Title: "Parent", Prompt: "test", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1,"reviewer_enabled":true,"merger_enabled":true}`}
+			require.NoError(t, env.Tasks.Create(ctx, parent))
+			var children []*models.Task
+			for _, role := range []models.SwarmRole{models.SwarmRolePlanner, models.SwarmRoleWorker, models.SwarmRoleReviewer, models.SwarmRoleMerger} {
+				child := &models.Task{ProjectID: "default", Title: string(role), Prompt: "test", Category: models.CategoryActive, Status: models.StatusRunning, ParentTaskID: &parent.ID, SwarmRole: role}
+				require.NoError(t, env.Tasks.Create(ctx, child))
+				children = append(children, child)
+			}
+			// Queue a completion callback while the stop holds the orchestration gate.
+			callbackDone := make(chan error, 1)
+			worker.RegisterCancel(children[1].ID, func() {
+				go func() { callbackDone <- swarm.OnChildCompleted(ctx, children[1].ID) }()
+			})
+			require.NoError(t, tasks.UpdateCategory(ctx, parent.ID, destination))
+			select {
+			case err := <-callbackDone:
+				require.NoError(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("completion callback deadlocked with stop")
+			}
+			for _, child := range children {
+				require.NoError(t, swarm.OnChildCompleted(ctx, child.ID))
+			}
+			// A completion already in flight may persist its terminal result after Stop.
+			for _, child := range children {
+				require.NoError(t, env.Tasks.UpdateStatus(ctx, child.ID, models.StatusCompleted))
+				require.NoError(t, swarm.OnChildCompleted(ctx, child.ID))
+			}
+			require.NoError(t, swarm.ApplyPlannerOutput(ctx, children[0].ID, PlannerOutput{}))
+			require.NoError(t, swarm.markPlannerOutputInvalid(ctx, children[0], "late invalid output"))
+			swarm.recordPlannerApplicationError(children[0], errors.New("late apply error"))
+			require.NoError(t, swarm.RecomputeParentStatus(ctx, parent.ID))
+			stored := requireFullSwarmTestTask(t, env.Tasks, parent.ID)
+			require.Equal(t, models.StatusCancelled, stored.Status)
+			require.Equal(t, destination, stored.Category)
+			select {
+			case submitted := <-worker.Submitted():
+				t.Fatalf("stopped swarm submitted %s", submitted.ID)
+			default:
+			}
+		})
+	}
+}
+
+func TestCancelSwarmInterruptsQueuedChildAndPurgesWorkerQueue(t *testing.T) {
+	env := teststores.New(t)
+	ctx := context.Background()
+	worker := newTestWorkerService(t)
+	worker.numWorkers = 1
+	worker.totalRunning = 1 // keep the only global slot occupied
+	tasks := NewTaskService(env.Tasks, nil, worker)
+	swarm := NewSwarmService(tasks, env.Tasks, nil, worker)
+	parent := &models.Task{ProjectID: "default", Title: "Parent", Prompt: "test", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent}
+	require.NoError(t, env.Tasks.Create(ctx, parent))
+	child := &models.Task{ProjectID: "default", Title: "Queued follow-up", Prompt: "test", Category: models.CategoryActive, Status: models.StatusQueued, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker}
+	require.NoError(t, env.Tasks.Create(ctx, child))
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	worker.RegisterCancel(child.ID, cancel)
+	waiting := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(waiting)
+		done <- worker.AcquireWorkerSlots(waitCtx, "default", "model")
+	}()
+	<-waiting
+	pending := &models.Task{ProjectID: "default", Title: "Pending worker", Prompt: "test", Category: models.CategoryActive, Status: models.StatusPending, ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker}
+	require.NoError(t, env.Tasks.Create(ctx, pending))
+	worker.Submit(*pending)
+	require.Len(t, worker.queue, 1)
+	require.NoError(t, swarm.CancelSwarm(ctx, parent.ID))
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("queued child is still waiting for capacity")
+	}
+	require.Empty(t, worker.queue)
+	require.False(t, worker.pending[pending.ID])
+	require.Equal(t, models.StatusCancelled, requireFullSwarmTestTask(t, env.Tasks, child.ID).Status)
+	require.Equal(t, models.StatusCancelled, requireFullSwarmTestTask(t, env.Tasks, pending.ID).Status)
+}

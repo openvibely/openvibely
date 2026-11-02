@@ -389,6 +389,9 @@ func (s *SwarmService) ApplyPlannerOutput(ctx context.Context, plannerTaskID str
 	if err != nil || parent == nil {
 		return fmt.Errorf("loading swarm parent: %w", err)
 	}
+	if parent.Status == models.StatusCancelled {
+		return nil
+	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	if err := validatePlannerOutput(output, parentCfg); err != nil {
 		planner.SwarmStatus = "invalid_plan"
@@ -663,6 +666,9 @@ func (s *SwarmService) onChildCompletedLocked(ctx context.Context, childTaskID s
 	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
 	if err != nil || parent == nil {
 		return err
+	}
+	if parent.Status == models.StatusCancelled {
+		return nil
 	}
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parent.ID)
 	if err != nil {
@@ -1180,6 +1186,9 @@ func (s *SwarmService) recomputeParentStatusLocked(ctx context.Context, parentTa
 	if err != nil || parent == nil || parent.SwarmRole != models.SwarmRoleParent {
 		return err
 	}
+	if parent.Status == models.StatusCancelled {
+		return nil
+	}
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parent.ID)
 	if err != nil {
 		return err
@@ -1294,30 +1303,47 @@ func (s *SwarmService) CancelSwarmObservedWithPending(ctx context.Context, obser
 	return s.cancelSwarmLocked(ctx, observed.ID)
 }
 
+// cancelSwarmLocked requires the parent lifecycle lock. The orchestration lock
+// serializes the stop with child completion and stage promotion.
 func (s *SwarmService) cancelSwarmLocked(ctx context.Context, parentTaskID string) error {
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
+	ctx = context.WithoutCancel(ctx)
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parentTaskID)
 	if err != nil {
 		return err
 	}
+	if s.workerSvc != nil {
+		s.workerSvc.MarkCancellationRequested(parentTaskID)
+	}
+	if err := s.taskRepo.UpdateStatus(ctx, parentTaskID, models.StatusCancelled); err != nil {
+		return err
+	}
+	var stopErrors []error
+	// Mark every child before purging queues: a purge can dispatch other work.
 	for _, child := range children {
-		cancellable := child.Status == models.StatusPending || child.Status == models.StatusQueued || child.Status == models.StatusRunning || child.Status == models.StatusBlocked
-		if cancellable && s.workerSvc != nil {
+		if child.Status != models.StatusPending && child.Status != models.StatusQueued && child.Status != models.StatusRunning && child.Status != models.StatusBlocked {
+			continue
+		}
+		if s.workerSvc != nil {
 			s.workerSvc.MarkCancellationRequested(child.ID)
 		}
-		if child.Status == models.StatusRunning && s.workerSvc != nil {
-			s.workerSvc.CancelRunningTask(child.ID)
-		}
-		if cancellable {
-			_ = s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusCancelled)
+		if err := s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusCancelled); err != nil {
+			stopErrors = append(stopErrors, err)
 		}
 	}
-	if parent, err := s.taskRepo.GetByID(ctx, parentTaskID); err == nil && parent != nil {
+	for _, child := range children {
+		if child.Status != models.StatusPending && child.Status != models.StatusQueued && child.Status != models.StatusRunning && child.Status != models.StatusBlocked {
+			continue
+		}
 		if s.workerSvc != nil {
-			s.workerSvc.MarkCancellationRequested(parent.ID)
+			s.workerSvc.CancelRunningTask(child.ID)
+			if err := s.workerSvc.CancelQueuedTask(ctx, child.ID, "Swarm was stopped by the user"); err != nil {
+				stopErrors = append(stopErrors, err)
+			}
 		}
-		return s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusCancelled)
 	}
-	return nil
+	return errors.Join(stopErrors...)
 }
 
 func (s *SwarmService) applyCompletedPlannerExecution(ctx context.Context, planner *models.Task) (retErr error) {
@@ -1326,6 +1352,13 @@ func (s *SwarmService) applyCompletedPlannerExecution(ctx context.Context, plann
 			s.recordPlannerApplicationError(planner, retErr)
 		}
 	}()
+	parent, err := s.taskRepo.GetByID(ctx, *planner.ParentTaskID)
+	if err != nil || parent == nil {
+		return err
+	}
+	if parent.Status == models.StatusCancelled {
+		return nil
+	}
 	children, err := s.taskRepo.ListSwarmChildren(ctx, *planner.ParentTaskID)
 	if err != nil {
 		return err
@@ -1363,6 +1396,8 @@ func (s *SwarmService) recordPlannerApplicationError(planner *models.Task, cause
 	if planner == nil || planner.ParentTaskID == nil || cause == nil {
 		return
 	}
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	storedPlanner, err := s.taskRepo.GetByID(ctx, planner.ID)
@@ -1372,6 +1407,9 @@ func (s *SwarmService) recordPlannerApplicationError(planner *models.Task, cause
 	message := fmt.Sprintf("applying planner output: %v", cause)
 	parent, err := s.taskRepo.GetByID(ctx, *storedPlanner.ParentTaskID)
 	if err != nil || parent == nil {
+		return
+	}
+	if parent.Status == models.StatusCancelled {
 		return
 	}
 	followup := isFollowupPlannerApplication(storedPlanner, parent)
@@ -1420,16 +1458,21 @@ func (s *SwarmService) markPlannerOutputInvalid(ctx context.Context, planner *mo
 	if planner == nil || planner.ParentTaskID == nil {
 		return errors.New(message)
 	}
+	s.orchestration.Lock()
+	defer s.orchestration.Unlock()
+	parent, err := s.taskRepo.GetByID(ctx, *planner.ParentTaskID)
+	if err != nil || parent == nil {
+		return errors.New(message)
+	}
+	if parent.Status == models.StatusCancelled {
+		return nil
+	}
 	cfg, _ := models.ParseSwarmConfig(planner.SwarmConfig)
 	cfg.LastError = message
 	planner.SwarmConfig, _ = cfg.JSON()
 	planner.SwarmStatus = "invalid_plan"
 	_ = s.taskRepo.UpdateSwarmFields(ctx, planner.ID, planner.SwarmRole, planner.SwarmStatus, planner.SwarmConfig, planner.SwarmSequence)
 	_ = s.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusFailed)
-	parent, err := s.taskRepo.GetByID(ctx, *planner.ParentTaskID)
-	if err != nil || parent == nil {
-		return errors.New(message)
-	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	parentCfg.LastError = message
 	parent.SwarmConfig, _ = parentCfg.JSON()
