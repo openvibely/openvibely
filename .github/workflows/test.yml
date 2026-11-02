@@ -191,17 +191,6 @@ jobs:
           OPENVIBELY_SKIP_BROWSER_TESTS: "1"
         run: go test ./... -count=1 -timeout 600s -coverpkg=./... -coverprofile=coverage.txt
 
-      - name: Benchmark synthetic checkpoint follow-ups against local mocks
-        run: python3 scripts/replay-memory-bench/checkpoint/run.py --output "${{ runner.temp }}/checkpoint-results"
-
-      - name: Upload checkpoint benchmark measurements
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: checkpoint-benchmark
-          path: ${{ runner.temp }}/checkpoint-results
-          if-no-files-found: ignore
-
       - name: Run component functional browser tests
         run: go test ./web/templates/components -run '^TestBrowserFunctional_' -count=1 -timeout 180s
 
