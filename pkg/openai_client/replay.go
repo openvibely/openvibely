@@ -1,5 +1,7 @@
 package openaiclient
 
+import "github.com/openvibely/openvibely/internal/llm/jsonview"
+
 // EstimateResponsesInputTokens uses the same image-aware estimator as requests.
 func EstimateResponsesInputTokens(items []any) int {
 	return estimateInputItemsTokens(items)
@@ -11,7 +13,7 @@ func EstimateResponsesInputTokens(items []any) int {
 func repairInterruptedToolCalls(items []any) []any {
 	outputs := make(map[string]bool)
 	for _, raw := range items {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemHeader(raw)
 		if !ok {
 			continue
 		}
@@ -23,7 +25,7 @@ func repairInterruptedToolCalls(items []any) []any {
 	result := make([]any, 0, len(items))
 	for _, raw := range items {
 		result = append(result, raw)
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemHeader(raw)
 		if !ok {
 			continue
 		}
@@ -35,3 +37,6 @@ func repairInterruptedToolCalls(items []any) []any {
 	}
 	return result
 }
+
+func responseItemObject(value any) (map[string]any, bool) { return jsonview.ResponseObject(value) }
+func responseItemHeader(value any) (map[string]any, bool) { return jsonview.ResponseHeader(value) }

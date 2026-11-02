@@ -10,6 +10,11 @@ import (
 
 func rawValue(value any) (json.RawMessage, bool) {
 	switch v := value.(type) {
+	case *jsonview.ResponseItem:
+		if v == nil {
+			return nil, false
+		}
+		return v.RawJSON(), true
 	case json.RawMessage:
 		return v, true
 	case jsonview.Value:
@@ -71,6 +76,10 @@ func rawSizeHint(value any) int {
 // fields. It never mutates input. Invalid JSON/UTF-8 keeps encoder semantics.
 func appendValue(dst []byte, value any) ([]byte, error) { return appendValueDepth(dst, value, 0) }
 func appendValueDepth(dst []byte, value any, depth int) ([]byte, error) {
+	// SavedResponse already validated syntax and UTF-8; its bytes are immutable.
+	if saved, ok := value.(*jsonview.ResponseItem); ok && saved != nil && len(saved.RawJSON()) > 0 {
+		return append(dst, saved.RawJSON()...), nil
+	}
 	if depth >= 64 {
 		encoded, err := json.Marshal(value)
 		return append(dst, encoded...), err

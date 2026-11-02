@@ -961,7 +961,7 @@ func appendRecoveredAsyncToolResults(inputItems *[]any, results []AsyncToolResul
 		// Reuse it instead of replaying a duplicate call_id on recovery.
 		hasCall, hasOutput := false, false
 		for _, raw := range *inputItems {
-			item, ok := raw.(map[string]any)
+			item, ok := responseItemHeader(raw)
 			if !ok || stringFromAny(item["call_id"]) != callID {
 				continue
 			}
@@ -1182,7 +1182,14 @@ func estimateAgenticInputItemTokens(item any) int {
 }
 
 func estimateAgenticResponseItemModelVisibleBytes(item any) int {
-	if itemMap, ok := item.(map[string]any); ok {
+	if saved, ok := item.(*jsonview.ResponseItem); ok {
+		decoded, err := saved.Object()
+		if err != nil {
+			return 0
+		}
+		return estimateAgenticResponseItemModelVisibleBytes(decoded)
+	}
+	if itemMap, ok := responseItemObject(item); ok {
 		switch strings.TrimSpace(stringFromAny(itemMap["type"])) {
 		case "reasoning", "context_compaction":
 			if encryptedContent := stringFromAny(itemMap["encrypted_content"]); encryptedContent != "" {
@@ -1217,7 +1224,7 @@ func marshalAgenticItemAndImageAdjustment(item any) (int, int, int, bool, error)
 		size, err := requestjson.Size(item)
 		return size, 0, 0, false, err
 	}
-	itemMap, ok := item.(map[string]any)
+	itemMap, ok := responseItemObject(item)
 	if !ok {
 		return marshalFallback()
 	}
@@ -1316,10 +1323,15 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 			return len("null"), 0, 0, 0, false, true
 		}
 		replacedURLKey := ""
-		replacedURL := ""
+		replacedURLBytes := 0
+		replacedPayloadBytes := 0
 		replacedPayload := ""
 		isImage := strings.EqualFold(strings.TrimSpace(stringFromAny(typed["type"])), "input_image")
-		if isImage {
+		if urlBytes, payloadBytes, rawOK := borrowedResizedImageURL(typed["image_url"]); isImage && rawOK && !strings.EqualFold(strings.TrimSpace(stringFromAny(typed["detail"])), "original") {
+			replacedURLKey = "image_url"
+			replacedURLBytes = urlBytes
+			replacedPayloadBytes = payloadBytes
+		} else if isImage {
 			urlKey := "image_url"
 			imageURL := stringFromAny(typed[urlKey])
 			hasURL := imageURL != ""
@@ -1336,7 +1348,8 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 						return 0, 0, 0, 0, false, false
 					}
 					replacedURLKey = urlKey
-					replacedURL = imageURL
+					replacedURLBytes = len(imageURL)
+					replacedPayloadBytes = len(payload)
 					replacedPayload = payload
 				}
 			}
@@ -1352,8 +1365,8 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 			size += agenticJSONEncodedStringSize(key) + 1
 			if key == replacedURLKey {
 				size += 2 // The replaced URL is the JSON string "".
-				removedURLBytes += len(replacedURL)
-				payloadBytes += len(replacedPayload)
+				removedURLBytes += replacedURLBytes
+				payloadBytes += replacedPayloadBytes
 				optimized = true
 				if strings.EqualFold(strings.TrimSpace(stringFromAny(typed["detail"])), "original") {
 					replacementBytes += estimateAgenticOriginalImageBytesFromValidatedPayload(replacedPayload)
@@ -1404,7 +1417,7 @@ var agenticBase64PayloadAlphabet = func() [256]bool {
 	return alphabet
 }()
 
-func agenticCanonicalBase64Payload(payload string) bool {
+func agenticCanonicalBase64Payload[T ~string | ~[]byte](payload T) bool {
 	if len(payload)%4 != 0 {
 		return false
 	}
@@ -1484,7 +1497,7 @@ func agenticAudioDataURLEstimateAdjustment(item any) (int, int) {
 func agenticEncryptedFunctionOutputEstimateAdjustment(item any) (int, int) {
 	payloadBytes := 0
 	replacementBytes := 0
-	itemMap, ok := item.(map[string]any)
+	itemMap, ok := responseItemObject(item)
 	if !ok {
 		return 0, 0
 	}
@@ -1804,7 +1817,7 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	}
 	compactionItems := make([]any, 0, 1)
 	for _, raw := range result.outputItems {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemObject(raw)
 		if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "compaction") {
 			compactionItems = append(compactionItems, item)
 		}
@@ -1823,7 +1836,7 @@ func buildAgenticRemoteCompactionV2History(inputItems []any, compactionItem any)
 	remaining := openAIRemoteCompactionV2RetainedMessageTokenBudget
 
 	for i := len(inputItems) - 1; i >= 0 && remaining > 0; i-- {
-		item, ok := inputItems[i].(map[string]any)
+		item, ok := responseItemObject(inputItems[i])
 		if !ok || !isRetainedForOpenAIRemoteCompactionV2(item) {
 			continue
 		}
@@ -1887,7 +1900,7 @@ func messageTextTokenCountForOpenAIRemoteCompactionV2(item map[string]any) int {
 	case []any:
 		total := 0
 		for _, raw := range content {
-			block, ok := raw.(map[string]any)
+			block, ok := responseItemObject(raw)
 			if !ok {
 				continue
 			}
@@ -1919,7 +1932,7 @@ func truncateRetainedMessageForOpenAIRemoteCompactionV2(item map[string]any, tok
 		remaining := tokenBudget
 		out := make([]any, 0, len(content))
 		for _, raw := range content {
-			block, ok := raw.(map[string]any)
+			block, ok := responseItemObject(raw)
 			if !ok {
 				out = append(out, raw)
 				continue
@@ -2078,9 +2091,9 @@ func trimCompactionInputWithOverhead(inputItems []any, overhead int, model strin
 		if recentIndex >= 0 && itemTokens[recentIndex] > itemTokens[candidate] {
 			candidate = recentIndex
 		}
-		item, ok := replacements[candidate].(map[string]any)
+		item, ok := responseItemObject(replacements[candidate])
 		if !ok {
-			item, ok = inputItems[candidate].(map[string]any)
+			item, ok = responseItemObject(inputItems[candidate])
 		}
 		if !ok {
 			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item cannot be bounded"))
@@ -2127,7 +2140,7 @@ func indexCompactionTrimGroups(items []any, protected []bool) ([]compactionTrimG
 	groupByIndex := make([]int, len(items))
 	toolGroupsByCallID := make(map[string]int)
 	for i, raw := range items {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemHeader(raw)
 		itemType := ""
 		callID := ""
 		if ok {
@@ -2184,7 +2197,7 @@ func compactionTrimCandidateOrder(items []any, groupByIndex []int, protected []b
 			seenFallback[groupIndex] = true
 			fallback = append(fallback, groupIndex)
 		}
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemObject(raw)
 		if !ok || isCodexGeneratedInputItem(item) {
 			if !seenGenerated[groupIndex] {
 				seenGenerated[groupIndex] = true
@@ -2223,7 +2236,7 @@ func compactionRequestFixedTokenOverhead(tools []ToolDefinition, instructions st
 func compactionObjectiveIndex(items []any) int {
 	firstMessage := -1
 	for i, raw := range items {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemHeader(raw)
 		if !ok {
 			continue
 		}
@@ -2247,7 +2260,7 @@ func compactionObjectiveIndex(items []any) int {
 
 func compactionRecentContextIndex(items []any) int {
 	for i := len(items) - 1; i >= 0; i-- {
-		item, ok := items[i].(map[string]any)
+		item, ok := responseItemObject(items[i])
 		if !ok {
 			continue
 		}
@@ -2319,7 +2332,7 @@ func isCodexGeneratedInputItem(item map[string]any) bool {
 
 func extractCompactionSummaryFromOutputItems(items []any) string {
 	for _, raw := range items {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemObject(raw)
 		if !ok {
 			continue
 		}
@@ -2342,7 +2355,7 @@ func extractCompactionSummaryFromOutputItems(items []any) string {
 func openAIInputItemsTranscript(inputItems []any) string {
 	var sb strings.Builder
 	for _, raw := range inputItems {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemObject(raw)
 		if !ok {
 			continue
 		}
@@ -2386,7 +2399,7 @@ func openAIInputItemContentText(raw any) string {
 	case []any:
 		parts := make([]string, 0, len(v))
 		for _, item := range v {
-			block, ok := item.(map[string]any)
+			block, ok := responseItemObject(item)
 			if !ok {
 				continue
 			}
@@ -2475,11 +2488,11 @@ func astraConfigurationUpdateItem(effort string) agenticInputItem {
 
 func latestConfigurationUpdateEffort(items []any) string {
 	for i := len(items) - 1; i >= 0; i-- {
-		item, ok := items[i].(map[string]any)
+		item, ok := responseItemHeader(items[i])
 		if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "configuration_update") {
 			continue
 		}
-		reasoning, _ := item["reasoning"].(map[string]any)
+		reasoning, _ := responseItemHeader(item["reasoning"])
 		return normalizeReasoningEffort(stringFromAny(reasoning["effort"]))
 	}
 	return ""
@@ -2490,7 +2503,7 @@ func upsertTrailingConfigurationUpdate(items []any, effort string) []any {
 	if len(items) == 0 {
 		return append(items, update)
 	}
-	item, ok := items[len(items)-1].(map[string]any)
+	item, ok := responseItemHeader(items[len(items)-1])
 	if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "configuration_update") {
 		items[len(items)-1] = update
 		return items
@@ -2501,7 +2514,7 @@ func upsertTrailingConfigurationUpdate(items []any, effort string) []any {
 func statelessOAuthOutputItems(items []any) []any {
 	filtered := make([]any, 0, len(items))
 	for _, raw := range items {
-		item, ok := raw.(map[string]any)
+		item, ok := responseItemHeader(raw)
 		if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "reasoning") &&
 			strings.TrimSpace(stringFromAny(item["encrypted_content"])) == "" {
 			continue
@@ -2963,7 +2976,7 @@ func (c *Client) parseAgenticEventsCapturingText(scanner *responsesEventIterator
 
 		case "response.output_item.added":
 			// A new output item is being streamed
-			if item, ok := ev["item"].(map[string]any); ok {
+			if item, ok := responseItemObject(ev["item"]); ok {
 				itemType := stringFromAny(item["type"])
 				idx := intFromAny(ev["output_index"])
 				if itemType == "function_call" {
@@ -2996,7 +3009,7 @@ func (c *Client) parseAgenticEventsCapturingText(scanner *responsesEventIterator
 			}
 
 		case "response.output_item.done":
-			if item, ok := ev["item"].(map[string]any); ok {
+			if item, ok := responseItemObject(ev["item"]); ok {
 				itemType := stringFromAny(item["type"])
 				switch itemType {
 				case "function_call":
@@ -3080,7 +3093,7 @@ func (c *Client) parseAgenticEventsCapturingText(scanner *responsesEventIterator
 			return nil, responsesStreamTerminalError(typ, ev)
 
 		case "response.completed":
-			if m, ok := ev["response"].(map[string]any); ok {
+			if m, ok := responseItemObject(ev["response"]); ok {
 				completed = m
 			}
 		}
@@ -3152,7 +3165,7 @@ func providerNativeToolEventFromOutputItem(item map[string]any) (providerNativeT
 		pattern := strings.TrimSpace(stringFromAny(item["pattern"]))
 
 		var sourceCount int
-		if action, ok := item["action"].(map[string]any); ok {
+		if action, ok := responseItemObject(item["action"]); ok {
 			actionType := strings.TrimSpace(stringFromAny(action["type"]))
 			if actionType != "" {
 				input["action"] = actionType
@@ -3231,4 +3244,35 @@ func isProviderNativeOutputItem(itemType string) bool {
 	default:
 		return false
 	}
+}
+
+// Inspect ordinary borrowed base64 URLs without decoding a second image-sized
+// string. Unusual URLs and original-resolution images keep the existing path.
+func borrowedResizedImageURL(value any) (int, int, bool) {
+	view, ok := value.(jsonview.Value)
+	if !ok {
+		return 0, 0, false
+	}
+	raw := view.Raw()
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return 0, 0, false
+	}
+	url := raw[1 : len(raw)-1]
+	if !bytes.HasPrefix(url, []byte("data:image/")) {
+		return 0, 0, false
+	}
+	comma := bytes.IndexByte(url, ',')
+	if comma < 0 || !bytes.HasSuffix(url[:comma], []byte(";base64")) {
+		return 0, 0, false
+	}
+	for _, c := range url[:comma] {
+		if c < 0x20 || c >= 0x7f || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			return 0, 0, false
+		}
+	}
+	payload := url[comma+1:]
+	if !agenticCanonicalBase64Payload(payload) {
+		return 0, 0, false
+	}
+	return len(url), len(payload), true
 }

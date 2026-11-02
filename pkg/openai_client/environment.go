@@ -12,14 +12,14 @@ func postCompactionContextWindow(items []any) (start, end int) {
 	// them before appending the next user request.
 	end = len(items)
 	for end > 0 {
-		item, ok := items[end-1].(map[string]any)
+		item, ok := responseItemHeader(items[end-1])
 		if !ok || item["type"] != "configuration_update" {
 			break
 		}
 		end--
 	}
 	for i := end - 1; i >= 0; i-- {
-		if item, ok := items[i].(map[string]any); ok && item["type"] == "compaction" {
+		if item, ok := responseItemHeader(items[i]); ok && item["type"] == "compaction" {
 			start = i + 1
 			break
 		}
@@ -30,7 +30,7 @@ func postCompactionContextWindow(items []any) (start, end int) {
 func ensureExecutionEnvironment(items []any, dir string) []any {
 	start, end := postCompactionContextWindow(items)
 	withEnvironment := executionenv.Ensure(items[start:end], dir, func(item any) (string, string) {
-		m, ok := item.(map[string]any)
+		m, ok := responseItemHeader(item)
 		if !ok {
 			return "", ""
 		}
@@ -72,7 +72,7 @@ func ensureCompletionsHistoryEnvironment(items []CompletionsHistoryMessage, dir 
 func ensureAttachmentContext(ctx context.Context, items []any) []any {
 	start, end := postCompactionContextWindow(items)
 	restored := managedcontext.Ensure(ctx, items[start:end], func(item any) (string, string) {
-		m, ok := item.(map[string]any)
+		m, ok := responseItemHeader(item)
 		if !ok {
 			return "", ""
 		}
@@ -81,7 +81,7 @@ func ensureAttachmentContext(ctx context.Context, items []any) []any {
 		return role, text
 	}, func(text string) any { return map[string]any{"type": "message", "role": "user", "content": text} })
 	restored = attachmentcontext.Ensure(ctx, restored, func(item any) (string, string) {
-		m, ok := item.(map[string]any)
+		m, ok := responseItemHeader(item)
 		if !ok {
 			return "", ""
 		}

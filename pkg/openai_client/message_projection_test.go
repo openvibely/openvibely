@@ -68,7 +68,7 @@ func BenchmarkMessageCheckpointProjection(b *testing.B) {
 			block = map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + strings.Repeat("AAAA", 2621440), "detail": "auto"}
 		}
 		raw, _ := json.Marshal(map[string]any{"type": "message", "role": "user", "content": []any{block}})
-		for _, mode := range []string{"decoded", "borrowed"} {
+		for _, mode := range []string{"decoded", "borrowed", "raw"} {
 			b.Run(kind+"/"+mode, func(b *testing.B) {
 				b.ReportAllocs()
 				for b.Loop() {
@@ -76,6 +76,8 @@ func BenchmarkMessageCheckpointProjection(b *testing.B) {
 					var err error
 					if mode == "decoded" {
 						err = json.Unmarshal(raw, &item)
+					} else if mode == "raw" {
+						item, err = jsonview.SavedResponse(raw)
 					} else {
 						item, err = jsonview.ToolOutput(raw)
 					}

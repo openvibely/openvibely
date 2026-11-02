@@ -296,7 +296,13 @@ func filterResponsesLiteImageDetails(value any, model string) {
 			filterResponsesLiteImageDetails(nested, model)
 		}
 	case []any:
-		for _, nested := range current {
+		for i, nested := range current {
+			if saved, ok := nested.(*jsonview.ResponseItem); ok {
+				if object, err := saved.Object(); err == nil {
+					current[i] = object
+					nested = object
+				}
+			}
 			filterResponsesLiteImageDetails(nested, model)
 		}
 	}
@@ -349,6 +355,7 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	}
 
 	input, _ := request["input"].([]any)
+	input = append([]any(nil), input...)
 	filterResponsesLiteImageDetails(input, stringFromAny(request["model"]))
 	prefix := make([]any, 0, 2)
 	prefix = append(prefix, map[string]any{

@@ -99,7 +99,7 @@ func UserMessageHistory(history []models.Execution) []models.Execution {
 	}
 	var users []models.Execution
 	for _, raw := range historyMessageItems(messages) {
-		item, ok := raw.(map[string]any)
+		item, ok := jsonview.ResponseObject(raw)
 		if !ok || (item["type"] != nil && item["type"] != "message") || item["role"] != "user" {
 			continue
 		}
@@ -166,7 +166,7 @@ func decodeNativeInput(raw string) ([]any, error) {
 	}
 	items := make([]any, len(rows))
 	for i, row := range rows {
-		items[i], err = jsonview.ToolOutput(row)
+		items[i], err = jsonview.SavedResponse(row)
 		if err != nil {
 			return nil, err
 		}
@@ -176,7 +176,7 @@ func decodeNativeInput(raw string) ([]any, error) {
 
 func decodeNativeReplayInput(replay models.ExecutionReplayMessage) ([]any, error) {
 	if replay.TranscriptJSON == "" && replay.Rows != nil && replay.Rows.Format == "array" {
-		return jsonview.ToolOutputs(replay.Rows.Items)
+		return jsonview.SavedResponses(replay.Rows.Items)
 	}
 	return decodeNativeInput(replay.FullTranscriptJSON())
 }
