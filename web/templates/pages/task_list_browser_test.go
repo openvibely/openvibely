@@ -729,6 +729,14 @@ func TestBrowserFunctional_SidebarContextSearch(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL, "sidebar-context-search", func(b *composerFocusCDP) {
 		b.waitFor("task rows", `String(!!document.querySelector('[data-task-list-row="search-one"]'))`, "true")
+		b.call("Emulation.setEmulatedMedia", map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": "reduce"}}}, nil)
+		b.waitFor("closed search respects reduced motion", `getComputedStyle(document.querySelector('.task-list-search')).transitionDuration`, "0s")
+		b.evaluate(`document.getElementById('task-list-search-toggle').click();'open with reduced motion'`)
+		b.waitFor("open search respects reduced motion", `String(getComputedStyle(document.querySelector('.task-list-search')).transitionDuration==='0s' && getComputedStyle(document.getElementById('task-list-search-input')).transitionDuration==='0s')`, "true")
+		b.evaluate(`document.getElementById('task-list-search-toggle').click();'close with reduced motion'`)
+		b.waitFor("closed search has no visibility delay", `String(getComputedStyle(document.querySelector('.task-list-search')).visibility==='hidden' && getComputedStyle(document.querySelector('.task-list-search')).transitionDelay==='0s')`, "true")
+		b.call("Emulation.setEmulatedMedia", map[string]any{"features": []map[string]string{{"name": "prefers-reduced-motion", "value": "no-preference"}}}, nil)
+
 		b.evaluate(`window.search=document.getElementById('task-list-search-input');window.toggle=document.getElementById('task-list-search-toggle');toggle.click();'open'`)
 		b.waitFor("input opens in sidebar", `String(document.activeElement===search && !!search.closest('#task-list-panel') && toggle.getAttribute('aria-expanded')==='true')`, "true")
 		b.waitFor("search fits the sidebar", `(()=>{var panel=document.getElementById('task-list-panel').getBoundingClientRect(),field=search.getBoundingClientRect();return String(field.width>60 && field.left>=panel.left && field.right<=panel.right && field.top>=panel.top)})()`, "true")
