@@ -84,7 +84,11 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 				<span class="task-list-group-label">{ group.Label }</span>
 				<span class="task-list-count">{ strconv.Itoa(len(group.Tasks)) }</span>
+                if len(group.Tasks) > taskListGroupLimit {
+                    <button type="button" class="task-list-done">Done</button>
+                }
 			</summary>
+			<div class="task-list-rows">
 			for i, task := range group.Tasks {
 				<a
 					class="task-list-row"
@@ -117,8 +121,9 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
                     }
                 </template>
 			}
+			</div>
 			if len(group.Tasks) > taskListGroupLimit {
-				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>{ fmt.Sprintf("Show %d more", len(group.Tasks)-taskListGroupLimit) }</button>
+				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks) - taskListGroupLimit) }>{ fmt.Sprintf("Browse all %d", len(group.Tasks)) }</button>
 			}
 		</details>
 	}
@@ -557,17 +562,20 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 
 			var groupStateKey = 'openvibely.taskListGroups';
 			var groupState = {};
+            var browseScroll = {};
 			try { groupState = JSON.parse(localStorage.getItem(groupStateKey) || '{}') || {}; } catch (_) {}
 			function saveGroupState() { try { localStorage.setItem(groupStateKey, JSON.stringify(groupState)); } catch (_) {} }
 			function syncMore(group) {
 				var btn = group.querySelector('.task-list-more');
-				if (btn) btn.textContent = group.hasAttribute('data-expanded') ? 'Show less' : 'Show ' + btn.getAttribute('data-task-list-more') + ' more';
+				if (btn) btn.setAttribute('aria-expanded', String(group.hasAttribute('data-browsing')));
 			}
 			function restoreGroups() {
 				groups.querySelectorAll('.task-list-group').forEach(function(group) {
 					var st = groupState[group.getAttribute('data-task-list-group')] || {};
 					group.open = !st.closed;
-					group.toggleAttribute('data-expanded', !!st.expanded);
+					group.toggleAttribute('data-browsing', !!st.browsing);
+                    var rows = group.querySelector('.task-list-rows');
+                    rows.scrollTop = browseScroll[currentProjectID() + ':' + group.dataset.taskListGroup] || 0;
 					syncMore(group);
 				});
 			}
@@ -593,13 +601,16 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				e.stopPropagation();
 			}, true);
 			groups.addEventListener('click', function(e) {
-				var btn = e.target.closest('.task-list-more');
+				var btn = e.target.closest('.task-list-more, .task-list-done');
 				if (!btn) return;
 				var group = btn.closest('.task-list-group');
-				var expanded = !group.hasAttribute('data-expanded');
-				group.toggleAttribute('data-expanded', expanded);
+				e.preventDefault();
+                e.stopPropagation();
+                var expanded = !btn.classList.contains('task-list-done');
+                group.toggleAttribute('data-browsing', expanded);
+                group.querySelector('.task-list-rows').scrollTop = 0;
 				var label = group.getAttribute('data-task-list-group');
-				groupState[label] = Object.assign({}, groupState[label], { expanded: expanded });
+				groupState[label] = Object.assign({}, groupState[label], { browsing: expanded });
 				saveGroupState();
 				syncMore(group);
 			});
@@ -645,7 +656,13 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				hoverTimer = setTimeout(function() { if (hoverRow === row && row.isConnected) showHoverCard(row); }, hoverCard.hidden ? 450 : 60);
 			});
 			groups.addEventListener('mouseleave', hideHoverCard);
-			groups.addEventListener('scroll', hideHoverCard, { passive: true });
+			groups.addEventListener('scroll', function(e) {
+                hideHoverCard();
+                if (e.target.matches('.task-list-rows')) {
+                    var group = e.target.closest('.task-list-group');
+                    browseScroll[currentProjectID() + ':' + group.dataset.taskListGroup] = e.target.scrollTop;
+                }
+            }, { passive: true, capture: true });
 			groups.addEventListener('click', hideHoverCard);
 
             // Sidebar dragging uses the same category and relative-order endpoints as cards.
@@ -793,10 +810,13 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     positionRowDropTargets(state);
                     function scrollFrame() {
                         if (rowDrag !== state) return;
-                        var rect = groups.getBoundingClientRect();
+                        var hit = document.elementFromPoint(state.lastX, state.lastY);
+                        var scroller = hit && hit.closest('.task-list-group[data-browsing]:not([data-searching]) .task-list-rows');
+                        scroller = scroller || groups;
+                        var rect = scroller.getBoundingClientRect();
                         if (state.lastX >= rect.left && state.lastX <= rect.right && !dropTargets.contains(document.elementFromPoint(state.lastX, state.lastY))) {
                             var delta = state.lastY < rect.top + 32 ? -7 : state.lastY > rect.bottom - 32 ? 7 : 0;
-                            if (delta) { groups.scrollTop += delta; state.destination = rowDropAt(state.lastX, state.lastY); }
+                            if (delta) { scroller.scrollTop += delta; state.destination = rowDropAt(state.lastX, state.lastY); }
                         }
                         state.frame = requestAnimationFrame(scrollFrame);
                     }
@@ -902,7 +922,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
             document.addEventListener('pointerdown', function(event) {
                 if (window.kanbanDropdownForTarget(event.target) !== contextMenu) closeTaskContextMenu(false);
             });
-            groups.addEventListener('scroll', function() { closeTaskContextMenu(false); });
+            groups.addEventListener('scroll', function() { closeTaskContextMenu(false); }, true);
             window.addEventListener('resize', function() { closeTaskContextMenu(false); });
             window.addEventListener('task-list-action-finished', function() { closeTaskContextMenu(true); refreshSoon(0); });
             contextMenu.addEventListener('htmx:afterRequest', function(event) {
@@ -998,6 +1018,9 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				if (pressing || rowDrag || rowMovePending || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
                 deferredRefresh = false;
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
+                groups.querySelectorAll('.task-list-group[data-browsing] .task-list-rows').forEach(function(rows) {
+                    browseScroll[currentProjectID() + ':' + rows.closest('.task-list-group').dataset.taskListGroup] = rows.scrollTop;
+                });
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();
 			});
