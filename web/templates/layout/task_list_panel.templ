@@ -81,9 +81,9 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 	for _, group := range groups {
 		<details class="task-list-group" open?={ group.Label == "Active" || group.Label == "Completed" } data-task-list-group={ group.Label } data-task-list-project-scope={ projectID }>
 			<summary>
-				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 				<span class="task-list-group-label">{ group.Label }</span>
 				<span class="task-list-count">{ strconv.Itoa(len(group.Tasks)) }</span>
+				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 			</summary>
 			<div class="task-list-rows">
 			for i, task := range group.Tasks {
