@@ -964,11 +964,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	req = trackSteeringRecovery(req)
 	var replayErr error
-	req, replayErr = s.loadProviderReplayHistory(req)
-	if replayErr != nil {
-		return llmcontracts.AgentResult{}, replayErr
-	}
 	if installationContinuation {
+		// Installation completion edits the existing replay before restoration.
+		req, replayErr = s.loadProviderReplayHistory(req)
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
 		req, replayErr = s.completeInstallationTranscript(req)
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
@@ -984,6 +985,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	// Apply the saved boundary before conversion can synthesize assistant
 	// messages from aggregate execution output already covered by a summary.
 	req = s.restoreCompactionCheckpoint(req)
+	// Hydrate only the executions that survive the saved boundary. Full replay
+	// remains available on demand if native recovery needs the original history.
+	req, replayErr = s.loadProviderReplayHistory(req)
+	if replayErr != nil {
+		return llmcontracts.AgentResult{}, replayErr
+	}
 	if req.Agent.Provider != models.ProviderOpenAI {
 		recoverySource := req
 		needsRecovery := hasOpaqueCompaction(req.ChatHistory)
@@ -1009,7 +1016,13 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		}
 		return res, err
 	}
-	uncompactedReq.ChatHistory = normalizeProviderReplay(req.Agent.Provider, uncompactedReq.ChatHistory, false)
+	loadUncompactedHistory := func() ([]models.Execution, error) {
+		loaded, err := s.loadProviderReplayHistory(uncompactedReq)
+		if err != nil {
+			return nil, err
+		}
+		return normalizeProviderReplay(req.Agent.Provider, loaded.ChatHistory, false), nil
+	}
 	compactionStrategy := "none"
 	if req.HasNativeState() {
 		compactionStrategy = "provider_native_checkpoint"
@@ -1054,7 +1067,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 				// Include its readable summary and continuation before clearing it.
 				req.ChatHistory = append(history, req.ChatHistory...)
 			} else {
-				req.ChatHistory = uncompactedReq.ChatHistory
+				req.ChatHistory, replayErr = loadUncompactedHistory()
+				if replayErr != nil {
+					return llmcontracts.AgentResult{}, replayErr
+				}
 				originalReq = req
 				originalReq.NativeCompactionStateJSON = ""
 				originalReq.NativeCompactionStateRows = nil
@@ -1115,8 +1131,11 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	// A text summarizer cannot decode native encrypted state. Recover the
 	// original transcript before switching strategies, including when the
 	// checkpoint consumed every prior execution.
-	if req.HasNativeState() {
-		req.ChatHistory = uncompactedReq.ChatHistory
+	if req.HasNativeState() && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) {
+		req.ChatHistory, replayErr = loadUncompactedHistory()
+		if replayErr != nil {
+			return llmcontracts.AgentResult{}, replayErr
+		}
 		req.NativeCompactionStateJSON = ""
 		req.NativeCompactionStateRows = nil
 	}
@@ -1214,6 +1233,26 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 			}
 		}
 		checkpoint.ProviderSessionStateJSON = ""
+	}
+	if checkpoint.Strategy == "local_summary_inflight" {
+		// In-flight summaries need the source continuation to distinguish a full
+		// Responses snapshot from a delta or an explicitly empty continuation.
+		// Load just that execution before selecting the replacement history.
+		for i, execution := range req.ChatHistory {
+			if execution.ID != checkpoint.SourceExecutionID {
+				continue
+			}
+			source := req
+			source.ChatHistory = []models.Execution{execution}
+			loaded, err := s.loadProviderReplayHistory(source)
+			if err != nil {
+				applog.Infof("[agent-svc] restore checkpoint continuation failed: %v", err)
+				return req
+			}
+			req.ChatHistory = append([]models.Execution(nil), req.ChatHistory...)
+			req.ChatHistory[i] = loaded.ChatHistory[0]
+			break
+		}
 	}
 	restored := req
 	if len(checkpoint.History) > 0 || checkpoint.HasNativeState() {
