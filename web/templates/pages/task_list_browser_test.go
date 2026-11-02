@@ -108,6 +108,7 @@ func TestBrowserFunctional_TaskListClickUsesDisplayedTask(t *testing.T) {
 
 func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
+	var revision atomic.Int32
 	tasks := []models.Task{}
 	for _, title := range []string{"login-first", "other-2", "other-3", "other-4", "other-5", "other-6", "other-7", "login-extra", "unrelated-extra"} {
 		tasks = append(tasks, models.Task{ID: title, Title: title, Category: models.CategoryCompleted})
@@ -118,6 +119,7 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/tasks/sidebar":
+			fmt.Fprintf(w, "<!-- revision %d -->", revision.Add(1))
 			if err := layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil {
 				t.Error(err)
 			}
@@ -135,12 +137,26 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("initial seven rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
 		b.evaluate(`document.getElementById('task-list-search-toggle').click(); var search=document.getElementById('task-list-search-input'); search.value='login'; search.dispatchEvent(new Event('input')); 'searched'`)
 		b.waitFor("only matching rows including eighth task", visible, `["login-first","login-extra"]`)
-		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); document.querySelector('.task-list-more').click(); 'expanded'`)
+		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); window.previewHeight=document.querySelector('.task-list-group').getBoundingClientRect().height; document.querySelector('.task-list-more').click(); 'expanded'`)
 		b.waitFor("show more reveals all nine rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
+		b.waitFor("browsing keeps preview height", `String(Math.abs(document.querySelector('.task-list-group').getBoundingClientRect().height-window.previewHeight)<2)`, "true")
+		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=50; 'scrolled'`)
+		b.waitFor("category scrolls independently", `String(document.querySelector('.task-list-rows').scrollTop===50)`, "true")
+		b.evaluate(`window.oldRows=document.querySelector('.task-list-rows'); htmx.trigger(document.getElementById('task-list-groups'),'taskListRefresh'); 'refresh'`)
+		b.waitFor("refresh retains browsing position", `JSON.stringify({replaced:document.querySelector('.task-list-rows')!==window.oldRows,scroll:document.querySelector('.task-list-rows').scrollTop,browsing:document.querySelector('.task-list-group').hasAttribute('data-browsing')})`, `{"replaced":true,"scroll":50,"browsing":true}`)
+
 		b.evaluate(`search.value='login'; search.dispatchEvent(new Event('input')); 'searched expanded group'`)
 		b.waitFor("expanded group still excludes nonmatches", visible, `["login-first","login-extra"]`)
 		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); 'cleared'`)
 		b.waitFor("clearing search preserves show more", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
+		b.evaluate(`document.querySelector('.task-list-done').click(); 'done'`)
+		b.waitFor("Done restores seven rows and keeps category open", `String(document.querySelector('.task-list-group').open && !document.querySelector('.task-list-group').hasAttribute('data-browsing') && document.querySelector('.task-list-rows').scrollTop===0)`, "true")
+		b.waitFor("preview restored", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
+		b.evaluate(`document.getElementById('task-list-groups').style.paddingTop='260px';document.querySelector('.task-list-more').click(); var row=document.querySelector('[data-task-list-row="other-6"]'),r=row.getBoundingClientRect(),area=document.querySelector('.task-list-rows').getBoundingClientRect();window.outerScroll=document.getElementById('task-list-groups').scrollTop;row.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:9,clientX:r.left+30,clientY:r.top+10}));window.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,cancelable:true,pointerId:9,clientX:area.left+30,clientY:area.bottom-4}));'dragging'`)
+		b.waitFor("drag scrolls browsing category", `String(document.querySelector('.task-list-rows').scrollTop>30 && document.getElementById('task-list-groups').scrollTop===window.outerScroll)`, "true")
+		b.evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'cancelled'`)
+		b.waitFor("drag cleanup in scroller", `String(!window.isDragging && !document.querySelector('[data-pointer-drag-placeholder]'))`, "true")
+
 	})
 }
 
