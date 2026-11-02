@@ -582,7 +582,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 	}
 }
 
-func TestAllProjectsTabCanCloseAndReopen(t *testing.T) {
+func TestBrowserFunctional_AllProjectsTabCanCloseAndReopen(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	for _, desktop := range []bool{false, true} {
 		t.Run(fmt.Sprint(desktop), func(t *testing.T) {
