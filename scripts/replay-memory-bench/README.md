@@ -2,6 +2,7 @@
 
 This directory contains reusable streaming and persistence benchmark tools. Keep reports, raw results, profiles, and databases outside the repository.
 
+- [Repeated checkpoint follow-ups](checkpoint/README.md): generated 11 MiB image checkpoint, real local provider transports, cache reuse/invalidation/eviction, allocations and retained memory. No user data or paid calls.
 - [Concurrent streaming](concurrent/README.md): one or ten tasks in one backend/database process; text-only and tool-use separately; CPU, allocation/reclamation rates, heap/RSS, output gaps, and storage throughout each turn.
 - [Sequential app flow and browser loading](app-flow/README.md): empty task followed by five completed follow-ups, native compaction/continuation, cold opens, and verified cache-hit reopens.
 
