@@ -2106,14 +2106,17 @@ func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing
 	}
 }
 
-func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *testing.T) {
+func TestTaskService_UpdateCategory_UnchangedScheduledOrNonRunnableDoesNotCancel(t *testing.T) {
 	cases := []struct {
-		name     string
-		category models.TaskCategory
-		status   models.TaskStatus
+		name        string
+		category    models.TaskCategory
+		status      models.TaskStatus
+		destination models.TaskCategory
 	}{
-		{name: "running scheduled task", category: models.CategoryScheduled, status: models.StatusRunning},
-		{name: "queued backlog task", category: models.CategoryBacklog, status: models.StatusQueued},
+		{name: "running chat task", category: models.CategoryChat, status: models.StatusRunning, destination: models.CategoryCompleted},
+		{name: "queued backlog task", category: models.CategoryBacklog, status: models.StatusQueued, destination: models.CategoryCompleted},
+		{name: "unchanged running scheduled task", category: models.CategoryScheduled, status: models.StatusRunning, destination: models.CategoryScheduled},
+		{name: "unchanged queued scheduled task", category: models.CategoryScheduled, status: models.StatusQueued, destination: models.CategoryScheduled},
 	}
 
 	for _, tc := range cases {
@@ -2140,11 +2143,11 @@ func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *tes
 			cancelled := make(chan struct{}, 1)
 			workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
 
-			require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryCompleted))
+			require.NoError(t, svc.UpdateCategory(ctx, task.ID, tc.destination))
 
 			select {
 			case <-cancelled:
-				t.Fatal("non-Active task category change must not cancel worker work")
+				t.Fatal("category update must not cancel worker work")
 			default:
 			}
 			assert.False(t, workerSvc.IsCancellationRequested(task.ID))
@@ -2153,7 +2156,7 @@ func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *tes
 			require.NoError(t, err)
 			require.NotNil(t, updated)
 			assert.Equal(t, tc.status, updated.Status)
-			assert.Equal(t, models.CategoryCompleted, updated.Category)
+			assert.Equal(t, tc.destination, updated.Category)
 
 			updatedGoal, err := goalSvc.GetGoal(ctx, task.ID)
 			require.NoError(t, err)
@@ -2635,6 +2638,56 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testin
 	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
 	assert.Equal(t, goal.GoalID, paused.GoalID)
 	assert.Equal(t, "stopped by user", paused.Reason)
+}
+
+func TestTaskService_UpdateCategory_FromScheduledCancelsWork(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusQueued} {
+		for _, destination := range []models.TaskCategory{models.CategoryBacklog, models.CategoryCompleted} {
+			t.Run(string(status)+"/"+string(destination), func(t *testing.T) {
+				env := teststores.New(t)
+				taskRepo := env.Tasks
+				workerSvc := newTestWorkerService(t)
+				attachmentRepo := env.Attachments
+				goalSvc := NewTaskGoalService(env.TaskGoals, taskRepo, nil)
+				svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+				svc.SetTaskGoalService(goalSvc)
+				ctx := context.Background()
+
+				task := &models.Task{
+					ProjectID: "default",
+					Title:     "Scheduled Task",
+					Category:  models.CategoryScheduled,
+					Status:    status,
+					Prompt:    "wait for capacity",
+				}
+				require.NoError(t, taskRepo.Create(ctx, task))
+				goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+				require.NoError(t, err)
+				cancelled := make(chan struct{}, 1)
+				workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+				require.NoError(t, svc.UpdateCategory(ctx, task.ID, destination))
+				assert.True(t, workerSvc.IsCancellationRequested(task.ID))
+
+				select {
+				case <-cancelled:
+				case <-time.After(100 * time.Millisecond):
+					t.Fatal("expected scheduled task cancel function to be called")
+				}
+				updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+				require.NoError(t, err)
+				require.NotNil(t, updatedTask)
+				assert.Equal(t, models.StatusCancelled, updatedTask.Status)
+				assert.Equal(t, destination, updatedTask.Category)
+				paused, err := goalSvc.GetGoal(ctx, task.ID)
+				require.NoError(t, err)
+				require.NotNil(t, paused)
+				assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+				assert.Equal(t, goal.GoalID, paused.GoalID)
+				assert.Equal(t, "stopped by user", paused.Reason)
+			})
+		}
+	}
 }
 
 func TestTaskService_UpdateCategory_FromActiveToBacklogCancelsQueued(t *testing.T) {

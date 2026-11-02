@@ -577,12 +577,13 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	// the execution to release project/model capacity or abort the queued wait.
 	// Pending work also has to be removed from the worker queue; Automation
 	// pending dispatches are cancelled durably by CancelQueuedTask.
-	isCancellableActiveWork := previousTask != nil && previousTask.Category == models.CategoryActive &&
+	isCancellableRunnableWork := previousTask != nil && previousTask.Category != category &&
+		(previousTask.Category == models.CategoryActive || previousTask.Category == models.CategoryScheduled) &&
 		(previousTask.Status == models.StatusRunning || previousTask.Status == models.StatusQueued || (previousTask.Status == models.StatusPending && models.IsSwarmChildRole(previousTask.SwarmRole)))
 	isPendingRunnableWork := previousTask != nil && previousTask.Status == models.StatusPending &&
 		(previousTask.Category == models.CategoryActive || previousTask.Category == models.CategoryScheduled)
-	if category != models.CategoryActive && isCancellableActiveWork {
-		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, previousTask.Status, category)
+	if category != models.CategoryActive && isCancellableRunnableWork {
+		applog.Infof("[task-svc] UpdateCategory cancelling runnable task id=%s status=%s (moved to %s)", id, previousTask.Status, category)
 		if err := s.cancelActiveTaskWork(ctx, id); err != nil {
 			return err
 		}
@@ -592,9 +593,9 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return err
 			}
 		}
-		applog.Infof("[task-svc] UpdateCategory cancelled active task id=%s and kept requested category=%s", id, category)
+		applog.Infof("[task-svc] UpdateCategory cancelled runnable task id=%s and kept requested category=%s", id, category)
 	}
-	if category != models.CategoryActive && !isCancellableActiveWork && isPendingRunnableWork && s.workerSvc != nil {
+	if category != models.CategoryActive && !isCancellableRunnableWork && isPendingRunnableWork && s.workerSvc != nil {
 		if err := s.workerSvc.CancelQueuedTask(context.WithoutCancel(ctx), id, "Automation task was moved out of a runnable category"); err != nil {
 			applog.Infof("[task-svc] UpdateCategory error cancelling queued Automation dispatch id=%s: %v", id, err)
 			return err
