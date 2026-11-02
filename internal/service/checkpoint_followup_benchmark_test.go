@@ -35,6 +35,23 @@ func (s *checkpointUncachedStore) GetChatCompactionCheckpoint(ctx context.Contex
 	return s.ExecutionStore.GetChatCompactionCheckpoint(ctx, typ, id)
 }
 
+// Preserve the production row reader through both instrumentation wrappers.
+// Embedding ExecutionStore alone hides this optional interface and accidentally
+// benchmarks legacy full-transcript materialization instead.
+type checkpointBenchmarkStore struct{ *countingCheckpointStore }
+
+func checkpointBenchmarkRows(ctx context.Context, store persistence.ExecutionStore, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return store.(interface {
+		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+	}).ReplayRowsByExecutionIDs(ctx, ids)
+}
+func (s *checkpointBenchmarkStore) ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return checkpointBenchmarkRows(ctx, s.ExecutionStore, ids)
+}
+func (s *checkpointUncachedStore) ReplayRowsByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	return checkpointBenchmarkRows(ctx, s.ExecutionStore, ids)
+}
+
 func syntheticImageCheckpoint(t testing.TB, cp *models.ChatCompactionCheckpoint, provider models.LLMProvider, encodedBytes int) {
 	t.Helper()
 	var pngData bytes.Buffer
@@ -109,7 +126,7 @@ func TestCheckpointFollowupMock(t *testing.T) {
 	defer func() { openaiclient.OpenAIAPIBaseURL = oldOpenAI; anthropicclient.AnthropicAPIHost = oldAnthropic }()
 	svc, read, req, cp := checkpointResumeFixture(t, provider, 128, 2)
 	original := read.ExecutionStore
-	counted := &countingCheckpointStore{ExecutionStore: original, revisions: original.(checkpointRevisionStore)}
+	counted := &checkpointBenchmarkStore{&countingCheckpointStore{ExecutionStore: original, revisions: original.(checkpointRevisionStore)}}
 	uncached := &checkpointUncachedStore{ExecutionStore: original}
 	svc.execRepo = counted
 	if mode == "reload" {
@@ -228,4 +245,24 @@ func TestCheckpointFollowupMock(t *testing.T) {
 	encoded, err := json.MarshalIndent(output, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(os.Getenv("OV_CHECKPOINT_RESULT"), encoded, 0600))
+}
+
+func TestCheckpointBenchmarkUsesProductionReplayRows(t *testing.T) {
+	_, read, req, _ := checkpointResumeFixture(t, models.ProviderOpenAI, 1024, 2)
+	original := read.ExecutionStore
+	cached := &checkpointBenchmarkStore{&countingCheckpointStore{ExecutionStore: original, revisions: original.(checkpointRevisionStore)}}
+	uncached := &checkpointUncachedStore{ExecutionStore: original}
+	type rowReader interface {
+		ReplayRowsByExecutionIDs(context.Context, []string) (map[string][]models.ExecutionReplayMessage, error)
+	}
+	for _, store := range []persistence.ExecutionStore{cached, uncached} {
+		rows, ok := store.(rowReader)
+		require.True(t, ok)
+		id := req.ChatHistory[0].ID
+		replay, err := rows.ReplayRowsByExecutionIDs(req.Ctx, []string{id})
+		require.NoError(t, err)
+		require.NotEmpty(t, replay[id])
+		require.NotNil(t, replay[id][0].Rows)
+		require.Empty(t, replay[id][0].TranscriptJSON, "benchmark must not materialize compatibility JSON")
+	}
 }
