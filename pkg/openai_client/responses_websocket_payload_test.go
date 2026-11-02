@@ -141,3 +141,45 @@ func TestLitePreparedToolsPreserveUnknownRawFields(t *testing.T) {
 		t.Fatal("raw schema was reformatted")
 	}
 }
+
+func TestWebsocketRequestCachedPropertiesInputShapes(t *testing.T) {
+	for _, input := range []any{nil, []any{}, []any{map[string]any{"type": "message", "content": "hello <world>"}}, []any{json.RawMessage(`{"type":"function_call_output","output":"large <result>"}`)}} {
+		wire := map[string]any{"input": input, "client_metadata": map[string]string{"tag": "a"}, "previous_response_id": "prev"}
+		got, err := marshalResponsesWebsocketRequest(wire, `{"model":"m","tools":[{"type":"web_search","x-extension":true}]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(got, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		wire["model"] = "m"
+		wire["tools"] = []any{map[string]any{"type": "web_search", "x-extension": true}}
+		want, err := json.Marshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var expected map[string]any
+		if err := json.Unmarshal(want, &expected); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(decoded, expected) {
+			t.Fatal("cached properties or dynamic fields changed")
+		}
+	}
+	if _, err := marshalResponsesWebsocketRequest(map[string]any{"input": []any{json.RawMessage(`{bad`)}}, `{"model":"m"}`); err == nil {
+		t.Fatal("invalid input accepted")
+	}
+}
+
+func BenchmarkMarshalResponsesWebsocketRequest(b *testing.B) {
+	payload := websocketPayloadFixture(3000)
+	wire, _, properties := incrementalResponsesWebsocketPayload(payload, &ResponsesTransportState{})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, err := marshalResponsesWebsocketRequest(wire, properties); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

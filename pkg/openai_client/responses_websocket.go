@@ -702,22 +702,22 @@ func marshalResponsesWebsocketRequest(wire map[string]any, properties string) ([
 	if properties == "" {
 		return marshalResponsesWebsocketPayload(wire)
 	}
-	dynamic := make(map[string]any, 3)
-	for _, key := range []string{"input", "client_metadata", "previous_response_id"} {
-		if value, exists := wire[key]; exists {
-			dynamic[key] = value
-		}
-	}
-	tail, err := marshalResponsesWebsocketPayload(dynamic)
-	if err != nil {
+	// Borrow the small, already encoded properties and encode them together
+	// with the selected input. Building a separate dynamic payload first would
+	// allocate and copy the entire history a second time to attach properties.
+	payload := make(map[string]any, len(wire))
+	if err := requestjson.Object([]byte(properties), func(key string, value json.RawMessage) error {
+		payload[key] = value
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	body := make([]byte, 0, len(properties)+len(tail))
-	body = append(body, properties[:len(properties)-1]...)
-	if len(properties) > 2 && len(tail) > 2 {
-		body = append(body, ',')
+	for _, key := range []string{"input", "client_metadata", "previous_response_id"} {
+		if value, exists := wire[key]; exists {
+			payload[key] = value
+		}
 	}
-	return append(body, tail[1:]...), nil
+	return marshalResponsesWebsocketPayload(payload)
 }
 
 // marshalResponsesWebsocketPayload writes stored json.RawMessage input items
