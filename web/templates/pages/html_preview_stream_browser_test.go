@@ -31,9 +31,11 @@ func TestBrowserFunctional_StreamingHTMLPreview(t *testing.T) {
   if(root.querySelector('iframe')!==previewFrame||previewFrame.closest('[hidden]')||previewLoads!==1)throw Error('stream reloaded preview: '+previewLoads);
  }
  window.finalSource=previewSource+' More response text.\n\nAnother paragraph.';
+ root.parentElement.setAttribute('data-exec-status','completed');
  await renderLiveChatContent(root,finalSource,true,true);
  await new Promise(resolve=>setTimeout(resolve,100));
  if(root.querySelector('iframe')!==previewFrame||previewFrame.closest('[hidden]')||previewLoads!==1)throw Error('finalization reloaded preview: '+previewLoads);
+ root.parentElement.setAttribute('data-exec-status','running');
  await renderLiveChatContent(root,finalSource+' Additional text.');
  await new Promise(resolve=>setTimeout(resolve,100));
  if(root.querySelector('iframe')!==previewFrame||previewFrame.closest('[hidden]')||previewLoads!==1)throw Error('resume reloaded preview: '+previewLoads);
@@ -66,4 +68,41 @@ func TestBrowserFunctional_StreamingHTMLPreview(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestBrowserFunctional_StreamingHTMLPreviewWithoutMoveBefore(t *testing.T) {
+	runStreamingMathBrowser(t, func(b *composerFocusCDP) {
+		b.waitFor("renderer ready", `String(document.readyState==='complete' && !!window.OVFileViewer && !!window.renderLiveChatContent)`, "true")
+		b.evaluate(`Element.prototype.moveBefore=undefined;document.getElementById('math-stream').parentElement.setAttribute('data-exec-status','running');'ready'`)
+		b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream');window.source='[Using tool: publish_file | mockup.html]\n[Tool publish_file done]\n{"url":"/files/abcdef"}\n[/Tool]\nPublished [Mockup](/files/abcdef).';
+ await renderLiveChatContent(root,source);
+ const link=root.querySelector('a');link.dataset.fileLinkBound='';link.dataset.filePreview='';
+ const canvas=document.createElement('div');canvas.className='file-html-canvas';window.frame=document.createElement('iframe');frame.setAttribute('sandbox','allow-scripts');window.loads=0;frame.addEventListener('load',()=>loads++);frame.srcdoc='<html><body>Mockup</body></html>';canvas.append(frame);link.after(canvas);return 'ready';
+ })()`)
+		b.waitFor("preview loaded", `String(loads)`, "1")
+		result := b.evaluateAwait(`(async()=>{
+ const root=document.getElementById('math-stream');
+ for(const suffix of [' More',' More explanation.',' More explanation.\n\nSecond paragraph.']){
+ await renderLiveChatContent(root,source+suffix);
+ await new Promise(resolve=>setTimeout(resolve,100));
+ if(root.querySelector('iframe')!==frame||loads!==1)return 'preview reloads: '+loads;
+ if(!root.textContent.includes(suffix.split('\n\n').pop().trim()))return 'response text not updated';
+ }
+ root.parentElement.setAttribute('data-exec-status','completed');
+ await renderLiveChatContent(root,source+' More explanation.\n\nSecond paragraph.',true,true);
+ await new Promise(resolve=>setTimeout(resolve,100));
+ if(root.querySelector('iframe')!==frame||loads!==1)return 'completion reloads: '+loads;
+ root.parentElement.setAttribute('data-exec-status','running');
+ await renderLiveChatContent(root,source+' More explanation.\n\nSecond paragraph. Continuing.');
+ await new Promise(resolve=>setTimeout(resolve,100));
+ if(root.querySelector('iframe')!==frame||loads!==1)return 'resume reloads: '+loads;
+ await renderLiveChatContent(root,'Preview removed.',true,true);
+ if(root.querySelector('iframe'))return 'removed preview retained';
+ return 'pass';
+ })()`)
+		if result != "pass" {
+			t.Fatal(result)
+		}
+	})
 }

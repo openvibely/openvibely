@@ -229,7 +229,7 @@
    const canvas=retained.nextElementSibling?.classList.contains('file-html-canvas')?retained.nextElementSibling:null;
    link.replaceWith(retained);
    if(canvas){
-    if(previous.isConnected&&canvas.isConnected&&previous.moveBefore){
+    if(previous.isConnected&&canvas.isConnected){
      const marker=document.createComment('HTML preview');retained.after(marker);
      (fragment._fileStreamMoves ||= []).push([marker,canvas]);
     }else retained.after(canvas);
@@ -241,7 +241,49 @@
  }
  // Attach destinations before moving browsing contexts; ordinary DOM insertion
  // reloads an iframe even when the exact same element is reused.
+ // Engines without state-preserving moves must keep the iframe's entire
+ // ancestor chain attached. Replace surrounding prose/tools in place instead.
+ function commitStreamInPlace(fragment,previous){
+  const moves=fragment._fileStreamMoves||[];
+  function patch(parent,desired){
+   let cursor=parent.firstChild;
+   for(const fresh of Array.from(desired.childNodes)){
+    const entry=moves.find(([marker])=>fresh===marker||fresh.contains(marker));
+    let node=fresh;
+    if(entry){
+     const [marker,canvas]=entry;
+     let ancestor=canvas;
+     while(ancestor.parentNode&&ancestor.parentNode!==parent)ancestor=ancestor.parentNode;
+     if(ancestor.parentNode===parent&&(fresh===marker||ancestor!==canvas)){
+      node=ancestor;
+      if(fresh!==marker){
+       if(node.nodeName===fresh.nodeName&&node.style?.display!=='contents'){
+        for(const attr of Array.from(node.attributes))if(!fresh.hasAttribute(attr.name))node.removeAttribute(attr.name);
+        for(const attr of fresh.attributes)node.setAttribute(attr.name,attr.value);
+        if(fresh._chatMarkdownSource!==undefined)node._chatMarkdownSource=fresh._chatMarkdownSource;
+        patch(node,fresh);
+       }else{
+        // Completion can remove the live-tail wrapper. Retain that wrapper
+        // rather than disconnecting its browsing context just to flatten it.
+        const wrapper=document.createDocumentFragment();wrapper.append(fresh);patch(node,wrapper);
+       }
+      }
+     }else{
+      marker.replaceWith(canvas);
+      node=fresh===marker?canvas:fresh;
+     }
+    }
+    if(node.parentNode===parent){
+     while(cursor&&cursor!==node){const next=cursor.nextSibling;cursor.remove();cursor=next}
+    }else parent.insertBefore(node,cursor);
+    cursor=node.nextSibling;
+   }
+   while(cursor){const next=cursor.nextSibling;cursor.remove();cursor=next}
+  }
+  patch(previous,fragment);
+ }
  function commitStream(fragment,previous){
+  if(!previous.moveBefore&&fragment._fileStreamMoves?.length){commitStreamInPlace(fragment,previous);return}
   const old=Array.from(previous.childNodes);
   previous.append(fragment);
   for(const [marker,node] of fragment._fileStreamMoves||[]){
