@@ -117,6 +117,7 @@ func (s *LLMService) loadActiveCheckpoint(ctx context.Context, scopeType, scopeI
 	}
 	entry := &activeCheckpointEntry{checkpoint: *cloneActiveCheckpoint(*c), revision: version, cost: cost, prepared: preparedhistory.NewReusableState()}
 	entry.prepared.BindReplay(c.NativeState())
+	entry.prepared.BindHistory(c.History)
 	// Do not overwrite a concurrently installed snapshot from a different read.
 	if cache.entries[key] != old {
 		return c, nil, nil

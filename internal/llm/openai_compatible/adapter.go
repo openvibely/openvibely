@@ -767,7 +767,9 @@ func SummaryHistory(history []models.Execution) []openaiclient.CompletionsHistor
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.PreparedCompletionsHistory, error) {
 	// The service hydrates history before budgeting and compaction. Never reload
 	// from storage here: that would restore content deliberately discarded there.
-	return preparedhistory.Take(ctx, chatHistory, buildPreparedClientHistory), nil
+	return preparedhistory.Take(ctx, chatHistory, func(history []models.Execution) []openaiclient.PreparedCompletionsHistory {
+		return buildPreparedClientHistoryContext(ctx, history)
+	}), nil
 }
 
 func convertAttachmentsContext(ctx context.Context, attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
@@ -917,6 +919,10 @@ func (a *Adapter) conversationRecorder(ctx context.Context, execID string) *conv
 }
 
 func buildPreparedClientHistory(history []models.Execution) []openaiclient.PreparedCompletionsHistory {
+	return buildPreparedClientHistoryContext(context.Background(), history)
+}
+
+func buildPreparedClientHistoryContext(ctx context.Context, history []models.Execution) []openaiclient.PreparedCompletionsHistory {
 	var result openaiclient.PreparedCompletionsHistory
 	for _, exec := range history {
 		if len(exec.ReplayMessages) == 0 {
@@ -924,7 +930,7 @@ func buildPreparedClientHistory(history []models.Execution) []openaiclient.Prepa
 			continue
 		}
 		for _, replay := range exec.ReplayMessages {
-			prepared, err := openaiclient.PrepareCompletionsHistory(replay)
+			prepared, err := preparedhistory.ReadReplayProjection(ctx, replay, openaiclient.PrepareCompletionsHistory)
 			if err != nil || prepared.Empty() {
 				copy := exec
 				copy.ReplayMessages = []models.ExecutionReplayMessage{replay}

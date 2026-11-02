@@ -26,6 +26,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/streamdecode"
 	"github.com/openvibely/openvibely/internal/llm/tooloutput"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/transcript"
 )
 
 var DefaultModel = catalogDefaultModel()
@@ -249,6 +250,11 @@ func cloneCompletionsHistory(messages []CompletionsHistoryMessage) []Completions
 	for i, message := range messages {
 		cloned[i] = message
 		cloned[i].ToolCalls = append([]CompletionsToolCall(nil), message.ToolCalls...)
+		if message.ImageContent != nil {
+			// Prepared checkpoint projections can outlive this request. Clone
+			// mutable image containers while sharing their immutable data strings.
+			cloned[i].ImageContent = transcript.FreezeItems([]any{message.ImageContent})[0].([]map[string]interface{})
+		}
 	}
 	return cloned
 }

@@ -5,6 +5,7 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/models"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 // EstimateHistoryTokens uses the same replay representation as the adapter,
@@ -14,7 +15,9 @@ func EstimateHistoryTokens(history []models.Execution) int {
 }
 
 func EstimateHistoryTokensContext(ctx context.Context, history []models.Execution) int {
-	messages := preparedhistory.Read(ctx, history, buildPreparedClientHistory)
+	messages := preparedhistory.Read(ctx, history, func(h []models.Execution) []openaiclient.PreparedCompletionsHistory {
+		return buildPreparedClientHistoryContext(ctx, h)
+	})
 	return messages[0].EstimatedTokens()
 }
 

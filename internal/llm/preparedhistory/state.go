@@ -97,8 +97,8 @@ func replayState[T any](ctx context.Context, replay models.ExecutionReplayMessag
 }
 
 // ReusableState retains immutable decoded native state across calls. Mutable
-// handoffs clone containers, sharing immutable strings. Ordinary history and
-// replay-row projections remain request-local.
+// handoffs clone containers, sharing immutable strings. Explicitly bound checkpoint
+// replay projections may also be reused; newer history stays request-local.
 type ReusableState struct {
 	state  cache
 	replay *models.ExecutionReplayMessage

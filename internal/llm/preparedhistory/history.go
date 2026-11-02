@@ -18,13 +18,15 @@ type entry struct {
 	value   any
 }
 type cache struct {
-	statesOwner *cache
-	boundReplay *models.ExecutionReplayMessage
-	reusable    bool
-	mu          sync.Mutex
-	entries     map[reflect.Type]entry
-	states      map[reflect.Type]stateEntry
-	rows        map[reflect.Type]rowsEntry
+	statesOwner  *cache
+	projections  map[projectionKey]any
+	boundHistory map[replayIdentity]bool
+	boundReplay  *models.ExecutionReplayMessage
+	reusable     bool
+	mu           sync.Mutex
+	entries      map[reflect.Type]entry
+	states       map[reflect.Type]stateEntry
+	rows         map[reflect.Type]rowsEntry
 }
 
 // WithScope always creates a fresh scope, including for nested provider calls.

@@ -106,6 +106,22 @@ func valueSize(v any, depth int) (int, error) {
 			return IntegerSize(x), nil
 		case uint64:
 			return UnsignedIntegerSize(x), nil
+		case []map[string]any:
+			if x == nil {
+				return 4, nil
+			}
+			n := 2
+			for i, item := range x {
+				if i > 0 {
+					n++
+				}
+				size, err := valueSize(item, depth+1)
+				if err != nil {
+					return 0, err
+				}
+				n += size
+			}
+			return n, nil
 		case []any:
 			if x == nil {
 				return 4, nil

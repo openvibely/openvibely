@@ -140,3 +140,20 @@ func TestPreparedForeignToolContentAndMutableExport(t *testing.T) {
 		t.Fatal("null row lost valid history")
 	}
 }
+
+func TestPreparedCheckpointImageHandoffIsolated(t *testing.T) {
+	prepared, err := PrepareCompletionsHistory(models.ExecutionReplayMessage{TranscriptJSON: `[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,original"}}]}]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &Client{}
+	first.SetPreparedCompletionsHistory(prepared)
+	first.completionsHistory[0].ImageContent[0]["image_url"].(map[string]interface{})["url"] = "changed"
+	exported := prepared.DecodedMessages()
+	exported[0].ImageContent[0]["image_url"].(map[string]interface{})["url"] = "also changed"
+	second := &Client{}
+	second.SetPreparedCompletionsHistory(prepared)
+	if got := second.completionsHistory[0].ImageContent[0]["image_url"].(map[string]interface{})["url"]; got != "data:image/png;base64,original" {
+		t.Fatalf("cached image changed: %v", got)
+	}
+}
