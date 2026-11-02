@@ -187,3 +187,43 @@ func setResumeNativeCheckpoint(t testing.TB, cp *models.ChatCompactionCheckpoint
 	require.NoError(t, err)
 	cp.ProviderStateJSON = string(raw)
 }
+
+func TestInflightCheckpointDoesNotReloadMissingContinuation(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderOllama} {
+		for _, suffix := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/suffix=%t", provider, suffix), func(t *testing.T) {
+				svc, store, req, cp := checkpointResumeFixture(t, provider, 1024, 3)
+				sourceIndex := 2
+				if suffix {
+					sourceIndex = 1
+				}
+				sourceID := req.ChatHistory[sourceIndex].ID
+				require.NoError(t, store.ReplaceReasoningReplay(req.Ctx, sourceID, "OLD_PRE_SUMMARY_REASONING", nil))
+				cp.SourceExecutionID = sourceID
+				cp.Strategy = "local_summary_inflight"
+				require.NoError(t, store.UpsertChatCompactionCheckpoint(req.Ctx, cp))
+				called := false
+				_, err := svc.callProviderWithCompaction(providerAdapterFunc(func(got llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+					called = true
+					for _, execution := range got.ChatHistory {
+						require.NotContains(t, execution.ReasoningContent, "OLD_PRE_SUMMARY_REASONING")
+					}
+					if !suffix || provider != models.ProviderOpenAI {
+						require.True(t, resumeHasSummary(got.ChatHistory))
+					}
+					if suffix {
+						require.NotEmpty(t, got.ChatHistory[len(got.ChatHistory)-1].ReplayMessages)
+					}
+					return llmcontracts.AgentResult{}, nil
+				}), req)
+				require.NoError(t, err)
+				require.True(t, called)
+				expected := []string{sourceID}
+				if suffix {
+					expected = append(expected, req.ChatHistory[2].ID)
+				}
+				require.Equal(t, expected, store.reads, "read the source once and only hydrate uncovered follow-ups")
+			})
+		}
+	}
+}

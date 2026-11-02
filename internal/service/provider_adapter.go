@@ -1251,6 +1251,12 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 			}
 			req.ChatHistory = append([]models.Execution(nil), req.ChatHistory...)
 			req.ChatHistory[i] = loaded.ChatHistory[0]
+			if req.ChatHistory[i].ReplayMessages == nil {
+				// Nil means not yet hydrated to loadProviderReplayHistory. Preserve
+				// an empty result so the post-restore load cannot reintroduce the
+				// aggregate reasoning that restoration deliberately clears below.
+				req.ChatHistory[i].ReplayMessages = []models.ExecutionReplayMessage{}
+			}
 			break
 		}
 	}
