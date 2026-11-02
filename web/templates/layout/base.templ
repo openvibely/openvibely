@@ -3151,7 +3151,9 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-row > :first-child { flex-shrink: 0; }
 				.task-list-row svg { width: 14px; height: 14px; }
 				.task-list-title { min-width: 0; flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-				[data-task-list-group="Completed"] .task-list-title { opacity: .65; }
+				[data-task-list-group="Completed"] .task-list-title,
+                [data-task-list-group="Backlog"] .task-list-title,
+                [data-task-list-group="Scheduled"] .task-list-title { opacity: .65; }
 				.task-list-row[data-task-list-extra] { display: none; }
 				.task-list-group[data-browsing] .task-list-row[data-task-list-extra]:not([hidden]), .task-list-group[data-searching] .task-list-row[data-task-list-extra]:not([hidden]) { display: flex; }
                 .task-list-rows { display:flex; flex-direction:column; }
