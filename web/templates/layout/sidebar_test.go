@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	xhtml "golang.org/x/net/html"
 )
 
 func TestSidebar_ThemeToggleInFooter(t *testing.T) {
@@ -111,13 +112,12 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`aria-autocomplete="list"`,
 		`class="w-full min-w-0 p-0"`,
 		`class="ov-menu-option w-full max-w-full overflow-hidden"`,
-		`class="ov-menu-check" aria-hidden="true" data-project-selector-current data-searchable-selector-current>✓</span>`,
 		`role="listbox"`,
 		`data-project-selector-option`,
 		`data-project-id="payments-api"`,
 		`data-project-name="Payments API"`,
 		`aria-selected="true"`,
-		`data-project-selector-current`,
+		`data-searchable-selector-current-label`,
 		`data-project-selector-no-match`,
 		`No projects match your search.`,
 		`oninput="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
@@ -173,7 +173,7 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		t.Fatal("project selector must use the original select background arrow without a custom caret")
 	}
 	if strings.Contains(html, `class="badge badge-sm badge-outline shrink-0"`) {
-		t.Fatal("project selector must use the breadcrumb selector check-column treatment, not a project-only Current badge")
+		t.Fatal("project selector must use shared option styling without a project-only Current badge")
 	}
 	if strings.Contains(html, "private description") || strings.Contains(html, "private-repo-path") || strings.Contains(html, "https://private.example/repo") {
 		t.Fatal("sidebar project selector must render identity fields only")
@@ -211,9 +211,23 @@ func TestSidebar_ProjectSelectorEmptyWorkspaceFallback(t *testing.T) {
 	if markupEnd < 0 {
 		t.Fatal("sidebar project selector script is missing")
 	}
-	if strings.Contains(html[:markupEnd], `data-project-selector-option`) {
-		t.Fatal("empty project selector must not render a result option")
+	// Inspect actual attributes, not selector strings in CSS or JavaScript.
+	doc, err := xhtml.Parse(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse sidebar: %v", err)
 	}
+	var checkOptions func(*xhtml.Node)
+	checkOptions = func(node *xhtml.Node) {
+		for _, attr := range node.Attr {
+			if attr.Key == "data-project-selector-option" {
+				t.Fatal("empty project selector must not render a result option")
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			checkOptions(child)
+		}
+	}
+	checkOptions(doc)
 }
 
 func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.T) {

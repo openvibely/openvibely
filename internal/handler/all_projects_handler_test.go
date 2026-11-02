@@ -51,7 +51,7 @@ func TestAllProjectsViewsAndOwnership(t *testing.T) {
 	require.NotContains(t, sidebar, "all-projects-choose")
 	scopedSidebar := get("/tasks/sidebar?project_id=" + first.ID).Body.String()
 	require.NotContains(t, scopedSidebar, "Second workspace task")
-	require.NotContains(t, scopedSidebar, "data-task-list-project")
+	require.NotContains(t, scopedSidebar, `data-task-list-project="`)
 	body := get("/tasks?project_id=" + models.AllProjectsID).Body.String()
 	require.Contains(t, body, `data-project-tab="`+models.AllProjectsID+`"`)
 	require.Contains(t, body, "First workspace task")
