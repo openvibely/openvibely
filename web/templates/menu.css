@@ -52,29 +52,29 @@
 .ov-menu [data-options] > .ov-menu-option:is(:hover, :focus-visible) {
   background: var(--ov-menu-active);
 }
-/* Breadcrumb and model choices match the task list: selection remains
+/* Project, breadcrumb, and model choices match the task list: selection remains
    distinct from pointer/keyboard navigation, including on the selected row. */
-.ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
+.ov-menu :is([data-breadcrumb-selector-option], [data-project-selector-option]):is(:hover, [data-selector-active]),
 .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
 .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
 .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
   background: var(--ov-menu-active);
 }
 @supports (color: oklch(0 0 0)) {
-  .ov-menu [data-breadcrumb-selector-option]:is(:hover, [data-selector-active]),
+  .ov-menu :is([data-breadcrumb-selector-option], [data-project-selector-option]):is(:hover, [data-selector-active]),
   .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
   .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
   .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
     background: oklch(var(--bc) / .06);
   }
 }
-.ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
+.ov-menu :is([data-breadcrumb-selector-option], [data-project-selector-option])[aria-selected="true"],
 .ov-menu .ov-mp-row[data-selected="true"],
 .ov-menu.ov-menu-actions > li > .ov-menu-choice[aria-pressed="true"] {
   background: var(--ov-menu-active);
 }
 @supports (color: color-mix(in srgb, oklch(0 0 0) 10%, transparent)) {
-  .ov-menu [data-breadcrumb-selector-option][aria-selected="true"],
+  .ov-menu :is([data-breadcrumb-selector-option], [data-project-selector-option])[aria-selected="true"],
   .ov-menu .ov-mp-row[data-selected="true"],
   .ov-menu.ov-menu-actions > li > .ov-menu-choice[aria-pressed="true"] {
     background: var(--shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent));

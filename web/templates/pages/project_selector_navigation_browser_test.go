@@ -155,7 +155,7 @@ window.addEventListener('DOMContentLoaded', function() {
     typeSearch(search, 'default');
     var currentFiltered = visibleOptions();
     if (currentFiltered.length !== 1 || currentFiltered[0].dataset.projectId !== 'default') fail('searching for the current project did not show it as the sole match');
-    if (currentFiltered[0].getAttribute('aria-selected') !== 'true' || currentFiltered[0].querySelector('[data-project-selector-current]').textContent.trim() !== '✓') fail('matching current project was not shown as selected');
+    if (currentFiltered[0].getAttribute('aria-selected') !== 'true' || currentFiltered[0].querySelector('.ov-menu-check') !== null) fail('matching current project was not shown as selected');
 
     typeSearch(search, 'swarm');
     if (window.staleSearchableSelectorEvents !== 0) fail('stale searchable selector listener remained active after controller upgrade');
