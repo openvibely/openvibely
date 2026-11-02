@@ -147,6 +147,16 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("show more reveals all nine rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
 		b.waitFor("browse hint and Done share footer outside scroller", `(()=>{var group=document.querySelector('.task-list-group'),footer=group.querySelector('.task-list-browse-controls');return String(getComputedStyle(footer).display==='flex' && Array.from(footer.children).map(el=>el.textContent.trim()).join(' ')==='Scroll to browse · Done' && footer.previousElementSibling.matches('.task-list-more') && !group.querySelector('summary .task-list-done') && footer.getBoundingClientRect().top>=group.querySelector('.task-list-rows').getBoundingClientRect().bottom && getComputedStyle(group.querySelector('.task-list-more')).display==='none')})()`, "true")
 		b.waitFor("browsing keeps preview height", `String(Math.abs(document.querySelector('.task-list-group').getBoundingClientRect().height-window.previewHeight)<2)`, "true")
+		var footerPoint struct{ X, Y float64 }
+		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('.task-list-done').getBoundingClientRect();window.footerTop=r.top;window.sidebarScroll=document.getElementById('task-list-groups').scrollTop;return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`)), &footerPoint); err != nil {
+			t.Fatal(err)
+		}
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": footerPoint.X, "y": footerPoint.Y, "deltaX": 0, "deltaY": 40}, nil)
+		b.waitFor("wheel over Done scrolls category without moving footer", `String(document.querySelector('.task-list-rows').scrollTop>0 && document.querySelector('.task-list-done').getBoundingClientRect().top===window.footerTop && document.getElementById('task-list-groups').scrollTop===window.sidebarScroll)`, "true")
+		b.evaluate(`var footer=document.querySelector('.task-list-browse-controls');footer.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:10000}));window.endScroll=document.querySelector('.task-list-rows').scrollTop;window.edgeWheel=new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:40});footer.dispatchEvent(window.edgeWheel);'at end'`)
+		b.waitFor("footer wheel stays contained at category end", `String(window.edgeWheel.defaultPrevented && document.querySelector('.task-list-rows').scrollTop===window.endScroll && document.getElementById('task-list-groups').scrollTop===window.sidebarScroll)`, "true")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": footerPoint.X, "y": footerPoint.Y, "deltaX": 0, "deltaY": -1000}, nil)
+		b.waitFor("footer wheel scrolls back to start", `String(document.querySelector('.task-list-rows').scrollTop===0)`, "true")
 		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=50; 'scrolled'`)
 		b.waitFor("category scrolls independently", `String(document.querySelector('.task-list-rows').scrollTop===50)`, "true")
 		b.evaluate(`window.oldRows=document.querySelector('.task-list-rows'); htmx.trigger(document.getElementById('task-list-groups'),'taskListRefresh'); 'refresh'`)
