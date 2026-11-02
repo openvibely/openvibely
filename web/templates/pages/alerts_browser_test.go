@@ -287,11 +287,7 @@ func TestBrowserFunctional_AlertsInspectCopyFeedbackInChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stderrFile.Close()
-	profileDir, err := os.MkdirTemp("", "openvibely-alerts-copy-browser-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(profileDir)
+	profileDir := t.TempDir()
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",

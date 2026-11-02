@@ -1374,6 +1374,7 @@ func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *t
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=8000", "--dump-dom", fixture.URL,
@@ -1523,6 +1524,7 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL+"?search=foo",
@@ -1642,6 +1644,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
@@ -1764,6 +1767,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
@@ -1994,6 +1998,7 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=10000", "--dump-dom", fixture.URL,
@@ -2249,6 +2254,7 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=12000", "--dump-dom", fixture.URL,

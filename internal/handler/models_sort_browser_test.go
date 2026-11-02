@@ -198,6 +198,7 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check", "--no-first-run",
 		"--virtual-time-budget=3000", "--dump-dom", srv.URL,
@@ -357,6 +358,7 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check", "--no-first-run",
 		"--virtual-time-budget=3000", "--dump-dom", srv.URL,

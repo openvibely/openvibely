@@ -303,16 +303,10 @@ func TestConfigNormalizeForMode_FillsAppStorageDefaults(t *testing.T) {
 
 func TestLoadWithMode_DesktopEnvOverrides(t *testing.T) {
 	// Env vars override desktop defaults.
-	os.Setenv("PORT", "9999")
-	os.Setenv("DATABASE_PATH", "/custom/path.db")
-	os.Setenv("PROJECT_REPO_ROOT", "/custom/repos")
-	os.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "false")
-	defer func() {
-		os.Unsetenv("PORT")
-		os.Unsetenv("DATABASE_PATH")
-		os.Unsetenv("PROJECT_REPO_ROOT")
-		os.Unsetenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH")
-	}()
+	t.Setenv("PORT", "9999")
+	t.Setenv("DATABASE_PATH", "/custom/path.db")
+	t.Setenv("PROJECT_REPO_ROOT", "/custom/repos")
+	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "false")
 
 	cfg := LoadWithMode(ModeDesktop)
 	if cfg.Port != "9999" {

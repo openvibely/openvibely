@@ -181,6 +181,7 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
+		"--user-data-dir="+t.TempDir(), "--disk-cache-dir="+t.TempDir(),
 		"--headless=new",
 		"--disable-gpu",
 		"--no-sandbox",

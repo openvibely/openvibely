@@ -1953,7 +1953,7 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	workerSvc.RegisterCancel(task.ID, func() { close(cancelled) })
 
 	// Create a temporary file to simulate an attachment
-	tmpFile, err := os.CreateTemp("", "test-attachment-*.txt")
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-attachment-*.txt")
 	if err != nil {
 		t.Fatalf("creating temp file: %v", err)
 	}
