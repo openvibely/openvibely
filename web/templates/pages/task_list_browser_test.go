@@ -60,7 +60,7 @@ func TestBrowserFunctional_TaskListGoalEventsAndSearch(t *testing.T) {
 		b.waitFor("search survives live list replacements", visible, "true")
 		b.evaluate(`document.getElementById('task-list-search-input').value=''; document.getElementById('task-list-search-input').dispatchEvent(new Event('input')); 'cleared'`)
 		b.waitFor("clearing search restores collapsed group", `String(document.querySelector('[data-task-list-group="Completed"]').open)`, "false")
-		b.waitFor("temporary expansion not persisted", `String(JSON.parse(localStorage.getItem('openvibely.taskListGroups')).Completed.closed)`, "true")
+		b.waitFor("temporary expansion not persisted", `String(JSON.parse(localStorage.getItem('openvibely.taskListGroups'))[document.querySelector('[data-task-list-group="Completed"]').dataset.taskListProjectScope+':Completed'].closed)`, "true")
 		b.evaluate(`document.querySelector('[data-task-list-group="Completed"]').open=true; var input=document.getElementById('task-list-search-input'); input.value='no match'; input.dispatchEvent(new Event('input')); input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); 'closed search'`)
 		b.waitFor("closing search preserves previously open group", `String(document.querySelector('[data-task-list-group="Completed"]').open && !document.querySelector('[data-task-list-group="Completed"]').hidden)`, "true")
 	})
@@ -615,16 +615,24 @@ func TestBrowserFunctional_TaskListBrowseScrollPerProject(t *testing.T) {
 		b.waitFor("first project loaded", `String(!!document.querySelector('[data-task-list-row="first-0"]'))`, "true")
 		b.evaluate(`document.querySelector('.task-list-more').click();document.querySelector('.task-list-rows').scrollTop=180;'browsing first'`)
 		b.waitFor("first position", `String(document.querySelector('.task-list-rows').scrollTop)`, "180")
-		switchTo := func(project string, scroll int) {
+		switchTo := func(project string, scroll int, browsing bool) {
 			// Use the actual project synchronization path: the request scope changes
 			// before the outgoing rows are replaced by the HTTP response.
 			b.evaluate(fmt.Sprintf(`history.replaceState({},'', '/?project_id=%s');window.dispatchEvent(new PopStateEvent('popstate'));'switched'`, project))
-			b.waitFor("incoming rows and independent position", `JSON.stringify({project:document.querySelector('.task-list-group').dataset.taskListProjectScope,scroll:document.querySelector('.task-list-rows').scrollTop})`, fmt.Sprintf(`{"project":%q,"scroll":%d}`, project, scroll))
+			b.waitFor("incoming rows and independent position", `JSON.stringify({project:document.querySelector('.task-list-group').dataset.taskListProjectScope,scroll:document.querySelector('.task-list-rows').scrollTop,browsing:document.querySelector('.task-list-group').hasAttribute('data-browsing')})`, fmt.Sprintf(`{"project":%q,"scroll":%d,"browsing":%t}`, project, scroll, browsing))
 		}
-		switchTo("second", 0)
+		switchTo("second", 0, false)
+		b.evaluate(`document.querySelector('.task-list-more').click(); 'browse second'`)
 		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=70;'browsing second'`)
 		b.waitFor("second position", `String(document.querySelector('.task-list-rows').scrollTop)`, "70")
-		switchTo("first", 180)
-		switchTo("second", 70)
+		switchTo("first", 180, true)
+		switchTo("second", 70, true)
+		switchTo(models.AllProjectsID, 0, false)
+		b.evaluate(`document.querySelector('.task-list-more').click(); 'browse all projects'`)
+		switchTo("first", 180, true)
+		b.evaluate(`document.querySelector('.task-list-done').click(); 'finish first'`)
+		switchTo(models.AllProjectsID, 0, true)
+		switchTo("first", 0, false)
+		switchTo("second", 70, true)
 	})
 }

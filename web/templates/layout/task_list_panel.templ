@@ -504,7 +504,7 @@ templ TaskListPanel(currentProjectID string) {
 			function filter() {
 				var q = searchInput.value.trim().toLowerCase();
 groups.querySelectorAll('.task-list-group').forEach(function(group) {
-						var label = group.getAttribute('data-task-list-group');
+						var label = taskListGroupKey(group);
 						var wasSearching = group.hasAttribute('data-searching');
 						if (q && !wasSearching) {
 							// Capture the current state even if its toggle event is still queued.
@@ -565,7 +565,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			var groupStateKey = 'openvibely.taskListGroups';
 			var groupState = {};
             var browseScroll = {};
-            function browseScrollKey(group) {
+            function taskListGroupKey(group) {
                 // The rendered rows can still belong to the outgoing project while
                 // hx-get already points at the incoming project's request.
                 return group.dataset.taskListProjectScope + ':' + group.dataset.taskListGroup;
@@ -578,11 +578,11 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			}
 			function restoreGroups() {
 				groups.querySelectorAll('.task-list-group').forEach(function(group) {
-					var st = groupState[group.getAttribute('data-task-list-group')] || {};
+					var st = groupState[taskListGroupKey(group)] || {};
 					group.open = !st.closed;
 					group.toggleAttribute('data-browsing', !!st.browsing);
                     var rows = group.querySelector('.task-list-rows');
-                    rows.scrollTop = browseScroll[browseScrollKey(group)] || 0;
+                    rows.scrollTop = browseScroll[taskListGroupKey(group)] || 0;
 					syncMore(group);
 				});
 			}
@@ -591,7 +591,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 				if (!group.classList || !group.classList.contains('task-list-group')) return;
 				// Search expansion is temporary, including after a live list refresh.
 				if (searchInput.value.trim()) return;
-				var label = group.getAttribute('data-task-list-group');
+				var label = taskListGroupKey(group);
 				groupState[label] = Object.assign({}, groupState[label], { closed: !group.open });
 				saveGroupState();
 			}, true);
@@ -616,7 +616,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 var expanded = !btn.classList.contains('task-list-done');
                 group.toggleAttribute('data-browsing', expanded);
                 group.querySelector('.task-list-rows').scrollTop = 0;
-				var label = group.getAttribute('data-task-list-group');
+				var label = taskListGroupKey(group);
 				groupState[label] = Object.assign({}, groupState[label], { browsing: expanded });
 				saveGroupState();
 				syncMore(group);
@@ -671,7 +671,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 hideHoverCard();
                 if (e.target.matches('.task-list-rows')) {
                     var group = e.target.closest('.task-list-group');
-                    browseScroll[browseScrollKey(group)] = e.target.scrollTop;
+                    browseScroll[taskListGroupKey(group)] = e.target.scrollTop;
                 }
             }, { passive: true, capture: true });
 			groups.addEventListener('click', hideHoverCard);
@@ -1030,7 +1030,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 deferredRefresh = false;
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
                 groups.querySelectorAll('.task-list-group[data-browsing] .task-list-rows').forEach(function(rows) {
-                    browseScroll[browseScrollKey(rows.closest('.task-list-group'))] = rows.scrollTop;
+                    browseScroll[taskListGroupKey(rows.closest('.task-list-group'))] = rows.scrollTop;
                 });
 				lastListHTML = e.detail.serverResponse;
 				hideHoverCard();
