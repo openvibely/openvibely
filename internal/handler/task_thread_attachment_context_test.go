@@ -35,7 +35,13 @@ func TestTaskThreadFollowupSeesPanelUploadAndAttachmentsBeyondHistoryLimit(t *te
 	})
 	require.NoError(t, h.attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, ExecutionID: first.ID, FileName: "ancient.png", FilePath: "/missing/ancient.png", MediaType: "image/png", FileSize: 1}))
 	for i := 0; i < taskThreadHistoryLimit+3; i++ {
-		createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) { ex.Status = models.ExecCompleted; ex.PromptSent = "turn" })
+		createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecCompleted
+			ex.PromptSent = "turn"
+			// A context reset excludes the old turn even when the provider
+			// expands history beyond the handler's initial bounded window.
+			ex.StartsNewContext = i == 0
+		})
 	}
 
 	var body bytes.Buffer

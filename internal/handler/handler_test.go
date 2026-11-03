@@ -8191,10 +8191,25 @@ func TestHandler_TaskThreadSend_SkipsCheckWhenAlreadyRunning(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
-// TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesBoundedHistoryToModel verifies
-// that the deferred-history-load path fetches only the bounded model replay window
-// instead of scanning a whole large task thread before provider normalization.
-func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesBoundedHistoryToModel(t *testing.T) {
+type boundedHistoryRead struct {
+	limit int
+	rows  []models.Execution
+}
+
+type boundedHistoryRecordingStore struct {
+	persistence.ExecutionStore
+	reads chan boundedHistoryRead
+}
+
+func (s *boundedHistoryRecordingStore) ListByTaskChronologicalLimit(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	rows, err := s.ExecutionStore.ListByTaskChronologicalLimit(ctx, taskID, limit)
+	s.reads <- boundedHistoryRead{limit: limit, rows: rows}
+	return rows, err
+}
+
+// The handler loads a bounded window; the provider independently expands replay
+// history when there is no checkpoint or explicit context reset.
+func TestHandler_TaskThreadSend_DeferredHistoryLoad_BoundsInitialRead(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil // skip slot acquisition so goroutine runs immediately
 	agent := createAgent(t, llmConfigRepo)
@@ -8208,14 +8223,18 @@ func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesBoundedHistoryToModel(
 	// Create enough completed executions to exceed the LLM replay window.
 	const priorCount = 128
 	const expectedHistoryCount = 20
+	var priorIDs []string
 	for i := 0; i < priorCount; i++ {
-		createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
 			ex.Status = models.ExecCompleted
 			ex.PromptSent = fmt.Sprintf("prior turn %d", i)
 			ex.Output = fmt.Sprintf("prior output %d", i)
 			ex.IsFollowup = i > 0
 		})
+		priorIDs = append(priorIDs, exec.ID)
 	}
+	reads := make(chan boundedHistoryRead, 10)
+	h.execRepo = &boundedHistoryRecordingStore{ExecutionStore: h.execRepo, reads: reads}
 
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = "deferred history response"
@@ -8233,10 +8252,21 @@ func TestHandler_TaskThreadSend_DeferredHistoryLoad_PassesBoundedHistoryToModel(
 		"model was not called within timeout")
 
 	req := mock.LastAgentRequest()
-	assert.Len(t, req.ChatHistory, expectedHistoryCount,
-		"deferred load should pass only the bounded provider replay window")
-	assert.Equal(t, "prior turn 108", req.ChatHistory[0].PromptSent)
-	assert.Equal(t, "prior turn 127", req.ChatHistory[expectedHistoryCount-1].PromptSent)
+	select {
+	case read := <-reads:
+		require.Equal(t, expectedHistoryCount+1, read.limit)
+		require.Len(t, read.rows, expectedHistoryCount+1)
+		assert.Equal(t, "prior turn 108", read.rows[0].PromptSent)
+		assert.Equal(t, "prior turn 127", read.rows[expectedHistoryCount-1].PromptSent)
+		assert.Equal(t, req.ExecID, read.rows[expectedHistoryCount].ID)
+	default:
+		t.Fatal("handler did not load a bounded history window")
+	}
+	var replayIDs []string
+	for _, execution := range req.ChatHistory {
+		replayIDs = append(replayIDs, execution.ID)
+	}
+	assert.Equal(t, priorIDs, replayIDs, "provider replay restores older turns in order")
 	assert.Equal(t, "follow-up after many prior turns", req.Message)
 }
 
