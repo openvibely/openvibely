@@ -306,13 +306,13 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	default:
 		t.Fatal("100% must alert even after the 95% warning")
 	}
-	// A fresh monitor must not re-alert when the provider changes only the
-	// reset timestamp representation between app launches.
+	// A fresh monitor must not re-alert when the provider changes the reset
+	// timestamp representation or adds subsecond jitter between app launches.
 	resetTime, err := time.Parse(time.RFC3339, reset)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reset = resetTime.In(time.FixedZone("offset", 3600)).Format("2006-01-02T15:04:05.000000Z07:00")
+	reset = resetTime.Add(250 * time.Millisecond).In(time.FixedZone("offset", 3600)).Format("2006-01-02T15:04:05.000000Z07:00")
 	if err := NewAccountUsageMonitor(usage, env.Stores.Settings, env.Stores.Projects, alerts).RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -429,5 +429,41 @@ func TestAccountMonitorResetFormattingAcrossRestart(t *testing.T) {
 	events := evaluateAccountMonitor(&state, limits, nil, now, "Anthropic")
 	if len(events) != 1 || events[0].Key == wantKey {
 		t.Fatalf("a new window must have its own alert: %+v", events)
+	}
+}
+
+func TestAccountMonitorActiveLimitResetJitter(t *testing.T) {
+	// These reset timestamps reproduce successive alerts in the local records:
+	// the account stayed at 100% and the reset was still in the future.
+	now := time.Date(2026, 11, 3, 4, 0, 0, 0, time.UTC)
+	pct := 100.0
+	state := monitorTestState()
+	state.Limits["five_hour"] = monitoredLimit{Window: "2026-11-03T05:19:59.893814+00:00", Cycle: 2, Percent: 100, Threshold: 100}
+	wantKey := "limit:five_hour:2026-11-03T05:19:59.893814+00:00:2:100"
+	state.Sent[wantKey] = true
+	for _, window := range []string{
+		"2026-11-03T05:19:59.634101+00:00",
+		"2026-11-03T05:19:59.634051+00:00",
+		"2026-11-03T05:20:00.100000+00:00", // jitter may cross a second boundary
+	} {
+		encoded, err := json.Marshal(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = accountMonitorState{}
+		if err := json.Unmarshal(encoded, &state); err != nil {
+			t.Fatal(err)
+		}
+		limits := []models.AccountLimitView{{LimitKey: "five_hour", UsedPercent: &pct, ResetsAt: &window}}
+		events := evaluateAccountMonitor(&state, limits, nil, now, "Anthropic")
+		if len(events) != 1 || !state.Sent[events[0].Key] {
+			t.Fatalf("polling after restart would repeat the active limit alert: %+v", events)
+		}
+	}
+	// A genuinely different reset must still produce a new event.
+	window := "2026-11-03T10:19:59.634051+00:00"
+	events := evaluateAccountMonitor(&state, []models.AccountLimitView{{LimitKey: "five_hour", UsedPercent: &pct, ResetsAt: &window}}, nil, now, "Anthropic")
+	if len(events) != 1 || state.Sent[events[0].Key] {
+		t.Fatalf("new usage period must alert: %+v", events)
 	}
 }

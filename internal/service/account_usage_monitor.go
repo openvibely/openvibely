@@ -266,9 +266,11 @@ func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountL
 				if !reset.After(now) {
 					continue
 				}
-				// Preserve the persisted event key when only the timestamp's
-				// formatting changed (including states written by older versions).
-				if previousReset, err := time.Parse(time.RFC3339Nano, prev.Window); err == nil && reset.Equal(previousReset) {
+				// Anthropic's reset timestamp can jitter by fractions of a second
+				// between requests. Keep the persisted window as the anchor so
+				// polling or restarting does not turn that jitter into a new alert.
+				// Comparing against the anchor also prevents cumulative drift.
+				if previousReset, err := time.Parse(time.RFC3339Nano, prev.Window); err == nil && reset.Sub(previousReset).Abs() < time.Second {
 					window = prev.Window
 				} else {
 					window = reset.UTC().Format(time.RFC3339Nano)
