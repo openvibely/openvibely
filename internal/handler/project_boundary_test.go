@@ -142,7 +142,10 @@ func TestThreadInputMutationsRejectForeignProject(t *testing.T) {
 	tc := NewStoreTestContext(t)
 	tc.handler.SetThreadInputRepo(tc.stores.ThreadInputs)
 	project := tc.CreateProject().WithName("Input owner").Build()
-	task := tc.CreateTask(project.ID).Build()
+	// Releasing the edit hold promotes the queued input unless a turn is still running.
+	task := &models.Task{ProjectID: project.ID, Title: "Running thread", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "test prompt"}
+	require.NoError(t, tc.taskRepo.Create(t.Context(), task))
+	require.NoError(t, tc.execRepo.Create(t.Context(), &models.Execution{TaskID: task.ID, Status: models.ExecRunning}))
 	input := &models.ThreadInput{ProjectID: project.ID, TaskID: task.ID, Scope: models.ThreadInputScopeTask, Content: "original", InputMode: models.ThreadInputModeQueued}
 	require.NoError(t, tc.stores.ThreadInputs.CreateQueued(t.Context(), input))
 	for _, path := range []string{

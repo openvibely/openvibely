@@ -94,7 +94,7 @@ func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
 		mu.Unlock()
 		startOnce.Do(func() { close(start) })
 		<-finish
-		return TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(time.Hour).UnixMilli()}, nil
+		return TokenSet{AccessToken: "new-access", RefreshToken: "new-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
 	}
 
 	var wg sync.WaitGroup
