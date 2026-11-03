@@ -22,6 +22,8 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		}
 		var content templ.Component
 		switch r.URL.Path {
+		case "/tasks/first-thread", "/tasks/second-thread":
+			content = templ.Raw(`<div id="task-thread-view" data-task-id="` + r.URL.Path[len("/tasks/"):] + `">Thread</div>`)
 		case "/themes":
 			content = ThemesContent(nil)
 		case "/models", "/agents", "/skills", "/channels", "/personality":
@@ -153,6 +155,25 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		waitFor("history preserves first project return destination", `document.querySelector('#appearance-settings-nav [data-settings-back]').getAttribute('href')`, "/tasks?project_id=first&category=backlog#board")
 		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'return after browser back'`)
 		waitFor("history return restores first workspace and sidebar", `String(location.search==='?project_id=first&category=backlog' && location.hash==='#board' && !!document.getElementById('settings-workspace') && document.getElementById('settings-workspace')!==window.secondProjectWorkspace && !document.documentElement.classList.contains('appearance-settings') && document.getElementById('task-list-groups').getAttribute('hx-get')==='/tasks/sidebar?project_id=first')`, "true")
+
+		// Revisit both threads so project switching uses the synchronous cached
+		// preview before the network response commits its URL.
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+		for _, thread := range []string{"first", "second", "first"} {
+			url := "/tasks/" + thread + "-thread?project_id=" + thread
+			b.evaluate(`window.openVibelyNavigate('` + url + `');'open thread'`)
+			waitFor("thread ready", `String(location.pathname+location.search==='`+url+`' && !!document.getElementById('task-thread-view'))`, "true")
+		}
+		b.evaluate(`window.workspaceNavigation.navigate('/themes?project_id=first',true);'settings from thread'`)
+		waitFor("thread retained by settings", `String(location.pathname==='/themes' && !!document.getElementById('settings-retained-workspace'))`, "true")
+		b.evaluate(`window.cachedProjectPreview=false;document.addEventListener('htmx:afterSwap',function(event){if(event.detail._ovCachedPreview)window.cachedProjectPreview=true;});window.openVibelyNavigate('/tasks/second-thread?project_id=second');'second thread tab'`)
+		waitFor("second thread tab ready", `String(location.pathname==='/tasks/second-thread' && !document.getElementById('themes-container'))`, "true")
+		waitFor("cached project preview used", `String(window.cachedProjectPreview)`, "true")
+		b.evaluate(`window.openVibelyNavigate('/themes?project_id=first');'first settings tab'`)
+		waitFor("settings tab restored", `String(location.pathname==='/themes' && !!document.getElementById('themes-container'))`, "true")
+		waitFor("original thread return destination", `document.querySelector('#appearance-settings-nav [data-settings-back]').getAttribute('href')`, "/tasks/first-thread?project_id=first")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-settings-back]').click();'back to original thread'`)
+		waitFor("original thread restored", `String(location.pathname==='/tasks/first-thread' && location.search==='?project_id=first' && !!document.getElementById('task-thread-view') && !document.documentElement.classList.contains('appearance-settings'))`, "true")
 
 		// Search on a direct Settings link does not need a workspace request.
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
