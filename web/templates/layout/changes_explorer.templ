@@ -6,7 +6,6 @@ templ ChangesExplorerScript() {
         html.changes-explorer-active #task-list-panel > #changes-explorer-host { display: block !important; overflow-y: auto; }
         html.changes-explorer-active #appearance-settings-nav, html.changes-explorer-active .settings-mobile-nav { display: none !important; }
         html.changes-explorer-active:not([data-shell-frame]) #changes-explorer-mobile { display: block; max-height: 35vh; overflow: auto; padding: 12px; }
-        .changes-explorer .explorer-back { display: block; padding: 10px; margin-bottom: 12px; font-size: 13px; opacity: .75; }
         html[data-shell-frame] .changes-explorer .explorer-search { display:none; }
         .changes-explorer .explorer-search { width: 100%; margin-bottom: 12px; }
         .changes-explorer summary { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 10px; font-size: 13px; opacity: .8; overflow-wrap: anywhere; list-style: none; }
@@ -24,7 +23,7 @@ templ ChangesExplorerScript() {
         nav.className = 'changes-explorer';
         nav.setAttribute('aria-label', 'Changed files');
         var back = document.createElement('button');
-        back.type = 'button'; back.className = 'explorer-back'; back.textContent = '← Back to workspace';
+        back.type = 'button'; back.className = 'explorer-back'; back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7M5 12h14"></path></svg><span>Back</span>';
         back.onclick = function() { if (window.taskWorkspace) window.taskWorkspace.openThread(); };
         var search = document.createElement('input');
         search.type = 'search'; search.className = 'input input-bordered input-sm explorer-search';

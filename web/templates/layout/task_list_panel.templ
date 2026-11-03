@@ -172,7 +172,10 @@ templ TaskListPanel(currentProjectID string) {
         #appearance-settings-nav { display: none; }
         html.appearance-settings #task-list-panel > :not(#appearance-settings-nav):not(#changes-explorer-host):not(.task-list-search-slot) { display: none !important; }
         html.appearance-settings #appearance-settings-nav { display: flex; flex-direction: column; overflow-y: auto; }
-        #appearance-settings-nav .settings-back { font-size: 13px; opacity: .75; padding: 10px; margin-bottom: 12px; }
+        .settings-back, .changes-explorer .explorer-back { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 10px; margin-bottom: 12px; border-radius: 8px; font-size: 14px; font-weight: 600; line-height: 20px; color: inherit; text-decoration: none; cursor: pointer; }
+        .settings-back svg, .changes-explorer .explorer-back svg { width: 20px; height: 20px; flex-shrink: 0; }
+        .settings-back:hover, .changes-explorer .explorer-back:hover { background: var(--ov-hover-subtle); }
+        .settings-back:focus-visible, .changes-explorer .explorer-back:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
         .settings-nav-group { width: 100%; }
         .settings-nav-group > summary { list-style: none; cursor: pointer; }
         .settings-nav-group > summary::-webkit-details-marker { display: none; }
@@ -1207,7 +1210,10 @@ templ TaskListHeaderControls(currentProjectID string) {
 }
 
 templ SettingsLinks(currentProjectID string) {
-	<a class="settings-back" href="/tasks" data-settings-back hx-get="/tasks" hx-target="#main-content" hx-push-url="true">← Back to workspace</a>
+	<a class="settings-back" href="/tasks" data-settings-back hx-get="/tasks" hx-target="#main-content" hx-push-url="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7M5 12h14"></path></svg>
+        <span>Back</span>
+    </a>
 	<details class="settings-nav-group" open>
 		<summary class="task-list-row settings-nav-group-title">
 			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
