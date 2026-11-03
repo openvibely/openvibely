@@ -37,6 +37,8 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		w.Header().Set("Content-Type", "text/html")
 		var component templ.Component
 		switch {
+		case r.URL.Path == "/tasks/new":
+			component = NewTask([]models.Project{project}, &project, nil, nil)
 		case r.URL.Path == "/tasks/sidebar":
 			component = layout.TaskListPanelContent(project.ID, []layout.TaskListGroup{
 				{Label: "Active", Tasks: []models.Task{{ID: "c", ProjectID: project.ID, Title: "C"}, {ID: "a", ProjectID: project.ID, Title: "A"}}},
@@ -234,4 +236,14 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.waitFor("sidebar navigation commits A", `String(location.pathname==='/tasks/a' && !document.querySelector('template[hx-history-elt]'))`, "true")
 
 	})
+	// A new task has no current list entry, but both directions must still navigate.
+	for _, tc := range []struct{ code, destination string }{{"Period", "a"}, {"Comma", "c"}} {
+		holdCachedC.Store(false)
+		runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?project_id=shortcuts", "new-task-shortcut-"+tc.code, func(b *composerFocusCDP) {
+			b.waitFor("new composer focused", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
+			b.evaluate(`document.getElementById('task-message-input').dispatchEvent(new KeyboardEvent('keydown',{code:'` + tc.code + `',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true}));'sent'`)
+			b.waitFor("breadcrumb navigates from new task", `location.pathname`, "/tasks/"+tc.destination)
+		})
+	}
+
 }

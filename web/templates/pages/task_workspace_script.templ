@@ -168,10 +168,10 @@ templ TaskWorkspaceScript() {
 			return window.openVibelyNavigate(destination.href);
 		}
 		async function stepRecent(direction) {
-			if (navigating || !breadcrumb || !taskID) return;
+			if (navigating || !breadcrumb) return;
 			navigating = true;
 			try {
-				if (!Array.isArray(visits.items)) {
+				if (!taskID || !Array.isArray(visits.items)) {
 					var search = breadcrumb.querySelector('[data-breadcrumb-selector-search]');
 					var url = new URL(search.getAttribute('hx-get'), location.href);
 					breadcrumb.querySelectorAll('input[type="hidden"][name]').forEach(function(input) { url.searchParams.set(input.name, input.value); });
@@ -183,8 +183,8 @@ templ TaskWorkspaceScript() {
 					visits.items = Array.from(parsed.querySelectorAll('[data-breadcrumb-selector-option]')).map(function(link) { return link.getAttribute('href'); });
 				}
 				var index = visits.items.findIndex(function(url) { return new URL(url, location.href).pathname === '/tasks/' + taskID; });
-				var next = index + direction;
-				if (index >= 0 && next >= 0 && next < visits.items.length) await navigateTask(visits.items[next], true);
+				var next = !taskID ? (direction > 0 ? 0 : visits.items.length - 1) : index + direction;
+				if ((!taskID || index >= 0) && next >= 0 && next < visits.items.length) await navigateTask(visits.items[next], true);
 			} catch (error) {
 				if (!signal.aborted && window.showToast) window.showToast('Could not load recent tasks', 'error');
 			} finally { navigating = false; }
@@ -195,7 +195,7 @@ templ TaskWorkspaceScript() {
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
 			if (command && !event.altKey && event.shiftKey && (event.code === 'Comma' || event.code === 'Period')) {
-                if (!taskID || !breadcrumb) return;
+                if (!breadcrumb) return;
                 if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"], [role="tab"], [role="tree"], [role="menu"]') && event.target.id !== 'task-message-input') return;
                 if (document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])'))) return;
                 event.preventDefault();
