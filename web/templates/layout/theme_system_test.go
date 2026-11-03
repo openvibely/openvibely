@@ -356,7 +356,7 @@ func TestSidebarSettingsLinkIsInFooter(t *testing.T) {
 		t.Fatal("Settings link must not be rendered in the main navigation list")
 	}
 	footer := html[footerStart:]
-	if !strings.Contains(footer, `data-nav-base="/themes"`) || !strings.Contains(footer, `<span class="sr-only">Settings</span>`) {
+	if !strings.Contains(footer, `data-nav-base="/themes"`) || !strings.Contains(footer, `<span class="sidebar-text">Settings</span>`) {
 		t.Fatal("Settings link must be rendered in the sidebar footer")
 	}
 	userMenu := strings.Index(footer, `id="sidebar-user-menu"`)

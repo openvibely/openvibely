@@ -26,8 +26,8 @@ func TestSidebar_FooterHasNoThemeToggle(t *testing.T) {
 	if !strings.Contains(html, "sidebar-footer") {
 		t.Fatal("sidebar footer container missing")
 	}
-	if !strings.Contains(html, "justify-end") {
-		t.Fatal("sidebar footer must right-align footer controls")
+	if !strings.Contains(html, "justify-between") {
+		t.Fatal("sidebar footer must spread user menu and settings across the footer")
 	}
 	for _, removed := range []string{"theme-toggle-pill", "theme-toggle-collapsed-btn", "data-theme-mode-toggle", "window.toggleTheme"} {
 		if strings.Contains(html, removed) {
@@ -738,9 +738,9 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 	html := buf.String()
 
 	required := []string{
-		`sidebar-footer border-t border-base-300 p-3 flex items-center justify-end gap-2`,
+		`sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2`,
 		`id="sidebar-user-menu-trigger"`,
-		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
+		`class="sidebar-user-trigger btn btn-ghost w-full flex-nowrap justify-start items-center gap-2 normal-case"`,
 		`id="sidebar-logout-label" type="submit" class="ov-menu-option w-full" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
 		`.sidebar-footer {`,

@@ -984,13 +984,13 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 		</div>
 
 			<!-- Footer: user info + settings pinned to bottom of sidebar -->
-		<div class="sidebar-footer border-t border-base-300 p-3 flex items-center justify-end gap-2">
+		<div class="sidebar-footer border-t border-base-300 p-3 flex items-center justify-between gap-2">
 			<div id="sidebar-auth-user" class="hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto">
 				<div class="dropdown dropdown-top w-full">
 					<button
 						id="sidebar-user-menu-trigger"
 						type="button"
-						class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"
+						class="sidebar-user-trigger btn btn-ghost w-full flex-nowrap justify-start items-center gap-2 normal-case"
 						aria-haspopup="menu"
 						aria-label="Open user menu"
 					>
@@ -999,7 +999,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								<span id="sidebar-auth-avatar" class="text-xs font-semibold leading-none">U</span>
 							</div>
 						</div>
-						<div id="sidebar-auth-name" class="text-xs font-medium truncate leading-none">User</div>
+						<div id="sidebar-auth-name" class="min-w-0 text-xs font-medium truncate leading-none">User</div>
 					</button>
 					<ul id="sidebar-user-menu" tabindex="0" class="ov-menu ov-menu-actions ov-menu-scroll dropdown-content menu w-44 z-[120]" role="menu" aria-label="User menu">
 						<li role="none">
@@ -1018,14 +1018,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						hx-get={ fmt.Sprintf("/themes?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
 						hx-push-url="true"
-						data-tip="Settings"
-						data-tip-side="right"
 					>
 						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 							<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"></path>
 							<path d="m9.5 3-.6 2.2-1.5.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.5.9.6 2.2h5l.6-2.2 1.5-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.5-.9-.6-2.2Z"></path>
 						</svg>
-						<span class="sr-only">Settings</span>
+						<span class="sidebar-text">Settings</span>
 					</a>
 				</li>
 			</ul>
