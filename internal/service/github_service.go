@@ -260,6 +260,9 @@ func defaultRunGit(ctx context.Context, dir string, extraEnv []string, args ...s
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Env = ensureGitSSLConfig(cmd.Env)
+	if len(args) > 0 && args[0] == "status" {
+		cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0")
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
