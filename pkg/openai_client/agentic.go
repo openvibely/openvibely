@@ -17,6 +17,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -402,9 +403,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 	}()
 	var exchange transcript.ExchangeTracker[any]
-	// Native checkpoints with no independently replayable history establish a
-	// replacement base; ordinary calls collect only their new exchange.
-	if opts.ContinueFromHistory || len(c.History) == 0 {
+	// Restored checkpoint input is already durable, even when no exchanges
+	// follow it yet. Establish a base only for a genuinely new conversation or
+	// an explicit continuation; checkpoint follow-ups record their new exchange.
+	if opts.ContinueFromHistory || (len(c.History) == 0 && len(opts.InitialInputItems) == 0) {
 		exchange.ReplaceHistory(inputItems)
 	}
 
@@ -412,11 +414,16 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		inputItems = append(inputItems, items...)
 		exchange.Append(items...)
 	}
-	// Context helpers may insert into older messages. That is an explicit
-	// replacement, not an append to the current exchange.
+	// Context helpers preserve existing items. Appending context belongs to the
+	// current exchange; inserting it among older items requires a replacement.
+	// Compare only when a helper added items, not on ordinary replay saves.
 	updateContext := func(next []any) {
 		if len(next) != len(inputItems) {
-			exchange.ReplaceHistory(next)
+			if len(next) > len(inputItems) && reflect.DeepEqual(next[:len(inputItems)], inputItems) {
+				exchange.Append(next[len(inputItems):]...)
+			} else {
+				exchange.ReplaceHistory(next)
+			}
 		}
 		inputItems = next
 	}

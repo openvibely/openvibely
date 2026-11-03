@@ -15,6 +15,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,13 +223,13 @@ func TestCheckpointFollowupMock(t *testing.T) {
 		require.NoError(t, original.Complete(req.Ctx, execution.ID, models.ExecCompleted, "", "", 0, 0))
 		// Read physical records outside the measured interval. New exchanges
 		// must neither repeat old payloads nor depend on execution links.
-		if provider == models.ProviderOpenAI && mode == "reuse" && turn > 0 {
+		if provider == models.ProviderOpenAI {
 			heads, err := original.ReadConversationHeads(req.Ctx, models.ConversationOwner{ExecutionID: execution.ID}, "", 0)
 			require.NoError(t, err)
 			frames, err := transcript.RestoreReplayRecords(heads)
 			require.NoError(t, err)
 			require.Len(t, frames, 1)
-			require.Contains(t, frames[0].TranscriptJSON, `"responses_delta"`)
+			require.True(t, strings.Contains(frames[0].TranscriptJSON, `"responses_delta"`), "ordinary follow-ups must save an exchange, including the first one")
 			require.NotContains(t, frames[0].TranscriptJSON, `"responses_base_execution_ids"`)
 			require.NotContains(t, frames[0].TranscriptJSON, `"responses_base_revision"`)
 			require.Less(t, len(frames[0].TranscriptJSON), 64*1024, "ordinary follow-ups must not save the large checkpoint again")
