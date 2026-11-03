@@ -25,15 +25,11 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`data-catalog=`,
 		`getAttribute('data-catalog')`,
 		`openvibely.colorTheme`,
-		`openvibely.lastLightTheme`,
-		`openvibely.lastDarkTheme`,
 		`var rawSaved = document.documentElement.getAttribute('data-ui-theme') || '';`,
 		`var saved = normalizeStoredTheme(rawSaved);`,
 		`persistUIPreference({ theme: saved });`,
 		`data-color-theme-kind`,
-		`window.openVibelyThemes.toggleMode`,
 		`window.openVibelyThemes.applySystemMode`,
-		`window.openVibelyThemes.syncThemeControls`,
 		`[data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}`,
 		`[data-ov-theme-layer="custom"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }`,
 		`[data-ov-theme-layer="custom"] .hljs * { color: var(--ov-syntax-foreground); }`,
@@ -199,7 +195,6 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`[data-color-theme] .ov-task-result-start-btn {`,
 		`[data-color-theme] #selection-counter {`,
 		`[data-color-theme] .toggle {`,
-		`[data-color-theme] .theme-toggle-pill {`,
 		"[data-color-theme] {\n--ov-account-limit-track:",
 		"[data-color-theme] {\n--ov-account-limit-fill:",
 		`[data-color-theme] .btn-primary,`, `[data-color-theme] .btn-ghost:hover,`,
@@ -265,13 +260,11 @@ func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
 	js := `
 	const themeScript = ` + strconv.Quote(themeScript) + `;
 	const catalogJSON = ` + strconv.Quote(themes.RuntimeCatalogJSON()) + `;
-	function toggleEl() { return { attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); } }; }
-	function run(initialStore, systemLight, initialToggles) {
+	function run(initialStore, systemLight) {
 	  const store = Object.assign({}, initialStore || {});
 	  const attrs = {};
 	  const styleVars = {};
 	  const listeners = {};
-	  const toggles = initialToggles || [];
 	  global.localStorage = {
 	    getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
 	    setItem(k, v) { store[k] = String(v); },
@@ -288,10 +281,10 @@ func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
 	      style: { removeProperty(k) { delete styleVars[k]; }, setProperty(k, v) { if (!/^--ov-[a-z0-9-]+$/.test(k)) throw new Error('unsafe css var ' + k); styleVars[k] = String(v); } }
 	    },
 	    getElementById(id) { return id === 'ov-theme-catalog' ? { getAttribute() { return catalogJSON; } } : null; },
-	    querySelectorAll(selector) { return selector === '[data-theme-mode-toggle]' ? toggles : []; }
+	    querySelectorAll() { return []; }
 	  };
 	  eval(themeScript);
-	  return { store, attrs, styleVars, toggles, listeners, api: window.openVibelyThemes };
+	  return { store, attrs, styleVars, listeners, api: window.openVibelyThemes };
 	}let legacy = run({ theme: 'light' }, false);
 if (legacy.attrs['data-theme'] !== 'light') throw new Error('legacy light mode did not migrate to light mode');
 if (legacy.attrs['data-color-theme'] !== 'openvibely-light') throw new Error('legacy light mode did not choose OpenVibely light theme');
@@ -305,16 +298,10 @@ if (Object.keys(legacy.styleVars).some(k => !k.startsWith('--ov-surface-'))) thr
 if (legacy.styleVars['--ov-surface-default-page'] !== '#15191E') throw new Error('Dark surface definition was not applied');
 legacy.api.apply('openvibely-light');
 if (legacy.styleVars['--ov-surface-default-page'] !== '#FFFFFF' || legacy.styleVars['--ov-surface-layered-frame'] !== '#F0F0F0') throw new Error('Light did not replace Dark surface colors');
-let lateToggle = toggleEl();legacy.toggles.push(lateToggle);
-legacy.api.syncThemeControls();
-if (lateToggle.attrs['aria-pressed'] !== 'false') throw new Error('late light-mode toggle aria state was not synchronized');
-if (lateToggle.attrs['title'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle title was not synchronized');
-if (lateToggle.attrs['aria-label'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle aria label was not synchronized');
-if (lateToggle.attrs['data-tip'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle tooltip was not synchronized');
 let invalid = run({ 'openvibely.colorTheme': 'missing-theme-id' }, false);
 if (Object.prototype.hasOwnProperty.call(invalid.store, 'openvibely.colorTheme')) throw new Error('invalid exact theme id was not removed');
 if (invalid.attrs['data-color-theme'] !== 'openvibely-dark') throw new Error('invalid exact theme did not fall back to OpenVibely dark');
-let selected = run({}, false, [toggleEl()]);
+let selected = run({}, false);
 selected.api.apply('vscode-default-high-contrast');
 if (selected.attrs['data-theme'] !== 'dark') throw new Error('high-contrast dark did not retain dark mode');
 if (selected.attrs['data-color-theme-kind'] !== 'high-contrast-dark') throw new Error('high-contrast dark kind was lost');
@@ -325,13 +312,6 @@ selected.api.apply('openvibely-dark');
 if (selected.attrs['data-ov-theme-layer'] !== 'native') throw new Error('OpenVibely default did not restore the native theme layer');
 selected.api.apply('vscode-default-high-contrast');
 if (selected.store['openvibely.colorTheme'] !== 'vscode-default-high-contrast') throw new Error('selection did not persist exact high-contrast theme');
-selected.store['openvibely.lastLightTheme'] = 'vscode-default-high-contrast-light';
-selected.api.toggleMode();
-if (selected.attrs['data-theme'] !== 'light') throw new Error('toggle did not switch to light mode');
-if (selected.attrs['data-color-theme'] !== 'vscode-default-high-contrast-light') throw new Error('toggle did not use remembered light theme');
-if (selected.attrs['data-color-theme-kind'] !== 'high-contrast-light') throw new Error('high-contrast light kind was lost');
-if (selected.store['openvibely.colorTheme'] !== 'vscode-default-high-contrast-light') throw new Error('toggle did not persist exact light theme');
-if (selected.toggles[0].attrs['aria-pressed'] !== 'false') throw new Error('toggle aria state did not reflect light mode');
 `
 	if output, err := exec.Command(node, "-e", js).CombinedOutput(); err != nil {
 		t.Fatalf("rendered built-in theme runtime failed: %v\n%s", err, output)
@@ -358,40 +338,30 @@ func TestVSCodeThemeAttributionDocumentsFallbackRules(t *testing.T) {
 	}
 }
 
-func TestSidebarThemesLinkIsMainNavigationItem(t *testing.T) {
+func TestSidebarSettingsLinkIsInFooter(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Sidebar([]models.Project{}, "project-1").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render Sidebar: %v", err)
 	}
 	html := buf.String()
-	if !strings.Contains(html, `data-nav-base="/themes"`) || !strings.Contains(html, `>Settings</span>`) {
-		t.Fatal("sidebar missing main Themes nav item")
+	navStart := strings.Index(html, `aria-label="Main navigation"`)
+	footerStart := strings.Index(html, `class="sidebar-footer`)
+	if navStart == -1 || footerStart == -1 {
+		t.Fatal("sidebar main navigation or footer not rendered")
 	}
-	footerStart := strings.Index(html, `id="sidebar-user-menu"`)
-	if footerStart == -1 {
-		t.Fatal("sidebar user menu not rendered")
+	if strings.Count(html, `data-nav-base="/themes"`) != 1 {
+		t.Fatal("sidebar must render exactly one Settings link")
 	}
-	if strings.Contains(html[footerStart:], `data-nav-base="/themes"`) {
-		t.Fatal("Themes nav item must not be rendered inside the footer user menu")
+	if strings.Contains(html[navStart:footerStart], `data-nav-base="/themes"`) {
+		t.Fatal("Settings link must not be rendered in the main navigation list")
 	}
-}
-
-func TestSidebarFooterToggleUsesThemeModeSwitch(t *testing.T) {
-	var buf bytes.Buffer
-	if err := Sidebar([]models.Project{}, "project-1").Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render Sidebar: %v", err)
+	footer := html[footerStart:]
+	if !strings.Contains(footer, `data-nav-base="/themes"`) || !strings.Contains(footer, `<span class="sidebar-text">Settings</span>`) {
+		t.Fatal("Settings link must be rendered in the sidebar footer")
 	}
-	html := buf.String()
-	for _, fragment := range []string{
-		`data-theme-mode-toggle`,
-		`Switch theme mode`,
-		`aria-pressed="false"`,
-		`aria-label="Switch theme mode"`,
-		`onkeydown="if (event.key === 'Enter' || event.key === ' ')`,
-		`window.toggleTheme(); return false;`,
-	} {
-		if !strings.Contains(html, fragment) {
-			t.Fatalf("sidebar theme toggle missing %q", fragment)
-		}
+	userMenu := strings.Index(footer, `id="sidebar-user-menu"`)
+	userMenuEnd := strings.Index(footer[userMenu:], `</ul>`)
+	if strings.Contains(footer[userMenu:userMenu+userMenuEnd], `data-nav-base="/themes"`) {
+		t.Fatal("Settings link must not be rendered inside the footer user menu")
 	}
 }

@@ -5699,7 +5699,7 @@ func TestLayout_ThemeAndSidebarPreferencesPersistBeforeFirstPaint(t *testing.T) 
 	}
 
 	if strings.Contains(body, `localStorage.setItem('theme', next)`) {
-		t.Fatal("theme toggle must persist stable exact theme IDs, not raw light/dark mode values")
+		t.Fatal("theme changes must persist stable exact theme IDs, not raw light/dark mode values")
 	}
 }
 

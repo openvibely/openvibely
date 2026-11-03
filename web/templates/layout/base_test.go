@@ -965,9 +965,8 @@ func TestToastDismissalCleanup(t *testing.T) {
 		t.Error("desktop external-link bridge must define openExternalViaBackend as the server-side fallback")
 	}
 
-	// Verify theme toggle is NOT present in top navbar (moved to sidebar footer).
 	if strings.Contains(html, "navbar-theme-toggle") {
-		t.Error("base layout navbar should not include theme toggle; toggle is rendered in sidebar footer")
+		t.Error("base layout navbar should not include a theme toggle")
 	}
 
 	// Navbar should be mobile-only to avoid desktop top-gap above page headers.
@@ -1363,7 +1362,7 @@ func TestBase_MobileDrawerLayerStaysAboveStickyPageContent(t *testing.T) {
 		t.Fatal("mobile drawer overlay should sit behind the sidebar but above page content")
 	}
 	if !strings.Contains(html, `id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto`) {
-		t.Fatal("mobile sidebar panel should sit above the drawer overlay so nav links and theme toggle remain clickable")
+		t.Fatal("mobile sidebar panel should sit above the drawer overlay so nav links and footer controls remain clickable")
 	}
 }
 
@@ -1422,9 +1421,9 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 	}
 }
 
-// TestThemeToggle_UsesImmediateSwitch ensures theme toggle applies instantly
+// TestThemeSwitch_IsImmediate ensures theme changes apply instantly
 // without transition class choreography that can lag on large pages.
-func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
+func TestThemeSwitch_IsImmediate(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1443,12 +1442,6 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 	}
 
 	expected := []string{
-		".theme-toggle-pill {",
-		"background: #E8E8E8;",
-		"[data-theme=\"dark\"] .theme-toggle-pill {",
-		"background: #3a4455;",
-		"window.toggleTheme = function() {",
-		"window.openVibelyThemes.toggleMode();",
 		"localStorage.setItem(key, value);",
 		"document.documentElement.setAttribute('data-color-theme', themeID);",
 		"persistUIPreference({ theme: themeID });",

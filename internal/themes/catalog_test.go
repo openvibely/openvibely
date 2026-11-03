@@ -103,7 +103,7 @@ func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T)
 		ID         string            `json:"id"`
 		CSS        map[string]string `json:"css"`
 		SurfaceCSS map[string]string `json:"surfaceCSS"`
-		Roles      [7]string         `json:"r"`
+		Roles      [3]string         `json:"r"`
 	}
 	var runtime []runtimeTheme
 	if err := json.Unmarshal([]byte(RuntimeCatalogJSON()), &runtime); err != nil {
@@ -126,9 +126,6 @@ func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T)
 			if theme.SurfaceCSS[name] != value {
 				t.Fatalf("theme %s lost surface role %s", theme.ID, name)
 			}
-		}
-		if theme.Roles != toggleRuntimeRoles(expectedTheme) {
-			t.Fatalf("runtime theme %s lost derived toggle roles", theme.ID)
 		}
 		for index, name := range roleNames {
 			if theme.Roles[index] == "" {
