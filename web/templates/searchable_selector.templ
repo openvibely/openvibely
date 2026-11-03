@@ -315,7 +315,7 @@ templ searchableSelectorScript() {
                         button.setAttribute('aria-keyshortcuts', apple ? 'Meta+K ArrowLeft ArrowRight Meta+Shift+L' : 'Control+K ArrowLeft ArrowRight Control+Shift+L');
                     }
                     if (automation && automation.root.contains(button)) {
-                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (Left arrow)\nNext (Right arrow)\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
+                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (←)\nNext (→)\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
                         button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+K ArrowLeft ArrowRight Meta+Shift+L' : 'Control+K ArrowLeft ArrowRight Control+Shift+L'));
                     }
                 });

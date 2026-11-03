@@ -56,7 +56,7 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 					b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{code:'` + code + `',key:'` + code + `',bubbles:true,cancelable:true}));'sent'`)
 				}
 
-				b.waitFor("remaining shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]');return button.title.includes('Last visited (') && button.title.includes('Previous (Left arrow)') && button.title.includes('Next (Right arrow)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
+				b.waitFor("remaining shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]');return button.title.includes('Last visited (') && button.title.includes('Previous (←)') && button.title.includes('Next (→)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
 				// Both directions belong to project tabs, even with a breadcrumb present.
 				for _, code := range []string{"ArrowLeft", "ArrowRight"} {
 					b.waitFor("breadcrumb leaves project shortcut unhandled", `String((function(){var e=new KeyboardEvent('keydown',{code:'`+code+`',key:'`+code+`',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true});document.body.dispatchEvent(e);return !e.defaultPrevented})())`, "true")

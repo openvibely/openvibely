@@ -86,7 +86,7 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("composer", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
-		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),title=button.title||button.dataset.ovTooltip||'';return title.includes('Last visited (') && title.includes('Previous (Left arrow)') && title.includes('Next (Right arrow)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
+		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),title=button.title||button.dataset.ovTooltip||'';return title.includes('Last visited (') && title.includes('Previous (←)') && title.includes('Next (→)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
 		b.evaluate(`['a','b','c'].forEach(function(id){localStorage.setItem('openvibely-task-thread-message-history-'+id,JSON.stringify(['Older message','Newest message']))});'ready'`)
 		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
 		key := func(code, modifiers string) {
