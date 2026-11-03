@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
@@ -34,6 +35,11 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		w.Header().Set("Content-Type", "text/html")
 		var component templ.Component
 		switch {
+		case r.URL.Path == "/tasks/sidebar":
+			component = layout.TaskListPanelContent(project.ID, []layout.TaskListGroup{
+				{Label: "Active", Tasks: []models.Task{{ID: "c", ProjectID: project.ID, Title: "C"}, {ID: "a", ProjectID: project.ID, Title: "A"}}},
+				{Label: "Completed", Tasks: []models.Task{{ID: "b", ProjectID: project.ID, Title: "B"}}},
+			})
 		case r.URL.Path == "/breadcrumb-selectors/tasks":
 			lists.Add(1)
 			items := []models.BreadcrumbSelectorItem{}
@@ -70,7 +76,7 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("composer", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
-		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),mac=/Mac|iPhone|iPad/.test(navigator.platform),title=button.title||button.dataset.ovTooltip||'';return title.includes(mac?'Previous (⌘⇧↑)':'Previous (Ctrl+Shift+↑)') && title.includes(mac?'Next (⌘⇧↓)':'Next (Ctrl+Shift+↓)') && title.includes(mac?'Last visited (⌘⇧L)':'Last visited (Ctrl+Shift+L)') && !title.includes('Previous:') && !title.includes('Next:') && !title.includes('Last visited:')})())`, "true")
+		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),mac=/Mac|iPhone|iPad/.test(navigator.platform),title=button.title||button.dataset.ovTooltip||'';return title.includes(mac?'Previous (⌘⇧←)':'Previous (Ctrl+Shift+←)') && title.includes(mac?'Next (⌘⇧→)':'Next (Ctrl+Shift+→)') && title.includes(mac?'Last visited (⌘⇧L)':'Last visited (Ctrl+Shift+L)') && !title.includes('Previous:') && !title.includes('Next:') && !title.includes('Last visited:')})())`, "true")
 		b.evaluate(`['a','b','c'].forEach(function(id){localStorage.setItem('openvibely-task-thread-message-history-'+id,JSON.stringify(['Older message','Newest message']))});'ready'`)
 		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
 		key := func(code, modifiers string) {
@@ -117,37 +123,37 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 		b.waitFor("breadcrumb closes", `String(!document.querySelector('dialog[open]'))`, "true")
 		b.waitFor("close restores breadcrumb button focus", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-button'))`, "true")
-		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
-		b.waitFor("command shift down from breadcrumb button switches task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+		key("ArrowRight", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("command shift right from breadcrumb button switches task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
 		b.waitFor("composer after breadcrumb shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
-		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowLeft", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("return after breadcrumb shortcut", `document.getElementById('task-detail-content').dataset.taskId`, "a")
 		// Navigate without showing the selector, then reverse through the frozen list.
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
 		key("ArrowUp", `{}`)
 		b.waitFor("history active before task switch", `document.getElementById('task-message-input').value`, "Newest message")
-		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowRight", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("next task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
 		count := lists.Load()
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
-		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowLeft", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("return to original task", `document.getElementById('task-detail-content').dataset.taskId`, "a")
 		b.waitFor("draft restored after navigation", `String(document.getElementById('task-message-input') && document.getElementById('task-message-input').value)`, "Newest message")
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
-		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowLeft", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("first task does not wrap", `location.pathname`, "/tasks/a")
-		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowRight", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("next again", `document.getElementById('task-detail-content').dataset.taskId`, "b")
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
-		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowRight", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("second next task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.evaluate(`document.getElementById('task-message-input').setSelectionRange(0,0);'ready'`)
-		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
+		key("ArrowLeft", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("previous task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
 		if lists.Load() != count {
 			t.Fatal("recent list refetched during cycling")
@@ -170,5 +176,22 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.waitFor("menu selection composer focus", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
 		b.typeText("Ready to type")
 		b.waitFor("typing immediately after menu navigation", `document.getElementById('task-message-input').value`, "Ready to type")
+		b.waitFor("task committed before sidebar shortcut", `String(!document.querySelector('template[hx-history-elt]') && document.activeElement.id === 'task-message-input')`, "true")
+		b.waitFor("sidebar loaded", `String(document.querySelectorAll('[data-task-list-row]').length)`, "3")
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("sidebar order differs from breadcrumb", `location.pathname`, "/tasks/a")
+		b.waitFor("sidebar navigation focuses composer", `document.activeElement.id`, "task-message-input")
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("sidebar crosses dropzone", `location.pathname`, "/tasks/b")
+		b.waitFor("composer at last sidebar task", `document.activeElement.id`, "task-message-input")
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("sidebar does not wrap", `location.pathname`, "/tasks/b")
+		key("ArrowUp", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("sidebar previous", `location.pathname`, "/tasks/a")
+		b.waitFor("composer after sidebar previous", `document.activeElement.id`, "task-message-input")
+		b.evaluate(`document.querySelector('[data-task-list-group="Completed"]').open=false;'closed'`)
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("sidebar skips collapsed groups", `location.pathname`, "/tasks/a")
+
 	})
 }
