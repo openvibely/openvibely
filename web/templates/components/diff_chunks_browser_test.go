@@ -3,6 +3,7 @@ package components
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -310,7 +312,8 @@ func runProgressiveDiffBrowser(t *testing.T, kind string) {
 				http.Error(w, "invalid", 400)
 				return
 			}
-			if err := DiffChunk(chunks, 0, view, "chunk-task", comments, chunk, DiffCodeRevision(file)).Render(r.Context(), w); err != nil {
+			// The viewer aborts chunk requests superseded by layout switches and anchor restores.
+			if err := DiffChunk(chunks, 0, view, "chunk-task", comments, chunk, DiffCodeRevision(file)).Render(r.Context(), w); err != nil && r.Context().Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
 				t.Error(err)
 			}
 		default:

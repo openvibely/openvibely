@@ -2,11 +2,14 @@ package pages
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
@@ -120,7 +123,8 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		switch r.URL.Path {
 		case "/tasks/sidebar":
 			fmt.Fprintf(w, "<!-- revision %d -->", revision.Add(1))
-			if err := layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil {
+			// Live refreshes can still be in flight when the browser shuts down.
+			if err := layout.TaskListPanelContent("project", layout.TaskListGroups(tasks)).Render(r.Context(), w); err != nil && r.Context().Err() == nil && !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
 				t.Error(err)
 			}
 		case "/":
@@ -194,6 +198,7 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 	var running atomic.Bool
 	var deleted atomic.Bool
 	var rejectDelete atomic.Bool
+	runReceived := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -234,6 +239,12 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 			if r.FormValue("project_id") != "owner" {
 				t.Error("wrong Run project")
 			}
+			defer func() {
+				select {
+				case runReceived <- struct{}{}:
+				default:
+				}
+			}()
 			if runs.Add(1) > 1 {
 				revision.Store(2)
 				w.WriteHeader(http.StatusConflict)
@@ -279,8 +290,14 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 		b.waitFor("shared Git actions loaded", `String(!!document.querySelector('[data-task-list-context-menu] [data-merge-type="ff"]'))`, "true")
 		b.waitFor("menu fits viewport", `(()=>{var menu=document.querySelector('[data-task-list-context-menu] [data-menu-content]');var r=menu.getBoundingClientRect();return String(r.width>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight)})()`, "true")
 		b.waitFor("Edit preserves All projects", `String(document.querySelector('[data-task-list-context-menu] a[hx-get]').getAttribute('href').includes('project_id=__all_projects__'))`, "true")
+		b.waitFor("menu shown", `String(document.activeElement.matches('[data-task-list-context-menu] button[hx-post]'))`, "true")
 		b.click(`[data-task-list-context-menu] button[hx-post]`)
 		b.waitFor("Run closes menu", `String(!document.querySelector('[data-task-list-context-menu]').hasAttribute('data-kanban-menu-open'))`, "true")
+		select {
+		case <-runReceived:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Run request was not sent")
+		}
 		if runs.Load() != 1 {
 			t.Fatalf("Run requests = %d", runs.Load())
 		}
@@ -305,6 +322,7 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 		}
 		b.evaluate(open)
 		b.waitFor("first action focused", `document.activeElement.textContent.trim().slice(0,100)`, "Run")
+		b.waitFor("Git actions loaded for keyboard", `String(!!document.querySelector('[data-task-list-context-menu] [data-task-card-local-submenu]'))`, "true")
 		key("ArrowDown")
 		b.waitFor("Edit reachable", `document.activeElement.textContent.trim().slice(0,100)`, "Edit")
 		key("ArrowDown")
@@ -357,7 +375,7 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 		b.evaluate(`htmx.trigger(document.getElementById('task-list-groups'),'taskListRefresh'); 'refresh'`)
 		b.waitFor("running state loaded", `String(!!document.querySelector('[data-task-list-menu]').content.querySelector('[hx-post$="/cancel"]'))`, "true")
 		b.evaluate(open)
-		b.waitFor("Cancel ready", `String(!!document.querySelector('[data-task-list-context-menu] [hx-post$="/cancel"]'))`, "true")
+		b.waitFor("Cancel ready", `String(!!document.querySelector('[data-task-list-context-menu] [hx-post$="/cancel"]') && document.activeElement.matches('[data-task-list-context-menu] button[hx-post]'))`, "true")
 		b.click(`[data-task-list-context-menu] [hx-post$="/cancel"]`)
 		b.waitFor("Cancel confirmation", `String(document.getElementById("app_confirm_modal").open)`, "true")
 		b.click(`#app_confirm_modal [data-confirm-accept]`)

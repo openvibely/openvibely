@@ -1129,6 +1129,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     if (template && template.matches('[data-task-list-menu]')) template.remove();
                     row.remove();
                 });
+                lastListHTML = null;
                 var card = document.getElementById('task-' + id);
                 if (card && card.closest('#kanban-board')) htmx.remove(card);
                 // Reconcile counts and empty groups without waiting for the live stream.
@@ -1169,7 +1170,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			});
 
 			// Replacing a row between pointerdown and pointerup makes the browser drop the click.
-			var pressing = false, deferredRefresh = false, lastListHTML = null;
+			var pressing = false, deferredRefresh = false, lastListHTML = null, focusedTaskRow = null;
 			groups.addEventListener('pointerdown', function() { pressing = true; });
             function flushDeferredRefresh() {
                 if (!deferredRefresh || pressing || rowDrag || rowMovePending || taskContextMenuOpen()) return;
@@ -1189,7 +1190,8 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			document.addEventListener('pointerup', endPress, true);
 			document.addEventListener('pointercancel', endPress, true);
 			document.body.addEventListener('htmx:beforeSwap', function(e) {
-				if (e.detail.target !== groups) return;
+				// Actions also target the list with swap:none; only list refreshes carry list HTML.
+				if (e.detail.target !== groups || e.detail.elt !== groups) return;
 				if (pressing || rowDrag || rowMovePending || taskContextMenuOpen()) { e.detail.shouldSwap = false; deferredRefresh = true; return; }
                 deferredRefresh = false;
 				if (e.detail.serverResponse === lastListHTML) { e.detail.shouldSwap = false; return; }
@@ -1197,9 +1199,18 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                     browseScroll[taskListGroupKey(rows.closest('.task-list-group'))] = rows.scrollTop;
                 });
 				lastListHTML = e.detail.serverResponse;
+				var focusedRow = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-task-list-row]');
+				focusedTaskRow = focusedRow && groups.contains(focusedRow) ? focusedRow.dataset.taskListRow : null;
 				hideHoverCard();
 			});
-			document.body.addEventListener('htmx:afterSwap', function(e) { if (e.detail.target === groups) { restoreGroups(); filter(); syncActiveRow(); } });
+			document.body.addEventListener('htmx:afterSwap', function(e) {
+				if (e.detail.target !== groups) return;
+				restoreGroups(); filter(); syncActiveRow();
+				if (focusedTaskRow === null) return;
+				var row = groups.querySelector('[data-task-list-row="' + CSS.escape(focusedTaskRow) + '"]');
+				focusedTaskRow = null;
+				if (row && (document.activeElement === document.body || !document.activeElement)) row.focus({preventScroll: true});
+			});
 			document.body.addEventListener('htmx:afterSettle', syncActiveRow);
 			window.addEventListener('popstate', syncActiveRow);
 			window.addEventListener('resize', function() { setWidth(currentWidth(), false); });

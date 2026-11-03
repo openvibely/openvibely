@@ -6035,7 +6035,7 @@ func TestTasks_DeleteButton_LightMode_NoDefaultCircularBackground(t *testing.T) 
 	}
 }
 
-func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
+func TestSidebar_AlertsThenAnalyticsAfterSchedule(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/alerts", nil)
@@ -6043,21 +6043,18 @@ func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	body := rec.Body.String()
 
-	insightsIdx := strings.Index(body, `>Insights</span>`)
-	systemIdx := strings.Index(body, `>System</span>`)
+	scheduleIdx := strings.Index(body, `data-nav-base="/schedule"`)
 	alertsIdx := strings.Index(body, `data-nav-base="/alerts"`)
-	settingsIdx := strings.Index(body, `data-nav-base="/themes"`)
-	if insightsIdx < 0 || systemIdx < 0 || alertsIdx < 0 || settingsIdx < 0 {
-		t.Fatal("sidebar missing Insights/System/Alerts/Settings markers")
+	analyticsIdx := strings.Index(body, `data-nav-base="/analytics"`)
+	insightsIdx := strings.Index(body, `>Insights</span>`)
+	if scheduleIdx < 0 || alertsIdx < 0 || analyticsIdx < 0 || insightsIdx < 0 {
+		t.Fatal("sidebar missing Schedule/Alerts/Analytics/Insights markers")
 	}
-	if !(insightsIdx < systemIdx) {
-		t.Fatal("Insights section must appear before System section")
+	if !(scheduleIdx < alertsIdx && alertsIdx < analyticsIdx && analyticsIdx < insightsIdx) {
+		t.Fatal("Alerts then Analytics must follow Schedule, before the Insights section")
 	}
-	if !(systemIdx < alertsIdx && alertsIdx < settingsIdx) {
-		t.Fatal("Alerts nav item must be grouped under System, before Settings")
-	}
-	if strings.Contains(body[:systemIdx], `data-nav-base="/alerts"`) {
-		t.Fatal("Alerts nav item must not appear before the System section")
+	if strings.Contains(body, `>System</span>`) {
+		t.Fatal("sidebar must not render the removed System section")
 	}
 
 	requiredAlertsSnippets := []string{
