@@ -942,9 +942,9 @@ func prepareCompletionsMessages(messages []completionsMessage) (*requestjson.Fie
 		}
 		if len(raw) > 0 {
 			items[i] = raw
-		} else if requestjson.HasRawValue(m.Content) {
-			// Keep provider envelope rules here; the shared encoder borrows the
-			// large content value without a custom-marshaler round trip.
+		} else {
+			// Keep provider envelope rules here. Ordinary JSON containers let the
+			// shared encoder stream content without a separate message buffer.
 			fields := map[string]any{"role": m.Role, "content": m.Content}
 			if m.ReasoningContent != "" {
 				fields["reasoning_content"] = m.ReasoningContent
@@ -956,8 +956,6 @@ func prepareCompletionsMessages(messages []completionsMessage) (*requestjson.Fie
 				fields["tool_call_id"] = m.ToolCallID
 			}
 			items[i] = fields
-		} else {
-			items[i] = m
 		}
 	}
 	if messages == nil {
