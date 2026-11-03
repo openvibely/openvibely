@@ -1719,15 +1719,36 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	fixture := `<main id="reconnect-result"></main><script>
+	cases := map[string]string{
+		"openai": `[
+ [{code:'reset',windows_reset:1},'completed','Usage reset.'],
+ [{code:'already_redeemed'},'completed','Usage reset.'],
+ [{code:'nothing_to_reset',windows_reset:0},'info','Your usage does not need a reset right now.'],
+ [{code:'no_credit'},'error','That reset is no longer available. Refresh to see your current resets.'],
+ [{result:'reset'},'warning',"Couldn't reset usage. Please try again."],
+ [{code:'unexpected'},'warning',"Couldn't reset usage. Please try again."]
+ ]`,
+		"anthropic": `[
+ [{result:'reset',resets_left:0},'completed','Usage reset.'],
+ [{result:'not_limited',reason:'not_limited'},'info','Your usage does not need a reset right now.'],
+ [{result:'already_used'},'error','That reset was already used.'],
+ [{result:'cooldown',cooldown_until:'2035-01-01T00:00:00Z'},'error',"Another reset was just started on your account. This one wasn't used. Try again in a minute."],
+ [{result:'ineligible',reason:'expired'},'error',"This reset isn't available any more. Nothing was used."],
+ [{code:'reset'},'warning',"Couldn't reset usage. Please try again."],
+ [{result:'unavailable',reason:'reset_unconfirmed'},'warning','Your earlier reset may still be going through. Try again in a minute.']
+ ]`,
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		t.Run(provider, func(t *testing.T) {
+			fixture := `<main id="reconnect-result"></main><script>
  history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
  window.Chart=function(){this.destroy=function(){};};
- const toasts=[];let payload={},provider='openai';
+ const toasts=[],keys=[],provider='` + provider + `';let payload={};
  window.showToast=(text,status)=>toasts.push({text,status});
  const response=data=>({ok:true,json:async()=>data});
- window.fetch=async function(url){
+ window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
- if(u.pathname.endsWith('/resets/consume'))return response(payload);
+ if(u.pathname.endsWith('/resets/consume')){keys.push(JSON.parse(opts.body).idempotency_key);return response(payload);}
  if(u.pathname.endsWith('/resets'))return response({available_count:1,credits:[{id:'credit',title:'Reset',status:'available',usable:true}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider}]});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider,plan_type:'Pro',limits:[{label:'Weekly',used_percent:99}]}]});
@@ -1737,33 +1758,26 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
  const result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
  const assert=(ok,message)=>{if(!ok)throw Error(message);};
- const cases=[
- [{code:'reset',windows_reset:1},'completed','Usage reset.'],
- [{code:'already_redeemed'},'completed','Usage reset.'],
- [{code:'nothing_to_reset',windows_reset:0},'info','Your usage does not need a reset right now.'],
- [{code:'no_credit'},'error','That reset is no longer available. Refresh to see your current resets.'],
- [{result:'reset',resets_left:0},'completed','Usage reset.'],
- [{result:'not_limited',reason:'not_limited'},'info','Your usage does not need a reset right now.'],
- [{result:'already_used'},'error','That reset was already used.'],
- [{result:'cooldown'},'error','Reset is on cooldown.'],
- [{result:'ineligible'},'error','This reset is not currently available.'],
- [{result:'unavailable',reason:'expired'},'error','This reset is not currently available.'],
- [{status:'reset'},'warning',"Couldn't reset usage. Please try again."]
- ];
+ const cases=` + cases[provider] + `;
  try{
  const card=document.getElementById('accountUsageCards');
- for(provider of ['openai','anthropic'])for(const [data,status,text] of cases){
+ for(const [data,status,text] of cases){
  for(let i=0;i<150&&(!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
  payload=data;const before=toasts.length;card.querySelector('button').click();
  for(let i=0;i<150&&(!card.textContent.includes(text)||toasts.length===before||!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
  assert(toasts.length===before+1,'expected one toast per result');
- assert(toasts[before].status===status&&toasts[before].text===text,'incorrect toast for '+JSON.stringify(data));
+ assert(toasts[before].status===status&&toasts[before].text===text,'incorrect toast for '+JSON.stringify(data)+': '+JSON.stringify(toasts[before]));
  assert(card.textContent.includes(text),'inline result missing');
  }
+ const n=keys.length;
+ assert(keys[n-1]===keys[n-2],'unconfirmed reset must retry with the same idempotency key');
+ assert(keys[n-2]!==keys[n-3],'settled reset must start a new attempt');
  result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
  });</script>` + rendered.String()
-	runReconnectChromeFixture(t, fixture)
+			runReconnectChromeFixture(t, fixture)
+		})
+	}
 }
 
 func TestBrowserFunctional_AnalyticsHidesUnavailableResets(t *testing.T) {
