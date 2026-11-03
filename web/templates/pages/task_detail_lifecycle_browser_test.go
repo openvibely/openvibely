@@ -2544,6 +2544,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var firstRowRect = firstRow.getBoundingClientRect();
     if (Math.abs(cardRect.bottom - bodyBottom) > 2) throw new Error('lifecycle card does not fill inspector body: card=' + cardRect.bottom + ' body=' + bodyBottom);
     if (firstRowRect.top - descriptionRect.bottom > 64) throw new Error('lifecycle rows start too far below the heading: gap=' + (firstRowRect.top - descriptionRect.bottom));
+    if (port.getBoundingClientRect().right - firstRow.querySelector('summary').getBoundingClientRect().right < 16) throw new Error('lifecycle row background overlaps scrollbar gutter');
     if (port.clientHeight < 500) throw new Error('lifecycle scrollport is unexpectedly short: ' + port.clientHeight);
     if (port.scrollHeight <= port.clientHeight) throw new Error('lifecycle rows do not overflow their internal scrollport');
     if (root.scrollHeight > root.clientHeight + 2) throw new Error('lifecycle rows escaped into page-level overflow');

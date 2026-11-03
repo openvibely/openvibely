@@ -1379,7 +1379,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 
 					<div class="flex-1 min-h-0 px-6 py-3">
-						<div data-webhook-section-panel="config" class="h-full overflow-y-auto pr-1">
+						<div data-webhook-section-panel="config" class="h-full overflow-y-auto pr-4">
  if view.CurrentProjectID == models.AllProjectsID {
  <label class="form-control mb-3"><span class="label-text">Project</span>
  <select id="webhook_project_owner" class="select select-bordered" required onchange="var f=this.form;f.querySelector('[name=project_id]').value=this.value;if(f.dataset.webhookMode==='create'){f.setAttribute('hx-post','/channels/webhooks?project_id='+encodeURIComponent(this.value));htmx.process(f);}syncWebhookProjectAgents()">
@@ -1442,7 +1442,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							</div>
 						</div>
 
-						<div data-webhook-section-panel="agents" class="h-full overflow-y-auto pr-1 hidden">
+						<div data-webhook-section-panel="agents" class="h-full overflow-y-auto pr-4 hidden">
 							<div class="space-y-3">
 								<div class="border border-base-300 rounded-lg p-3">
 									<div class="flex items-center justify-between mb-2">
@@ -1458,7 +1458,7 @@ templ settingsContent(view ChannelsSettingsView) {
 											oninput="renderWebhookAgentList()"
 										/>
 									</div>
-									<div id="webhook_agent_list" class="space-y-2 max-h-[500px] overflow-auto"></div>
+									<div id="webhook_agent_list" class="space-y-2 max-h-[500px] overflow-auto pr-4"></div>
 								</div>
 							</div>
 						</div>

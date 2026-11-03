@@ -99,7 +99,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 })();
 </script>
 
-		<div id="automations-container" class="h-full min-w-0 max-w-full overflow-y-auto" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+		<div id="automations-container" class="min-w-0 max-w-full" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("automations", state) } data-card-pagination-list="#automations-card-list" data-card-pagination-card-selector="[data-automation-url]" data-card-pagination-key="data-automation-url" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Automations")
 		<div data-page-header class="mb-6 flex items-center justify-between gap-3">
 			<h2 class="text-2xl font-bold">Automations</h2>
@@ -516,7 +516,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		@automationViewStateScript()
 	@automationNodePanelScript()
 		@automationYAMLSharedScript()
-		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
+		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
 			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, layout.WorkspaceProjectID(ctx, currentProjectID)) }>
 			@layout.PageTitle(graph.Automation.Name)
 			<div class="mb-6 flex flex-wrap items-start justify-between gap-3" data-page-header data-automation-live-header>

@@ -96,7 +96,7 @@ if q.Kind == "projects" {
  <div data-project-picker class="hidden rounded-lg border border-base-300 p-2 space-y-2">
   <div data-project-chips class="flex flex-wrap gap-1"></div>
   <input type="search" data-project-search class="input input-bordered input-sm w-full" placeholder="Search projects…" aria-label="Search projects"/>
-  <div data-project-results class="hidden max-h-48 overflow-auto" role="group" aria-label="Select projects">
+  <div data-project-results class="hidden max-h-48 overflow-auto pr-4" role="group" aria-label="Select projects">
    for _, project := range q.Projects {
     <button type="button" class="btn btn-ghost btn-sm w-full justify-start" data-project-choice={ project.ID } data-project-name={ project.Name } aria-pressed="false"><span data-project-check aria-hidden="true">□</span>{ project.Name }</button>
    }

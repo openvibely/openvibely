@@ -216,7 +216,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					</div>
 
 					<div class="flex-1 min-h-0 px-6 py-3">
-						<div data-agent-section-panel="details" class="h-full overflow-y-auto pr-1">
+						<div data-agent-section-panel="details" class="h-full overflow-y-auto pr-4">
 							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Name</span></label>
 								<input type="text" id="agent_name" name="name" class="input input-bordered" required placeholder="my-agent"/>
@@ -292,7 +292,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								</div>
 						</div>
 
-						<div data-agent-section-panel="plugins" class="h-full overflow-y-auto pr-1 hidden">
+						<div data-agent-section-panel="plugins" class="h-full overflow-y-auto pr-4 hidden">
 							<div class="space-y-3">
 								<div class="border border-base-300 rounded-lg p-3">
 									<div class="flex items-center justify-between mb-2">
@@ -312,12 +312,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<span class="loading loading-spinner loading-xs"></span>
 										<span>Loading marketplace data...</span>
 									</div>
-									<div id="plugin_catalog" class="space-y-2 max-h-[500px] overflow-auto"></div>
+									<div id="plugin_catalog" class="space-y-2 max-h-[500px] overflow-auto pr-4"></div>
 								</div>
 							</div>
 						</div>
 
-						<div data-agent-section-panel="marketplace" class="h-full overflow-y-auto pr-1 hidden">
+						<div data-agent-section-panel="marketplace" class="h-full overflow-y-auto pr-4 hidden">
 							<div class="space-y-3">
 								<div class="border border-base-300 rounded-lg p-3">
 									<p class="text-sm font-medium mb-2">Plugin Marketplace</p>
@@ -332,7 +332,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							</div>
 						</div>
 
-							<div data-agent-section-panel="skills" class="h-full overflow-y-auto pr-1 hidden">
+							<div data-agent-section-panel="skills" class="h-full overflow-y-auto pr-4 hidden">
 								<div class="space-y-3">
 									<div class="alert alert-info text-sm">
 										Assigned-agent tasks route from this agent's indexed skills. Standalone skills are routed only for tasks with no assigned agent.
@@ -341,7 +341,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 									<div class="border border-base-300 rounded-lg p-3 bg-base-200/30">
 										<p class="text-sm font-medium mb-1">Router Preview</p>
 										<p id="agent_skills_router_summary" class="text-xs opacity-70">Save this agent to preview routed skills.</p>
-										<pre id="agent_skills_router_index" class="text-xs whitespace-pre-wrap mt-2 max-h-36 overflow-auto hidden"></pre>
+										<pre id="agent_skills_router_index" class="text-xs whitespace-pre-wrap mt-2 max-h-36 overflow-auto pr-4 hidden"></pre>
 									</div>
 									<div class="border border-base-300 rounded-lg p-3">
 										<div class="flex items-center justify-between gap-2 mb-2">
@@ -368,7 +368,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								</div>
 							</div>
 
-								<div data-agent-section-panel="lifecycle" class="h-full overflow-y-auto pr-1 hidden">							<div class="space-y-3">
+								<div data-agent-section-panel="lifecycle" class="h-full overflow-y-auto pr-4 hidden">							<div class="space-y-3">
 										<p class="text-sm opacity-70">Lifecycle hooks are implementation hooks, usually for system/lifecycle agents. Normal assigned agents usually need skills, not custom hooks.</p>
 										<div class="alert alert-info text-sm">Task execution is separate from hooks: route_task selects skills, before_run can add context, after_complete observes and learns. task_mode is internal and is not configurable here.</div>
 									<div id="lifecycle_hooks_protected_banner" class="hidden alert alert-warning text-sm">
@@ -429,7 +429,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 								</div>
 							</div>
 
-								<div data-agent-section-panel="advanced" class="h-full overflow-y-auto pr-1 hidden">
+								<div data-agent-section-panel="advanced" class="h-full overflow-y-auto pr-4 hidden">
 								<div class="space-y-3">
 								<p class="text-sm opacity-70">Identity and scope. Most agents do not need to change these.</p>
 								<div class="grid grid-cols-1 md:grid-cols-2 gap-2">

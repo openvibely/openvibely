@@ -282,7 +282,7 @@ templ projectChangesSection(pc *models.ProjectChanges) {
 		<div class="card bg-base-100 shadow-sm border border-base-300">
 			<div class="card-body p-4">
 				<h3 class="font-semibold text-sm mb-3">Recent Commits</h3>
-				<div class="space-y-2 max-h-64 overflow-y-auto">
+				<div class="space-y-2 max-h-64 overflow-y-auto pr-4">
 					for _, commit := range limitCommits(pc.Commits, 10) {
 						<div class="flex items-start gap-2 text-xs">
 							<span class="font-mono text-primary opacity-70 flex-shrink-0">{ commit.ShortHash }</span>

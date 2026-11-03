@@ -694,7 +694,7 @@ templ ProjectSettingsTabs(prefix string) {
   :is(#edit_project_modal, #new_project_modal) .modal-action > button[type="submit"] { min-width: 6rem; }
   :is(#new-project-create-progress, #edit-project-save-progress) { display: none; }
   :is(#new-project-create-progress, #edit-project-save-progress).htmx-request { display: inline-block; }
-  [data-project-tab-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; }
+  [data-project-tab-content] { height: min(38rem, calc(100dvh - 17rem)); overflow-y: auto; padding-right: 1rem; }
   [data-project-repo-fields][hidden] { display: none !important; }
   [data-project-panel="general"] :is(.input, .select, .textarea) { width: 100%; min-width: 0; }
   [data-project-panel="general"] .form-control > :is(.input, .select, .textarea) { flex-shrink: 0; }

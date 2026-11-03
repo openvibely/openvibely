@@ -368,7 +368,7 @@ func ChatInputRequestCard(req *events.ChatInputRequestEvent) templ.Component {
 				}
 			}
 			if q.Kind == "projects" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div data-project-picker class=\"hidden rounded-lg border border-base-300 p-2 space-y-2\"><div data-project-chips class=\"flex flex-wrap gap-1\"></div><input type=\"search\" data-project-search class=\"input input-bordered input-sm w-full\" placeholder=\"Search projects…\" aria-label=\"Search projects\"><div data-project-results class=\"hidden max-h-48 overflow-auto\" role=\"group\" aria-label=\"Select projects\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div data-project-picker class=\"hidden rounded-lg border border-base-300 p-2 space-y-2\"><div data-project-chips class=\"flex flex-wrap gap-1\"></div><input type=\"search\" data-project-search class=\"input input-bordered input-sm w-full\" placeholder=\"Search projects…\" aria-label=\"Search projects\"><div data-project-results class=\"hidden max-h-48 overflow-auto pr-4\" role=\"group\" aria-label=\"Select projects\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

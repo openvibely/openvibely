@@ -2758,8 +2758,9 @@ box-shadow: 0 1.25rem 3.5rem rgba(0, 0, 0, 0.45) !important;
 [data-ov-theme-layer="custom"] .bg-base-200,
 [data-ov-theme-layer="custom"] .stats { background-color: var(--ov-content-bg); }
 [data-ov-theme-layer="custom"] .kanban-column { background-color: var(--ov-kanban-column-bg); }
-/* Keeps card borders off the scroll clip edge; WebKit drops them at fractional widths. */
-.category-drop-zone { padding-inline: 2px; }
+/* Keep the 2px card-border clearance for fractional WebKit widths, and move
+   each scrollbar into the column's existing 12px gutter without narrowing cards. */
+.category-drop-zone { margin-right: -0.75rem; padding-left: 2px; padding-right: calc(0.75rem + 2px); }
 [data-ov-theme-layer="custom"] .text-base-content,
 [data-ov-theme-layer="custom"] h1,
 [data-ov-theme-layer="custom"] h2,
@@ -3064,6 +3065,10 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside { margin-bottom: 0; height: calc(100dvh - var(--project-titlebar-height, 46px)) !important; }
 				html[data-shell-frame].task-list-collapsed #task-list-panel { display: none; }
 				#task-list-groups { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+                /* Put sidebar scrollbars in the outer gutter, outside row backgrounds. */
+                html[data-shell-frame] #task-list-panel > :is(#task-list-groups, #changes-explorer-host, #appearance-settings-nav) {
+                    min-height: 0; margin-right: -8px; padding-right: 16px;
+                }
 		.kanban-search { display:flex; align-items:center; flex:0 1 auto; min-width:2rem; max-width:100%; height:2rem; width:2rem; border-radius:var(--rounded-btn,.5rem); overflow:hidden; transition:width .25s ease, background-color .25s ease, box-shadow .25s ease; }
 		.kanban-search[data-open="true"] { width:16rem; height:38px; border:1px solid oklch(var(--b3)); border-radius:var(--rounded-box,1rem); background:oklch(var(--b1)); box-shadow:0 1px 2px 0 rgb(0 0 0 / .05); }
 		.kanban-search-toggle { flex:0 0 2rem; }
@@ -3110,7 +3115,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				.task-list-group[data-browsing] .task-list-row[data-task-list-extra]:not([hidden]), .task-list-group[data-searching] .task-list-row[data-task-list-extra]:not([hidden]) { display: flex; }
                 .task-list-rows { display:flex; flex-direction:column; }
                 .task-list-rows > .task-list-row, .task-list-rows > [data-pointer-drag-placeholder] { flex-shrink:0; }
-                .task-list-group[data-browsing]:not([data-searching]) .task-list-rows { max-height:var(--task-list-preview-height, 238px); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+                .task-list-group[data-browsing]:not([data-searching]) .task-list-rows { max-height:var(--task-list-preview-height, 238px); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; margin-right:-8px; padding-right:16px; }
                 .task-list-browse-controls { display:none; align-items:center; gap:4px; padding:6px 10px 6px 32px; font-size:12px; color:oklch(var(--bc) / .55); }
                 .task-list-done { width:100%; text-align:left; border-radius:8px; }
                 .task-list-done:hover { background:oklch(var(--bc) / .07); color:oklch(var(--bc) / .85); }
