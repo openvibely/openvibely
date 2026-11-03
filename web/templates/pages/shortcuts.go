@@ -48,6 +48,10 @@ var shortcutGroups = []shortcutGroup{
 		{Action: "Focus adjacent project tab", Keys: []string{"←", "or", "→"}, Context: "Focus a project tab first. Moves focus; Enter opens that project.", MacOnly: false},
 		{Action: "Focus first or last project tab", Keys: []string{"Home", "or", "End"}, Context: "Focus a project tab first. Moves focus; Enter opens that project.", MacOnly: false},
 		{Action: "Close a project tab", Keys: []string{"forwardDelete"}, Context: "Focus the project tab first. Uses forward delete, not the Mac backspace key.", MacOnly: false},
+		{Action: "Resize task list", Keys: []string{"←", "or", "→"}, Context: "When the task-list divider has focus. Left narrows the list; Right widens it by 20 pixels."},
+		{Action: "Resize details panel", Keys: []string{"←", "or", "→"}, Context: "When the details-panel divider has focus. Left widens the panel; Right narrows it by 20 pixels."},
+		{Action: "Set minimum panel width", Keys: []string{"Home"}, Context: "When the details-panel divider has focus. Sets its preferred width to 340 pixels."},
+		{Action: "Set maximum panel width", Keys: []string{"End"}, Context: "When the details-panel divider has focus. Sets its preferred width to 720 pixels."},
 	}},
 	{Name: "Automations", Description: "Navigation on automation pages; editor shortcuts only in the builder.", Entries: []shortcutEntry{
 		{Action: "Previous automation", Keys: []string{"mod", "shift", ","}, Context: "On an existing automation. Does not run inside text fields or the YAML editor.", MacOnly: false},
@@ -55,6 +59,9 @@ var shortcutGroups = []shortcutGroup{
 		{Action: "Last visited automation", Keys: []string{"mod", "shift", "L"}, Context: "Requires a previous automation visit. Does not run inside text fields or the YAML editor.", MacOnly: false},
 		{Action: "Indent YAML", Keys: []string{"Tab"}, Context: "Insert two spaces in the YAML editor.", MacOnly: false},
 		{Action: "Unindent YAML", Keys: []string{"shift", "Tab"}, Context: "Remove up to two leading spaces.", MacOnly: false},
+		{Action: "Open automation node", Keys: []string{"Enter", "or", "Space"}, Context: "When a node on the builder canvas has focus. Opens its details panel."},
+		{Action: "Remove automation node", Keys: []string{"Delete", "or", "Backspace"}, Context: "When a node on the builder canvas has focus."},
+		{Action: "Move automation node", Keys: []string{"←", "or", "→", "or", "↑", "or", "↓"}, Context: "When a node on the builder canvas has focus. Moves it 10 pixels in that direction."},
 		{Action: "Remove a connection", Keys: []string{"Delete", "or", "Backspace"}, Context: "When a connection has focus.", MacOnly: false},
 	}},
 	{Name: "File previews", Description: "Use these while a file preview is open.", Entries: []shortcutEntry{
