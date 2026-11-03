@@ -29,18 +29,14 @@ func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKe
 		return nil, fmt.Errorf("credit_id and idempotency_key are required and must be bounded")
 	}
 	defer s.accountReads.Forget("resets:" + accountKey)
-	raw, err := s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
-	if err != nil {
-		return nil, err
-	}
-	return normalizeUsageResetOutcome(raw), nil
+	return s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
 }
 
 // retry_same_request: the redemption may have happened, so a retry must reuse the idempotency key.
-func normalizeUsageResetOutcome(raw map[string]any) map[string]any {
+func normalizeUsageResetOutcome(provider models.LLMProvider, raw map[string]any) map[string]any {
 	outcome := "unknown"
-	if code, ok := raw["code"].(string); ok {
-		switch code {
+	if provider == models.ProviderOpenAI {
+		switch raw["code"] {
 		case "reset", "already_redeemed":
 			outcome = "reset"
 		case "nothing_to_reset":
@@ -48,8 +44,8 @@ func normalizeUsageResetOutcome(raw map[string]any) map[string]any {
 		case "no_credit":
 			outcome = "no_longer_available"
 		}
-	} else if result, ok := raw["result"].(string); ok {
-		switch result {
+	} else if provider == models.ProviderAnthropic {
+		switch raw["result"] {
 		case "reset":
 			outcome = "reset"
 		case "not_limited":
@@ -199,7 +195,10 @@ func (s *UsageAnalyticsService) requestUsageResetForCredential(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Provider == models.ProviderAnthropic && creditID == "" {
+	if creditID != "" {
+		return normalizeUsageResetOutcome(cfg.Provider, raw), nil
+	}
+	if cfg.Provider == models.ProviderAnthropic {
 		return normalizeAnthropicResetGrants(raw, time.Now()), nil
 	}
 	return raw, nil

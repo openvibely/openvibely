@@ -292,40 +292,46 @@ func TestAnthropicResetGrantAvailability(t *testing.T) {
 }
 
 func TestNormalizeUsageResetOutcome(t *testing.T) {
+	openai, anthropic := models.ProviderOpenAI, models.ProviderAnthropic
 	cases := []struct {
-		raw     string
-		outcome string
-		retry   bool
+		provider models.LLMProvider
+		raw      string
+		outcome  string
+		retry    bool
 	}{
-		{`{"code":"reset","windows_reset":1}`, "reset", false},
-		{`{"code":"already_redeemed"}`, "reset", false},
-		{`{"code":"nothing_to_reset","windows_reset":0}`, "not_needed", false},
-		{`{"code":"no_credit"}`, "no_longer_available", false},
-		{`{"code":"surprise"}`, "unknown", true},
-		{`{"result":"reset","resets_left":0}`, "reset", false},
-		{`{"result":"not_limited","reason":"not_limited"}`, "not_needed", false},
-		{`{"result":"already_used"}`, "already_used", false},
-		{`{"result":"ineligible","reason":"tier"}`, "no_longer_available", false},
-		{`{"result":"cooldown","cooldown_until":"2035-01-01T00:00:00Z"}`, "cooldown", false},
-		{`{"result":"unavailable","reason":"reset_unconfirmed"}`, "in_progress", true},
-		{`{"result":"unavailable","reason":"stamp_indeterminate"}`, "in_progress", true},
-		{`{"result":"unavailable","reason":"expired"}`, "no_longer_available", false},
-		{`{"result":"unavailable","reason":"paused"}`, "no_longer_available", false},
-		{`{"result":"unavailable","reason":"unknown_grant"}`, "no_longer_available", false},
-		{`{"result":"unavailable","reason":"not_next_grant"}`, "no_longer_available", false},
-		{`{"result":"unavailable","reason":"grant_id_required"}`, "no_longer_available", false},
-		{`{"result":"unavailable"}`, "in_progress", true},
-		{`{"result":"unavailable","reason":"something_new"}`, "in_progress", true},
-		{`{"status":"reset"}`, "unknown", true},
+		{openai, `{"code":"reset","windows_reset":1}`, "reset", false},
+		{openai, `{"code":"already_redeemed"}`, "reset", false},
+		{openai, `{"code":"nothing_to_reset","windows_reset":0}`, "not_needed", false},
+		{openai, `{"code":"no_credit"}`, "no_longer_available", false},
+		{openai, `{"code":"surprise"}`, "unknown", true},
+		{anthropic, `{"result":"reset","resets_left":0}`, "reset", false},
+		{anthropic, `{"result":"not_limited","reason":"not_limited"}`, "not_needed", false},
+		{anthropic, `{"result":"already_used"}`, "already_used", false},
+		{anthropic, `{"result":"ineligible","reason":"tier"}`, "no_longer_available", false},
+		{anthropic, `{"result":"cooldown","cooldown_until":"2035-01-01T00:00:00Z"}`, "cooldown", false},
+		{anthropic, `{"result":"unavailable","reason":"reset_unconfirmed"}`, "in_progress", true},
+		{anthropic, `{"result":"unavailable","reason":"stamp_indeterminate"}`, "in_progress", true},
+		{anthropic, `{"result":"unavailable","reason":"expired"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"paused"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"unknown_grant"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"not_next_grant"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"grant_id_required"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable"}`, "in_progress", true},
+		{anthropic, `{"result":"unavailable","reason":"something_new"}`, "in_progress", true},
+		{openai, `{"status":"reset"}`, "unknown", true},
+		{anthropic, `{"status":"reset"}`, "unknown", true},
+		{openai, `{"result":"reset"}`, "unknown", true},
+		{anthropic, `{"code":"reset","result":"cooldown"}`, "cooldown", false},
+		{anthropic, `{"code":"reset"}`, "unknown", true},
 	}
 	for _, c := range cases {
 		var raw map[string]any
 		if err := json.Unmarshal([]byte(c.raw), &raw); err != nil {
 			t.Fatal(err)
 		}
-		got := normalizeUsageResetOutcome(raw)
+		got := normalizeUsageResetOutcome(c.provider, raw)
 		if got["outcome"] != c.outcome || got["retry_same_request"] != c.retry || len(got) != 2 {
-			t.Errorf("%s: got %v, want outcome=%s retry=%v", c.raw, got, c.outcome, c.retry)
+			t.Errorf("%s %s: got %v, want outcome=%s retry=%v", c.provider, c.raw, got, c.outcome, c.retry)
 		}
 	}
 }
