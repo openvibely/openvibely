@@ -1129,7 +1129,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 	@automationViewStateScript()
 	@automationNodePanelScript()
 	@automationYAMLSharedScript()
-	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-selected-node={ page.SelectedNodeKey } data-focus-node={ fmt.Sprint(page.FocusNode) } data-automation-draft data-automation-yaml-builder data-automation-unsaved-changes={ fmt.Sprint(page.UnsavedChanges) }>
+	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col" data-selected-node={ page.SelectedNodeKey } data-focus-node={ fmt.Sprint(page.FocusNode) } data-automation-draft data-automation-yaml-builder data-automation-unsaved-changes={ fmt.Sprint(page.UnsavedChanges) }>
 		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", automationBuilderUsesEditShell(page)) } data-automation-builder-edit-pane>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if automationBuilderUsesEditShell(page) {

@@ -874,7 +874,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	    if (!detectTransientTopJump || !target || target.id !== 'alerts-content') return;
 	    requestAnimationFrame(function() {
 	      var liveRoot = document.getElementById('alerts-container');
-	      if (liveRoot && liveRoot.scrollTop < 100) transientTopJump = true;
+	      if (liveRoot && document.getElementById('main-content').scrollTop < 100) transientTopJump = true;
 	    });
 	  });
 	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
@@ -888,7 +888,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 		    var originalUpdateCard = document.getElementById('system-update-card');
 		    var root = document.getElementById('alerts-container');
 		    var originalScrollport = root;
-		    root.scrollTop = row('item-15').offsetTop - root.offsetTop - 70;
+		    document.getElementById('main-content').scrollTop = row('item-15').offsetTop - root.offsetTop - 70;
 		    await wait(50);
 		    var liveAnchorTop = row('item-14').getBoundingClientRect().top;
 		    detectTransientTopJump = true;
@@ -903,7 +903,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 		    if (root !== originalScrollport) fail('live operational alert replaced the Alerts scrollport');
 		    if (transientTopJump) fail('live operational alert painted the Alerts scrollport at the top before restoration');
 		    assertNear(row('item-14').getBoundingClientRect().top, liveAnchorTop, 'live operational alert visible anchor');
-		    if (root.scrollTop < 100) fail('live operational alert reset the Alerts scrollport');
+		    if (document.getElementById('main-content').scrollTop < 100) fail('live operational alert reset the Alerts scrollport');
 			    if (row('live-operational').contains(document.activeElement)) fail('live operational alert received focus');
 
 		    var liveSearch = document.querySelector('input[data-card-search="alerts"]');
@@ -947,7 +947,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	    if (transientTopJump) fail('single delete painted the Alerts scrollport at the top before restoration');
 	    assertNear(row('item-14').getBoundingClientRect().top, stableTop, 'actionable notification nearest surviving anchor');
 	    if (document.activeElement !== row('item-16').querySelector('[data-alert-delete]')) fail('focus did not move to the next delete control');
-	    if (root.scrollTop < 100) fail('single delete reset the Alerts scrollport to the top');
+	    if (document.getElementById('main-content').scrollTop < 100) fail('single delete reset the Alerts scrollport to the top');
 	    if (!document.getElementById('alert-badge').textContent.trim()) fail('unread badge was not authoritatively refreshed');
 
 	    var repeatedTop = row('item-14').getBoundingClientRect().top;
@@ -964,24 +964,24 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	    await remove('item-29');
 	    await waitForAlertsSettled('item-29 deletion');
 	    assertNear(row('item-17').getBoundingClientRect().top, beforeBelow, 'deletion below viewport');
-	    if (document.getElementById('alerts-container').scrollTop < 100) fail('off-viewport deletion reset the scrollport');
+	    if (document.getElementById('main-content').scrollTop < 100) fail('off-viewport deletion reset the scrollport');
 
 	    root = document.getElementById('alerts-container');
-	    root.scrollTop = root.scrollHeight;
+	    document.getElementById('main-content').scrollTop = document.getElementById('main-content').scrollHeight;
 	    await wait(50);
 	    await remove('item-28');
 	    await waitForAlertsSettled('item-28 deletion');
 	    root = document.getElementById('alerts-container');
-	    if (Math.abs((root.scrollHeight - root.clientHeight) - root.scrollTop) > 3) fail('deleting the last visible item did not preserve the end-of-list anchor');
+	    if (Math.abs((document.getElementById('main-content').scrollHeight - document.getElementById('main-content').clientHeight) - document.getElementById('main-content').scrollTop) > 3) fail('deleting the last visible item did not preserve the end-of-list anchor');
 	    if (document.activeElement !== row('item-27').querySelector('[data-alert-delete]')) fail('deleting the last visible item did not focus the previous delete control');
-	    if (document.getElementById('alerts-container').scrollTop < 100) fail('deleting the last visible item reset the scrollport');
+	    if (document.getElementById('main-content').scrollTop < 100) fail('deleting the last visible item reset the scrollport');
 
 	    var search = document.querySelector('input[data-card-search="alerts"]');
 	    search.value = 'filtered-focus';
 	    search.dispatchEvent(new Event('input', {bubbles:true}));
 	    await waitForCardSearchSettled('filtered-focus', 'filtered focus');
 	    root = document.getElementById('alerts-container');
-	    root.scrollTop = row('item-11').offsetTop - root.offsetTop - 70;
+	    document.getElementById('main-content').scrollTop = row('item-11').offsetTop - root.offsetTop - 70;
 	    await wait(50);
 	    if (getComputedStyle(row('item-12')).display !== 'none') fail('card search did not hide the adjacent non-matching row');
 	    if (getComputedStyle(row('item-14')).display === 'none') fail('card search hid the expected focus fallback row');
@@ -1078,7 +1078,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	style := `<style>
 	body { margin: 0; }
 	.hidden { display: none !important; }
-	#alerts-container { box-sizing: border-box; height: 420px !important; overflow-y: auto !important; padding: 12px; }
+	#main-content { box-sizing: border-box; height: 420px !important; flex: none !important; overflow-y: auto !important; padding: 12px; }
 	[data-alert-scroll-anchor] { box-sizing: border-box; min-height: 132px; margin-bottom: 16px; }
 	</style>`
 

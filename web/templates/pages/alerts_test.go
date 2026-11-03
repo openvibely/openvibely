@@ -465,7 +465,7 @@ func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {
 
 	html := buf.String()
 	for _, want := range []string{
-		`id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0"`,
+		`id="alerts-container" class="max-w-full min-w-0"`,
 		`class="grid grid-cols-1 gap-4 max-w-full min-w-0"`,
 		`transition-all w-full min-w-0 max-w-full`,
 		`card-body max-w-full min-w-0 p-4 sm:p-6`,

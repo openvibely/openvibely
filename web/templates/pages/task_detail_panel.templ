@@ -23,7 +23,10 @@ templ TaskDetailPanel() {
 		#task-breadcrumb-changes[hidden] { display:none; }
 		#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }
 		#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }
-		#tab-changes { overflow:auto; }
+		/* Extend the independent scrollport into the page gutter, keeping
+		   the gutter inside it so overlay scrollbars cannot cover controls. */
+		#tab-changes { overflow:auto; margin-right:-24px; padding-right:24px; }
+		#task-detail-content[data-inspector-docked="true"] #tab-changes { margin-right:0; }
 		/* Keep conversation prose comfortable to read. */
 		#task-thread-messages .chat-markdown,
 		#task-thread-messages .chat-bubble-user-msg .chat-bubble-inner > .whitespace-pre-wrap { font-size:.875rem; }

@@ -654,6 +654,7 @@ func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testin
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/sticky-task?tab=changes", "sticky-diff", func(b *composerFocusCDP) {
 		b.waitFor("diff loaded", `String(!!document.querySelector('.diff-file-header'))`, "true")
+		b.waitFor("Changes scrollbar reaches page edge with content clearance", `(function(){var s=document.getElementById('tab-changes'),m=document.getElementById('main-content'),r=s.getBoundingClientRect(),content=document.getElementById('changes-content').getBoundingClientRect();return String(Math.abs(r.right-m.getBoundingClientRect().right)<2 && r.right-content.right>=24 && m.scrollHeight<=m.clientHeight+1)})()`, "true")
 		b.waitFor("scroll diff workspace", `(function(){var s=document.getElementById('tab-changes');s.scrollTop=300;return String(s.scrollTop>0)})()`, "true")
 		b.waitFor("whole pinned header visible", `(function(){var s=document.getElementById('tab-changes').getBoundingClientRect(),h=document.querySelector('.diff-file-header'),r=h.getBoundingClientRect();return String(Math.abs(r.top-s.top)<1 && r.bottom<=s.bottom && h.dataset.stuck==='1')})()`, "true")
 		b.waitFor("reset scrolling", `(function(){document.getElementById('tab-changes').scrollTop=0;return 'done'})()`, "done")
