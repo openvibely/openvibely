@@ -306,6 +306,13 @@ func TestAccountMonitorPersistsAcrossRuns(t *testing.T) {
 	default:
 		t.Fatal("100% must alert even after the 95% warning")
 	}
+	// A fresh monitor must not re-alert when the provider changes only the
+	// reset timestamp representation between app launches.
+	resetTime, err := time.Parse(time.RFC3339, reset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset = resetTime.In(time.FixedZone("offset", 3600)).Format("2006-01-02T15:04:05.000000Z07:00")
 	if err := NewAccountUsageMonitor(usage, env.Stores.Settings, env.Stores.Projects, alerts).RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -375,4 +382,52 @@ func TestAccountReadSharingAndCancellation(t *testing.T) {
 			t.Fatal("completed result cached unexpectedly")
 		}
 	})
+}
+
+func TestAccountMonitorExpiredLimitWindow(t *testing.T) {
+	now := time.Date(2028, 1, 1, 12, 0, 0, 0, time.UTC)
+	pct := 100.0
+	state := monitorTestState()
+	for _, reset := range []time.Time{now.Add(-time.Hour), now} {
+		window := reset.Format(time.RFC3339)
+		limits := []models.AccountLimitView{{LimitKey: "five_hour", Label: "5-hour session", UsedPercent: &pct, ResetsAt: &window}}
+		if events := evaluateAccountMonitor(&state, limits, nil, now, "Anthropic"); len(events) != 0 {
+			t.Fatalf("expired window generated alerts: %+v", events)
+		}
+	}
+	window := now.Add(time.Hour).Format(time.RFC3339)
+	limits := []models.AccountLimitView{{LimitKey: "five_hour", Label: "5-hour session", UsedPercent: &pct, ResetsAt: &window}}
+	if events := evaluateAccountMonitor(&state, limits, nil, now, "Anthropic"); len(events) != 1 {
+		t.Fatalf("current exhausted window must still alert: %+v", events)
+	}
+}
+
+func TestAccountMonitorResetFormattingAcrossRestart(t *testing.T) {
+	now := time.Date(2028, 1, 1, 12, 0, 0, 0, time.UTC)
+	pct := 100.0
+	// Simulate persisted state from before reset timestamp normalization.
+	state := monitorTestState()
+	state.Limits["five_hour"] = monitoredLimit{Window: "2028-01-01T14:00:00.000000+01:00", Percent: pct, Threshold: 100}
+	wantKey := "limit:five_hour:2028-01-01T14:00:00.000000+01:00:0:100"
+	for _, window := range []string{"2028-01-01T13:00:00Z", "2028-01-01T13:00:00.000Z", "2028-01-01T14:00:00+01:00"} {
+		encoded, err := json.Marshal(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state = accountMonitorState{}
+		if err := json.Unmarshal(encoded, &state); err != nil {
+			t.Fatal(err)
+		}
+		limits := []models.AccountLimitView{{LimitKey: "five_hour", Label: "5-hour session", UsedPercent: &pct, ResetsAt: &window}}
+		events := evaluateAccountMonitor(&state, limits, nil, now, "Anthropic")
+		if len(events) != 1 || events[0].Key != wantKey {
+			t.Fatalf("same reset must retain its deduplication key after restart: %+v", events)
+		}
+	}
+	window := "2028-01-01T18:00:00Z"
+	limits := []models.AccountLimitView{{LimitKey: "five_hour", UsedPercent: &pct, ResetsAt: &window}}
+	events := evaluateAccountMonitor(&state, limits, nil, now, "Anthropic")
+	if len(events) != 1 || events[0].Key == wantKey {
+		t.Fatalf("a new window must have its own alert: %+v", events)
+	}
 }

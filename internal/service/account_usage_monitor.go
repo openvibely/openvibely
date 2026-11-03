@@ -260,6 +260,20 @@ func evaluateAccountMonitor(state *accountMonitorState, limits []models.AccountL
 		window := ""
 		if limit.ResetsAt != nil {
 			window = *limit.ResetsAt
+			if reset, err := time.Parse(time.RFC3339Nano, window); err == nil {
+				// Providers can continue reporting the exhausted percentage after
+				// its window expires. It must not produce a new startup alert.
+				if !reset.After(now) {
+					continue
+				}
+				// Preserve the persisted event key when only the timestamp's
+				// formatting changed (including states written by older versions).
+				if previousReset, err := time.Parse(time.RFC3339Nano, prev.Window); err == nil && reset.Equal(previousReset) {
+					window = prev.Window
+				} else {
+					window = reset.UTC().Format(time.RFC3339Nano)
+				}
+			}
 		}
 		cycle := prev.Cycle
 		if window == "" && pct <= 80 && prev.Percent > 80 {
