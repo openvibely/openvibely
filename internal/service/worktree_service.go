@@ -586,6 +586,9 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 				"GIT_ASKPASS=true",
 				"SSH_ASKPASS=true",
 			)
+			if len(args) > 0 && args[0] == "status" {
+				cmd.Env = append(cmd.Env, "GIT_OPTIONAL_LOCKS=0")
+			}
 			out, err := cmd.CombinedOutput()
 			// Another Git process may briefly own the index. Retry only this
 			// contention error after 1s and 2s, without deleting a lock owned by
@@ -761,7 +764,7 @@ func collectWorktreeCommitStatus(worktreePath string) string {
 	if worktreePath == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	cmd := diffGitCommand(context.Background(), "status", "--porcelain", "--untracked-files=all")
 	cmd.Dir = worktreePath
 	out, err := cmd.Output()
 	if err != nil {
@@ -2317,7 +2320,7 @@ func (ws *WorktreeService) cleanupWorktreeUnlocked(ctx context.Context, task *mo
 	}
 
 	// Check for uncommitted changes
-	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	statusCmd := diffGitCommand(ctx, "status", "--porcelain")
 	statusCmd.Dir = task.WorktreePath
 	out, err := statusCmd.Output()
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
@@ -3580,7 +3583,7 @@ func worktreeDirtyState(ctx context.Context, worktreePath string) (dirty bool, o
 	if worktreePath == "" {
 		return false, false
 	}
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
+	cmd := diffGitCommand(ctx, "status", "--porcelain", "--untracked-files=all")
 	cmd.Dir = worktreePath
 	out, err := cmd.Output()
 	if err != nil || ctx.Err() != nil {

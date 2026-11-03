@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -10,6 +11,9 @@ import (
 // Bound pipe cleanup too: a Git child may inherit stdout after Git is killed.
 func diffGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "git", args...)
+	// Read commands must not refresh the index: cancellation can kill Git
+	// while it holds the optional index.lock and leave that lock behind.
+	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
 	cmd.WaitDelay = time.Second
 	return cmd
 }
