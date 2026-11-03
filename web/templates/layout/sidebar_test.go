@@ -10,7 +10,7 @@ import (
 	xhtml "golang.org/x/net/html"
 )
 
-func TestSidebar_ThemeToggleInFooter(t *testing.T) {
+func TestSidebar_FooterHasNoThemeToggle(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 
 	var buf bytes.Buffer
@@ -23,11 +23,11 @@ func TestSidebar_ThemeToggleInFooter(t *testing.T) {
 	if !strings.Contains(html, `id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto`) {
 		t.Fatal("sidebar panel must be layered above the drawer overlay so footer controls are clickable on mobile")
 	}
-	if !strings.Contains(html, "sidebar-theme-toggle-container") {
-		t.Fatal("sidebar footer must contain theme toggle container")
+	if !strings.Contains(html, "sidebar-footer") {
+		t.Fatal("sidebar footer container missing")
 	}
 	if !strings.Contains(html, "justify-end") {
-		t.Fatal("sidebar theme-toggle container must right-align footer controls")
+		t.Fatal("sidebar footer must right-align footer controls")
 	}
 	for _, removed := range []string{"theme-toggle-pill", "theme-toggle-collapsed-btn", "data-theme-mode-toggle", "window.toggleTheme"} {
 		if strings.Contains(html, removed) {
@@ -738,12 +738,12 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 	html := buf.String()
 
 	required := []string{
-		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2`,
+		`sidebar-footer border-t border-base-300 p-3 flex items-center justify-end gap-2`,
 		`id="sidebar-user-menu-trigger"`,
 		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
 		`id="sidebar-logout-label" type="submit" class="ov-menu-option w-full" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
-		`.sidebar-theme-toggle-container {`,
+		`.sidebar-footer {`,
 		`min-height: 3.25rem;`,
 		`align-items: center;`,
 		`.sidebar-user-trigger {`,

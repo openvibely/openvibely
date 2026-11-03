@@ -984,7 +984,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 		</div>
 
 			<!-- Footer: user info + settings pinned to bottom of sidebar -->
-		<div class="sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2">
+		<div class="sidebar-footer border-t border-base-300 p-3 flex items-center justify-end gap-2">
 			<div id="sidebar-auth-user" class="hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto">
 				<div class="dropdown dropdown-top w-full">
 					<button
@@ -1062,7 +1062,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				}
 			}
 			
-			.sidebar-theme-toggle-container {
+			.sidebar-footer {
 				flex-shrink: 0;
 				min-height: 3.25rem;
 				align-items: center;

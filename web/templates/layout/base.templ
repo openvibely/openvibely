@@ -205,7 +205,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						window.openVibelyThemes.currentID = function() { return document.documentElement.getAttribute('data-color-theme') || initialThemeID(); };
 						window.openVibelyThemes.apply = function(id) { return applyTheme(id, { persistDB: true }); };
 						window.openVibelyThemes.applySystemMode = function(mode) { return applyTheme(fallbackIDForMode(mode === 'light' ? 'light' : 'dark'), { persistLocal: false, persistDB: false }); };
-						window.openVibelyThemes.toggleMode = function() { var current = validTheme(window.openVibelyThemes.currentID()) || validTheme(initialThemeID()); var nextMode = modeForTheme(current) === 'dark' ? 'light' : 'dark'; var remembered = normalizeThemeID(safeGet(nextMode === 'light' ? lastLightKey : lastDarkKey)); return applyTheme(remembered || fallbackIDForMode(nextMode), { persistDB: true }); };
 						window.openVibelyThemes.themeForID = validTheme;
 						window.applyOpenVibelyTheme = function(themeID, persist) { return applyTheme(themeID, { persistDB: !!persist }); };
 						applyTheme(initialThemeID(), { persistLocal: false, persistDB: false });
@@ -693,7 +692,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							border-radius: inherit;
 							background-color: var(--ov-account-limit-fill);
 						}
-						/* Theme toggle is intentionally immediate (no global transition choreography). */
+						/* Theme switches are intentionally immediate (no global transition choreography). */
 					/* The app scrolls inside its panels, not at the root. Modal opening must
 					   not reserve native scrollbar gutters and inset the entire app shell. */
 					html,
@@ -3192,7 +3191,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 				html[data-shell-frame] .sidebar-aside .menu a svg { width: 1.125rem; height: 1.125rem; }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] { opacity: 1; color: oklch(var(--bc)); background: color-mix(in srgb, oklch(var(--bc)) 10%, transparent); }
 				html[data-shell-frame] .sidebar-aside .menu a[aria-current="page"] svg { color: inherit; }
-				html[data-shell-frame] .sidebar-aside .sidebar-theme-toggle-container { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
+				html[data-shell-frame] .sidebar-aside .sidebar-footer { justify-content: center; padding: 6px 0 10px; min-height: 0; border: 0; }
 
 				/* Project tab bar shares the chrome color; tabs are detached pills. */
 				html[data-shell-frame] #desktop-project-titlebar {

@@ -34,7 +34,7 @@ func runIncrementalChatBrowser(t *testing.T, script string) json.RawMessage {
 	}
 	source := base.String()
 	start := strings.Index(source, "window.configureChatMarked = function()")
-	end := strings.Index(source, "// Theme toggle function")
+	end := strings.Index(source, "// Listen for system theme changes")
 	if start < 0 || end < start {
 		t.Fatal("missing production markdown helpers")
 	}

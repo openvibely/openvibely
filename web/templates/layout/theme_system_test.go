@@ -31,7 +31,6 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`var saved = normalizeStoredTheme(rawSaved);`,
 		`persistUIPreference({ theme: saved });`,
 		`data-color-theme-kind`,
-		`window.openVibelyThemes.toggleMode`,
 		`window.openVibelyThemes.applySystemMode`,
 		`[data-ov-theme-layer="custom"]{background-color:var(--ov-content-bg)}`,
 		`[data-ov-theme-layer="custom"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }`,
@@ -316,12 +315,6 @@ selected.api.apply('openvibely-dark');
 if (selected.attrs['data-ov-theme-layer'] !== 'native') throw new Error('OpenVibely default did not restore the native theme layer');
 selected.api.apply('vscode-default-high-contrast');
 if (selected.store['openvibely.colorTheme'] !== 'vscode-default-high-contrast') throw new Error('selection did not persist exact high-contrast theme');
-selected.store['openvibely.lastLightTheme'] = 'vscode-default-high-contrast-light';
-selected.api.toggleMode();
-if (selected.attrs['data-theme'] !== 'light') throw new Error('toggle did not switch to light mode');
-if (selected.attrs['data-color-theme'] !== 'vscode-default-high-contrast-light') throw new Error('toggle did not use remembered light theme');
-if (selected.attrs['data-color-theme-kind'] !== 'high-contrast-light') throw new Error('high-contrast light kind was lost');
-if (selected.store['openvibely.colorTheme'] !== 'vscode-default-high-contrast-light') throw new Error('toggle did not persist exact light theme');
 `
 	if output, err := exec.Command(node, "-e", js).CombinedOutput(); err != nil {
 		t.Fatalf("rendered built-in theme runtime failed: %v\n%s", err, output)
@@ -355,7 +348,7 @@ func TestSidebarSettingsLinkIsInFooter(t *testing.T) {
 	}
 	html := buf.String()
 	navStart := strings.Index(html, `aria-label="Main navigation"`)
-	footerStart := strings.Index(html, `class="sidebar-theme-toggle-container`)
+	footerStart := strings.Index(html, `class="sidebar-footer`)
 	if navStart == -1 || footerStart == -1 {
 		t.Fatal("sidebar main navigation or footer not rendered")
 	}
