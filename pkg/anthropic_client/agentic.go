@@ -24,6 +24,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/transcript"
 	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
@@ -590,23 +591,23 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		messages = append(messages, agenticMessage{Role: "user", Content: prompt})
 	}
 
-	replay := []Message{replayPrompt}
-	firstChanged := 0
+	var exchange transcript.ExchangeTracker[Message]
+	exchange.Append(replayPrompt)
 	saveReplay := func(saveCtx context.Context) error {
 		var err error
 		if opts.OnReplayChanged != nil {
-			err = opts.OnReplayChanged(saveCtx, replay, firstChanged)
+			err = opts.OnReplayChanged(saveCtx, exchange.Items(), exchange.FirstChanged())
 		} else if opts.OnReplaySave != nil {
-			err = opts.OnReplaySave(saveCtx, replay)
+			err = opts.OnReplaySave(saveCtx, exchange.Items())
 		}
 		if err == nil {
-			firstChanged = len(replay)
+			exchange.Committed()
 		}
 		return err
 	}
 	defer func() {
 		if opts.OnReplay != nil {
-			opts.OnReplay(replay)
+			opts.OnReplay(exchange.Items())
 		}
 	}()
 	result := &AgenticResponse{Model: opts.Model}
@@ -629,13 +630,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 		makeReplayContext := func(text string) Message { return Message{Role: "user", Content: text} }
 		makeWireContext := func(text string) agenticMessage { return agenticMessage{Role: "user", Content: text} }
-		beforeContext := len(replay)
+		beforeContext := exchange.Len()
+		replay := exchange.Items()
 		replay = managedcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
 		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		replay = attachmentcontext.SeedReplay(ctx, messages, replay, readContext, makeReplayContext)
 		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		if len(replay) != beforeContext {
-			firstChanged = min(firstChanged, max(0, beforeContext-1))
+			exchange.ReplaceTail(max(0, beforeContext-1), replay[max(0, beforeContext-1):]...)
 		}
 		if !opts.OmitExecutionEnvironment {
 			messages = ensureExecutionEnvironment(messages, opts.WorkDir)
@@ -661,7 +663,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		})
 		if err != nil {
 			if text := partialText.String(); text != "" {
-				replay = append(replay, Message{Role: "assistant", Content: text})
+				exchange.Append(Message{Role: "assistant", Content: text})
 			}
 			return nil, conversationError(categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err)), messages)
 		}
@@ -730,7 +732,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			replayContent = blocks
 		}
 		replayBlocks, _ := json.Marshal(replayContent)
-		replay = append(replay, Message{Role: "assistant", ContentBlocks: replayBlocks})
+		exchange.Append(Message{Role: "assistant", ContentBlocks: replayBlocks})
 		if opts.OnReplaySave != nil || opts.OnReplayChanged != nil {
 			if err := saveReplay(ctx); err != nil {
 				return nil, err
@@ -784,7 +786,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 
 		toolResults := make([]agenticBlock, 0, len(toolUseBlocks))
-		replayResultIndex := len(replay)
+		replayResultIndex := exchange.Len()
 		var saveMu sync.Mutex
 		completed := func(exec anthropicToolExecutionResult) {
 			saveMu.Lock()
@@ -814,11 +816,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			})
 			if opts.OnReplaySave != nil || opts.OnReplayChanged != nil {
 				encoded, _ := json.Marshal(toolResults)
-				if len(replay) == replayResultIndex {
-					replay = append(replay, Message{Role: "user"})
+				if exchange.Len() == replayResultIndex {
+					exchange.Append(Message{Role: "user"})
 				}
-				replay[replayResultIndex].ContentBlocks = encoded
-				firstChanged = min(firstChanged, replayResultIndex)
+				exchange.Set(replayResultIndex, Message{Role: "user", ContentBlocks: encoded})
 				if err := saveReplay(context.WithoutCancel(ctx)); err != nil {
 					applog.Infof("[anthropicclient] intermediate tool transcript save failed; continuing with in-memory history: %v", err)
 				}
@@ -852,11 +853,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// Persist the exact model-visible results, including resolved tool images.
 		replayResults := append([]agenticBlock(nil), toolResults...)
 		replayJSON, _ := json.Marshal(replayResults)
-		if len(replay) == replayResultIndex {
-			replay = append(replay, Message{Role: "user"})
+		if exchange.Len() == replayResultIndex {
+			exchange.Append(Message{Role: "user"})
 		}
-		replay[replayResultIndex].ContentBlocks = replayJSON
-		firstChanged = min(firstChanged, replayResultIndex)
+		exchange.Set(replayResultIndex, Message{Role: "user", ContentBlocks: replayJSON})
 		// Add tool results as user message.
 		userBlocks := append([]agenticBlock(nil), toolResults...)
 		if opts.OnToolBoundarySteering != nil {
@@ -868,7 +868,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				userBlocks = append(userBlocks, agenticBlock{Type: "text", Text: steering})
 				replayResults = append(replayResults, agenticBlock{Type: "text", Text: steering})
 				replayJSON, _ = json.Marshal(replayResults)
-				replay[len(replay)-1].ContentBlocks = replayJSON
+				exchange.Set(exchange.Len()-1, Message{Role: "user", ContentBlocks: replayJSON})
 			}
 		}
 		messages = append(messages, agenticMessage{
@@ -897,7 +897,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	if !opts.OmitExecutionEnvironment {
 		c.History = ensureHistoryEnvironment(c.History, opts.WorkDir)
 	}
-	c.History = append(c.History, replay...)
+	c.History = append(c.History, exchange.Items()...)
 
 	return result, nil
 }

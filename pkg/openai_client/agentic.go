@@ -16,7 +16,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -393,18 +392,32 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			"content": msg.Content,
 		})
 	}
-	var replayPrefix []any
-	replayReplacement := true
+
+	var exchange transcript.ExchangeTracker[any]
+	durable := false
 	if opts.OnReplayChanged != nil && opts.OnReplayStart != nil && !opts.ContinueFromHistory {
-		durable, err := opts.OnReplayStart(ctx, inputItems)
+		var err error
+		durable, err = opts.OnReplayStart(ctx, inputItems)
 		if err != nil {
 			return nil, err
 		}
-		replayReplacement = !durable
-		if durable {
-			replayPrefix = transcript.FreezeItems(inputItems)
-		}
 	}
+	if !durable {
+		exchange.ReplaceHistory(inputItems)
+	}
+	appendInput := func(items ...any) {
+		inputItems = append(inputItems, items...)
+		exchange.Append(items...)
+	}
+	// Context helpers may insert into older messages. That is an explicit
+	// replacement, not an append to the current exchange.
+	updateContext := func(next []any) {
+		if len(next) != len(inputItems) {
+			exchange.ReplaceHistory(next)
+		}
+		inputItems = next
+	}
+
 	// A locally summarized or otherwise rewritten history may no longer contain
 	// the saved update position. Re-establish the selected effort from the
 	// request we actually reconstructed, not from the transport bookkeeping.
@@ -469,11 +482,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			compactedItems = append(compactedItems, astraConfigurationUpdateItem(astraPostCompactionEffort))
 		}
 		tokenLedger.reset()
+		exchange.ReplaceHistory(compactedItems)
 		return compactedItems, nil
 	}
 
+	beforeRecovered := len(inputItems)
 	recoveredAsyncDeliveries := appendRecoveredAsyncToolResults(&inputItems, opts.InitialAsyncToolResults, toolOutputTokenLimit)
-	inputItems = repairInterruptedToolCalls(inputItems)
+	exchange.Append(inputItems[beforeRecovered:]...)
+	updateContext(repairInterruptedToolCalls(inputItems))
 	if len(inputItems) > 0 {
 		var err error
 		sessionEstimate := 0
@@ -486,14 +502,21 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 	}
 	if !opts.OmitExecutionEnvironment {
-		inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
+		updateContext(ensureExecutionEnvironment(inputItems, opts.WorkDir))
 	}
-	inputItems = ensureAttachmentContext(ctx, inputItems)
+	updateContext(ensureAttachmentContext(ctx, inputItems))
 	if astraConfigurationUpdateEffort != "" {
 		// The update must immediately precede the next user message. Waiting until
 		// after pre-turn compaction also avoids sending an update into compaction
 		// without re-establishing it afterward.
-		inputItems = upsertTrailingConfigurationUpdate(inputItems, astraConfigurationUpdateEffort)
+		before := len(inputItems)
+		next := upsertTrailingConfigurationUpdate(inputItems, astraConfigurationUpdateEffort)
+		if len(next) == before {
+			exchange.ReplaceHistory(next)
+		} else {
+			exchange.Append(next[before:]...)
+		}
+		inputItems = next
 	}
 
 	// Add current prompt with optional attachments
@@ -512,13 +535,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			content = append(content, block)
 		}
-		inputItems = append(inputItems, agenticInputItem{
+		appendInput(agenticInputItem{
 			"type":    "message",
 			"role":    "user",
 			"content": content,
 		})
 	} else if !opts.ContinueFromHistory {
-		inputItems = append(inputItems, agenticInputItem{
+		appendInput(agenticInputItem{
 			"type":    "message",
 			"role":    "user",
 			"content": prompt,
@@ -539,17 +562,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 		}
 		if opts.OnReplayChanged != nil {
-			// A rewrite of prior context is a replacement, never a new exchange.
-			start := len(replayPrefix)
-			if compactionGeneration != 0 || len(items) < start || (firstChanged < start && !reflect.DeepEqual(items[:start], replayPrefix)) {
-				replayReplacement = true
-			}
-			exchange, changed := items, firstChanged
-			if !replayReplacement {
-				exchange = items[start:]
-				changed = max(0, firstChanged-start)
-			}
-			update := ResponsesReplayUpdate{Items: exchange, FirstChanged: changed, ReplacesHistory: replayReplacement}
+			update := ResponsesReplayUpdate{Items: exchange.Items(), FirstChanged: exchange.FirstChanged(), ReplacesHistory: exchange.ReplacesHistory()}
 			if err := opts.OnReplayChanged(ctx, update); err != nil {
 				return err
 			}
@@ -563,6 +576,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return err
 			}
 		}
+		exchange.Committed()
 		firstChanged = len(items)
 		persistedGeneration = compactionGeneration
 		return nil
@@ -571,9 +585,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Context helpers insert updates without editing existing messages.
 		beforeContext := len(inputItems)
-		inputItems = ensureAttachmentContext(ctx, inputItems)
+		updateContext(ensureAttachmentContext(ctx, inputItems))
 		if !opts.OmitExecutionEnvironment {
-			inputItems = ensureExecutionEnvironment(inputItems, opts.WorkDir)
+			updateContext(ensureExecutionEnvironment(inputItems, opts.WorkDir))
 		}
 		if len(inputItems) != beforeContext {
 			firstChanged = 0
@@ -638,7 +652,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		})
 		if err != nil {
 			if text := partialText.String(); text != "" {
-				inputItems = append(inputItems, agenticInputItem{"type": "message", "role": "assistant", "content": text})
+				appendInput(agenticInputItem{"type": "message", "role": "assistant", "content": text})
 				if saveErr := persistHistory(context.WithoutCancel(ctx), inputItems); saveErr != nil {
 					err = errors.Join(err, saveErr)
 				}
@@ -687,7 +701,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
-		inputItems = append(inputItems, outputItems...)
+		appendInput(outputItems...)
 		if persistSteeringHistory != nil || opts.OnHistory != nil || opts.OnHistoryChanged != nil || opts.OnReplayChanged != nil {
 			if err := persistHistory(ctx, inputItems); err != nil {
 				return nil, err
@@ -731,11 +745,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				if err != nil {
 					return nil, fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err)
 				}
-				var appendErr error
-				inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
+				steeringItems, appendErr := appendLocalSteeringInput(nil, localSteering)
 				if appendErr != nil {
 					return nil, fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr)
 				}
+				appendInput(steeringItems...)
 				if localSteering.Commit != nil {
 					if err := localSteering.Commit(ctx, inputItems); err != nil {
 						return nil, fmt.Errorf("record consumed steering: %w", err)
@@ -810,7 +824,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				"call_id": exec.call.CallID,
 				"output":  modelOutput,
 			}
-			inputItems = append(inputItems, toolResultItem)
+			appendInput(toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
 			if image, ok := attachment.TakeToolImage(ctx, exec.output); ok && !exec.isError {
 				imageBlock := map[string]any{"type": "input_image", "detail": "auto", "image_url": "data:" + image.MediaType + ";base64," + base64.StdEncoding.EncodeToString(image.Data)}
@@ -822,7 +836,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					item := agenticInputItem{"type": "message", "role": "user", "content": []any{
 						map[string]any{"type": "input_text", "text": "Image returned by view_image: " + image.Name}, imageBlock,
 					}}
-					inputItems = append(inputItems, item)
+					appendInput(item)
 					localItemsAfterResponse = append(localItemsAfterResponse, item)
 				}
 			}
@@ -880,11 +894,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return nil, fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err)
 			}
 			pendingAsyncDeliveries = append(pendingAsyncDeliveries, deliveryRecords...)
-			var appendErr error
-			inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
+			steeringItems, appendErr := appendLocalSteeringInput(nil, localSteering)
 			if appendErr != nil {
 				return nil, fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr)
 			}
+			appendInput(steeringItems...)
 			if localSteering.Commit != nil {
 				if err := localSteering.Commit(ctx, inputItems); err != nil {
 					return nil, fmt.Errorf("record consumed steering: %w", err)

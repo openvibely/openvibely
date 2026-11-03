@@ -19,6 +19,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/transcript"
 	"github.com/openvibely/openvibely/pkg/attachment"
 	"github.com/openvibely/openvibely/pkg/attachmentcontext"
 	"github.com/openvibely/openvibely/pkg/managedcontext"
@@ -268,39 +269,37 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
 	finalReasoningContent := ""
-	var currentTranscript []CompletionsHistoryMessage
+	var exchange transcript.ExchangeTracker[CompletionsHistoryMessage]
+	exchange.Append(environmentUpdate...)
+	environmentCount := len(environmentUpdate)
 	if !opts.ContinueFromHistory {
-		currentTranscript = []CompletionsHistoryMessage{{Role: "user", Content: prompt, ImageContent: promptBlocks}}
+		exchange.Append(CompletionsHistoryMessage{Role: "user", Content: prompt, ImageContent: promptBlocks})
 	}
 
-	firstChanged := 0
 	replaySnapshot := func() []CompletionsHistoryMessage {
-		items := currentTranscript
 		if opts.OnReplayChanged == nil {
-			items = cloneCompletionsHistory(items)
+			return cloneCompletionsHistory(exchange.Items())
 		}
-		snapshot := make([]CompletionsHistoryMessage, 0, len(environmentUpdate)+len(items))
-		snapshot = append(snapshot, environmentUpdate...)
-		return append(snapshot, items...)
+		return append([]CompletionsHistoryMessage(nil), exchange.Items()...)
 	}
 	saveReplay := func(saveCtx context.Context, snapshot []CompletionsHistoryMessage) error {
 		var err error
 		if opts.OnReplayChanged != nil {
-			err = opts.OnReplayChanged(saveCtx, snapshot, firstChanged)
+			err = opts.OnReplayChanged(saveCtx, snapshot, exchange.FirstChanged())
 		} else if opts.OnReplay != nil {
 			err = opts.OnReplay(saveCtx, snapshot)
 		}
 		if err == nil {
-			firstChanged = len(snapshot)
+			exchange.Committed()
 		}
 		return err
 	}
 
 	// Publish completed exchanges even when a subsequent request is cancelled.
 	defer func() {
-		c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
+		c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(exchange.Items()[environmentCount:])...)
 		c.lastCompletionsReasoning = finalReasoningContent
-		c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(currentTranscript)...)
+		c.lastCompletionsTranscript = append(environmentUpdate, cloneCompletionsHistory(exchange.Items()[environmentCount:])...)
 	}()
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
@@ -312,13 +311,14 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			return CompletionsHistoryMessage{Role: "user", Content: text}
 		}
 		makeWireContext := func(text string) completionsMessage { return completionsMessage{Role: "user", Content: text} }
+		currentTranscript := exchange.Items()[environmentCount:]
 		beforeContext := len(currentTranscript)
 		currentTranscript = managedcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
 		messages = managedcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		currentTranscript = attachmentcontext.SeedReplay(ctx, messages, currentTranscript, readContext, makeReplayContext)
 		messages = attachmentcontext.Ensure(ctx, messages, readContext, makeWireContext)
 		if len(currentTranscript) != beforeContext {
-			firstChanged = min(firstChanged, len(environmentUpdate)+max(0, beforeContext-1))
+			exchange.ReplaceTail(environmentCount+max(0, beforeContext-1), currentTranscript[max(0, beforeContext-1):]...)
 		}
 		// Summary compaction sends first and trims only after provider overflow.
 		_, summarizing := llmcontracts.SummarySystemPromptFromContext(ctx)
@@ -357,7 +357,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		})
 		if err != nil {
 			if text := partialText.String(); text != "" {
-				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "assistant", Content: text})
+				exchange.Append(CompletionsHistoryMessage{Role: "assistant", Content: text})
 			}
 			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
@@ -378,7 +378,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 		allText.WriteString(turnResult.text)
 		finalReasoningContent = turnResult.reasoningContent
-		currentTranscript = append(currentTranscript, CompletionsHistoryMessage{
+		exchange.Append(CompletionsHistoryMessage{
 			Role:             "assistant",
 			Content:          turnResult.text,
 			ReasoningContent: turnResult.reasoningContent,
@@ -471,8 +471,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Content:    truncateToolOutputForModelInput(output, opts.ToolOutputTokenLimit),
 				ToolCallID: tc.ID,
 			})
-			firstChanged = min(firstChanged, len(environmentUpdate)+len(currentTranscript))
-			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{
+			exchange.Append(CompletionsHistoryMessage{
 				Role:       "tool",
 				Content:    output,
 				ToolCallID: tc.ID,
@@ -496,7 +495,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 		messages = append(messages, imageMessages...)
 		for _, image := range imageMessages {
-			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", ImageContent: image.Content.([]map[string]interface{})})
+			exchange.Append(CompletionsHistoryMessage{Role: "user", ImageContent: image.Content.([]map[string]interface{})})
 		}
 		if opts.OnToolBoundarySteering != nil {
 			steering, err := opts.OnToolBoundarySteering(ctx)
@@ -505,7 +504,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			}
 			if steering = strings.TrimSpace(steering); steering != "" {
 				messages = append(messages, completionsMessage{Role: "user", Content: steering})
-				currentTranscript = append(currentTranscript, CompletionsHistoryMessage{Role: "user", Content: steering})
+				exchange.Append(CompletionsHistoryMessage{Role: "user", Content: steering})
 			}
 		}
 
