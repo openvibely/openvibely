@@ -3116,8 +3116,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 .task-list-rows { display:flex; flex-direction:column; }
                 .task-list-rows > .task-list-row, .task-list-rows > [data-pointer-drag-placeholder] { flex-shrink:0; }
                 .task-list-scroll-wrap { position:relative; }
-                .task-list-scroll-rail { display:none;position:absolute;right:-10px;top:3px;bottom:3px;width:8px;border-radius:8px;background:oklch(var(--bc) / .12);touch-action:none;cursor:pointer; }
-                .task-list-scroll-thumb { position:absolute;left:1px;top:0;width:6px;border-radius:8px;background:oklch(var(--bc) / .45);cursor:grab; }
+                .task-list-scroll-rail { display:none;position:absolute;right:-10px;top:3px;bottom:3px;width:8px;border-radius:8px;background:oklch(var(--bc) / .12);touch-action:none;cursor:default; }
+                .task-list-scroll-thumb { position:absolute;left:1px;top:0;width:6px;border-radius:8px;background:oklch(var(--bc) / .45);cursor:default; }
                 .task-list-scroll-thumb:hover { background:oklch(var(--bc) / .65); }
                 .task-list-group[data-browsing]:not([data-searching]) .task-list-scroll-rail { display:block; }
                 .task-list-group[data-browsing]:not([data-searching]) .task-list-rows { max-height:var(--task-list-preview-height, 238px); overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; }
