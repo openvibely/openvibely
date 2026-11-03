@@ -158,7 +158,7 @@ templ TaskWorkspaceScript() {
 		back.title = 'Back to thread (' + (apple ? '⌘⇧D' : 'Ctrl+Shift+D') + ')';
 		back.setAttribute('aria-keyshortcuts', apple ? 'Meta+Shift+D' : 'Control+Shift+D');
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
-		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (←)\nNext (→)\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (' + (apple ? '⌘←' : 'Ctrl+←') + ')\nNext (' + (apple ? '⌘→' : 'Ctrl+→') + ')\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
 		function navigateTask(url, cycling) {
 			var destination = new URL(url, location.href);
 			if (destination.origin !== location.origin) return;
@@ -194,7 +194,8 @@ templ TaskWorkspaceScript() {
 			var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
-			if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && (event.code === 'ArrowLeft' || event.code === 'ArrowRight')) {
+			if (command && !event.altKey && !event.shiftKey && (event.code === 'ArrowLeft' || event.code === 'ArrowRight')) {
+                if (!taskID || !breadcrumb) return;
                 if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"], [role="tab"], [role="tree"], [role="menu"]') && event.target.id !== 'task-message-input') return;
                 if (document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])'))) return;
                 event.preventDefault();
