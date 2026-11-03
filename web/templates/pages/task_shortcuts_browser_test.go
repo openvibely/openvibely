@@ -86,7 +86,7 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("composer", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
-		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),title=button.title||button.dataset.ovTooltip||'';return title.includes('Last visited (') && !title.includes('Previous (') && !title.includes('Next (') && !button.getAttribute('aria-keyshortcuts').includes('Arrow')})())`, "true")
+		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),title=button.title||button.dataset.ovTooltip||'';return title.includes('Last visited (') && title.includes('Previous (Left arrow)') && title.includes('Next (Right arrow)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
 		b.evaluate(`['a','b','c'].forEach(function(id){localStorage.setItem('openvibely-task-thread-message-history-'+id,JSON.stringify(['Older message','Newest message']))});'ready'`)
 		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
 		key := func(code, modifiers string) {
@@ -133,11 +133,20 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 		b.waitFor("breadcrumb closes", `String(!document.querySelector('dialog[open]'))`, "true")
 		b.waitFor("close restores breadcrumb button focus", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-button'))`, "true")
-		// Establish visits without claiming the project-tab arrow shortcuts.
+		// Plain arrows navigate breadcrumbs; modified arrows remain project shortcuts.
 		for _, id := range []string{"b", "c", "b"} {
-			b.evaluate(`window.openVibelyNavigate('/tasks/` + id + `?project_id=shortcuts');'started'`)
+			b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
+			direction := "ArrowRight"
+			if id == "b" && b.evaluate(`location.pathname`) == "/tasks/c" {
+				direction = "ArrowLeft"
+			}
+			key(direction, `{}`)
 			b.waitFor("task visit committed", `location.pathname`, "/tasks/"+id)
-			b.waitFor("composer after visit", `document.activeElement.id`, "task-message-input")
+			b.waitFor("breadcrumb visit settled", `String(!document.querySelector('template[hx-history-elt]') && !!document.getElementById('task-message-input'))`, "true")
+		}
+		b.evaluate(`document.getElementById('task-message-input').focus();'ready'`)
+		for _, code := range []string{"ArrowLeft", "ArrowRight"} {
+			b.waitFor("plain arrows leave composer editing unhandled", `String((function(){var e=new KeyboardEvent('keydown',{key:'`+code+`',code:'`+code+`',bubbles:true,cancelable:true});document.getElementById('task-message-input').dispatchEvent(e);return !e.defaultPrevented && location.pathname==='/tasks/b'})())`, "true")
 		}
 		key("KeyL", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("last task", `document.getElementById('task-detail-content').dataset.taskId`, "c")

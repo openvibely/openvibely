@@ -52,16 +52,21 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 					b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{code:'` + code + `',key:'` + code + `',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true}));'sent'`)
 				}
 
-				b.waitFor("remaining shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]');return button.title.includes('Last visited (') && !button.title.includes('Previous (') && !button.title.includes('Next (') && !button.getAttribute('aria-keyshortcuts').includes('Arrow')})())`, "true")
+				plainKey := func(code string) {
+					b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{code:'` + code + `',key:'` + code + `',bubbles:true,cancelable:true}));'sent'`)
+				}
+
+				b.waitFor("remaining shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]');return button.title.includes('Last visited (') && button.title.includes('Previous (Left arrow)') && button.title.includes('Next (Right arrow)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
 				// Both directions belong to project tabs, even with a breadcrumb present.
 				for _, code := range []string{"ArrowLeft", "ArrowRight"} {
 					b.waitFor("breadcrumb leaves project shortcut unhandled", `String((function(){var e=new KeyboardEvent('keydown',{code:'`+code+`',key:'`+code+`',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true});document.body.dispatchEvent(e);return !e.defaultPrevented})())`, "true")
 				}
-				b.evaluate(`window.openVibelyNavigate('/automations/b` + suffix + `?project_id=p');'started'`)
+				plainKey("ArrowRight")
 				b.waitFor("visit B", `location.pathname`, "/automations/b"+suffix)
-				b.evaluate(`window.openVibelyNavigate('/automations/a` + suffix + `?project_id=p');'started'`)
+				plainKey("ArrowLeft")
 				b.waitFor("return to A", `location.pathname`, "/automations/a"+suffix)
 				b.evaluate(`document.getElementById('editor').focus();'ready'`)
+				plainKey("ArrowRight")
 				key("KeyL")
 				b.waitFor("editor does not navigate", `location.pathname`, "/automations/a"+suffix)
 				b.evaluate(`var menu=document.createElement('div');menu.setAttribute('data-automation-live-menu','');menu.innerHTML='<button id="menu-action">Action</button>';document.body.appendChild(menu);document.getElementById('menu-action').focus();'ready'`)
@@ -70,7 +75,7 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 				b.evaluate(`menu.remove();document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
 				if mode == "edit" {
 					b.evaluate(`var builder=document.createElement('div');builder.setAttribute('data-automation-yaml-builder','');builder.hasUnsavedAutomationChanges=()=>true;document.body.appendChild(builder);window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return false};'ready'`)
-					key("KeyL")
+					plainKey("ArrowRight")
 					b.waitFor("dirty edit asks before leaving", `String(window.confirmCalls)`, "1")
 					b.waitFor("cancel preserves page", `location.pathname`, "/automations/a"+suffix)
 					b.evaluate(`window.confirm=()=>true;'ready'`)
@@ -79,8 +84,8 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 				b.waitFor("last visited B", `location.pathname`, "/automations/b"+suffix)
 				key("KeyL")
 				b.waitFor("last visited toggles to A", `location.pathname`, "/automations/a"+suffix)
-				if lists.Load() != 0 {
-					t.Fatal("removed breadcrumb arrow shortcuts fetched navigation list")
+				if lists.Load() != 1 {
+					t.Fatal("breadcrumb cycling should fetch its list once")
 				}
 
 			})

@@ -158,7 +158,7 @@ templ TaskWorkspaceScript() {
 		back.title = 'Back to thread (' + (apple ? '⌘⇧D' : 'Ctrl+Shift+D') + ')';
 		back.setAttribute('aria-keyshortcuts', apple ? 'Meta+Shift+D' : 'Control+Shift+D');
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
-		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (Left arrow)\nNext (Right arrow)\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
 		function navigateTask(url, cycling) {
 			var destination = new URL(url, location.href);
 			if (destination.origin !== location.origin) return;
@@ -167,12 +167,39 @@ templ TaskWorkspaceScript() {
 			saveVisits();
 			return window.openVibelyNavigate(destination.href);
 		}
+		async function stepRecent(direction) {
+			if (navigating || !breadcrumb || !taskID) return;
+			navigating = true;
+			try {
+				if (!Array.isArray(visits.items)) {
+					var search = breadcrumb.querySelector('[data-breadcrumb-selector-search]');
+					var url = new URL(search.getAttribute('hx-get'), location.href);
+					breadcrumb.querySelectorAll('input[type="hidden"][name]').forEach(function(input) { url.searchParams.set(input.name, input.value); });
+					var response = await fetch(url, {signal:signal});
+					if (!response.ok) throw new Error('Task list unavailable');
+					var html = await response.text();
+					if (signal.aborted || !root.isConnected) return;
+					var parsed = new DOMParser().parseFromString(html, 'text/html');
+					visits.items = Array.from(parsed.querySelectorAll('[data-breadcrumb-selector-option]')).map(function(link) { return link.getAttribute('href'); });
+				}
+				var index = visits.items.findIndex(function(url) { return new URL(url, location.href).pathname === '/tasks/' + taskID; });
+				var next = index + direction;
+				if (index >= 0 && next >= 0 && next < visits.items.length) await navigateTask(visits.items[next], true);
+			} catch (error) {
+				if (!signal.aborted && window.showToast) window.showToast('Could not load recent tasks', 'error');
+			} finally { navigating = false; }
+		}
 		on(document, 'keydown', function(event) {
 			if (event.defaultPrevented || event.isComposing || event.repeat || !root.isConnected || root.closest('[hidden], [inert]')) return;
 			var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
-			if (command && !event.altKey && event.shiftKey && event.code === 'KeyD') {
+			if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && (event.code === 'ArrowLeft' || event.code === 'ArrowRight')) {
+                if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="slider"], [role="tab"], [role="tree"], [role="menu"]')) return;
+                if (document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])'))) return;
+                event.preventDefault();
+                stepRecent(event.code === 'ArrowLeft' ? -1 : 1);
+            } else if (command && !event.altKey && event.shiftKey && event.code === 'KeyD') {
 				if (!taskID || document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])')) || (!panel.hidden && panel.dataset.overlay === 'true')) return;
 				event.preventDefault();
 				workspace(changes.classList.contains('hidden'));
