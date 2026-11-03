@@ -4,7 +4,10 @@
 package requestjson
 
 import (
+	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"fmt"
 	"sort"
 	"sync"
@@ -199,19 +202,21 @@ func MarshalItems(metadata any, key string, items []any) ([]byte, error) {
 		return nil, err
 	}
 	size := len(head) + 2
-	// Encode non-raw rows once before allocating the final body. Omitting their
-	// sizes can force a second full-history allocation for a tiny overflow.
 	encoded := make([][]byte, len(items))
 	for i, item := range items {
 		if HasRawValue(item) {
-			size += rawSizeHint(item) + 1
+			size += rawSizeHint(item)
+		} else if hint, ok := plainSizeHint(item, 0); ok {
+			size += hint
 		} else {
+			// Custom types retain one normal marshal, including its method calls.
 			encoded[i], err = json.Marshal(item)
 			if err != nil {
 				return nil, err
 			}
-			size += len(encoded[i]) + 1
+			size += len(encoded[i])
 		}
+		size++
 	}
 	out := make([]byte, 0, size)
 	out = append(out, head...)
@@ -222,9 +227,11 @@ func MarshalItems(metadata any, key string, items []any) ([]byte, error) {
 		}
 		if encoded[i] != nil {
 			out = append(out, encoded[i]...)
-			continue
+		} else if HasRawValue(item) {
+			out, err = appendValue(out, item)
+		} else {
+			out, err = appendStandardValue(out, item)
 		}
-		out, err = appendValue(out, item)
 		if err != nil {
 			return nil, err
 		}
@@ -240,4 +247,28 @@ func PrepareItems(key string, items []any) (*Field, error) {
 	}
 	encodedKey, _ := json.Marshal(key)
 	return &Field{key: key, raw: body[len(encodedKey)+2 : len(body)-1]}, nil
+}
+
+// appendStandardValue writes ordinary values into the destination rather than
+// retaining a separately marshaled copy of every message. V1 options preserve
+// the existing custom-marshaler, escaping, nil, and error semantics.
+func appendStandardValue(dst []byte, value any) ([]byte, error) {
+	buffer := &appendBuffer{data: dst}
+	encoder := jsontext.NewEncoder(buffer)
+	if err := jsonv2.MarshalEncode(encoder, value, json.DefaultOptionsV1()); err != nil {
+		return nil, err
+	}
+	// A top-level Encoder value terminates with a newline. Here the value is
+	// embedded in an array, whose separators are written by the caller.
+	return bytes.TrimSuffix(buffer.data, []byte{'\n'}), nil
+}
+
+// Keep the encoder's streaming buffer independent of the destination capacity.
+// bytes.Buffer's lending protocol can double a large destination while flushing
+// an otherwise small suffix after a large JSON string.
+type appendBuffer struct{ data []byte }
+
+func (b *appendBuffer) Write(p []byte) (int, error) {
+	b.data = append(b.data, p...)
+	return len(p), nil
 }

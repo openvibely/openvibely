@@ -2236,11 +2236,13 @@ func prepareAgenticMessages(messages []agenticMessage) (*requestjson.Field, erro
 	}
 	items := make([]any, 0, len(messages))
 	for _, m := range messages {
-		raw, err := marshalAgenticMessage(m)
-		if err != nil {
-			return nil, err
+		// Native checkpoint content is already encoded. Pass its envelope to
+		// the shared encoder without constructing a full message-sized buffer.
+		if raw, ok := m.Content.(json.RawMessage); ok {
+			items = append(items, map[string]any{"role": m.Role, "content": raw})
+		} else {
+			items = append(items, m)
 		}
-		items = append(items, json.RawMessage(raw))
 	}
 	return requestjson.PrepareItems("messages", items)
 }

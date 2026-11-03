@@ -113,3 +113,60 @@ func encodedValueSize(v any) (int, error) {
 
 	return Size(v)
 }
+
+// plainSizeHint recognizes ordinary JSON containers without invoking custom
+// marshalers. String lengths are a cheap capacity hint, not a validation or
+// escaping pass: the standard encoder still handles escaping and buffer growth.
+// Bound depth so cyclic/custom values retain the ordinary marshal fallback.
+func plainSizeHint(v any, depth int) (int, bool) {
+	if depth >= 128 {
+		return 0, false
+	}
+	switch x := v.(type) {
+	case nil:
+		return 4, true
+	case bool:
+		return 5, true
+	case int, int64, uint64, float64:
+		return 24, true
+	case string:
+		// Small escaped context must fit beside a large image without forcing
+		// a full-buffer growth for a few newline or quote escapes.
+		if len(x) <= 64<<10 {
+			return StringSize(x), true
+		}
+		return len(x) + 2, true
+	case []any:
+		n := 4
+		for _, v := range x {
+			size, ok := plainSizeHint(v, depth+1)
+			if !ok {
+				return 0, false
+			}
+			n += size + 1
+		}
+		return n, true
+	case []map[string]any:
+		n := 4
+		for _, v := range x {
+			size, ok := plainSizeHint(v, depth+1)
+			if !ok {
+				return 0, false
+			}
+			n += size + 1
+		}
+		return n, true
+	case map[string]any:
+		n := 4
+		for k, v := range x {
+			size, ok := plainSizeHint(v, depth+1)
+			if !ok {
+				return 0, false
+			}
+			n += StringSize(k) + 2 + size
+		}
+		return n, true
+	default:
+		return 0, false
+	}
+}
