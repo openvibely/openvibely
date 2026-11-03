@@ -1,0 +1,111 @@
+package pages
+
+import (
+ "strconv"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Shortcuts(projects []models.Project, projectID string) {
+ @layout.Base("Shortcuts", projects, projectID) {
+  @ShortcutsContent()
+ }
+}
+
+templ ShortcutsContent() {
+ <div id="shortcuts-container">
+  @layout.PageTitle("Shortcuts")
+  <div data-page-header class="flex items-center justify-between mb-6">
+   <h2 class="text-2xl font-bold">Shortcuts</h2>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 mb-6">
+   <div class="w-full max-w-xs flex-1 min-w-44">
+    <div class="card border border-base-300 bg-base-100 shadow-sm">
+     <input type="search" data-shortcut-search aria-label="Search shortcuts" class="w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0" placeholder="Search shortcuts…" autocomplete="off"/>
+    </div>
+   </div>
+   <select data-shortcut-category aria-label="Shortcut category" class="select select-bordered select-sm font-normal">
+    <option value="">All categories</option>
+    for _, group := range shortcutGroups {
+     <option value={ group.Name }>{ group.Name }</option>
+    }
+   </select>
+  </div>
+  <div class="shortcut-groups">
+   for _, group := range shortcutGroups {
+    <section data-shortcut-group={ group.Name } class="mb-7">
+     <h3 class="text-sm font-semibold">{ group.Name }</h3>
+     <p class="text-xs opacity-60 mt-1 mb-3">{ group.Description }</p>
+     <div class="shortcut-rows border border-base-300 rounded-xl overflow-hidden">
+      for _, entry := range group.Entries {
+       <div data-shortcut-row data-mac-only={ strconv.FormatBool(entry.MacOnly) } class="shortcut-row">
+        <div>
+         <div class="text-sm" data-shortcut-action>{ entry.Action }</div>
+         <div class="text-xs opacity-60 mt-1" data-shortcut-context>{ entry.Context }</div>
+        </div>
+        <div class="shortcut-keys">
+         for _, key := range entry.Keys {
+          if key == "or" {
+           <span class="text-xs opacity-50 px-1">or</span>
+          } else {
+           <kbd class="kbd kbd-sm" data-shortcut-key={ key }>{ key }</kbd>
+          }
+         }
+        </div>
+       </div>
+      }
+     </div>
+    </section>
+   }
+  </div>
+  <div data-shortcut-empty hidden class="text-center py-12" role="status" aria-live="polite">
+   <p class="font-medium">No shortcuts found</p>
+   <p class="text-sm opacity-60 mt-2">Try another action or a different category.</p>
+   <button type="button" data-shortcut-reset class="btn btn-sm btn-ghost mt-3">Clear filters</button>
+  </div>
+  <style>
+   #shortcuts-container .shortcut-groups { max-width: 1010px; }
+   #shortcuts-container .shortcut-row { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:13px 16px; border-bottom:1px solid oklch(var(--bc) / .1); }
+   #shortcuts-container .shortcut-row:last-child { border-bottom:0; }
+   #shortcuts-container .shortcut-keys { display:flex; align-items:center; justify-content:flex-end; gap:5px; flex-shrink:0; }
+   #shortcuts-container [hidden] { display:none!important; }
+   @media(max-width:640px) { #shortcuts-container .shortcut-row { flex-wrap:wrap; gap:10px; } }
+  </style>
+  <script>
+   (function() {
+    var root = document.getElementById('shortcuts-container');
+    if (!root || root._shortcutsInitialized) return;
+    root._shortcutsInitialized = true;
+    var apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    var labels = {mod: apple ? '⌘' : 'Ctrl', shift: apple ? '⇧' : 'Shift', forwardDelete: apple ? 'Fn + Delete' : 'Delete'};
+    var names = {mod: apple ? 'Command Cmd' : 'Control Ctrl', shift: 'Shift', forwardDelete: apple ? 'Fn Delete' : 'Delete'};
+    root.querySelectorAll('[data-shortcut-key]').forEach(function(key) {
+     var token = key.dataset.shortcutKey;
+     key.textContent = labels[token] || token;
+     if (names[token]) key.setAttribute('aria-label', names[token]);
+    });
+    var search = root.querySelector('[data-shortcut-search]');
+    var category = root.querySelector('[data-shortcut-category]');
+    function filter() {
+     var query = search.value.trim().toLowerCase(), any = false;
+     root.querySelectorAll('[data-shortcut-group]').forEach(function(group) {
+      var shown = false;
+      group.querySelectorAll('[data-shortcut-row]').forEach(function(row) {
+       var keys = Array.from(row.querySelectorAll('[data-shortcut-key]')).map(function(key) {return names[key.dataset.shortcutKey] || key.textContent;}).join(' ');
+       var matches = (apple || row.dataset.macOnly !== 'true') && (!category.value || category.value === group.dataset.shortcutGroup) && (group.dataset.shortcutGroup + ' ' + row.textContent + ' ' + keys).toLowerCase().includes(query);
+       row.hidden = !matches;
+       shown = shown || matches;
+      });
+      group.hidden = !shown;
+      any = any || shown;
+     });
+     root.querySelector('[data-shortcut-empty]').hidden = any;
+    }
+    search.addEventListener('input', filter);
+    category.addEventListener('change', filter);
+    root.querySelector('[data-shortcut-reset]').addEventListener('click', function() {search.value = ''; category.value = ''; filter(); search.focus();});
+    filter();
+   })();
+  </script>
+ </div>
+}

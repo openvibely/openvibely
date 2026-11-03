@@ -1041,6 +1041,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Themes
 	e.GET("/themes", h.Themes)
+	e.GET("/shortcuts", h.Shortcuts)
 
 	// Custom personalities
 	e.POST("/personality/custom", h.CreateCustomPersonality)

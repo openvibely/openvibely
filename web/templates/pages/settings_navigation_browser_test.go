@@ -24,6 +24,8 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		switch r.URL.Path {
 		case "/tasks/first-thread", "/tasks/second-thread":
 			content = templ.Raw(`<div id="task-thread-view" data-task-id="` + r.URL.Path[len("/tasks/"):] + `">Thread</div>`)
+		case "/shortcuts":
+			content = ShortcutsContent()
 		case "/themes":
 			content = ThemesContent(nil)
 		case "/models", "/agents", "/skills", "/channels", "/personality":
@@ -78,10 +80,18 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		waitFor("layout previews", `String(!document.querySelector('[data-settings-section="layout"]').hidden && document.querySelector('[data-settings-section="themes"]').hidden && !!document.querySelector('[data-settings-section="layout"] .display-preview'))`, "true")
 		b.evaluate(`document.querySelector('[data-settings-link="chat"]').click();'chat'`)
 		waitFor("chat previews", `String(!document.querySelector('[data-settings-section="chat"]').hidden && !!document.querySelector('[data-settings-section="chat"] .display-preview'))`, "true")
-		for _, route := range []string{"models", "channels", "personality", "skills", "agents"} {
+		for _, route := range []string{"models", "shortcuts", "channels", "personality", "skills", "agents"} {
 			b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/` + route + `"] ').click();'configuration'`)
 			waitFor("settings navigation survives "+route, `String(!!document.getElementById('`+route+`-container') && document.documentElement.classList.contains('appearance-settings') && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
 			waitFor("settings rail selected", `String(document.querySelector('.sidebar-aside [data-nav-base="/themes"]').getAttribute('aria-current')==='page')`, "true")
+			if route == "shortcuts" {
+				b.evaluate(`history.back();'back from shortcuts'`)
+				waitFor("models before shortcuts", `String(!!document.getElementById('models-container'))`, "true")
+				b.evaluate(`history.forward();'forward to shortcuts'`)
+				waitFor("shortcuts restored", `String(!!document.getElementById('shortcuts-container'))`, "true")
+				b.evaluate(`var shortcutSearch=document.querySelector('[data-shortcut-search]');shortcutSearch.value='steer';shortcutSearch.dispatchEvent(new Event('input'));'search restored page'`)
+				waitFor("restored shortcuts search works", `Array.from(document.querySelectorAll('[data-shortcut-row]:not([hidden]) [data-shortcut-action]')).map(el=>el.textContent).join('|')`, "Steer the current turn")
+			}
 			if route == "models" {
 				b.evaluate(`history.back();'back within settings'`)
 				waitFor("themes restored by browser back", `String(!!document.getElementById('themes-container'))`, "true")

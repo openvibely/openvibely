@@ -346,7 +346,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/channels?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/personality')) {
 							newUrl = '/personality?project_id=' + encodeURIComponent(newProjectId);
-						} else if (currentPath.includes('/themes')) {
+						} else if (currentPath === '/shortcuts') {
+                            newUrl = '/shortcuts?project_id=' + encodeURIComponent(newProjectId);
+                        } else if (currentPath.includes('/themes')) {
 							newUrl = '/themes?project_id=' + encodeURIComponent(newProjectId);
 						} else {
 							newUrl = '/tasks?project_id=' + encodeURIComponent(newProjectId);
@@ -657,7 +659,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var currentPath = window.location.pathname;
 							document.querySelectorAll('[data-nav-base]').forEach(function(link) {
 								var base = link.getAttribute('data-nav-base');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|personality|organization|workers|settings\/workers)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
