@@ -162,8 +162,28 @@ func TestThreadInputMutationsRejectForeignProject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "original", stored.Content)
 	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
-	// A task input cannot be steered through the project-chat route even in its own project.
+	// Another tab's saved selection must not block an explicitly scoped edit hold.
+	require.NoError(t, tc.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, "default"))
+	for _, query := range []string{"?project_id=" + project.ID, "?project_id=" + models.AllProjectsID} {
+		for _, body := range []string{"edit_token=t", "hold=false&edit_token=t"} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/thread-inputs/"+input.ID+"/edit-hold"+query, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			tc.echo.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		}
+	}
 	rec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/thread-inputs/"+input.ID+"/cancel", nil))
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	rec = httptest.NewRecorder()
+	tc.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/thread-inputs/"+input.ID+"/cancel?project_id="+project.ID, nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	stored, err = tc.stores.ThreadInputs.GetByID(t.Context(), input.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputCancelled, stored.InputStatus)
+	// A task input cannot be steered through the project-chat route even in its own project.
+	rec = httptest.NewRecorder()
 	tc.echo.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/chat/queued/"+input.ID+"/steer?project_id="+project.ID, nil))
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }

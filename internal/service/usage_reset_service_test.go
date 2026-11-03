@@ -51,7 +51,7 @@ func TestUsageResetCreditsAndSelectedRedemption(t *testing.T) {
 				w.WriteHeader(503)
 				return
 			}
-			w.Write([]byte(`{"status":"reset","windows_reset":2}`))
+			w.Write([]byte(`{"code":"reset","windows_reset":2}`))
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -74,7 +74,7 @@ func TestUsageResetCreditsAndSelectedRedemption(t *testing.T) {
 		t.Fatalf("failed redemption must surface without automatic POST retries: calls=%d err=%v", postCalls, err)
 	}
 	result, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "chosen", "stable-attempt")
-	if err != nil || result["status"] != "reset" || postCalls != 2 {
+	if err != nil || result["outcome"] != "reset" || postCalls != 2 {
 		t.Fatalf("result %v, calls %d: %v", result, postCalls, err)
 	}
 	before := calls
@@ -134,7 +134,7 @@ func TestUsageResetAccountCredentialFallback(t *testing.T) {
 		if token != "Bearer good" {
 			t.Errorf("unexpected credential %s", token)
 		}
-		w.Write([]byte(`{"available_count":1,"status":"reset"}`))
+		w.Write([]byte(`{"available_count":1,"code":"reset"}`))
 	}))
 	defer server.Close()
 	old := openaiclient.OpenAIChatGPTAPIBaseURL
@@ -246,7 +246,7 @@ func TestAnthropicUsageResetRequests(t *testing.T) {
 		t.Fatalf("wrong grants: %v", data)
 	}
 	result, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "weekly", "attempt-1")
-	if err != nil || result["result"] != "reset" || claims != 1 {
+	if err != nil || result["outcome"] != "reset" || claims != 1 {
 		t.Fatalf("claim %v err=%v", result, err)
 	}
 	wrongOrg = true
@@ -288,5 +288,50 @@ func TestAnthropicResetGrantAvailability(t *testing.T) {
 				t.Fatalf("grant=%v", credit)
 			}
 		})
+	}
+}
+
+func TestNormalizeUsageResetOutcome(t *testing.T) {
+	openai, anthropic := models.ProviderOpenAI, models.ProviderAnthropic
+	cases := []struct {
+		provider models.LLMProvider
+		raw      string
+		outcome  string
+		retry    bool
+	}{
+		{openai, `{"code":"reset","windows_reset":1}`, "reset", false},
+		{openai, `{"code":"already_redeemed"}`, "reset", false},
+		{openai, `{"code":"nothing_to_reset","windows_reset":0}`, "not_needed", false},
+		{openai, `{"code":"no_credit"}`, "no_longer_available", false},
+		{openai, `{"code":"surprise"}`, "unknown", true},
+		{anthropic, `{"result":"reset","resets_left":0}`, "reset", false},
+		{anthropic, `{"result":"not_limited","reason":"not_limited"}`, "not_needed", false},
+		{anthropic, `{"result":"already_used"}`, "already_used", false},
+		{anthropic, `{"result":"ineligible","reason":"tier"}`, "no_longer_available", false},
+		{anthropic, `{"result":"cooldown","cooldown_until":"2035-01-01T00:00:00Z"}`, "cooldown", false},
+		{anthropic, `{"result":"unavailable","reason":"reset_unconfirmed"}`, "in_progress", true},
+		{anthropic, `{"result":"unavailable","reason":"stamp_indeterminate"}`, "in_progress", true},
+		{anthropic, `{"result":"unavailable","reason":"expired"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"paused"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"unknown_grant"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"not_next_grant"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable","reason":"grant_id_required"}`, "no_longer_available", false},
+		{anthropic, `{"result":"unavailable"}`, "in_progress", true},
+		{anthropic, `{"result":"unavailable","reason":"something_new"}`, "in_progress", true},
+		{openai, `{"status":"reset"}`, "unknown", true},
+		{anthropic, `{"status":"reset"}`, "unknown", true},
+		{openai, `{"result":"reset"}`, "unknown", true},
+		{anthropic, `{"code":"reset","result":"cooldown"}`, "cooldown", false},
+		{anthropic, `{"code":"reset"}`, "unknown", true},
+	}
+	for _, c := range cases {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(c.raw), &raw); err != nil {
+			t.Fatal(err)
+		}
+		got := normalizeUsageResetOutcome(c.provider, raw)
+		if got["outcome"] != c.outcome || got["retry_same_request"] != c.retry || len(got) != 2 {
+			t.Errorf("%s %s: got %v, want outcome=%s retry=%v", c.provider, c.raw, got, c.outcome, c.retry)
+		}
 	}
 }

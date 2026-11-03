@@ -32,6 +32,42 @@ func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKe
 	return s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
 }
 
+// retry_same_request: the redemption may have happened, so a retry must reuse the idempotency key.
+func normalizeUsageResetOutcome(provider models.LLMProvider, raw map[string]any) map[string]any {
+	outcome := "unknown"
+	if provider == models.ProviderOpenAI {
+		switch raw["code"] {
+		case "reset", "already_redeemed":
+			outcome = "reset"
+		case "nothing_to_reset":
+			outcome = "not_needed"
+		case "no_credit":
+			outcome = "no_longer_available"
+		}
+	} else if provider == models.ProviderAnthropic {
+		switch raw["result"] {
+		case "reset":
+			outcome = "reset"
+		case "not_limited":
+			outcome = "not_needed"
+		case "already_used":
+			outcome = "already_used"
+		case "ineligible":
+			outcome = "no_longer_available"
+		case "cooldown":
+			outcome = "cooldown"
+		case "unavailable":
+			switch raw["reason"] {
+			case "expired", "paused", "unknown_grant", "not_next_grant", "grant_id_required":
+				outcome = "no_longer_available"
+			default:
+				outcome = "in_progress"
+			}
+		}
+	}
+	return map[string]any{"outcome": outcome, "retry_same_request": outcome == "in_progress" || outcome == "unknown"}
+}
+
 func (s *UsageAnalyticsService) usageResetRequest(ctx context.Context, accountKey, creditID, idempotencyKey string) (map[string]any, error) {
 	if s.llmConfigRepo == nil || accountKey == "" {
 		return nil, fmt.Errorf("connected OAuth account is required")
@@ -159,7 +195,10 @@ func (s *UsageAnalyticsService) requestUsageResetForCredential(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Provider == models.ProviderAnthropic && creditID == "" {
+	if creditID != "" {
+		return normalizeUsageResetOutcome(cfg.Provider, raw), nil
+	}
+	if cfg.Provider == models.ProviderAnthropic {
 		return normalizeAnthropicResetGrants(raw, time.Now()), nil
 	}
 	return raw, nil

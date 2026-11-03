@@ -337,7 +337,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 var renewalTimer;
                 var renewing = false;
                 var leaseLost = false;
-                var holdURL = '/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold';
+                var taskDetail = document.getElementById('task-detail-content');
+                var projectSelector = document.getElementById('project-selector');
+                // The saved project preference is shared across tabs; send this tab's scope.
+                var projectID = (taskDetail && taskDetail.dataset.projectId) || (projectSelector && projectSelector.value) || '';
+                var projectQuery = projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
+                var holdURL = '/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold' + projectQuery;
                 function detachLifecycle() {
                     clearInterval(renewalTimer);
                     clearInterval(expiryTimer);
@@ -384,7 +389,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                 var held;
                 try {
                     var started = Date.now();
-                    var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({edit_token: editToken})}, true);
+                    var response = await timedFetch(holdURL, {method: 'POST', body: new URLSearchParams({edit_token: editToken})}, true);
                     held = response.editorBody;
                     if (!response.ok) throw new Error(held.message || 'Failed to hold message');
                     holdAcquired = true;
@@ -417,7 +422,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     }
                     saving = true;
                     try {
-                        var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken})});
+                        var response = await timedFetch(holdURL, {method: 'POST', body: new URLSearchParams({hold: 'false', edit_token: editToken})});
                         if (!response.ok && response.status !== 409) throw new Error('Could not release message. Please try again.');
                         released = true;
                         dialog.close();
@@ -458,7 +463,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					save.textContent = 'Saving…';
                     saveUncertain = true;
 					try {
-						var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
+						var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit' + projectQuery, {
 							method: 'POST', body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
 						}, true);
 						var result = response.editorBody;

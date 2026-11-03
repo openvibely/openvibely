@@ -37,7 +37,7 @@ type ConsumeUsageResetRequest struct {
 // @Accept json
 // @Produce json
 // @Param request body ConsumeUsageResetRequest true "Account, credit, and idempotency key"
-// @Success 200 {object} map[string]interface{} "Provider reset result"
+// @Success 200 {object} map[string]interface{} "Normalized reset result: outcome (reset, not_needed, already_used, no_longer_available, cooldown, in_progress, unknown) and retry_same_request"
 // @Failure 400 {object} ErrorResponse "Invalid reset request"
 // @Failure 502 {object} ErrorResponse "Account or provider request failed"
 // @Failure 503 {object} ErrorResponse "Usage service unavailable"

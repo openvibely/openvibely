@@ -1691,7 +1691,7 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  function response(data){return {ok:true,json:async()=>data};}
  window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
- if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return {ok:false,json:async()=>({message:'Temporary failure'})};return new Promise(resolve=>finish=()=>{redeemed=true;resolve(response({status:'reset',windows_reset:1}));});}
+ if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return {ok:false,json:async()=>({message:'Temporary failure'})};return new Promise(resolve=>finish=()=>{redeemed=true;resolve(response({outcome:'reset',retry_same_request:false}));});}
  if(u.pathname.endsWith('/resets'))return response({available_count:redeemed?1:2,credits:redeemed?[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'}]:[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'},{id:'b',status:'available',title:'My reset',expires_at:null}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'openai'}]});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'openai',plan_type:'Pro',limits:[{label:'Weekly',used_percent:redeemed?0:99}]}]});
@@ -1722,41 +1722,49 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
 	fixture := `<main id="reconnect-result"></main><script>
  history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
  window.Chart=function(){this.destroy=function(){};};
- const toasts=[];let payload={},provider='openai';
+ const toasts=[],keys=[];let payload={};
  window.showToast=(text,status)=>toasts.push({text,status});
  const response=data=>({ok:true,json:async()=>data});
- window.fetch=async function(url){
+ window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
- if(u.pathname.endsWith('/resets/consume'))return response(payload);
+ if(u.pathname.endsWith('/resets/consume')){keys.push(JSON.parse(opts.body).idempotency_key);return response(payload);}
  if(u.pathname.endsWith('/resets'))return response({available_count:1,credits:[{id:'credit',title:'Reset',status:'available',usable:true}]});
- if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider}]});
- if(p.get('projection')==='account_limits')return response({account_limits:[{provider,plan_type:'Pro',limits:[{label:'Weekly',used_percent:99}]}]});
+ if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'anthropic'}]});
+ if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[{label:'Weekly',used_percent:99}]}]});
  return response({totals:{},usage_rate:[],model_breakdown:[]});
  };
  window.addEventListener('load',async()=>{
  const result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
  const assert=(ok,message)=>{if(!ok)throw Error(message);};
+ const settled=r=>({outcome:r,retry_same_request:false}),pending=r=>({outcome:r,retry_same_request:true});
  const cases=[
- [{status:'reset'},'completed','Usage reset.'],
- [{outcome:'already_redeemed'},'completed','Usage reset.'],
- [{result:'nothing_to_reset'},'info','Your usage does not need a reset right now.'],
- [{status:'not_limited'},'info','Your usage does not need a reset right now.'],
- [{outcome:'no_credit'},'error','That reset is no longer available.'],
- [{result:'ineligible'},'error','This reset is not currently available.'],
- [{status:'cooldown'},'error','Reset is on cooldown.'],
- [{status:'unexpected',reason:'unrecognized_response'},'warning','Reset was not confirmed. unrecognized response']
+ [settled('reset'),'completed','Usage reset.'],
+ [settled('not_needed'),'info','Your usage does not need a reset right now.'],
+ [settled('already_used'),'error','That reset was already used.'],
+ [settled('no_longer_available'),'error',"This reset isn't available any more. Nothing was used."],
+ [settled('cooldown'),'error',"Another reset was just started on your account. This one wasn't used. Try again in a minute."],
+ [pending('in_progress'),'warning','Your earlier reset may still be going through. Try again in a minute.'],
+ [pending('in_progress'),'warning','Your earlier reset may still be going through. Try again in a minute.'],
+ [settled('reset'),'completed','Usage reset.'],
+ [pending('unknown'),'warning',"Couldn't reset usage. Please try again."],
+ [settled('reset'),'completed','Usage reset.'],
+ [settled('reset'),'completed','Usage reset.']
  ];
  try{
  const card=document.getElementById('accountUsageCards');
- for(provider of ['openai','anthropic'])for(const [data,status,text] of cases){
+ for(const [data,status,text] of cases){
  for(let i=0;i<150&&(!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
  payload=data;const before=toasts.length;card.querySelector('button').click();
  for(let i=0;i<150&&(!card.textContent.includes(text)||toasts.length===before||!card.querySelector('button')||card.querySelector('button').disabled);i++)await wait();
  assert(toasts.length===before+1,'expected one toast per result');
- assert(toasts[before].status===status&&toasts[before].text===text,'incorrect toast for '+JSON.stringify(data));
+ assert(toasts[before].status===status&&toasts[before].text===text,'incorrect toast for '+JSON.stringify(data)+': '+JSON.stringify(toasts[before]));
  assert(card.textContent.includes(text),'inline result missing');
  }
+ assert(new Set(keys.slice(0,5)).size===5,'settled outcomes must start a new attempt each time');
+ assert(keys[5]!==keys[4]&&keys[6]===keys[5]&&keys[7]===keys[5],'in-progress reset must retry with the same idempotency key');
+ assert(keys[8]!==keys[7]&&keys[9]===keys[8],'unknown reset must retry with the same idempotency key');
+ assert(keys[10]!==keys[9],'a confirmed retry must clear the key');
  result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
  });</script>` + rendered.String()
@@ -1808,7 +1816,7 @@ func TestBrowserFunctional_AnalyticsAnthropicResets(t *testing.T) {
  Object.defineProperty(crypto,'randomUUID',{value:undefined,configurable:true});
  window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
- if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));uses--;return response({result:'reset',resets_left:uses});}
+ if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));uses--;return response({outcome:'reset',retry_same_request:false});}
  if(u.pathname.endsWith('/resets'))return response({available_count:uses+1,credits:[{id:'weekly',title:'Weekly reset',status:'available',expires_at:'2035-01-01T00:00:00Z',remaining_uses:uses,clears:['seven_day'],usable:uses>0},{id:'paused',title:'Paused reset',status:'available',expires_at:null,remaining_uses:1,usable:false,unavailable_reason:'paused'}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'claude',provider:'anthropic'}]});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'anthropic',plan_type:'Max',limits:[]}]});
