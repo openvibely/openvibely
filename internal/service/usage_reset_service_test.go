@@ -51,7 +51,7 @@ func TestUsageResetCreditsAndSelectedRedemption(t *testing.T) {
 				w.WriteHeader(503)
 				return
 			}
-			w.Write([]byte(`{"status":"reset","windows_reset":2}`))
+			w.Write([]byte(`{"code":"reset","windows_reset":2}`))
 		default:
 			t.Errorf("unexpected endpoint %s", r.URL.Path)
 			w.WriteHeader(404)
@@ -74,7 +74,7 @@ func TestUsageResetCreditsAndSelectedRedemption(t *testing.T) {
 		t.Fatalf("failed redemption must surface without automatic POST retries: calls=%d err=%v", postCalls, err)
 	}
 	result, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "chosen", "stable-attempt")
-	if err != nil || result["status"] != "reset" || postCalls != 2 {
+	if err != nil || result["code"] != "reset" || postCalls != 2 {
 		t.Fatalf("result %v, calls %d: %v", result, postCalls, err)
 	}
 	before := calls
@@ -134,7 +134,7 @@ func TestUsageResetAccountCredentialFallback(t *testing.T) {
 		if token != "Bearer good" {
 			t.Errorf("unexpected credential %s", token)
 		}
-		w.Write([]byte(`{"available_count":1,"status":"reset"}`))
+		w.Write([]byte(`{"available_count":1,"code":"reset"}`))
 	}))
 	defer server.Close()
 	old := openaiclient.OpenAIChatGPTAPIBaseURL

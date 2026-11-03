@@ -1691,7 +1691,7 @@ func TestBrowserFunctional_AnalyticsUsageResetSelection(t *testing.T) {
  function response(data){return {ok:true,json:async()=>data};}
  window.fetch=async function(url,opts){
  const u=new URL(url,location.href),p=u.searchParams;
- if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return {ok:false,json:async()=>({message:'Temporary failure'})};return new Promise(resolve=>finish=()=>{redeemed=true;resolve(response({status:'reset',windows_reset:1}));});}
+ if(u.pathname.endsWith('/resets/consume')){requests.push(JSON.parse(opts.body));if(requests.length===1)return {ok:false,json:async()=>({message:'Temporary failure'})};return new Promise(resolve=>finish=()=>{redeemed=true;resolve(response({code:'reset',windows_reset:1}));});}
  if(u.pathname.endsWith('/resets'))return response({available_count:redeemed?1:2,credits:redeemed?[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'}]:[{id:'a',status:'available',title:'Earlier reset',expires_at:'2035-01-01T00:00:00Z'},{id:'b',status:'available',title:'My reset',expires_at:null}]});
  if(p.get('projection')==='accounts')return response({accounts:[{key:'account',provider:'openai'}]});
  if(p.get('projection')==='account_limits')return response({account_limits:[{provider:'openai',plan_type:'Pro',limits:[{label:'Weekly',used_percent:redeemed?0:99}]}]});
@@ -1738,14 +1738,17 @@ func TestBrowserFunctional_AnalyticsUsageResetOutcomeToasts(t *testing.T) {
  const wait=()=>new Promise(r=>setTimeout(r,20));
  const assert=(ok,message)=>{if(!ok)throw Error(message);};
  const cases=[
- [{status:'reset'},'completed','Usage reset.'],
- [{outcome:'already_redeemed'},'completed','Usage reset.'],
- [{result:'nothing_to_reset'},'info','Your usage does not need a reset right now.'],
- [{status:'not_limited'},'info','Your usage does not need a reset right now.'],
- [{outcome:'no_credit'},'error','That reset is no longer available.'],
+ [{code:'reset',windows_reset:1},'completed','Usage reset.'],
+ [{code:'already_redeemed'},'completed','Usage reset.'],
+ [{code:'nothing_to_reset',windows_reset:0},'info','Your usage does not need a reset right now.'],
+ [{code:'no_credit'},'error','That reset is no longer available. Refresh to see your current resets.'],
+ [{result:'reset',resets_left:0},'completed','Usage reset.'],
+ [{result:'not_limited',reason:'not_limited'},'info','Your usage does not need a reset right now.'],
+ [{result:'already_used'},'error','That reset was already used.'],
+ [{result:'cooldown'},'error','Reset is on cooldown.'],
  [{result:'ineligible'},'error','This reset is not currently available.'],
- [{status:'cooldown'},'error','Reset is on cooldown.'],
- [{status:'unexpected',reason:'unrecognized_response'},'warning','Reset was not confirmed. unrecognized response']
+ [{result:'unavailable',reason:'expired'},'error','This reset is not currently available.'],
+ [{status:'reset'},'warning',"Couldn't reset usage. Please try again."]
  ];
  try{
  const card=document.getElementById('accountUsageCards');
