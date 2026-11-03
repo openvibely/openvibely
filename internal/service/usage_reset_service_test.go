@@ -310,7 +310,12 @@ func TestNormalizeUsageResetOutcome(t *testing.T) {
 		{`{"result":"unavailable","reason":"reset_unconfirmed"}`, "in_progress", true},
 		{`{"result":"unavailable","reason":"stamp_indeterminate"}`, "in_progress", true},
 		{`{"result":"unavailable","reason":"expired"}`, "no_longer_available", false},
-		{`{"result":"unavailable"}`, "no_longer_available", false},
+		{`{"result":"unavailable","reason":"paused"}`, "no_longer_available", false},
+		{`{"result":"unavailable","reason":"unknown_grant"}`, "no_longer_available", false},
+		{`{"result":"unavailable","reason":"not_next_grant"}`, "no_longer_available", false},
+		{`{"result":"unavailable","reason":"grant_id_required"}`, "no_longer_available", false},
+		{`{"result":"unavailable"}`, "in_progress", true},
+		{`{"result":"unavailable","reason":"something_new"}`, "in_progress", true},
 		{`{"status":"reset"}`, "unknown", true},
 	}
 	for _, c := range cases {

@@ -36,9 +36,7 @@ func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKe
 	return normalizeUsageResetOutcome(raw), nil
 }
 
-// Outcomes: reset, not_needed, already_used, no_longer_available, cooldown,
-// in_progress, unknown. retry_same_request means the redemption may have
-// happened, so a retry must reuse the idempotency key to avoid a second spend.
+// retry_same_request: the redemption may have happened, so a retry must reuse the idempotency key.
 func normalizeUsageResetOutcome(raw map[string]any) map[string]any {
 	outcome := "unknown"
 	if code, ok := raw["code"].(string); ok {
@@ -64,10 +62,10 @@ func normalizeUsageResetOutcome(raw map[string]any) map[string]any {
 			outcome = "cooldown"
 		case "unavailable":
 			switch raw["reason"] {
-			case "reset_unconfirmed", "stamp_indeterminate":
-				outcome = "in_progress"
-			default:
+			case "expired", "paused", "unknown_grant", "not_next_grant", "grant_id_required":
 				outcome = "no_longer_available"
+			default:
+				outcome = "in_progress"
 			}
 		}
 	}
