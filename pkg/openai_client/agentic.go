@@ -16,6 +16,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -161,8 +162,8 @@ type AgenticOptions struct {
 	OnHistoryChanged func(context.Context, []any, int) error
 	// OnReplayChanged persists new items, or a replacement after a history rewrite.
 	OnReplayChanged func(context.Context, ResponsesReplayUpdate) error
-	// ReplayBaseAvailable enables incremental persistence against durable history.
-	ReplayBaseAvailable bool
+	// OnReplayStart verifies the history before collecting this execution.
+	OnReplayStart func(context.Context, []any) (bool, error)
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -393,10 +394,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		})
 	}
 	var replayPrefix []any
-	if opts.OnReplayChanged != nil && opts.ReplayBaseAvailable {
-		replayPrefix = transcript.FreezeItems(inputItems)
+	replayReplacement := true
+	if opts.OnReplayChanged != nil && opts.OnReplayStart != nil && !opts.ContinueFromHistory {
+		durable, err := opts.OnReplayStart(ctx, inputItems)
+		if err != nil {
+			return nil, err
+		}
+		replayReplacement = !durable
+		if durable {
+			replayPrefix = transcript.FreezeItems(inputItems)
+		}
 	}
-	replayReplacement := opts.ContinueFromHistory || !opts.ReplayBaseAvailable
 	// A locally summarized or otherwise rewritten history may no longer contain
 	// the saved update position. Re-establish the selected effort from the
 	// request we actually reconstructed, not from the transport bookkeeping.
@@ -531,7 +539,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 		}
 		if opts.OnReplayChanged != nil {
-			update := ResponsesReplayUpdate{Items: items, Prefix: replayPrefix, FirstChanged: firstChanged, ReplacesHistory: replayReplacement || compactionGeneration != 0, CompleteHistory: true}
+			// A rewrite of prior context is a replacement, never a new exchange.
+			start := len(replayPrefix)
+			if compactionGeneration != 0 || len(items) < start || (firstChanged < start && !reflect.DeepEqual(items[:start], replayPrefix)) {
+				replayReplacement = true
+			}
+			exchange, changed := items, firstChanged
+			if !replayReplacement {
+				exchange = items[start:]
+				changed = max(0, firstChanged-start)
+			}
+			update := ResponsesReplayUpdate{Items: exchange, FirstChanged: changed, ReplacesHistory: replayReplacement}
 			if err := opts.OnReplayChanged(ctx, update); err != nil {
 				return err
 			}

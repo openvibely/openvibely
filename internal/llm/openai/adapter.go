@@ -8,7 +8,6 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/preparedhistory"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
-	"github.com/openvibely/openvibely/internal/transcript"
 	"strings"
 	"sync"
 	"time"
@@ -593,6 +592,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", llmusage.FromTotal(0), err
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
+	beginReplay, saveReplay := a.responsesExchangeRecorder(execID, nil)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		PublishGeneratedImage:     openAIImagePublisher(rt),
 		Model:                     agent.Model,
@@ -623,7 +623,8 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnReplayChanged:                a.responsesExchangeRecorder(execID, nil),
+		OnReplayChanged:                saveReplay,
+		OnReplayStart:                  beginReplay,
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -738,6 +739,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		return "", llmusage.FromTotal(0), err
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
+	beginReplay, saveReplay := a.responsesExchangeRecorder(execID, chatHistory)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		PublishGeneratedImage:     openAIImagePublisher(rt),
 		Model:                     agent.Model,
@@ -769,8 +771,8 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
-		OnReplayChanged:                a.responsesExchangeRecorder(execID, chatHistory),
-		ReplayBaseAvailable:            transcript.CanSeparateHistory(execID, chatHistory),
+		OnReplayChanged:                saveReplay,
+		OnReplayStart:                  beginReplay,
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,

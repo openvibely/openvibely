@@ -279,12 +279,12 @@ func PreparedResponsesSummaryMessages(items []json.RawMessage) openaiclient.Prep
 
 // responsesExchangeRecorder supplies Responses headers to the shared execution
 // boundary recorder. Recovery always receives the full in-memory conversation.
-func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Execution) func(context.Context, openaiclient.ResponsesReplayUpdate) error {
+func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Execution) (func(context.Context, []any) (bool, error), func(context.Context, openaiclient.ResponsesReplayUpdate) error) {
 	if a.execRepo == nil || execID == "" {
-		return nil
+		return nil, nil
 	}
 	recorder := transcript.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID}, history)
-	return func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
+	return recorder.BeginExchange, func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
 		header := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil}
 		replacement := header
 		replacement.ItemsKey = "responses_input"

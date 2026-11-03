@@ -57,12 +57,20 @@ func TestExchangeBoundaryAcrossProviderFormats(t *testing.T) {
 					require.NoError(t, stores.Executions.Create(ctx, &current))
 				}
 				recorder := transcript.NewExchangeRecorder(stores.Executions, models.ConversationOwner{ExecutionID: current.ID}, []models.Execution{source})
+				durable, err := recorder.BeginExchange(ctx, prefix)
+				require.NoError(t, err)
+				require.Equal(t, sourceKind == "completed", durable)
 				items := []any{map[string]any{"role": "user", "content": "LATE_STEER"}}
 				for turn := 0; turn < 2; turn++ {
 					if turn == 1 {
 						items = append(items, map[string]any{"role": "assistant", "content": "TOOL_FINISHED"})
 					}
-					recovery, err := recorder.SaveUpdate(ctx, header, replacement, transcript.ExchangeUpdate{Prefix: prefix, Items: items, FirstChanged: turn})
+					savedItems, changed := items, turn
+					if !durable {
+						savedItems = append(append([]any(nil), prefix...), items...)
+						changed = 0
+					}
+					recovery, err := recorder.SaveUpdate(ctx, header, replacement, transcript.ExchangeUpdate{Items: savedItems, FirstChanged: changed, ReplacesHistory: !durable})
 					require.NoError(t, err)
 					require.Len(t, recovery, len(prefix)+len(items))
 					// Inspect durable state immediately, before handler finalization or any
@@ -79,7 +87,7 @@ func TestExchangeBoundaryAcrossProviderFormats(t *testing.T) {
 					}
 				}
 				summary := []any{map[string]any{"role": "user", "content": "REPLACEMENT_SUMMARY"}}
-				_, err := recorder.SaveUpdate(ctx, header, replacement, transcript.ExchangeUpdate{Prefix: prefix, Items: summary, ReplacesHistory: true})
+				_, err = recorder.SaveUpdate(ctx, header, replacement, transcript.ExchangeUpdate{Items: summary, ReplacesHistory: true})
 				require.NoError(t, err)
 				saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{current.ID})
 				require.NoError(t, err)

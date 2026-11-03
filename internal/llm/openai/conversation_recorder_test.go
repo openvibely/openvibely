@@ -230,9 +230,12 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 	old.ReplayMessages = loaded[old.ID]
 	var recovery []any
 	ctx = llmcontracts.WithResponsesRecovery(ctx, func(items []any) { recovery = items })
-	save := adapter.responsesExchangeRecorder(current.ID, []models.Execution{*old})
+	begin, save := adapter.responsesExchangeRecorder(current.ID, []models.Execution{*old})
+	durable, err := begin(ctx, prefix)
+	require.NoError(t, err)
+	require.True(t, durable)
 	delta := []any{map[string]any{"type": "message", "role": "user", "content": "new request"}}
-	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: delta}))
+	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: delta}))
 	heads, err := stores.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: current.ID}, "", 0)
 	require.NoError(t, err)
 	raw, err := transcript.RestoreReplayRecords(heads)
@@ -245,13 +248,13 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 	all := append(append([]any(nil), prefix...), delta...)
 	require.NoError(t, stores.ThreadInputs.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: current.ID, ResponsesHistory: all}))
 	delta = append(delta, map[string]any{"type": "function_call_output", "call_id": "done", "output": "tool finished"})
-	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: delta, FirstChanged: 1}))
+	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: delta, FirstChanged: 1}))
 	loaded, err = reader.ReplayRowsByExecutionIDs(ctx, []string{current.ID})
 	require.NoError(t, err)
 	require.Len(t, loaded[current.ID][0].Rows.Items, 2)
 	require.NotContains(t, loaded[current.ID][0].FullTranscriptJSON(), "responses_base_execution_ids")
 	replacement := []any{map[string]any{"type": "compaction", "encrypted_content": "replacement"}}
-	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: replacement, ReplacesHistory: true}))
+	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: replacement, ReplacesHistory: true}))
 	require.Equal(t, replacement, recovery)
 	loaded, err = reader.ReplayRowsByExecutionIDs(ctx, []string{current.ID})
 	require.NoError(t, err)
@@ -287,7 +290,11 @@ func TestResponsesExchangeRecorderStartsIndependentBase(t *testing.T) {
 			}
 			e := &models.Execution{TaskID: targetTask, Status: models.ExecRunning}
 			require.NoError(t, stores.Executions.Create(ctx, e))
-			require.NoError(t, a.responsesExchangeRecorder(e.ID, []models.Execution{*source})(ctx, openaiclient.ResponsesReplayUpdate{Prefix: prefix, Items: []any{map[string]any{"role": "user", "content": "next"}}}))
+			begin, save := a.responsesExchangeRecorder(e.ID, []models.Execution{*source})
+			durable, err := begin(ctx, prefix)
+			require.NoError(t, err)
+			require.False(t, durable)
+			require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: append(append([]any(nil), prefix...), map[string]any{"role": "user", "content": "next"}), ReplacesHistory: true}))
 			heads, err := stores.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: e.ID}, "", 0)
 			require.NoError(t, err)
 			raw, err := transcript.RestoreReplayRecords(heads)

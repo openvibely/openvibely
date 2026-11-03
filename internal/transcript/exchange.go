@@ -2,27 +2,20 @@ package transcript
 
 import (
 	"context"
-	"reflect"
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-// ExchangeUpdate describes provider data, independently of its wire format.
-// Prefix is an unchanged candidate for omission, not proof that it is durable.
-// Items contains the rest of the invocation; a rewrite contains all replacement
-// items and sets ReplacesHistory.
+// ExchangeUpdate contains the current execution, or explicitly replaced history.
 type ExchangeUpdate struct {
 	Items           []any
-	Prefix          []any
 	FirstChanged    int
 	ReplacesHistory bool
-	// CompleteHistory means Items includes Prefix; otherwise Items is current-execution data.
-	CompleteHistory bool
 }
 
-// CanSeparateHistory is a cheap preparation hint. SaveUpdate also verifies the
+// CanSeparateHistory is a cheap preparation hint. BeginExchange verifies the
 // source executions in storage before excluding any prefix. In particular,
 // synthetic steering contexts must never count as independently durable history.
 func CanSeparateHistory(execID string, history []models.Execution) bool {
@@ -45,9 +38,9 @@ func CanSeparateHistory(execID string, history []models.Execution) bool {
 }
 
 // ExchangeRecorder owns the save boundary for every provider. Providers supply
-// their current-execution items and headers; those with combined history may
-// additionally supply a prefix. Only other completed, persisted executions can
-// justify omitting that prefix. Recovery includes it regardless of storage form.
+// their current-execution items and headers. BeginExchange establishes prior
+// history using other completed, persisted executions. Recovery includes that
+// history regardless of storage form.
 type ExchangeRecorder struct {
 	mu       sync.Mutex
 	recorder *Recorder
@@ -58,7 +51,7 @@ type ExchangeRecorder struct {
 	sources          []string
 	taskID           string
 	checked, durable bool
-	replacement      bool
+	prefix           []any
 }
 
 func NewExchangeRecorder(store persistence.ConversationStore, owner models.ConversationOwner, history []models.Execution) *ExchangeRecorder {
@@ -105,31 +98,36 @@ func (r *ExchangeRecorder) prefixIsDurable(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// BeginExchange verifies prior history before the client starts collecting its
+// current exchange. Synthetic steering history belongs to the current execution
+// and must instead be included in a replacement save.
+func (r *ExchangeRecorder) BeginExchange(ctx context.Context, prefix []any) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	durable, err := r.prefixIsDurable(ctx)
+	if err != nil {
+		return false, err
+	}
+	if durable {
+		r.prefix = FreezeItems(prefix)
+	}
+	return durable, nil
+}
+
 func (r *ExchangeRecorder) SaveUpdate(ctx context.Context, header, replacement ReplayHeader, u ExchangeUpdate) ([]any, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	durable := true
-	if len(u.Prefix) > 0 && !u.ReplacesHistory {
-		var err error
-		durable, err = r.prefixIsDurable(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	u = selectExchange(u, durable, r.replacement)
-	r.replacement = u.ReplacesHistory
-	replacement.NullItems = u.Items == nil
-
 	if u.ReplacesHistory {
 		header = replacement
 		u.FirstChanged = 0
 	}
+	header.NullItems = u.Items == nil
 	if err := r.recorder.SaveChanged(ctx, header, u.Items, u.FirstChanged); err != nil {
 		return nil, err
 	}
 	saved := r.recorder.Recovery()
-	if !u.ReplacesHistory && len(u.Prefix) > 0 {
-		saved = append(append([]any(nil), u.Prefix...), saved...)
+	if !u.ReplacesHistory && len(r.prefix) > 0 {
+		saved = append(append([]any(nil), r.prefix...), saved...)
 	}
 	return saved, nil
 }
@@ -140,29 +138,4 @@ func (r *ExchangeRecorder) SaveChanged(ctx context.Context, header ReplayHeader,
 }
 func (r *ExchangeRecorder) Save(ctx context.Context, header ReplayHeader, items []any) error {
 	return r.SaveChanged(ctx, header, items, 0)
-}
-
-// selectExchange is the single boundary rule for all recorder callers. Inputs
-// may be a complete provider conversation or an already isolated exchange.
-// Rewrites are sticky for this execution: later saves must not revert to deltas.
-func selectExchange(u ExchangeUpdate, durable, replaced bool) ExchangeUpdate {
-	explicitReplacement := u.ReplacesHistory
-	u.ReplacesHistory = u.ReplacesHistory || replaced
-	if u.CompleteHistory {
-		n := len(u.Prefix)
-		if !durable || len(u.Items) < n || (n > 0 && !reflect.DeepEqual(u.Items[:min(len(u.Items), n)], u.Prefix)) {
-			u.ReplacesHistory = true
-		}
-		if !u.ReplacesHistory {
-			u.Items = u.Items[n:]
-			u.FirstChanged = max(0, u.FirstChanged-n)
-		}
-	} else if len(u.Prefix) > 0 && (!durable || replaced) && !explicitReplacement {
-		u.Items = append(append([]any(nil), u.Prefix...), u.Items...)
-		u.ReplacesHistory = true
-	}
-	if u.ReplacesHistory {
-		u.FirstChanged = 0
-	}
-	return u
 }
