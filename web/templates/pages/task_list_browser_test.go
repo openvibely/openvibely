@@ -157,6 +157,13 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('.task-list-scroll-rail').getBoundingClientRect();return JSON.stringify({X:r.left+4,Y:r.bottom-4})})()`)), &railPoint); err != nil {
 			t.Fatal(err)
 		}
+		b.evaluate(`window.railOuterScroll=document.getElementById('task-list-groups').scrollTop;'capture outer scroll'`)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": railPoint.X, "y": railPoint.Y, "deltaX": 0, "deltaY": 40}, nil)
+		b.waitFor("wheel over track scrolls only its category", `String(document.querySelector('.task-list-rows').scrollTop>0 && document.getElementById('task-list-groups').scrollTop===window.railOuterScroll)`, "true")
+		b.evaluate(`var rows=document.querySelector('.task-list-rows');rows.scrollTop=rows.scrollHeight;var event=new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:40});document.querySelector('.task-list-scroll-thumb').dispatchEvent(event);window.thumbWheelPrevented=event.defaultPrevented;'wheel over thumb at bottom'`)
+		b.waitFor("thumb wheel stays contained at boundary", `String(window.thumbWheelPrevented && document.getElementById('task-list-groups').scrollTop===window.railOuterScroll)`, "true")
+		b.evaluate(`document.querySelector('.task-list-scroll-thumb').dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-1000}));'wheel thumb upwards'`)
+		b.waitFor("thumb wheel returns to start", `String(document.querySelector('.task-list-rows').scrollTop===0)`, "true")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "button": "left", "clickCount": 1, "x": railPoint.X, "y": railPoint.Y}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "button": "left", "clickCount": 1, "x": railPoint.X, "y": railPoint.Y}, nil)
 		b.waitFor("scrollbar track click scrolls category", `String(document.querySelector('.task-list-rows').scrollTop>0)`, "true")
