@@ -144,7 +144,7 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.waitFor("initial seven rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7"]`)
 		b.evaluate(`document.getElementById('task-list-search-toggle').click(); var search=document.getElementById('task-list-search-input'); search.value='login'; search.dispatchEvent(new Event('input')); 'searched'`)
 		b.waitFor("only matching rows including eighth task", visible, `["login-first","login-extra"]`)
-		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); window.previewHeight=document.querySelector('.task-list-group').getBoundingClientRect().height; document.querySelector('.task-list-more').focus(); 'ready to browse'`)
+		b.evaluate(`search.value=''; search.dispatchEvent(new Event('input')); window.previewRowWidth=document.querySelector('.task-list-row').getBoundingClientRect().width; window.previewHeight=document.querySelector('.task-list-group').getBoundingClientRect().height; document.querySelector('.task-list-more').focus(); 'ready to browse'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "text": "\r", "windowsVirtualKeyCode": 13}, nil)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("Browse all focuses first task", `document.activeElement.dataset.taskListRow || ''`, "login-first")
@@ -161,6 +161,7 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "button": "left", "clickCount": 1, "x": railPoint.X, "y": railPoint.Y}, nil)
 		b.waitFor("scrollbar track click scrolls category", `String(document.querySelector('.task-list-rows').scrollTop>0)`, "true")
 		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=0;'reset rail test'`)
+		b.waitFor("browsing keeps task row width", `String(Math.abs(document.querySelector('.task-list-row').getBoundingClientRect().width-window.previewRowWidth)<1)`, "true")
 		var footerPoint struct{ X, Y float64 }
 		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('.task-list-done').getBoundingClientRect();window.footerTop=r.top;window.sidebarScroll=document.getElementById('task-list-groups').scrollTop;return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`)), &footerPoint); err != nil {
 			t.Fatal(err)
@@ -665,7 +666,7 @@ func TestBrowserFunctional_TaskListBrowseScrollPerProject(t *testing.T) {
 		b.waitFor("first project loaded", `String(!!document.querySelector('[data-task-list-row="first-0"]'))`, "true")
 		b.evaluate(`document.querySelector('.task-list-more').click();document.querySelector('.task-list-rows').scrollTop=180;'browsing first'`)
 		b.waitFor("first position", `String(document.querySelector('.task-list-rows').scrollTop)`, "180")
-		b.waitFor("sidebar and nested rows clear scrollbars", `(function(){var outer=document.getElementById('task-list-groups'),inner=document.querySelector('.task-list-rows'),row=inner.querySelector('.task-list-row'),panel=document.getElementById('task-list-panel');var o=outer.getBoundingClientRect(),i=inner.getBoundingClientRect(),r=row.getBoundingClientRect(),p=panel.getBoundingClientRect();return String(i.right-r.right>=16 && o.right-i.right>=8 && o.right<=p.right && outer.scrollWidth<=outer.clientWidth && inner.scrollWidth<=inner.clientWidth)})()`, "true")
+		b.waitFor("sidebar and nested rows clear scrollbars", `(function(){var outer=document.getElementById('task-list-groups'),inner=document.querySelector('.task-list-rows'),row=inner.querySelector('.task-list-row'),panel=document.getElementById('task-list-panel');var o=outer.getBoundingClientRect(),i=inner.getBoundingClientRect(),r=row.getBoundingClientRect(),p=panel.getBoundingClientRect();return String(Math.abs(i.right-r.right)<2 && document.querySelector('.task-list-scroll-rail').getBoundingClientRect().left>=r.right && document.querySelector('.task-list-scroll-rail').getBoundingClientRect().right<=o.right && o.right-i.right>=8 && o.right<=p.right && outer.scrollWidth<=outer.clientWidth && inner.scrollWidth<=inner.clientWidth)})()`, "true")
 		switchTo := func(project string, scroll int, browsing bool) {
 			// Use the actual project synchronization path: the request scope changes
 			// before the outgoing rows are replaced by the HTTP response.
