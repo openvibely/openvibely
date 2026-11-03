@@ -355,6 +355,8 @@ templ TaskListPanel(currentProjectID string) {
             document.addEventListener('htmx:afterRequest', function(e) {
                 if (e.detail.xhr === settingsRequest) settingsRequest = null;
             });
+            // Capture the outgoing workspace before cached thread navigation can
+            // synchronously swap the DOM and change inSettings during this event.
             document.addEventListener('htmx:beforeRequest', function(e) {
                 if (e.detail.target?.id === 'main-content' && isSettingsURL(e.detail.requestConfig?.path || location.href)) settingsRequest = e.detail.xhr;
                 if (e.detail.target && e.detail.target.id === 'main-content' && !inSettings) {
@@ -368,7 +370,7 @@ templ TaskListPanel(currentProjectID string) {
                         boardScroll.set(boardScrollKey(el), {top: el.scrollTop, left: el.scrollLeft});
                     });
                 }
-            });
+            }, true);
             window.syncAppearanceSettings = function() {
                 if (restoringWorkspace) return;
                 var appearance = !!document.getElementById('themes-container');
