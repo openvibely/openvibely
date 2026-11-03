@@ -51,46 +51,38 @@ func TestBrowserFunctional_AutomationBreadcrumbShortcuts(t *testing.T) {
 				key := func(code string) {
 					b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{code:'` + code + `',key:'` + code + `',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true}));'sent'`)
 				}
-				b.waitFor("platform shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),mac=/Mac|iPhone|iPad/.test(navigator.platform);return button.title.includes(mac?'Previous (⌘⇧←)':'Previous (Ctrl+Shift+←)') && button.title.includes(mac?'Next (⌘⇧→)':'Next (Ctrl+Shift+→)') && button.title.includes(mac?'Last visited (⌘⇧L)':'Last visited (Ctrl+Shift+L)') && button.getAttribute('aria-keyshortcuts').includes(mac?'Meta+Shift+L':'Control+Shift+L')})())`, "true")
-				b.waitFor("tooltip", `String((function(){var title=document.querySelector('[data-breadcrumb-selector-button]').title;return title.includes('Previous (') && title.includes('Next (') && title.includes('Last visited (') && !title.includes('Previous:') && !title.includes('Next:') && !title.includes('Last visited:')})())`, "true")
+
+				b.waitFor("remaining shortcut hints", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]');return button.title.includes('Last visited (') && !button.title.includes('Previous (') && !button.title.includes('Next (') && !button.getAttribute('aria-keyshortcuts').includes('Arrow')})())`, "true")
+				// Both directions belong to project tabs, even with a breadcrumb present.
+				for _, code := range []string{"ArrowLeft", "ArrowRight"} {
+					b.waitFor("breadcrumb leaves project shortcut unhandled", `String((function(){var e=new KeyboardEvent('keydown',{code:'`+code+`',key:'`+code+`',shiftKey:true,metaKey:/Mac|iPhone|iPad/.test(navigator.platform),ctrlKey:!/Mac|iPhone|iPad/.test(navigator.platform),bubbles:true,cancelable:true});document.body.dispatchEvent(e);return !e.defaultPrevented})())`, "true")
+				}
+				b.evaluate(`window.openVibelyNavigate('/automations/b` + suffix + `?project_id=p');'started'`)
+				b.waitFor("visit B", `location.pathname`, "/automations/b"+suffix)
+				b.evaluate(`window.openVibelyNavigate('/automations/a` + suffix + `?project_id=p');'started'`)
+				b.waitFor("return to A", `location.pathname`, "/automations/a"+suffix)
 				b.evaluate(`document.getElementById('editor').focus();'ready'`)
-				key("ArrowRight")
+				key("KeyL")
 				b.waitFor("editor does not navigate", `location.pathname`, "/automations/a"+suffix)
-				if lists.Load() != 0 {
-					t.Fatal("editor shortcut fetched navigation list")
-				}
-				b.evaluate(`var menu=document.createElement('div');menu.className='dropdown';menu.setAttribute('data-automation-` + map[bool]string{true: "builder-actions", false: "live-menu"}[mode == "edit"] + `','');menu.innerHTML='<button id="menu-action">Action</button>';document.body.appendChild(menu);document.getElementById('menu-action').focus();'ready'`)
-				for _, code := range []string{"ArrowRight", "ArrowLeft", "KeyL"} {
-					key(code)
-				}
-				if lists.Load() != 0 {
-					t.Fatal("open actions menu fetched navigation list")
-				}
-				b.waitFor("menu keeps current automation", `location.pathname`, "/automations/a"+suffix)
+				b.evaluate(`var menu=document.createElement('div');menu.setAttribute('data-automation-live-menu','');menu.innerHTML='<button id="menu-action">Action</button>';document.body.appendChild(menu);document.getElementById('menu-action').focus();'ready'`)
+				key("KeyL")
+				b.waitFor("menu does not navigate", `location.pathname`, "/automations/a"+suffix)
 				b.evaluate(`menu.remove();document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
 				if mode == "edit" {
 					b.evaluate(`var builder=document.createElement('div');builder.setAttribute('data-automation-yaml-builder','');builder.hasUnsavedAutomationChanges=()=>true;document.body.appendChild(builder);window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return false};'ready'`)
-					key("ArrowRight")
+					key("KeyL")
 					b.waitFor("dirty edit asks before leaving", `String(window.confirmCalls)`, "1")
 					b.waitFor("cancel preserves page", `location.pathname`, "/automations/a"+suffix)
-					b.waitFor("cancel preserves visits", `JSON.parse(sessionStorage.getItem('automation-shortcuts-p')).current`, "a")
-					b.evaluate(`window.confirm=()=>{window.confirmCalls++;return true};'ready'`)
-					key("ArrowRight")
-					b.waitFor("discard navigates", `location.pathname`, "/automations/b"+suffix)
-					b.evaluate(`builder.remove();'ready'`)
-					key("KeyL")
-					b.waitFor("return after discard", `location.pathname`, "/automations/a"+suffix)
-					lists.Store(0)
-					b.evaluate(`var visits=JSON.parse(sessionStorage.getItem('automation-shortcuts-p'));visits.items=null;sessionStorage.setItem('automation-shortcuts-p',JSON.stringify(visits));'ready'`)
+					b.evaluate(`window.confirm=()=>true;'ready'`)
 				}
-				b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
-				for _, step := range []struct{ code, id string }{{"ArrowRight", "b"}, {"ArrowRight", "c"}, {"ArrowLeft", "b"}, {"KeyL", "c"}, {"KeyL", "b"}, {"ArrowLeft", "a"}, {"ArrowLeft", "a"}} {
-					key(step.code)
-					b.waitFor("automation "+step.id, `location.pathname`, "/automations/"+step.id+suffix)
+				key("KeyL")
+				b.waitFor("last visited B", `location.pathname`, "/automations/b"+suffix)
+				key("KeyL")
+				b.waitFor("last visited toggles to A", `location.pathname`, "/automations/a"+suffix)
+				if lists.Load() != 0 {
+					t.Fatal("removed breadcrumb arrow shortcuts fetched navigation list")
 				}
-				if lists.Load() != 1 {
-					t.Fatalf("cycling fetched list %d times", lists.Load())
-				}
+
 			})
 		})
 	}

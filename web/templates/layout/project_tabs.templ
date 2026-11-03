@@ -491,8 +491,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    document.addEventListener('keydown', function(event) {
     if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey === event.ctrlKey || !event.shiftKey || event.altKey) return;
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-    // Task and automation breadcrumbs own horizontal navigation on their pages.
-    if (Array.from(document.querySelectorAll('[data-breadcrumb-selector][data-searchable-selector-kind="Task"], [data-breadcrumb-selector][data-searchable-selector-kind="Automation"]')).some(function(el) { return el.getClientRects().length > 0; })) return;
     var target = event.target;
     var composer = target && (target.id === 'message-input' || target.id === 'task-message-input');
     if (!composer && target && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;

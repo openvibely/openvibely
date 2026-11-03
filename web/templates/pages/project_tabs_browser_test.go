@@ -304,7 +304,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 							composerID = "task-message-input"
 						}
 						browser.evaluate(`(function(){var input=document.createElement('textarea');input.id=` + fmt.Sprintf("%q", composerID) + `;input.dataset.shortcutFixture='true';document.body.appendChild(input);input.focus({preventScroll:true});return 'focused';})()`)
+						browser.evaluate(`var crumb=document.createElement('div');crumb.setAttribute('data-breadcrumb-selector','');crumb.setAttribute('data-searchable-selector-kind','` + map[bool]string{true: "Task", false: "Automation"}[key == "ArrowLeft"] + `');crumb.textContent='Visible breadcrumb';document.body.appendChild(crumb);'ready'`)
 						browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key, "code": key, "modifiers": modifiers}, nil)
+						browser.evaluate(`crumb.remove();'removed'`)
 						browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": key}, nil)
 						browser.waitFor("shortcut project navigation", `new URLSearchParams(location.search).get('project_id')`, want)
 						browser.evaluate(`document.querySelectorAll('[data-shortcut-fixture]').forEach(el=>el.remove()); "removed"`)
