@@ -29,7 +29,49 @@ func (s *UsageAnalyticsService) ConsumeUsageReset(ctx context.Context, accountKe
 		return nil, fmt.Errorf("credit_id and idempotency_key are required and must be bounded")
 	}
 	defer s.accountReads.Forget("resets:" + accountKey)
-	return s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
+	raw, err := s.usageResetRequest(ctx, accountKey, creditID, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeUsageResetOutcome(raw), nil
+}
+
+// Outcomes: reset, not_needed, already_used, no_longer_available, cooldown,
+// in_progress, unknown. retry_same_request means the redemption may have
+// happened, so a retry must reuse the idempotency key to avoid a second spend.
+func normalizeUsageResetOutcome(raw map[string]any) map[string]any {
+	outcome := "unknown"
+	if code, ok := raw["code"].(string); ok {
+		switch code {
+		case "reset", "already_redeemed":
+			outcome = "reset"
+		case "nothing_to_reset":
+			outcome = "not_needed"
+		case "no_credit":
+			outcome = "no_longer_available"
+		}
+	} else if result, ok := raw["result"].(string); ok {
+		switch result {
+		case "reset":
+			outcome = "reset"
+		case "not_limited":
+			outcome = "not_needed"
+		case "already_used":
+			outcome = "already_used"
+		case "ineligible":
+			outcome = "no_longer_available"
+		case "cooldown":
+			outcome = "cooldown"
+		case "unavailable":
+			switch raw["reason"] {
+			case "reset_unconfirmed", "stamp_indeterminate":
+				outcome = "in_progress"
+			default:
+				outcome = "no_longer_available"
+			}
+		}
+	}
+	return map[string]any{"outcome": outcome, "retry_same_request": outcome == "in_progress" || outcome == "unknown"}
 }
 
 func (s *UsageAnalyticsService) usageResetRequest(ctx context.Context, accountKey, creditID, idempotencyKey string) (map[string]any, error) {

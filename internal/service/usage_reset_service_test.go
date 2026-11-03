@@ -74,7 +74,7 @@ func TestUsageResetCreditsAndSelectedRedemption(t *testing.T) {
 		t.Fatalf("failed redemption must surface without automatic POST retries: calls=%d err=%v", postCalls, err)
 	}
 	result, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "chosen", "stable-attempt")
-	if err != nil || result["code"] != "reset" || postCalls != 2 {
+	if err != nil || result["outcome"] != "reset" || postCalls != 2 {
 		t.Fatalf("result %v, calls %d: %v", result, postCalls, err)
 	}
 	before := calls
@@ -246,7 +246,7 @@ func TestAnthropicUsageResetRequests(t *testing.T) {
 		t.Fatalf("wrong grants: %v", data)
 	}
 	result, err := svc.ConsumeUsageReset(ctx, accounts[0].Key, "weekly", "attempt-1")
-	if err != nil || result["result"] != "reset" || claims != 1 {
+	if err != nil || result["outcome"] != "reset" || claims != 1 {
 		t.Fatalf("claim %v err=%v", result, err)
 	}
 	wrongOrg = true
@@ -288,5 +288,39 @@ func TestAnthropicResetGrantAvailability(t *testing.T) {
 				t.Fatalf("grant=%v", credit)
 			}
 		})
+	}
+}
+
+func TestNormalizeUsageResetOutcome(t *testing.T) {
+	cases := []struct {
+		raw     string
+		outcome string
+		retry   bool
+	}{
+		{`{"code":"reset","windows_reset":1}`, "reset", false},
+		{`{"code":"already_redeemed"}`, "reset", false},
+		{`{"code":"nothing_to_reset","windows_reset":0}`, "not_needed", false},
+		{`{"code":"no_credit"}`, "no_longer_available", false},
+		{`{"code":"surprise"}`, "unknown", true},
+		{`{"result":"reset","resets_left":0}`, "reset", false},
+		{`{"result":"not_limited","reason":"not_limited"}`, "not_needed", false},
+		{`{"result":"already_used"}`, "already_used", false},
+		{`{"result":"ineligible","reason":"tier"}`, "no_longer_available", false},
+		{`{"result":"cooldown","cooldown_until":"2035-01-01T00:00:00Z"}`, "cooldown", false},
+		{`{"result":"unavailable","reason":"reset_unconfirmed"}`, "in_progress", true},
+		{`{"result":"unavailable","reason":"stamp_indeterminate"}`, "in_progress", true},
+		{`{"result":"unavailable","reason":"expired"}`, "no_longer_available", false},
+		{`{"result":"unavailable"}`, "no_longer_available", false},
+		{`{"status":"reset"}`, "unknown", true},
+	}
+	for _, c := range cases {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(c.raw), &raw); err != nil {
+			t.Fatal(err)
+		}
+		got := normalizeUsageResetOutcome(raw)
+		if got["outcome"] != c.outcome || got["retry_same_request"] != c.retry || len(got) != 2 {
+			t.Errorf("%s: got %v, want outcome=%s retry=%v", c.raw, got, c.outcome, c.retry)
+		}
 	}
 }

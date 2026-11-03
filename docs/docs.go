@@ -850,7 +850,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Provider reset result",
+                        "description": "Normalized reset result: outcome (reset, not_needed, already_used, no_longer_available, cooldown, in_progress, unknown) and retry_same_request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
