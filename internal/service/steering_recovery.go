@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
-	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"github.com/openvibely/openvibely/internal/llm/recovery"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/transcript"
@@ -133,106 +131,31 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 	if decodeErr != nil {
 		return
 	}
-	if format == "responses_input" {
-		state.mu.Lock()
-		state.providerHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{models.ReplayFromRows(format, original)}}}
-		state.mu.Unlock()
-		return
-	}
-	type recoveryMessage struct {
-		Role               string
-		Content, ToolCalls json.RawMessage
-	}
-	messages := make([]recoveryMessage, 0, len(original))
-	for _, raw := range original {
-		var m recoveryMessage
-		if err := jsonview.Object(raw, func(k string, v json.RawMessage) error {
-			switch strings.ToLower(k) {
-			case "role":
-				return json.Unmarshal(v, &m.Role)
-			case "content":
-				m.Content = v
-			case "tool_calls":
-				m.ToolCalls = v
+	// Anthropic's wire content arrays use a different field in stored replay.
+	// Convert that shape only; all providers retain one complete snapshot.
+	if format == "messages" {
+		converted := make([]json.RawMessage, len(original))
+		for i, raw := range original {
+			var wire struct {
+				Role    string
+				Content json.RawMessage
 			}
-			return nil
-		}); err != nil {
-			return
-		}
-		messages = append(messages, m)
-	}
-	history := make([]models.Execution, 0, len(messages))
-	for i, message := range messages {
-		execution := models.Execution{Status: models.ExecCompleted}
-		var plain string
-		if json.Unmarshal(message.Content, &plain) == nil {
-			if message.Role == "user" {
-				execution.PromptSent = plain
-			} else {
-				execution.Output = plain
-			}
-		} else {
-			// Preserve structured tool/compaction blocks for the summarizer,
-			// and retain user instructions separately even if its summary omits them.
-			execution.Output = string(message.Content)
-			if format == "" {
-				var blocks []struct{ Type, Text string }
-				if json.Unmarshal(message.Content, &blocks) == nil {
-					var text strings.Builder
-					for _, block := range blocks {
-						if block.Type == "text" {
-							text.WriteString(block.Text)
-							text.WriteByte('\n')
-						}
-					}
-					execution.Output = text.String()
-				}
-			}
-			if message.Role == "user" {
-				var blocks []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				}
-				if json.Unmarshal(message.Content, &blocks) == nil {
-					var text strings.Builder
-					for _, block := range blocks {
-						if block.Type == "text" {
-							text.WriteString(block.Text)
-							text.WriteByte('\n')
-						}
-					}
-					execution.PromptSent = text.String()
-				}
-			}
-		}
-		if len(message.ToolCalls) > 0 && string(message.ToolCalls) != "null" {
-			execution.Output += "\nTool calls: " + string(message.ToolCalls)
-		}
-		// Keep the provider's message shape for summary requests. The execution's
-		// text fields retain user instructions and support text-only fallback paths.
-		snapshot := models.ReplayFromRows("", []json.RawMessage{original[i]})
-		if format == "messages" {
-			replay := anthropicclient.Message{Role: message.Role}
-			if json.Unmarshal(message.Content, &replay.Content) != nil {
-				replay.ContentBlocks = message.Content
-			}
-			var encodeErr error
-			var row []byte
-			row, encodeErr = anthropicclient.EncodeReplayMessage(replay)
-			snapshot = models.ReplayFromRows("messages", []json.RawMessage{row})
-			if encodeErr != nil {
+			if json.Unmarshal(raw, &wire) != nil {
 				return
 			}
+			message := anthropicclient.Message{Role: wire.Role}
+			if json.Unmarshal(wire.Content, &message.Content) != nil {
+				message.ContentBlocks = wire.Content
+			}
+			row, err := anthropicclient.EncodeReplayMessage(message)
+			if err != nil {
+				return
+			}
+			converted[i] = row
 		}
-		execution.ReplayMessages = []models.ExecutionReplayMessage{snapshot}
-		history = append(history, execution)
-	}
-	// Recovery contains the conversation through the active execution. Record
-	// that boundary so restoration does not append the covered executions again.
-	if len(history) > 0 {
-		history[len(history)-1].ID = req.ExecID
+		original = converted
 	}
 	state.mu.Lock()
-	state.providerHistory = history
+	state.providerHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{models.ReplayFromRows(format, original)}}}
 	state.mu.Unlock()
 }

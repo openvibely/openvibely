@@ -33,12 +33,26 @@ func TestSharedRecoverySnapshotPreservesCurrentWork(t *testing.T) {
 			require.ErrorIs(t, err, cause)
 			recordProviderRecovery(req, err)
 			got := restoreCurrentSteeringForRecovery(req)
+			require.Len(t, got.ChatHistory, 1, "every provider restores one complete snapshot")
+			require.Equal(t, "current", got.ChatHistory[0].ID)
+			require.Len(t, got.ChatHistory[0].ReplayMessages, 1)
 			require.Empty(t, got.Message)
 			require.Empty(t, got.NativeCompactionStateJSON)
 			require.True(t, llmcontracts.HistoryContinuationFromContext(got.Ctx))
 			text := summaryHistoryText(t, tc.provider, got.ChatHistory)
 			require.Contains(t, text, "NEW_STEERING")
 			require.Contains(t, text, "ALREADY_EDITED")
+			retained := retainedUserMessageHistory(got.ChatHistory, 20000)
+			require.Contains(t, summaryHistoryText(t, tc.provider, retained), "NEW_STEERING")
+			// Repeated recovery replaces the snapshot instead of appending duplicates.
+			recordProviderRecovery(req, err)
+			again := restoreCurrentSteeringForRecovery(req)
+			require.Len(t, again.ChatHistory, 1)
+			require.Equal(t, text, summaryHistoryText(t, tc.provider, again.ChatHistory))
+			// The retry may discard its outer history container without mutating the
+			// captured snapshot used by subsequent recovery attempts.
+			again.ChatHistory[0].ReplayMessages = nil
+			require.Contains(t, summaryHistoryText(t, tc.provider, restoreCurrentSteeringForRecovery(req).ChatHistory), "ALREADY_EDITED")
 		})
 	}
 }
