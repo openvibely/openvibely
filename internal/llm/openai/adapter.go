@@ -592,7 +592,10 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		return "", "", llmusage.FromTotal(0), err
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
-	beginReplay, saveReplay := a.responsesExchangeRecorder(execID, nil)
+	saveReplay, err := a.responsesExchangeRecorder(ctx, execID)
+	if err != nil {
+		return "", "", llmusage.FromTotal(0), err
+	}
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		PublishGeneratedImage:     openAIImagePublisher(rt),
 		Model:                     agent.Model,
@@ -624,7 +627,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 		OnReplayChanged:                saveReplay,
-		OnReplayStart:                  beginReplay,
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
@@ -739,7 +741,10 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		return "", llmusage.FromTotal(0), err
 	}
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
-	beginReplay, saveReplay := a.responsesExchangeRecorder(execID, chatHistory)
+	saveReplay, err := a.responsesExchangeRecorder(ctx, execID)
+	if err != nil {
+		return "", llmusage.FromTotal(0), err
+	}
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		PublishGeneratedImage:     openAIImagePublisher(rt),
 		Model:                     agent.Model,
@@ -772,7 +777,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 		OnReplayChanged:                saveReplay,
-		OnReplayStart:                  beginReplay,
+		IndependentReplay:              !isTaskFollowup,
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,

@@ -2,10 +2,11 @@ package transcript_test
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/internal/testutil/teststores"
 	"github.com/openvibely/openvibely/internal/transcript"
 	"github.com/stretchr/testify/require"
@@ -13,87 +14,86 @@ import (
 
 func TestExchangeBoundaryAcrossProviderFormats(t *testing.T) {
 	for _, format := range []string{"responses_delta", "messages", "array"} {
-		for _, sourceKind := range []string{"completed", "synthetic", "current", "running", "failed", "cross-task"} {
-			t.Run(fmt.Sprintf("%s/%s", format, sourceKind), func(t *testing.T) {
-				ctx := context.Background()
-				stores := teststores.New(t).Stores
-				task := &models.Task{ProjectID: "default", Title: "exchange", Category: models.CategoryCompleted, Status: models.StatusCompleted}
-				require.NoError(t, stores.Tasks.Create(ctx, task))
-				source := models.Execution{TaskID: task.ID, Status: models.ExecCompleted}
-				if sourceKind == "running" {
-					source.Status = models.ExecRunning
-				}
-				if sourceKind == "failed" {
-					source.Status = models.ExecFailed
-				}
-				require.NoError(t, stores.Executions.Create(ctx, &source))
-				current := models.Execution{TaskID: task.ID, Status: models.ExecRunning}
-				require.NoError(t, stores.Executions.Create(ctx, &current))
-				header := transcript.ReplayHeader{Format: "envelope", ItemsKey: format}
-				if format == "array" {
-					header.Format = "array"
-					header.ItemsKey = ""
-				}
-				replacement := header
-				if format == "responses_delta" {
-					replacement.ItemsKey = "responses_input"
-				}
-				prefix := []any{map[string]any{"role": "user", "content": "EARLIER_CURRENT_WORK"}}
-				original := transcript.NewRecorder(stores.Executions, models.ConversationOwner{ExecutionID: current.ID})
-				require.NoError(t, original.Save(ctx, header, prefix))
-				require.NoError(t, transcript.NewRecorder(stores.Executions, models.ConversationOwner{ExecutionID: source.ID}).Save(ctx, header, prefix))
-				source.ReplayMessages = []models.ExecutionReplayMessage{{TranscriptJSON: `[{"role":"user","content":"EARLIER_CURRENT_WORK"}]`}}
-				// In-memory status is not sufficient evidence: query persisted provenance.
-				source.Status = models.ExecCompleted
-				switch sourceKind {
-				case "synthetic":
-					source.ID = current.ID + "-steering-context-1"
-				case "current":
-					source.ID = current.ID
-				case "cross-task":
-					other := &models.Task{ProjectID: "default", Title: "other", Category: models.CategoryCompleted, Status: models.StatusCompleted}
-					require.NoError(t, stores.Tasks.Create(ctx, other))
-					current = models.Execution{TaskID: other.ID, Status: models.ExecRunning}
-					require.NoError(t, stores.Executions.Create(ctx, &current))
-				}
-				recorder := transcript.NewExchangeRecorder(stores.Executions, models.ConversationOwner{ExecutionID: current.ID}, []models.Execution{source})
-				durable, err := recorder.BeginExchange(ctx, prefix)
+		t.Run(format, func(t *testing.T) {
+			ctx := context.Background()
+			stores := teststores.New(t).Stores
+			task := &models.Task{ProjectID: "default", Title: "exchange", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+			require.NoError(t, stores.Tasks.Create(ctx, task))
+			current := models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+			require.NoError(t, stores.Executions.Create(ctx, &current))
+			owner := models.ConversationOwner{ExecutionID: current.ID}
+			header := transcript.ReplayHeader{Format: "envelope", ItemsKey: format}
+			if format == "array" {
+				header.Format = "array"
+				header.ItemsKey = ""
+			}
+			prefix := []any{map[string]any{"role": "user", "content": "ORIGINAL"}, map[string]any{"role": "assistant", "content": "COMPLETED_TOOL"}}
+			require.NoError(t, transcript.NewRecorder(stores.Executions, owner).Save(ctx, header, prefix))
+			for invocation := 0; invocation < 3; invocation++ {
+				recorder, err := transcript.OpenExchangeRecorder(ctx, stores.Executions, owner, false)
 				require.NoError(t, err)
-				require.Equal(t, sourceKind == "completed", durable)
 				items := []any{map[string]any{"role": "user", "content": "LATE_STEER"}}
 				for turn := 0; turn < 2; turn++ {
 					if turn == 1 {
-						items = append(items, map[string]any{"role": "assistant", "content": "TOOL_FINISHED"})
+						items = append(items, map[string]any{"role": "assistant", "content": "NEW_TOOL"})
 					}
-					savedItems, changed := items, turn
-					if !durable {
-						savedItems = append(append([]any(nil), prefix...), items...)
-						changed = 0
-					}
-					recovery, err := recorder.SaveUpdate(ctx, header, replacement, transcript.ExchangeUpdate{Items: savedItems, FirstChanged: changed, ReplacesHistory: !durable})
-					require.NoError(t, err)
-					require.Len(t, recovery, len(prefix)+len(items))
-					// Inspect durable state immediately, before handler finalization or any
-					// in-memory recovery callback could mask a crash-time loss.
+					require.NoError(t, recorder.SaveChanged(ctx, header, items, turn))
+					// Read immediately, without handler finalization. A crash now preserves
+					// every previous invocation, and only one frame for the running one.
 					saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{current.ID})
 					require.NoError(t, err)
-					require.Len(t, saved[current.ID], 1)
-					raw := saved[current.ID][0].FullTranscriptJSON()
-					require.Contains(t, raw, "LATE_STEER")
-					if sourceKind == "completed" {
-						require.NotContains(t, raw, "EARLIER_CURRENT_WORK")
-					} else {
-						require.Contains(t, raw, "EARLIER_CURRENT_WORK")
-					}
+					require.Len(t, saved[current.ID], invocation+2)
+					require.Contains(t, saved[current.ID][0].FullTranscriptJSON(), "COMPLETED_TOOL")
+					require.Contains(t, saved[current.ID][invocation+1].FullTranscriptJSON(), "LATE_STEER")
 				}
-				summary := []any{map[string]any{"role": "user", "content": "REPLACEMENT_SUMMARY"}}
-				_, err = recorder.SaveUpdate(ctx, header, replacement, transcript.ExchangeUpdate{Items: summary, ReplacesHistory: true})
-				require.NoError(t, err)
-				saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{current.ID})
-				require.NoError(t, err)
-				require.Contains(t, saved[current.ID][0].FullTranscriptJSON(), "REPLACEMENT_SUMMARY")
-				require.NotContains(t, saved[current.ID][0].FullTranscriptJSON(), "LATE_STEER")
-			})
-		}
+			}
+			replacement, err := transcript.OpenExchangeRecorder(ctx, stores.Executions, owner, true)
+			require.NoError(t, err)
+			require.NoError(t, replacement.Save(ctx, header, []any{map[string]any{"role": "user", "content": "SUMMARY"}}))
+			saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{current.ID})
+			require.NoError(t, err)
+			require.Len(t, saved[current.ID], 1)
+			require.Contains(t, saved[current.ID][0].FullTranscriptJSON(), "SUMMARY")
+			require.NotContains(t, saved[current.ID][0].FullTranscriptJSON(), "ORIGINAL")
+		})
 	}
+}
+
+func TestExchangePreservesCapturedHistoryAcrossSteeringCommit(t *testing.T) {
+	ctx := context.Background()
+	stores := teststores.New(t).Stores
+	task := &models.Task{ProjectID: "default", Title: "steering", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	require.NoError(t, stores.Tasks.Create(ctx, task))
+	current := models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+	require.NoError(t, stores.Executions.Create(ctx, &current))
+	owner := models.ConversationOwner{ExecutionID: current.ID}
+	header := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta"}
+	old := map[string]any{"type": "message", "role": "user", "content": "OLD_CURRENT_WORK"}
+	next := map[string]any{"type": "message", "role": "user", "content": "NEW_STEER"}
+	require.NoError(t, transcript.NewRecorder(stores.Executions, owner).Save(ctx, header, []any{old}))
+	recorder, err := transcript.OpenExchangeRecorder(ctx, stores.Executions, owner, false)
+	require.NoError(t, err)
+	require.NoError(t, stores.ThreadInputs.CommitLocalSteering(ctx, persistence.LocalSteeringCommit{ExecutionID: current.ID, ResponsesHistory: []any{old, next}}))
+	require.NoError(t, recorder.Save(ctx, header, []any{next}))
+	saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{current.ID})
+	require.NoError(t, err)
+	require.Len(t, saved[current.ID], 2)
+	require.NotContains(t, saved[current.ID][0].FullTranscriptJSON(), "NEW_STEER")
+	require.NotContains(t, saved[current.ID][1].FullTranscriptJSON(), "OLD_CURRENT_WORK")
+}
+
+// Failure to capture existing work must stop setup, not silently drop the prefix.
+type failingExchangeStore struct {
+	persistence.ConversationStore
+	err error
+}
+
+func (s failingExchangeStore) ReadConversationHeads(context.Context, models.ConversationOwner, models.ConversationLane, int64) ([]models.ConversationChange, error) {
+	return nil, s.err
+}
+func TestExchangeSetupFailsClosed(t *testing.T) {
+	cause := errors.New("cannot read existing work")
+	recorder, err := transcript.OpenExchangeRecorder(context.Background(), failingExchangeStore{err: cause}, models.ConversationOwner{ExecutionID: "current"}, false)
+	require.ErrorIs(t, err, cause)
+	require.Nil(t, recorder)
 }

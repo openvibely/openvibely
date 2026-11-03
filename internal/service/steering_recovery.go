@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/openvibely/openvibely/internal/llm/jsonview"
 	"strings"
 	"sync"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/jsonview"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/transcript"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
-	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 type steeringRecoveryKey struct{}
@@ -88,24 +88,20 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 	commit := state.commit
 	providerHistory := state.providerHistory
 	state.mu.Unlock()
-	if providerHistory != nil {
-		req.ChatHistory = append([]models.Execution(nil), providerHistory...)
-		req.Message = ""
-		req.Attachments = nil
-		req.NativeCompactionStateJSON = ""
-		req.NativeCompactionStateRows = nil
-		req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, "")
-		req.Ctx = llmcontracts.WithHistoryContinuation(req.Ctx)
-		return req
+	if providerHistory == nil {
+		if !recorded {
+			return req
+		}
+		// Atomic steering commits supply Responses-shaped rows. Normalize that
+		// committed snapshot into the same restoration path as client failures.
+		snapshot, err := models.EncodeReplayRows("responses_input", items)
+		if err != nil {
+			return req
+		}
+		providerHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{snapshot}}}
+		req.Ctx = llmcontracts.WithInitialSteeringCommit(req.Ctx, commit)
 	}
-	if !recorded {
-		return req
-	}
-	snapshot, err := models.EncodeReplayRows("responses_input", items)
-	if err != nil {
-		return req
-	}
-	req.ChatHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{snapshot}}}
+	req.ChatHistory = append([]models.Execution(nil), providerHistory...)
 	// The recorded history already includes the prompt and its attachments.
 	req.Message = ""
 	req.Attachments = nil
@@ -113,7 +109,6 @@ func restoreCurrentSteeringForRecovery(req llmcontracts.AgentRequest) llmcontrac
 	req.NativeCompactionStateRows = nil
 	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, "")
 	req.Ctx = llmcontracts.WithHistoryContinuation(req.Ctx)
-	req.Ctx = llmcontracts.WithInitialSteeringCommit(req.Ctx, commit)
 	return req
 }
 
@@ -129,16 +124,19 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 	}
 	var original []json.RawMessage
 	var decodeErr error
-	var anthropicFailure *anthropicclient.ConversationError
-	var completionsFailure *openaiclient.ConversationError
-	if errors.As(err, &anthropicFailure) {
-		original, decodeErr = anthropicFailure.RecoveryRows()
-	} else if errors.As(err, &completionsFailure) {
-		original, decodeErr = completionsFailure.RecoveryRows()
-	} else {
+	var failure recovery.Failure
+	if !errors.As(err, &failure) {
 		return
 	}
+	original, decodeErr = failure.RecoveryRows()
+	format := failure.RecoveryFormat()
 	if decodeErr != nil {
+		return
+	}
+	if format == "responses_input" {
+		state.mu.Lock()
+		state.providerHistory = []models.Execution{{ID: req.ExecID, Status: models.ExecCompleted, ReplayMessages: []models.ExecutionReplayMessage{models.ReplayFromRows(format, original)}}}
+		state.mu.Unlock()
 		return
 	}
 	type recoveryMessage struct {
@@ -177,7 +175,7 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 			// Preserve structured tool/compaction blocks for the summarizer,
 			// and retain user instructions separately even if its summary omits them.
 			execution.Output = string(message.Content)
-			if completionsFailure != nil {
+			if format == "" {
 				var blocks []struct{ Type, Text string }
 				if json.Unmarshal(message.Content, &blocks) == nil {
 					var text strings.Builder
@@ -213,7 +211,7 @@ func recordProviderRecovery(req llmcontracts.AgentRequest, err error) {
 		// Keep the provider's message shape for summary requests. The execution's
 		// text fields retain user instructions and support text-only fallback paths.
 		snapshot := models.ReplayFromRows("", []json.RawMessage{original[i]})
-		if anthropicFailure != nil {
+		if format == "messages" {
 			replay := anthropicclient.Message{Role: message.Role}
 			if json.Unmarshal(message.Content, &replay.Content) != nil {
 				replay.ContentBlocks = message.Content

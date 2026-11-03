@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -158,6 +159,8 @@ func TestInitialSteeringCommitPrecedesSampling(t *testing.T) {
 				},
 			})
 			require.Error(t, err)
+			var snapshot recovery.Failure
+			require.Equal(t, !failCommit, errors.As(err, &snapshot), "uncommitted input must not replace the service request")
 			if failCommit {
 				require.ErrorContains(t, err, "checkpoint failure")
 				require.Zero(t, requests.Load())
@@ -204,13 +207,13 @@ func TestResponsesReplayUpdateAppendAndRepair(t *testing.T) {
 		{"append", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, false, false},
 		{"repair", []any{map[string]any{"type": "function_call", "call_id": "unfinished", "name": "read", "arguments": "{}"}, map[string]any{"type": "message", "role": "user", "content": "old"}}, false, true},
 		{"retry", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, true, true},
-		{"unverified-steering", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, false, true},
+		{"independent", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newHTTPTestAPIKeyClient("key")
 			c.History = []Message{{ResponsesInputItems: tc.prefix}}
 			var updates []ResponsesReplayUpdate
-			_, err := c.SendAgentic(context.Background(), "new", &AgenticOptions{Model: "gpt-test", DisableTools: true, OmitExecutionEnvironment: true, ContinueFromHistory: tc.resume, OnReplayStart: func(context.Context, []any) (bool, error) { return tc.name != "unverified-steering", nil }, OnReplayChanged: func(_ context.Context, u ResponsesReplayUpdate) error { updates = append(updates, u); return nil }})
+			_, err := c.SendAgentic(context.Background(), "new", &AgenticOptions{Model: "gpt-test", DisableTools: true, OmitExecutionEnvironment: true, ContinueFromHistory: tc.resume, IndependentReplay: tc.name == "independent", OnReplayChanged: func(_ context.Context, u ResponsesReplayUpdate) error { updates = append(updates, u); return nil }})
 			require.NoError(t, err)
 			require.NotEmpty(t, updates)
 			for _, u := range updates {
@@ -230,24 +233,4 @@ func TestResponsesReplayUpdateAppendAndRepair(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestReplayPreparationFailureDoesNotSendOrSave(t *testing.T) {
-	var requests atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(http.StatusBadRequest) }))
-	defer srv.Close()
-	oldURL := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/"
-	defer func() { OpenAIAPIBaseURL = oldURL }()
-	c := newHTTPTestAPIKeyClient("key")
-	c.History = []Message{{Role: "user", Content: "old"}}
-	saved := false
-	_, err := c.SendAgentic(context.Background(), "new", &AgenticOptions{
-		Model: "gpt-test", DisableTools: true,
-		OnReplayStart:   func(context.Context, []any) (bool, error) { return false, errors.New("history read failed") },
-		OnReplayChanged: func(context.Context, ResponsesReplayUpdate) error { saved = true; return nil },
-	})
-	require.ErrorContains(t, err, "history read failed")
-	require.Zero(t, requests.Load())
-	require.False(t, saved)
 }

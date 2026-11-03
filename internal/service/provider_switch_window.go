@@ -5,10 +5,9 @@ import (
 	"errors"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/persistence"
-	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
-	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 // Preserve the destination's replay format without allowing hydration of the
@@ -132,17 +131,11 @@ func (s *LLMService) callProviderWithTruncatedRecovery(adapter ProviderAdapter, 
 // Provider clients may return an empty result on failure even after executing
 // tools. Never replay such a turn from its original input.
 func recoveryExecutedTools(err error, input []json.RawMessage) bool {
-	var anthropic *anthropicclient.ConversationError
-	var compatible *openaiclient.ConversationError
-	var messages []json.RawMessage
-	var decodeErr error
-	if errors.As(err, &anthropic) {
-		messages, decodeErr = anthropic.RecoveryRows()
-	} else if errors.As(err, &compatible) {
-		messages, decodeErr = compatible.RecoveryRows()
-	} else {
+	var failure recovery.Failure
+	if !errors.As(err, &failure) {
 		return false
 	}
+	messages, decodeErr := failure.RecoveryRows()
 	known := map[string]bool{}
 	for _, message := range input {
 		for _, id := range summaryToolIDs(message) {

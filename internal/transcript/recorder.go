@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -23,25 +24,62 @@ const ReplayGuardID = "replay-guard"
 // Heads retain payload digests rather than another full serialized history;
 // frozen values supply recovery and digests detect equivalent encodings.
 type Recorder struct {
-	mu       sync.Mutex
-	store    persistence.ConversationStore
-	owner    models.ConversationOwner
-	loaded   bool
-	heads    map[string]models.ConversationChange
-	hashes   map[string][32]byte
-	frozen   map[string]any
-	itemIDs  []string
-	recovery []any
+	mu               sync.Mutex
+	store            persistence.ConversationStore
+	owner            models.ConversationOwner
+	loaded           bool
+	heads            map[string]models.ConversationChange
+	hashes           map[string][32]byte
+	frozen           map[string]any
+	itemIDs          []string
+	recovery         []any
+	preserveExisting bool
+	initialized      bool
+	frame            int
+	prefix           []models.ConversationChange
 }
 
 func NewRecorder(store persistence.ConversationStore, owner models.ConversationOwner) *Recorder {
 	return &Recorder{store: store, owner: owner}
 }
 
+// replacePrevious switches an invocation from append to explicit replacement.
+func (r *Recorder) replacePrevious() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.preserveExisting = false
+	r.initialized = true
+	r.prefix = nil
+	r.frame = 0
+	r.itemIDs = nil
+	r.recovery = nil
+	r.frozen = nil
+	r.loaded = false
+}
+
 func (r *Recorder) load(ctx context.Context) error {
 	heads, err := r.store.ReadConversationHeads(ctx, r.owner, "", 0)
 	if err != nil {
 		return err
+	}
+	if !r.initialized {
+		if r.preserveExisting {
+			for _, h := range heads {
+				if !strings.HasPrefix(h.ItemID, ReplayRecordPrefix) || h.Operation == models.ConversationRemove {
+					continue
+				}
+				r.prefix = append(r.prefix, h)
+				parts := strings.Split(h.ItemID, ":")
+				if len(parts) >= 3 {
+					frame, err := strconv.Atoi(parts[1])
+					if err != nil {
+						return err
+					}
+					r.frame = max(r.frame, frame+1)
+				}
+			}
+		}
+		r.initialized = true
 	}
 	r.heads = make(map[string]models.ConversationChange, len(heads))
 	r.hashes = make(map[string][32]byte, len(heads))
@@ -125,16 +163,32 @@ func (r *Recorder) save(ctx context.Context, header ReplayHeader, items []any, f
 		return nil
 	}
 	for len(r.itemIDs) < len(items) {
-		r.itemIDs = append(r.itemIDs, ReplayItemID(0, len(r.itemIDs)))
+		r.itemIDs = append(r.itemIDs, ReplayItemID(r.frame, len(r.itemIDs)))
 	}
 	for i := firstChanged; i < len(items); i++ {
 		item := items[i]
-		if err := stage(r.itemIDs[i], models.ConversationProvider, int64(i), item); err != nil {
+		if err := stage(r.itemIDs[i], models.ConversationProvider, int64(r.frame)<<32|int64(i), item); err != nil {
 			return err
 		}
 	}
-	if err := stage(ReplayHeaderID(0), models.ConversationMetadata, 0, ReplayFrame{ReplayHeader: header, Count: len(items)}); err != nil {
+	if err := stage(ReplayHeaderID(r.frame), models.ConversationMetadata, int64(r.frame), ReplayFrame{ReplayHeader: header, Count: len(items)}); err != nil {
 		return err
+	}
+	// Prefix entries are immutable for this invocation. A steering transaction
+	// may replace the physical frame layout; restore the captured entries atomically
+	// with our new frame rather than accidentally duplicating that transaction's
+	// full conversation snapshot.
+	for _, prior := range r.prefix {
+		if retained != nil {
+			retained[prior.ItemID] = true
+		}
+		old, ok := r.heads[prior.ItemID]
+		if ok && old.Operation == models.ConversationPut && r.hashes[prior.ItemID] == sha256.Sum256(prior.Payload) {
+			continue
+		}
+		prior.PreviousRevision = old.Sequence
+		prior.MutationID = persistence.NewID()
+		changes = append(changes, prior)
 	}
 	if retained != nil {
 		retained[ReplayGuardID] = true

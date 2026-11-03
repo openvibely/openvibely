@@ -278,21 +278,24 @@ func PreparedResponsesSummaryMessages(items []json.RawMessage) openaiclient.Prep
 }
 
 // responsesExchangeRecorder supplies Responses headers to the shared execution
-// boundary recorder. Recovery always receives the full in-memory conversation.
-func (a *Adapter) responsesExchangeRecorder(execID string, history []models.Execution) (func(context.Context, []any) (bool, error), func(context.Context, openaiclient.ResponsesReplayUpdate) error) {
+// recorder. Failed requests carry their full conversation separately through the
+// common recovery snapshot interface.
+func (a *Adapter) responsesExchangeRecorder(ctx context.Context, execID string) (func(context.Context, openaiclient.ResponsesReplayUpdate) error, error) {
 	if a.execRepo == nil || execID == "" {
 		return nil, nil
 	}
-	recorder := transcript.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID}, history)
-	return recorder.BeginExchange, func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
+	recorder, err := transcript.OpenExchangeRecorder(ctx, a.execRepo, models.ConversationOwner{ExecutionID: execID}, llmcontracts.HistoryContinuationFromContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context, u openaiclient.ResponsesReplayUpdate) error {
 		header := transcript.ReplayHeader{Format: "envelope", ItemsKey: "responses_delta", NullItems: u.Items == nil}
 		replacement := header
 		replacement.ItemsKey = "responses_input"
-		saved, err := recorder.SaveUpdate(context.WithoutCancel(ctx), header, replacement, u)
+		_, err := recorder.SaveUpdate(context.WithoutCancel(ctx), header, replacement, u)
 		if err != nil {
 			return fmt.Errorf("save OpenAI exchange: %w", err)
 		}
-		llmcontracts.RecordResponsesRecovery(ctx, saved)
 		return nil
-	}
+	}, nil
 }

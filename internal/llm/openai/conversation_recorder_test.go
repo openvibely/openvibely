@@ -228,12 +228,8 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 	loaded, err := reader.ReplayRowsByExecutionIDs(ctx, []string{old.ID})
 	require.NoError(t, err)
 	old.ReplayMessages = loaded[old.ID]
-	var recovery []any
-	ctx = llmcontracts.WithResponsesRecovery(ctx, func(items []any) { recovery = items })
-	begin, save := adapter.responsesExchangeRecorder(current.ID, []models.Execution{*old})
-	durable, err := begin(ctx, prefix)
+	save, err := adapter.responsesExchangeRecorder(ctx, current.ID)
 	require.NoError(t, err)
-	require.True(t, durable)
 	delta := []any{map[string]any{"type": "message", "role": "user", "content": "new request"}}
 	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: delta}))
 	heads, err := stores.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: current.ID}, "", 0)
@@ -242,7 +238,6 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, raw[0].TranscriptJSON, "responses_delta")
 	require.NotContains(t, raw[0].TranscriptJSON, "old large image")
-	require.Equal(t, append(append([]any(nil), prefix...), delta...), recovery)
 	// Atomic steering writes full state externally; the recorder must reload its
 	// guard and restore delta storage without losing accepted input.
 	all := append(append([]any(nil), prefix...), delta...)
@@ -255,7 +250,6 @@ func TestResponsesExchangeRecorderDeltaRecoveryAndRewrite(t *testing.T) {
 	require.NotContains(t, loaded[current.ID][0].FullTranscriptJSON(), "responses_base_execution_ids")
 	replacement := []any{map[string]any{"type": "compaction", "encrypted_content": "replacement"}}
 	require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: replacement, ReplacesHistory: true}))
-	require.Equal(t, replacement, recovery)
 	loaded, err = reader.ReplayRowsByExecutionIDs(ctx, []string{current.ID})
 	require.NoError(t, err)
 	require.Len(t, loaded[current.ID][0].Rows.Items, 1)
@@ -290,10 +284,8 @@ func TestResponsesExchangeRecorderStartsIndependentBase(t *testing.T) {
 			}
 			e := &models.Execution{TaskID: targetTask, Status: models.ExecRunning}
 			require.NoError(t, stores.Executions.Create(ctx, e))
-			begin, save := a.responsesExchangeRecorder(e.ID, []models.Execution{*source})
-			durable, err := begin(ctx, prefix)
+			save, err := a.responsesExchangeRecorder(ctx, e.ID)
 			require.NoError(t, err)
-			require.False(t, durable)
 			require.NoError(t, save(ctx, openaiclient.ResponsesReplayUpdate{Items: append(append([]any(nil), prefix...), map[string]any{"role": "user", "content": "next"}), ReplacesHistory: true}))
 			heads, err := stores.Executions.ReadConversationHeads(ctx, models.ConversationOwner{ExecutionID: e.ID}, "", 0)
 			require.NoError(t, err)

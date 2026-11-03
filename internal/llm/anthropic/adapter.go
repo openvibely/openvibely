@@ -425,7 +425,10 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		// Store the actual environment for this execution, not the environment
 		// of a future client rebuilding its history.
 		environment := executionenv.Context(workDir)
-		recorder := transcript.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}, nil)
+		recorder, err := transcript.OpenExchangeRecorder(ctx, a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}, llmcontracts.HistoryContinuationFromContext(ctx))
+		if err != nil {
+			return result, err
+		}
 		envJSON, _ := json.Marshal(environment)
 		header := transcript.ReplayHeader{Format: "envelope", ItemsKey: "messages", Envelope: map[string]json.RawMessage{"anthropic_execution_environment": envJSON}, UserContent: req.Message}
 		ctx = context.WithValue(ctx, replaySaverKey{}, func(saveCtx context.Context, messages []anthropicclient.Message, firstChanged int) error {

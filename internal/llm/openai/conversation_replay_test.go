@@ -3,7 +3,9 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/llm/recovery"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,11 +57,7 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 	for _, transport := range []string{"http", "websocket", "completions"} {
 		for _, cancelled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/cancelled=%v", transport, cancelled), func(t *testing.T) {
-				var recoverySnapshot string
-				ctx := llmcontracts.WithResponsesRecovery(retrytest.Context(), func(items []any) {
-					raw, _ := json.Marshal(map[string]any{"responses_input": items})
-					recoverySnapshot = string(raw)
-				})
+				ctx := retrytest.Context()
 				stores := teststores.New(t).Stores
 				task := &models.Task{ProjectID: "default", Title: "Replay", Category: models.CategoryChat, Status: models.StatusCompleted}
 				require.NoError(t, stores.Tasks.Create(ctx, task))
@@ -152,6 +150,13 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 					cancel()
 					if cancelled && phase == 0 {
 						require.Error(t, err)
+						var failure recovery.Failure
+						require.True(t, errors.As(err, &failure))
+						rows, snapshotErr := failure.RecoveryRows()
+						require.NoError(t, snapshotErr)
+						raw, snapshotErr := json.Marshal(rows)
+						require.NoError(t, snapshotErr)
+						require.Contains(t, string(raw), "UNIQUE_SKILL_INSTRUCTIONS")
 					} else {
 						require.NoError(t, err)
 					}
@@ -160,9 +165,6 @@ func TestOrdinaryFollowupRetainsSkillResults(t *testing.T) {
 					require.NotEmpty(t, saved[exec.ID])
 					if phase == 0 {
 						require.Contains(t, saved[exec.ID][0].TranscriptJSON, "UNIQUE_SKILL_INSTRUCTIONS")
-						if transport != "completions" {
-							require.Contains(t, recoverySnapshot, "UNIQUE_SKILL_INSTRUCTIONS")
-						}
 					}
 					exec.ReplayMessages = saved[exec.ID]
 					exec.Status = models.ExecCompleted

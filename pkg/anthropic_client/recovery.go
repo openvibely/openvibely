@@ -29,3 +29,5 @@ func (e *ConversationError) RecoveryRows() ([]json.RawMessage, error) {
 	return e.snapshot.Rows(e.MessagesJSON)
 }
 func (e *ConversationError) JSON() string { return e.snapshot.JSON(e.MessagesJSON) }
+
+func (e *ConversationError) RecoveryFormat() string { return "messages" }

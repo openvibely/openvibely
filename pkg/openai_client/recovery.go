@@ -62,3 +62,5 @@ func (h PreparedCompletionsHistory) SnapshotRows() ([]json.RawMessage, error) {
 	}
 	return snapshot.Rows("")
 }
+
+func (e *ConversationError) RecoveryFormat() string { return "" }

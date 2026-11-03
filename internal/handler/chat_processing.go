@@ -1123,7 +1123,7 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 	}
 	// Record the completed continuation before another late steer takes its
 	// history snapshot. Otherwise both continuations inherit the same old replay.
-	if params.Agent.Provider == models.ProviderOpenAI && previousAssistantOutput != "" && hasNativeSteeringReplay(steeringContextHistory(*params)) {
+	if previousAssistantOutput != "" && len(steeringContextHistory(*params)) != 0 {
 		if err := h.persistSteeringReplayHistory(ctx, *params, previousAssistantOutput); err != nil {
 			return batch, err
 		}
@@ -1167,9 +1167,7 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 		params.Message = combineActivePromptWithSteering(params.Message, steeringInstruction)
 	}
 	params.steeringOutputCursor = previousAssistantOutput
-	if params.Agent.Provider == models.ProviderOpenAI && hasNativeSteeringReplay(steeringContextHistory(*params)) {
-		collapseSteeringContextsCoveredByLatestReplay(params)
-	}
+	collapseSteeringContextsCoveredByLatestReplay(params)
 	return batch, nil
 }
 
@@ -1239,17 +1237,6 @@ func steeringContextHistory(params streamingResponseParams) []models.Execution {
 	return history
 }
 
-func hasNativeSteeringReplay(history []models.Execution) bool {
-	for _, execution := range history {
-		for _, replay := range execution.ReplayMessages {
-			if replay.HasResponsesInput() {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params streamingResponseParams, finalOutput string) error {
 	steeringHistory := steeringContextHistory(params)
 	if len(steeringHistory) == 0 || h.execRepo == nil || strings.TrimSpace(params.ExecID) == "" {
@@ -1285,26 +1272,25 @@ func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params strea
 		return fmt.Errorf("load current replay history: %w", err)
 	}
 	currentReplay := currentReplayByID[params.ExecID]
-	// A continuation without another locally consumed steer leaves the old
-	// checkpoint unchanged. It does not contain this call's prompt or answer.
-	previousReplay := steeringHistory[len(steeringHistory)-1].ReplayMessages
-	if len(currentReplay) > 0 && !slices.Equal(currentReplay, previousReplay) {
-		replay = append(replay, currentReplay...)
-		for _, message := range currentReplay {
-			reasoning.WriteString(message.ReasoningContent)
-		}
-	} else {
-		finalAssistantOutput := finalOutput
-		if strings.HasPrefix(finalOutput, params.steeringOutputCursor) {
-			finalAssistantOutput = finalOutput[len(params.steeringOutputCursor):]
-		}
-		replay = append(replay, models.ExecutionReplayMessage{
-			UserContent:      params.Message,
-			AssistantContent: finalAssistantOutput,
-			ReasoningContent: exec.ReasoningContent,
-		})
-		reasoning.WriteString(exec.ReasoningContent)
+	// Real provider recorders already preserve the entire current execution.
+	// Do not merge it again. Only text-only/legacy callers that saved no new
+	// replay need the fallback below.
+	previous := steeringHistory[len(steeringHistory)-1].ReplayMessages
+	if len(currentReplay) > 0 && !slices.Equal(currentReplay, previous) {
+		return nil
 	}
+
+	// Only callers without a provider replay need a text fallback.
+	finalAssistantOutput := finalOutput
+	if strings.HasPrefix(finalOutput, params.steeringOutputCursor) {
+		finalAssistantOutput = finalOutput[len(params.steeringOutputCursor):]
+	}
+	replay = append(replay, models.ExecutionReplayMessage{
+		UserContent:      params.Message,
+		AssistantContent: finalAssistantOutput,
+		ReasoningContent: exec.ReasoningContent,
+	})
+	reasoning.WriteString(exec.ReasoningContent)
 
 	if err := h.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), params.ExecID, reasoning.String(), replay); err != nil {
 		return fmt.Errorf("persist steering replay history: %w", err)

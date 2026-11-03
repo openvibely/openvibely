@@ -63,7 +63,11 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	}
 
 	if a.execRepo != nil && req.ExecID != "" {
-		ctx = context.WithValue(ctx, conversationRecorderKey{}, conversation.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}, nil))
+		recorder, err := conversation.OpenExchangeRecorder(ctx, a.execRepo, models.ConversationOwner{ExecutionID: req.ExecID}, llmcontracts.HistoryContinuationFromContext(ctx))
+		if err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
+		ctx = context.WithValue(ctx, conversationRecorderKey{}, recorder)
 	}
 
 	switch req.Operation {
@@ -915,7 +919,7 @@ func (a *Adapter) conversationRecorder(ctx context.Context, execID string) *conv
 	if a.execRepo == nil || execID == "" {
 		return nil
 	}
-	return conversation.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID}, nil)
+	return conversation.NewExchangeRecorder(a.execRepo, models.ConversationOwner{ExecutionID: execID})
 }
 
 func buildPreparedClientHistory(history []models.Execution) []openaiclient.PreparedCompletionsHistory {

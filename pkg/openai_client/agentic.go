@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	llmrecovery "github.com/openvibely/openvibely/internal/llm/recovery"
 	"github.com/openvibely/openvibely/internal/llm/requestjson"
 	"github.com/openvibely/openvibely/internal/transcript"
 	"image"
@@ -161,8 +162,8 @@ type AgenticOptions struct {
 	OnHistoryChanged func(context.Context, []any, int) error
 	// OnReplayChanged persists new items, or a replacement after a history rewrite.
 	OnReplayChanged func(context.Context, ResponsesReplayUpdate) error
-	// OnReplayStart verifies the history before collecting this execution.
-	OnReplayStart func(context.Context, []any) (bool, error)
+	// IndependentReplay saves an independent conversation for cross-task chat.
+	IndependentReplay bool
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -288,7 +289,7 @@ type toolCallInfo struct {
 // SendAgentic sends a message with tool use enabled, executing an agentic loop
 // until the model finishes (no more tool calls) or MaxTurns is reached.
 // Uses the OpenAI Responses API with function calling.
-func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOptions) (*AgenticResponse, error) {
+func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOptions) (_ *AgenticResponse, callErr error) {
 	ctx = attachment.WithToolImages(ctx)
 	if opts == nil {
 		opts = &AgenticOptions{}
@@ -393,18 +394,22 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		})
 	}
 
-	var exchange transcript.ExchangeTracker[any]
-	durable := false
-	if opts.OnReplayChanged != nil && opts.OnReplayStart != nil && !opts.ContinueFromHistory {
-		var err error
-		durable, err = opts.OnReplayStart(ctx, inputItems)
-		if err != nil {
-			return nil, err
+	recoveryReady := false
+	defer func() {
+		// Before the first save/send boundary the service request still owns
+		// the pending prompt and attachments. Do not replace it with history
+		// that does not yet contain that input.
+		if recoveryReady {
+			callErr = llmrecovery.WithSnapshot(callErr, "responses_input", inputItems, requestjson.MarshalValue)
 		}
-	}
-	if !durable {
+	}()
+	var exchange transcript.ExchangeTracker[any]
+	// Native checkpoints with no independently replayable history establish a
+	// replacement base; ordinary calls collect only their new exchange.
+	if opts.ContinueFromHistory || opts.IndependentReplay || len(c.History) == 0 {
 		exchange.ReplaceHistory(inputItems)
 	}
+
 	appendInput := func(items ...any) {
 		inputItems = append(inputItems, items...)
 		exchange.Append(items...)
@@ -459,9 +464,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			if completedSampling {
 				// Codex ends the turn on mid-turn compaction failure. Retrying the
 				// original request can repeat tools whose results exist only here.
-				return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "OpenAI mid-turn compaction", err)
+				return items, llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "OpenAI mid-turn compaction", err)
 			}
-			return nil, err
+			return items, err
 		}
 
 		result.Compacted = true
@@ -597,6 +602,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return nil, err
 			}
 		}
+		recoveryReady = true
 		// Prepare once for this turn; filtering remains live for every attempt.
 		opts.requestTools, _ = requestjson.Prepare("tools", tools)
 		// Summary compaction sends first and trims only after provider overflow.

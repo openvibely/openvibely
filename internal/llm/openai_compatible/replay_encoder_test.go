@@ -74,5 +74,7 @@ func TestReplayEncoderMutationAndRetry(t *testing.T) {
 	require.NoError(t, err)
 	expected, err = json.Marshal(messages)
 	require.NoError(t, err)
-	require.Equal(t, string(expected), saved[execution.ID][0].TranscriptJSON)
+	require.Len(t, saved[execution.ID], 2)
+	require.Equal(t, result, saved[execution.ID][0].TranscriptJSON)
+	require.Equal(t, string(expected), saved[execution.ID][1].TranscriptJSON)
 }
