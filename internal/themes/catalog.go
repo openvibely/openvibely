@@ -204,6 +204,10 @@ var runtimeCatalog struct {
 	json string
 }
 
+func contrastRoles(theme Theme) [3]string {
+	return [3]string{theme.CSS["--ov-automation-node-border"], theme.CSS["--ov-automation-edge"], theme.CSS["--ov-yaml-indent-rail"]}
+}
+
 func RuntimeCatalogJSON() string {
 	runtimeCatalog.once.Do(func() {
 		type runtimeTheme struct {
@@ -212,7 +216,7 @@ func RuntimeCatalogJSON() string {
 			Mode       string            `json:"mode"`
 			CSS        map[string]string `json:"css"`
 			SurfaceCSS map[string]string `json:"surfaceCSS,omitempty"`
-			Roles      [7]string         `json:"r"`
+			Roles      [3]string         `json:"r"`
 		}
 		catalog := Catalog()
 		native := make(map[string]bool)
@@ -224,7 +228,7 @@ func RuntimeCatalogJSON() string {
 			// Native themes keep their stylesheet accents and syntax; only their
 			// explicitly defined surface treatments are applied by the browser.
 			if native[theme.ID] {
-				runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, SurfaceCSS: theme.SurfaceCSS, Roles: toggleRuntimeRoles(theme)})
+				runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, SurfaceCSS: theme.SurfaceCSS, Roles: contrastRoles(theme)})
 				continue
 			}
 			css := make(map[string]string, len(theme.CSS)-3)
@@ -241,7 +245,7 @@ func RuntimeCatalogJSON() string {
 			css["--ov-schedule-selection-bg"] = scheduleSelectionBackground(theme, card)
 			runtime = append(runtime, runtimeTheme{
 				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css, SurfaceCSS: theme.SurfaceCSS,
-				Roles: toggleRuntimeRoles(theme),
+				Roles: contrastRoles(theme),
 			})
 		}
 		data, err := json.Marshal(runtime)
