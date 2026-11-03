@@ -2,15 +2,15 @@ package preparedhistory
 
 import (
 	"context"
+	"reflect"
+
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/transcript"
-	"reflect"
 )
 
 type stateEntry struct {
-	raw   string
-	rows  *models.ReplayRows
-	value any
+	identity any
+	value    any
 }
 
 // ReadState shares decoded native state only inside one request scope. A changed
@@ -70,10 +70,21 @@ func replayState[T any](ctx context.Context, replay models.ExecutionReplayMessag
 	if c.statesOwner != nil && (c.boundReplay == nil || (c.boundReplay.TranscriptJSON == replay.TranscriptJSON && c.boundReplay.Rows == replay.Rows)) {
 		c = c.statesOwner
 	}
+	return cachedState(c, replayStateIdentity{replay.TranscriptJSON, replay.Rows}, func() (T, error) { return decode(replay) }, take, replay.TranscriptJSON != "" || replay.Rows != nil)
+}
+
+type replayStateIdentity struct {
+	raw  string
+	rows *models.ReplayRows
+}
+
+// cachedState owns reuse and mutable handoff for both native checkpoints and
+// combined checkpoint history. The owner is bounded by the checkpoint cache.
+func cachedState[T any](c *cache, identity any, decode func() (T, error), take, retain bool) (T, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	key := reflect.TypeFor[T]()
-	if old, ok := c.states[key]; ok && old.raw == replay.TranscriptJSON && old.rows == replay.Rows {
+	if old, ok := c.states[key]; ok && old.identity == identity {
 		if take && c.reusable {
 			return cloneState(old.value.(T)), nil
 		}
@@ -83,12 +94,12 @@ func replayState[T any](ctx context.Context, replay models.ExecutionReplayMessag
 		return old.value.(T), nil
 	}
 	delete(c.states, key)
-	value, err := decode(replay)
-	if err == nil && (!take || c.reusable) && (replay.TranscriptJSON != "" || replay.Rows != nil) {
+	value, err := decode()
+	if err == nil && (!take || c.reusable) && retain {
 		if c.states == nil {
 			c.states = make(map[reflect.Type]stateEntry)
 		}
-		c.states[key] = stateEntry{raw: replay.TranscriptJSON, rows: replay.Rows, value: value}
+		c.states[key] = stateEntry{identity: identity, value: value}
 	}
 	if err == nil && take && c.reusable {
 		return cloneState(value), nil
@@ -98,7 +109,7 @@ func replayState[T any](ctx context.Context, replay models.ExecutionReplayMessag
 
 // ReusableState retains immutable decoded native state across calls. Mutable
 // handoffs clone containers, sharing immutable strings. Explicitly bound checkpoint
-// replay projections may also be reused; newer history stays request-local.
+// combined history may also be reused; newer history stays request-local.
 type ReusableState struct {
 	state  cache
 	replay *models.ExecutionReplayMessage

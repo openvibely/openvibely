@@ -927,6 +927,13 @@ func buildPreparedClientHistory(history []models.Execution) []openaiclient.Prepa
 }
 
 func buildPreparedClientHistoryContext(ctx context.Context, history []models.Execution) []openaiclient.PreparedCompletionsHistory {
+	result, start, count := preparedhistory.ReadCheckpointHistory(ctx, history, func(saved []models.Execution) openaiclient.PreparedCompletionsHistory {
+		return buildPreparedClientHistoryUncached(saved)
+	})
+	return []openaiclient.PreparedCompletionsHistory{buildPreparedClientHistoryUncached(history[:start]).Append(result).Append(buildPreparedClientHistoryUncached(history[start+count:]))}
+}
+
+func buildPreparedClientHistoryUncached(history []models.Execution) openaiclient.PreparedCompletionsHistory {
 	var result openaiclient.PreparedCompletionsHistory
 	for _, exec := range history {
 		if len(exec.ReplayMessages) == 0 {
@@ -934,7 +941,7 @@ func buildPreparedClientHistoryContext(ctx context.Context, history []models.Exe
 			continue
 		}
 		for _, replay := range exec.ReplayMessages {
-			prepared, err := preparedhistory.ReadReplayProjection(ctx, replay, openaiclient.PrepareCompletionsHistory)
+			prepared, err := openaiclient.PrepareCompletionsHistory(replay)
 			if err != nil || prepared.Empty() {
 				copy := exec
 				copy.ReplayMessages = []models.ExecutionReplayMessage{replay}
@@ -943,7 +950,7 @@ func buildPreparedClientHistoryContext(ctx context.Context, history []models.Exe
 			result = result.Append(prepared)
 		}
 	}
-	return []openaiclient.PreparedCompletionsHistory{result}
+	return result
 }
 
 // SummaryHistoryRows uses the same immutable projection as continuing requests.

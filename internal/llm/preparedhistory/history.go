@@ -19,8 +19,7 @@ type entry struct {
 }
 type cache struct {
 	statesOwner  *cache
-	projections  map[projectionKey]any
-	boundHistory map[replayIdentity]bool
+	boundHistory []models.Execution
 	boundReplay  *models.ExecutionReplayMessage
 	reusable     bool
 	mu           sync.Mutex
