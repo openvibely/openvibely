@@ -448,7 +448,7 @@ func TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup, 
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\">Browse all</button> <button type=\"button\" class=\"task-list-browse-controls task-list-done\"><span>Show less</span> <span aria-hidden=\"true\">·</span> <span>Scroll to browse</span></button>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\">Show more</button> <button type=\"button\" class=\"task-list-browse-controls task-list-done\"><span>Show less</span> <span aria-hidden=\"true\">·</span> <span>Scroll to browse</span></button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

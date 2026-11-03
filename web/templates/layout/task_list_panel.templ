@@ -120,7 +120,7 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 			}
 			</div>
 			if len(group.Tasks) > 3 {
-				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks)) }>Browse all</button>
+				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks)) }>Show more</button>
                 <button type="button" class="task-list-browse-controls task-list-done">
                     <span>Show less</span>
                     <span aria-hidden="true">·</span>
