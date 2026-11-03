@@ -3,6 +3,7 @@
 package testutil
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,32 @@ import (
 	"testing"
 	"time"
 )
+
+func TestChromeScratchSocketPath(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux Chrome uses a Unix singleton socket under TMPDIR")
+	}
+	// An inherited long TMPDIR must not lengthen Chrome's socket path either.
+	t.Setenv("TMPDIR", t.TempDir())
+	var scratch string
+	t.Run(strings.Repeat("long-test-name-", 12), func(t *testing.T) {
+		cmd := exec.Command("chrome")
+		ConfigureBrowserStorage(t, cmd)
+		scratch = storageEnv(cmd, "TMPDIR")
+		dir, err := os.MkdirTemp(scratch, "com.google.Chrome.")
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener, err := net.Listen("unix", filepath.Join(dir, "SingletonSocket"))
+		if err != nil {
+			t.Fatalf("Chrome singleton socket cannot bind: %v", err)
+		}
+		defer listener.Close()
+	})
+	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
+		t.Errorf("scratch remains after cleanup: %s: %v", scratch, err)
+	}
+}
 
 func TestChromeStorageConcurrentCleanup(t *testing.T) {
 	chrome := ""

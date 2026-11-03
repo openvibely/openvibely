@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,21 @@ func ConfigureBrowserStorage(t testing.TB, cmd *exec.Cmd) {
 	}
 	root := t.TempDir()
 	profile, cache, scratch := filepath.Join(root, "profile"), filepath.Join(root, "cache"), filepath.Join(root, "tmp")
+	if runtime.GOOS == "linux" {
+		// Chrome adds com.google.Chrome.XXXXXX/SingletonSocket to TMPDIR.
+		// Linux Unix socket paths are limited to 108 bytes, so neither a test
+		// name nor an inherited (potentially long) TMPDIR can be used here.
+		var err error
+		scratch, err = os.MkdirTemp("/tmp", "ov-chrome-")
+		if err != nil {
+			t.Fatalf("create browser scratch directory: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll(scratch); err != nil {
+				t.Errorf("remove browser scratch directory: %v", err)
+			}
+		})
+	}
 	for _, dir := range []string{profile, cache, scratch} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatalf("create browser storage: %v", err)
