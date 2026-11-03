@@ -1473,7 +1473,7 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	body := out.String()
 
 	for _, want := range []string{
-		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
+		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col"`,
 		`class="min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
 		`class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden"`,
 	} {

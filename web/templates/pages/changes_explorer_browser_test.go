@@ -145,6 +145,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		}
 		b.evaluate(`document.getElementById('task-list-toggle').click();window.taskWorkspace.openChanges();'open'`)
 		b.waitFor("tree replaces collapsed task list", `String(document.documentElement.classList.contains('changes-explorer-active') && !document.documentElement.classList.contains('task-list-collapsed') && document.querySelectorAll('#changes-explorer-host [data-explorer-path]').length===2)`, "true")
+		b.waitFor("explorer rows clear scrollbar", `(function(){var host=document.getElementById('changes-explorer-host'),rows=Array.from(host.querySelectorAll('.task-list-row,.explorer-back'));return String(rows.length>0 && rows.every(function(row){return host.getBoundingClientRect().right-row.getBoundingClientRect().right>=16}) && host.scrollWidth<=host.clientWidth)})()`, "true")
 		b.waitFor("automatically expanded toggle state", `JSON.stringify([document.getElementById('task-list-toggle').getAttribute('aria-expanded'),document.getElementById('task-list-toggle').getAttribute('aria-label')])`, `["true","Collapse task list"]`)
 		b.waitFor("explorer controls visible in sidebar", `String(document.querySelector('#changes-explorer-host .explorer-back').getBoundingClientRect().height>0 && document.querySelector('#changes-explorer-host [data-explorer-path]').getBoundingClientRect().height>0)`, "true")
 		b.evaluate(`document.getElementById('task-list-toggle').click();'collapse explorer'`)

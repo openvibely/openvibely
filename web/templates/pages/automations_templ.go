@@ -334,14 +334,14 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		}
 		ctx = templ.InitializeContext(ctx)
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<script>\n(function() {\n if (window.openVibelyAutomationListEventsInstalled) return;\n window.openVibelyAutomationListEventsInstalled = true;\n var pending = false, timer = null, pressed = false, inFlight = false;\n function root() { return document.getElementById('automations-container'); }\n function busy(node) { return pressed || node.contains(document.activeElement) || node.querySelector('.htmx-request, [data-card-selected=\"true\"]') || document.querySelector('dialog[open]'); }\n function refresh() {\n  clearTimeout(timer);\n  var node = root();\n  if (!node) { pending = false; return; }\n  if (!pending || inFlight || document.hidden || busy(node)) return;\n  pending = false; inFlight = true;\n  var url = node.dataset.cardPaginationUrl;\n  if (window.cardPaginationRefreshURL) url = window.cardPaginationRefreshURL(node, url);\n  Promise.resolve(htmx.ajax('GET', url, {source:node, target:node, swap:'outerHTML', headers:{'X-Automation-List-Refresh':'true'}})).finally(function(){inFlight=false;if(pending) timer=setTimeout(refresh,100);});\n }\n function changed(event) {\n  var node = root(); if (!node) return;\n  var project = new URL(node.dataset.cardPaginationUrl, location.href).searchParams.get('project_id');\n  if (event && event.type === 'sse-automation-event' && project !== '__all_projects__' && event.detail && event.detail.project_id !== project) return;\n  pending = true; clearTimeout(timer);timer = setTimeout(refresh,100);\n }\n window.addEventListener('sse-automation-event', changed);\n window.addEventListener('sse-live-connected', changed);\n document.addEventListener('visibilitychange', function(){if(!document.hidden) refresh();});\n document.addEventListener('pointerdown',function(event){var node=root();pressed=!!(node && node.contains(event.target));},true);\n document.addEventListener('pointerup',function(){pressed=false;setTimeout(refresh,0);},true);\n document.addEventListener('pointercancel',function(){pressed=false;refresh();},true);\n document.addEventListener('focusout',function(){setTimeout(refresh,0);});\n document.addEventListener('close',refresh,true);\n document.body.addEventListener('htmx:beforeSwap',function(event){\n  var d=event.detail, headers=d.requestConfig && d.requestConfig.headers || {};\n  if(headers['X-Automation-List-Refresh']!=='true')return;\n  var node=root();\n  if(!node || node!==d.target || !node.isConnected){d.shouldSwap=false;return;}\n  if(busy(node)){pending=true;d.shouldSwap=false;return;}\n  var parsed=new DOMParser().parseFromString(d.xhr.responseText,'text/html');\n  var current=node.querySelector('#automations-card-list'), replacement=parsed.querySelector('#automations-card-list');\n  if(current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;\n });\n})();\n</script><div id=\"automations-container\" class=\"h-full min-w-0 max-w-full overflow-y-auto\" data-search-container data-card-pagination-root data-card-pagination-url=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<script>\n(function() {\n if (window.openVibelyAutomationListEventsInstalled) return;\n window.openVibelyAutomationListEventsInstalled = true;\n var pending = false, timer = null, pressed = false, inFlight = false;\n function root() { return document.getElementById('automations-container'); }\n function busy(node) { return pressed || node.contains(document.activeElement) || node.querySelector('.htmx-request, [data-card-selected=\"true\"]') || document.querySelector('dialog[open]'); }\n function refresh() {\n  clearTimeout(timer);\n  var node = root();\n  if (!node) { pending = false; return; }\n  if (!pending || inFlight || document.hidden || busy(node)) return;\n  pending = false; inFlight = true;\n  var url = node.dataset.cardPaginationUrl;\n  if (window.cardPaginationRefreshURL) url = window.cardPaginationRefreshURL(node, url);\n  Promise.resolve(htmx.ajax('GET', url, {source:node, target:node, swap:'outerHTML', headers:{'X-Automation-List-Refresh':'true'}})).finally(function(){inFlight=false;if(pending) timer=setTimeout(refresh,100);});\n }\n function changed(event) {\n  var node = root(); if (!node) return;\n  var project = new URL(node.dataset.cardPaginationUrl, location.href).searchParams.get('project_id');\n  if (event && event.type === 'sse-automation-event' && project !== '__all_projects__' && event.detail && event.detail.project_id !== project) return;\n  pending = true; clearTimeout(timer);timer = setTimeout(refresh,100);\n }\n window.addEventListener('sse-automation-event', changed);\n window.addEventListener('sse-live-connected', changed);\n document.addEventListener('visibilitychange', function(){if(!document.hidden) refresh();});\n document.addEventListener('pointerdown',function(event){var node=root();pressed=!!(node && node.contains(event.target));},true);\n document.addEventListener('pointerup',function(){pressed=false;setTimeout(refresh,0);},true);\n document.addEventListener('pointercancel',function(){pressed=false;refresh();},true);\n document.addEventListener('focusout',function(){setTimeout(refresh,0);});\n document.addEventListener('close',refresh,true);\n document.body.addEventListener('htmx:beforeSwap',function(event){\n  var d=event.detail, headers=d.requestConfig && d.requestConfig.headers || {};\n  if(headers['X-Automation-List-Refresh']!=='true')return;\n  var node=root();\n  if(!node || node!==d.target || !node.isConnected){d.shouldSwap=false;return;}\n  if(busy(node)){pending=true;d.shouldSwap=false;return;}\n  var parsed=new DOMParser().parseFromString(d.xhr.responseText,'text/html');\n  var current=node.querySelector('#automations-card-list'), replacement=parsed.querySelector('#automations-card-list');\n  if(current && replacement && current.innerHTML===replacement.innerHTML && node.dataset.cardPaginationHasMore===parsed.querySelector('#automations-container')?.dataset.cardPaginationHasMore)d.shouldSwap=false;\n });\n})();\n</script><div id=\"automations-container\" class=\"min-w-0 max-w-full\" data-search-container data-card-pagination-root data-card-pagination-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templruntime.NewAttributeExpression(CardListURL("automations", state)).ResolveURL(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 102, Col: 192}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 102, Col: 169}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -354,7 +354,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templruntime.NewAttributeExpression(cardPaginationHasMoreAttribute(hasMore)).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 102, Col: 459}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 102, Col: 436}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -1786,14 +1786,14 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<div id=\"automation-live\" class=\"flex h-full min-w-0 max-w-full flex-col overflow-y-auto\" data-automation-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<div id=\"automation-live\" class=\"flex h-full min-w-0 max-w-full flex-col\" data-automation-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var97 string
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templruntime.NewAttributeExpression(graph.Automation.ID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 132}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
@@ -1806,7 +1806,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		var templ_7745c5c3_Var98 string
 		templ_7745c5c3_Var98, templ_7745c5c3_Err = templruntime.NewAttributeExpression(currentProjectID).Resolve(ctx)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 169}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 519, Col: 153}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var98)
 		if templ_7745c5c3_Err != nil {

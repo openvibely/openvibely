@@ -638,6 +638,7 @@ func TestBrowserFunctional_TaskListBrowseScrollPerProject(t *testing.T) {
 		b.waitFor("first project loaded", `String(!!document.querySelector('[data-task-list-row="first-0"]'))`, "true")
 		b.evaluate(`document.querySelector('.task-list-more').click();document.querySelector('.task-list-rows').scrollTop=180;'browsing first'`)
 		b.waitFor("first position", `String(document.querySelector('.task-list-rows').scrollTop)`, "180")
+		b.waitFor("sidebar and nested rows clear scrollbars", `(function(){var outer=document.getElementById('task-list-groups'),inner=document.querySelector('.task-list-rows'),row=inner.querySelector('.task-list-row'),panel=document.getElementById('task-list-panel');var o=outer.getBoundingClientRect(),i=inner.getBoundingClientRect(),r=row.getBoundingClientRect(),p=panel.getBoundingClientRect();return String(i.right-r.right>=16 && o.right-i.right>=8 && o.right<=p.right && outer.scrollWidth<=outer.clientWidth && inner.scrollWidth<=inner.clientWidth)})()`, "true")
 		switchTo := func(project string, scroll int, browsing bool) {
 			// Use the actual project synchronization path: the request scope changes
 			// before the outgoing rows are replaced by the HTTP response.

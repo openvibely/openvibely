@@ -956,7 +956,7 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</div></div></div><!-- Recent Commits Timeline --><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body p-4\"><h3 class=\"font-semibold text-sm mb-3\">Recent Commits</h3><div class=\"space-y-2 max-h-64 overflow-y-auto\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 85, "</div></div></div><!-- Recent Commits Timeline --><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body p-4\"><h3 class=\"font-semibold text-sm mb-3\">Recent Commits</h3><div class=\"space-y-2 max-h-64 overflow-y-auto pr-4\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -568,8 +568,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							<style>
                             #tab-lifecycle .lifecycle-refresh { box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; min-height:28px; padding:0; flex-shrink:0; }
                             #tab-lifecycle .lifecycle-refresh svg { width:16px; height:16px; flex-shrink:0; }
-                            #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding-inline:12px; }
-                            .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
+                            #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding:0 16px 0 12px; }
+                            .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 12px); margin-left:-12px; margin-right:0; border-radius:8px; }
                             .lifecycle-entry summary::-webkit-details-marker { display:none; }
                             .lifecycle-entry summary:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
                             .lifecycle-entry summary > span:first-child { min-width:0; overflow-wrap:anywhere; }
