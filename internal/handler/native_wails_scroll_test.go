@@ -15,6 +15,23 @@ func TestTaskNativeWheelPagingInWails(t *testing.T) {
 	if testing.Short() || os.Getenv("OPENVIBELY_RUN_NATIVE_UI") != "1" {
 		t.Skip("requires OPENVIBELY_RUN_NATIVE_UI=1 and a graphical session")
 	}
+	runner := buildNativeChatHost(t)
+	t.Setenv("CHROME_BIN", runner)
+	t.Setenv("OPENVIBELY_NATIVE_TEST_HOST", runner)
+	t.Run("ordinary-page-scroll-range", TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome)
+	// Run sequentially: each scenario owns a native window and input stream.
+	for _, scenario := range []struct{ name, mode string }{
+		{"during-wheel", "native-wheel"},
+		{"after-wheel", "native-wheel-delayed"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testTaskPagedCachedNavigation(t, scenario.mode)
+		})
+	}
+}
+
+func buildNativeChatHost(t *testing.T) string {
+	t.Helper()
 	tags := "openvibely_native_ui"
 	if runtime.GOOS == "linux" {
 		tags += ",gtk3"
@@ -30,15 +47,5 @@ func TestTaskNativeWheelPagingInWails(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build Wails test host: %v\n%s", err, output)
 	}
-	t.Setenv("CHROME_BIN", runner)
-	t.Run("ordinary-page-scroll-range", TestOrdinaryPagesKeepViewportScrollAndBottomInsetInChrome)
-	// Run sequentially: each scenario owns a native window and input stream.
-	for _, scenario := range []struct{ name, mode string }{
-		{"during-wheel", "native-wheel"},
-		{"after-wheel", "native-wheel-delayed"},
-	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			testTaskPagedCachedNavigation(t, scenario.mode)
-		})
-	}
+	return runner
 }

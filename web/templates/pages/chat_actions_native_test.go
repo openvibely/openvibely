@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/internal/testutil/nativehost"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -98,6 +100,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 		"OPENVIBELY_NATIVE_UI_HELPER=1",
 		"OPENVIBELY_NATIVE_UI_URL="+server.URL+"/chat?project_id=project-native",
 	)
+	testutil.ConfigureNativeBrowserStorage(t, cmd)
 	cmd.Stdout = &childOutput
 	cmd.Stderr = &childOutput
 	if err := cmd.Start(); err != nil {
@@ -108,13 +111,8 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 		childDone <- cmd.Wait()
 	}()
 	stopChild := func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		select {
-		case <-childDone:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("native Wails helper did not terminate; output:\n%s", childOutput.String())
+		if err := testutil.StopNativeBrowser(cmd, childDone); err != nil {
+			t.Fatalf("stop native host: %v", err)
 		}
 	}
 
@@ -168,6 +166,7 @@ func runNativeWailsHelper() error {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+	defer nativehost.WatchShutdown(app.Quit)()
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:        "native-chat-actions-test",
 		Title:       "OpenVibely native Chat actions test",

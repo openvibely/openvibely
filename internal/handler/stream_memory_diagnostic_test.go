@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
@@ -213,10 +214,17 @@ func TestStreamMemoryDiagnostic(t *testing.T) {
 	defer logFile.Close()
 	cmd := exec.CommandContext(ctx, host, server.URL+"/tasks/"+task.ID+"?project_id="+project.ID)
 	cmd.Env = append(os.Environ(), "OPENVIBELY_NATIVE_VISIBLE=1")
+	testutil.ConfigureNativeBrowserStorage(t, cmd)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	require.NoError(t, cmd.Start())
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	hostDone := make(chan error, 1)
+	go func() { hostDone <- cmd.Wait() }()
+	defer func() {
+		if err := testutil.StopNativeBrowser(cmd, hostDone); err != nil {
+			t.Errorf("stop native host: %v", err)
+		}
+	}()
 	awake := exec.CommandContext(ctx, "caffeinate", "-di", "-w", fmt.Sprint(cmd.Process.Pid))
 	require.NoError(t, awake.Start())
 	defer func() { _ = awake.Process.Kill(); _ = awake.Wait() }()

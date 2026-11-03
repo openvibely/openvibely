@@ -125,3 +125,33 @@ continuous peaks. Neither these values nor render counts measure allocation chur
 or garbage collection. This single synthetic resumed stream does not establish
 behavior for concurrent streams, fresh-stream setup, every rich-content type, or
 the full running app. Backend `pprof` profiling is separate.
+
+## Native browser storage
+
+Tests build against unmodified Wails. Before starting each native host, the
+shared `testutil.ConfigureNativeBrowserStorage` helper creates fresh storage
+inside `t.TempDir()` and sets only the child process environment:
+
+- macOS: `CFFIXED_USER_HOME` redirects Cocoa home-directory resolution, including
+  WebKit data and caches. This is a Core Foundation implementation setting;
+  the native storage regression guards its behavior on supported macOS runners.
+- Linux: `XDG_DATA_HOME` and `XDG_CACHE_HOME` redirect WebKitGTK storage.
+- Windows: `APPDATA` redirects Wails’ default WebView2 profile directory. Wails’
+  custom loader clears `WEBVIEW2_USER_DATA_FOLDER`, so tests do not use it.
+
+Hosts must stop before test cleanup removes their storage. The memory diagnostic
+uses the same isolation while retaining its explicitly collected result files.
+Manual host launches do not get automatic isolation; supply the platform's
+variable(s) when launching manually if temporary storage is desired.
+
+Run the macOS isolation regression with the normal Go command:
+
+```sh
+OPENVIBELY_RUN_NATIVE_UI=1 go test -tags=openvibely_native_ui ./web/templates/pages -run '^TestNativeWebKitStorageIsolation$' -count=1 -timeout=120s
+```
+
+Native test hosts watch a shutdown request file under the test directory and call
+`app.Quit()`. Parents wait for exit, using forced termination only on timeout.
+Cleanup retries transient deletion errors; it does not infer browser shutdown
+from a fixed period without filesystem writes. Wails does not explicitly promise
+that every OS-managed browser service has exited when the host exits.

@@ -145,12 +145,12 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 		func() {
 			defer func() {
 				if !stopped {
-					stopHandlerBrowserProcess(cmd)
+					stopHandlerBrowserProcess(t, cmd)
 				}
 			}()
 			select {
 			case outcome := <-result:
-				stopHandlerBrowserProcess(cmd)
+				stopHandlerBrowserProcess(t, cmd)
 				stopped = true
 				t.Logf("%s: %s", page, outcome)
 				require.True(t, strings.HasPrefix(outcome, "pass:"), page+": "+outcome)
@@ -265,12 +265,12 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 	stopped := false
 	defer func() {
 		if !stopped {
-			stopHandlerBrowserProcess(cmd)
+			stopHandlerBrowserProcess(t, cmd)
 		}
 	}()
 	select {
 	case outcome := <-result:
-		stopHandlerBrowserProcess(cmd)
+		stopHandlerBrowserProcess(t, cmd)
 		stopped = true
 		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
 	case <-time.After(45 * time.Second):

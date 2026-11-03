@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"os"
 	"os/exec"
 	"syscall"
 	"testing"
@@ -11,7 +12,11 @@ import (
 )
 
 func startHandlerBrowserProcess(t testing.TB, cmd *exec.Cmd) error {
-	testutil.ConfigureBrowserStorage(t, cmd)
+	if native := os.Getenv("OPENVIBELY_NATIVE_TEST_HOST"); native != "" && cmd.Path == native {
+		testutil.ConfigureNativeBrowserStorage(t, cmd)
+	} else {
+		testutil.ConfigureBrowserStorage(t, cmd)
+	}
 	testutil.GuardBrowserProcess(cmd)
 	return cmd.Start()
 }
@@ -25,7 +30,16 @@ func killHandlerBrowserProcess(cmd *exec.Cmd) {
 	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
-func stopHandlerBrowserProcess(cmd *exec.Cmd) {
+func stopHandlerBrowserProcess(t testing.TB, cmd *exec.Cmd) {
+	t.Helper()
+	if testutil.IsNativeBrowser(cmd) {
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		if err := testutil.StopNativeBrowser(cmd, done); err != nil {
+			t.Errorf("stop native host: %v", err)
+		}
+		return
+	}
 	testutil.StopBrowserProcessGroup(cmd)
 }
 

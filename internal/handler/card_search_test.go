@@ -97,12 +97,12 @@ func TestCollectionSelectionGutterDoesNotShiftCardContent(t *testing.T) {
 	stopped := false
 	defer func() {
 		if !stopped {
-			stopHandlerBrowserProcess(cmd)
+			stopHandlerBrowserProcess(t, cmd)
 		}
 	}()
 	select {
 	case got := <-result:
-		stopHandlerBrowserProcess(cmd)
+		stopHandlerBrowserProcess(t, cmd)
 		stopped = true
 		require.Equal(t, "pass", strings.SplitN(got, ":", 2)[0], got)
 	case <-time.After(30 * time.Second):
@@ -360,13 +360,13 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	stopped := false
 	defer func() {
 		if !stopped {
-			stopHandlerBrowserProcess(cmd)
+			stopHandlerBrowserProcess(t, cmd)
 		}
 	}()
 	var browser browserResult
 	select {
 	case browser = <-browserResults:
-		stopHandlerBrowserProcess(cmd)
+		stopHandlerBrowserProcess(t, cmd)
 		stopped = true
 	case <-time.After(45 * time.Second):
 		t.Fatalf("selection browser regression timed out: %s", chromeOutput.String())

@@ -186,7 +186,7 @@ async function until(fn,label){for(let i=0;i<600;i++){if(fn())return;await wait(
 	case <-ctx.Done():
 		result = "timeout"
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	require.Equal(t, "pass", result, stderr.String())
 	require.EqualValues(t, 1, warm.Load(), "project return should refresh cached task")
 }

@@ -251,7 +251,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 	case <-time.After(35 * time.Second):
 		outcome = "fail:timeout"
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	_ = stderr.Close()
 	if !strings.HasPrefix(outcome, "pass:") {
 		data, _ := os.ReadFile(stderrPath)

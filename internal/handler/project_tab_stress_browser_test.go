@@ -173,7 +173,7 @@ func TestProjectTabsUnderLoadInChrome(t *testing.T) {
 			if err := startHandlerBrowserProcess(t, cmd); err != nil {
 				t.Fatal(err)
 			}
-			defer stopHandlerBrowserProcess(cmd)
+			defer stopHandlerBrowserProcess(t, cmd)
 			select {
 			case outcome := <-result:
 				t.Logf("%s; operations=%d navigations=%d SSE connections=%d reader wait=%v writer wait=%v", outcome, operations.Load(), navigations.Load(), streamConnections.Load(), stores.Contention().Reads.WaitDuration, stores.Contention().Writes.WaitDuration)

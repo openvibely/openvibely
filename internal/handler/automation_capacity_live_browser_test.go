@@ -174,7 +174,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			case <-time.After(45 * time.Second):
 				outcome = "fail:timed out waiting for browser result"
 			}
-			stopHandlerBrowserProcess(cmd)
+			stopHandlerBrowserProcess(t, cmd)
 			_ = stderrFile.Close()
 			if !strings.HasPrefix(outcome, "pass:") {
 				stderr, _ := os.ReadFile(stderrPath)
@@ -352,7 +352,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	case <-time.After(20 * time.Second):
 		outcome = "fail:timed out waiting for browser result"
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	_ = stderrFile.Close()
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)

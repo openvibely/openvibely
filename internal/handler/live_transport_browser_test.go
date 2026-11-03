@@ -157,7 +157,7 @@ window.addEventListener('load', async function() {
 			defer server.Close()
 			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL)
 			require.NoError(t, startHandlerBrowserProcess(t, cmd))
-			defer stopHandlerBrowserProcess(cmd)
+			defer stopHandlerBrowserProcess(t, cmd)
 			select {
 			case got := <-result:
 				require.Equal(t, "pass", strings.TrimSpace(got))
