@@ -133,21 +133,34 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 		b.waitFor("breadcrumb closes", `String(!document.querySelector('dialog[open]'))`, "true")
 		b.waitFor("close restores breadcrumb button focus", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-button'))`, "true")
-		// Plain arrows navigate breadcrumbs; modified arrows remain project shortcuts.
-		for _, id := range []string{"b", "c", "b"} {
-			b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus();'ready'`)
+		// Exercise the normal autofocus target, including a nonempty draft.
+		b.evaluate(`var input=document.getElementById('task-message-input');input.focus();input.value='Keep this draft';input.dispatchEvent(new Event('input',{bubbles:true}));'ready'`)
+		for _, id := range []string{"b", "c", "b", "a", "b"} {
+			b.waitFor("composer focused before plain shortcut", `document.activeElement.id`, "task-message-input")
 			direction := "ArrowRight"
-			if id == "b" && b.evaluate(`location.pathname`) == "/tasks/c" {
+			if id == "a" || (id == "b" && b.evaluate(`location.pathname`) == "/tasks/c") {
 				direction = "ArrowLeft"
 			}
 			key(direction, `{}`)
 			b.waitFor("task visit committed", `location.pathname`, "/tasks/"+id)
 			b.waitFor("breadcrumb visit settled", `String(!document.querySelector('template[hx-history-elt]') && !!document.getElementById('task-message-input'))`, "true")
+			if id == "a" {
+				b.waitFor("plain navigation preserves draft", `document.getElementById('task-message-input').value`, "Keep this draft")
+			}
 		}
-		b.evaluate(`document.getElementById('task-message-input').focus();'ready'`)
+		// Other editable fields still own their arrow keys.
+		b.evaluate(`window.shortcutEditor=document.createElement('input');document.body.appendChild(shortcutEditor);shortcutEditor.focus();'ready'`)
 		for _, code := range []string{"ArrowLeft", "ArrowRight"} {
-			b.waitFor("plain arrows leave composer editing unhandled", `String((function(){var e=new KeyboardEvent('keydown',{key:'`+code+`',code:'`+code+`',bubbles:true,cancelable:true});document.getElementById('task-message-input').dispatchEvent(e);return !e.defaultPrevented && location.pathname==='/tasks/b'})())`, "true")
+			b.waitFor("other inputs retain arrows", `String((function(){var e=new KeyboardEvent('keydown',{key:'`+code+`',code:'`+code+`',bubbles:true,cancelable:true});shortcutEditor.dispatchEvent(e);return !e.defaultPrevented && location.pathname==='/tasks/b'})())`, "true")
 		}
+		b.evaluate(`shortcutEditor.remove();document.getElementById('task-message-input').focus();'ready'`)
+		// Return to C then B so last-visited coverage retains the same sequence.
+		key("ArrowRight", `{}`)
+		b.waitFor("plain next from composer", `location.pathname`, "/tasks/c")
+		b.waitFor("composer on C", `document.activeElement.id`, "task-message-input")
+		key("ArrowLeft", `{}`)
+		b.waitFor("plain previous from composer", `location.pathname`, "/tasks/b")
+		b.waitFor("composer on B", `document.activeElement.id`, "task-message-input")
 		key("KeyL", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("last task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
 		b.waitFor("composer ready for task shortcut", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
