@@ -417,7 +417,7 @@ func runHandlerChromeFixture(t *testing.T, chrome, targetURL, name string, virtu
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	_ = stdoutFile.Close()
 	_ = stderrFile.Close()
 

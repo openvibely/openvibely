@@ -91,7 +91,7 @@ func TestChatResponseBrowserScrollsWithoutPaging(t *testing.T) {
 	defer server.Close()
 	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-extensions", "--no-first-run", "--window-size=1280,1000", server.URL+"/chat?project_id="+project.ID)
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
-	defer stopHandlerBrowserProcess(cmd)
+	defer stopHandlerBrowserProcess(t, cmd)
 	select {
 	case got := <-result:
 		require.Equal(t, "pass", got)

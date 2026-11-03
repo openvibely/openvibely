@@ -444,7 +444,7 @@ func TestThreadSnapshotsBackgroundLifecycleInChrome(t *testing.T) {
 	defer server.Close()
 	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL)
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
-	defer stopHandlerBrowserProcess(cmd)
+	defer stopHandlerBrowserProcess(t, cmd)
 	select {
 	case got := <-result:
 		require.Equal(t, "pass", got)
@@ -633,7 +633,7 @@ window.WebSocket=class extends NativeSocket {constructor(...args){super(...args)
 	defer unlock()
 	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", server.URL+path)
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
-	defer stopHandlerBrowserProcess(cmd)
+	defer stopHandlerBrowserProcess(t, cmd)
 	select {
 	case got := <-result:
 		require.Equal(t, "pass", got)

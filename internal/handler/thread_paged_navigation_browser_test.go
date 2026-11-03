@@ -359,7 +359,7 @@ document.addEventListener('htmx:responseError',function(event){
 	cmd.Stderr = &stderr
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
 	outcome := waitPagedBrowserResult(ctx, documentReady, results, 40*time.Second)
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
 }
 

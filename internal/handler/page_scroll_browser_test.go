@@ -234,7 +234,7 @@ window.__scrollTestHeartbeat=setInterval(()=>window.__scrollTestReport({kind:'he
 			}
 		}
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	stageMu.Lock()
 	trace := strings.Join(diagnostics, "\n")
 	stageMu.Unlock()

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestWorktreeActionsInNativeWailsWebView(t *testing.T) {
@@ -20,6 +22,7 @@ func TestWorktreeActionsInNativeWailsWebView(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^$")
 	cmd.Env = append(os.Environ(), "OPENVIBELY_NATIVE_UI_HELPER=1", "OPENVIBELY_NATIVE_UI_URL="+server.URL+"/")
 	var output bytes.Buffer
+	testutil.ConfigureNativeBrowserStorage(t, cmd)
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	if err := cmd.Start(); err != nil {
@@ -27,13 +30,12 @@ func TestWorktreeActionsInNativeWailsWebView(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	exited := false
 	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
+		if !exited {
+			if err := testutil.StopNativeBrowser(cmd, done); err != nil {
+				t.Errorf("stop native host: %v", err)
+			}
 		}
 	}()
 	select {
@@ -42,6 +44,7 @@ func TestWorktreeActionsInNativeWailsWebView(t *testing.T) {
 			t.Fatal(result)
 		}
 	case err := <-done:
+		exited = true
 		t.Fatalf("native host exited: %v %s", err, output.String())
 	case <-time.After(45 * time.Second):
 		t.Fatal("native menu test timed out")

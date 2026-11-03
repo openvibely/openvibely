@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/testutil/nativehost"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -41,6 +42,7 @@ func main() {
 	defer listener.Close()
 	stage("before application.New")
 	app := application.New(application.Options{Name: "Native chat regression", Mac: application.MacOptions{ApplicationShouldTerminateAfterLastWindowClosed: true}})
+	defer nativehost.WatchShutdown(app.Quit)()
 	stage("after application.New")
 	endpoint := "http://" + listener.Addr().String() + "/wheel"
 	bridge := fmt.Sprintf(`window.nativeTestInput={postMessage(data){return fetch(%q,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...data,scale:window.devicePixelRatio||1})}).then(r=>{if(!r.ok)return r.text().then(message=>{throw Error('Native input failed: '+r.status+' '+message)});if(data.count)window._nativeBurstDone=true}).catch(e=>{fetch('/browser-result?status='+encodeURIComponent(String(e)));throw e})}};`, endpoint)

@@ -156,6 +156,6 @@ window.addEventListener('DOMContentLoaded',()=>{(async()=>{
 	case <-ctx.Done():
 		outcome = "timeout"
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
 }

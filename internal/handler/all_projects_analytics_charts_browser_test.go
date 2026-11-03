@@ -196,7 +196,7 @@ func TestAllProjectsEveryAnalyticsChartInChrome(t *testing.T) {
 		t.Run(size, func(t *testing.T) {
 			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--window-size="+size, server.URL+"/analytics?project_id=__all_projects__&range=all&view=usage")
 			require.NoError(t, startHandlerBrowserProcess(t, cmd))
-			defer stopHandlerBrowserProcess(cmd)
+			defer stopHandlerBrowserProcess(t, cmd)
 			select {
 			case outcome := <-result:
 				require.Equal(t, "pass", outcome)

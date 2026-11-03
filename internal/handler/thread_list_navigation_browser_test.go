@@ -206,7 +206,7 @@ window.addEventListener('DOMContentLoaded',function(){
 	case <-ctx.Done():
 		outcome = "timeout"
 	}
-	stopHandlerBrowserProcess(cmd)
+	stopHandlerBrowserProcess(t, cmd)
 	require.Equal(t, "pass", outcome, stderr.String())
 	require.EqualValues(t, 2, warmRequests.Load(), "returns from the list pages must exercise the thread cache")
 	require.Zero(t, threadRequests.Load(), "a full page load embeds the thread")

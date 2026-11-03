@@ -314,14 +314,14 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	stopped := false
 	defer func() {
 		if !stopped {
-			stopHandlerBrowserProcess(cmd)
+			stopHandlerBrowserProcess(t, cmd)
 		}
 	}()
 
 	var outcome string
 	select {
 	case outcome = <-browserResult:
-		stopHandlerBrowserProcess(cmd)
+		stopHandlerBrowserProcess(t, cmd)
 		stopped = true
 	case <-time.After(60 * time.Second):
 		outcome = "fail:timed out waiting for browser result"

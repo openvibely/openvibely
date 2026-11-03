@@ -339,12 +339,12 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 	stopped := false
 	defer func() {
 		if !stopped {
-			stopHandlerBrowserProcess(cmd)
+			stopHandlerBrowserProcess(t, cmd)
 		}
 	}()
 	select {
 	case outcome := <-result:
-		stopHandlerBrowserProcess(cmd)
+		stopHandlerBrowserProcess(t, cmd)
 		stopped = true
 		require.True(t, strings.HasPrefix(outcome, "pass:"), outcome)
 	case <-time.After(45 * time.Second):

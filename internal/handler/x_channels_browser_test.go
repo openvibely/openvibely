@@ -231,7 +231,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	)
 	cmd.Stderr = stderrFile
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
-	defer stopHandlerBrowserProcess(cmd)
+	defer stopHandlerBrowserProcess(t, cmd)
 
 	var outcome string
 	deadline := time.After(60 * time.Second)

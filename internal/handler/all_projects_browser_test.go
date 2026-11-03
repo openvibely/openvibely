@@ -228,7 +228,7 @@ func TestAllProjectsNavigationInChrome(t *testing.T) {
 		t.Run(size, func(t *testing.T) {
 			cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--window-size="+size, server.URL+"/tasks?project_id=default")
 			require.NoError(t, startHandlerBrowserProcess(t, cmd))
-			defer stopHandlerBrowserProcess(cmd)
+			defer stopHandlerBrowserProcess(t, cmd)
 			select {
 			case outcome := <-result:
 				require.Equal(t, "pass", outcome)
@@ -290,7 +290,7 @@ func TestAllProjectsDesktopRestoresSavedLocationInChrome(t *testing.T) {
 	defer server.Close()
 	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--window-size=1280,900", server.URL+"/chat")
 	require.NoError(t, startHandlerBrowserProcess(t, cmd))
-	defer stopHandlerBrowserProcess(cmd)
+	defer stopHandlerBrowserProcess(t, cmd)
 	select {
 	case outcome := <-result:
 		require.Equal(t, "pass", outcome)

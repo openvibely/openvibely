@@ -95,6 +95,6 @@ func TestAppAndLoginPagesLoadWithoutExternalNetworkInChrome(t *testing.T) {
 		case <-time.After(30 * time.Second):
 			t.Errorf("%s did not finish loading without external network", probePath)
 		}
-		stopHandlerBrowserProcess(cmd)
+		stopHandlerBrowserProcess(t, cmd)
 	}
 }
