@@ -86,14 +86,20 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("composer", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
-		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),title=button.title||button.dataset.ovTooltip||'';return title.includes('Last visited (') && title.includes(/Mac|iPhone|iPad/.test(navigator.platform)?'Previous (⌘←)':'Previous (Ctrl+←)') && title.includes(/Mac|iPhone|iPad/.test(navigator.platform)?'Next (⌘→)':'Next (Ctrl+→)') && button.getAttribute('aria-keyshortcuts').includes('ArrowLeft')})())`, "true")
+		b.waitFor("breadcrumb shortcut labels", `String((function(){var button=document.querySelector('[data-breadcrumb-selector-button]'),title=button.title||button.dataset.ovTooltip||'';return title.includes('Last visited (') && title.includes(/Mac|iPhone|iPad/.test(navigator.platform)?'Previous (⌘⇧,)':'Previous (Ctrl+Shift+,)') && title.includes(/Mac|iPhone|iPad/.test(navigator.platform)?'Next (⌘⇧.)':'Next (Ctrl+Shift+.)') && button.getAttribute('aria-keyshortcuts').includes('Shift+,')})())`, "true")
 		b.evaluate(`['a','b','c'].forEach(function(id){localStorage.setItem('openvibely-task-thread-message-history-'+id,JSON.stringify(['Older message','Newest message']))});'ready'`)
 		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
 		key := func(code, modifiers string) {
 			flags := 0
 			fmt.Sscan(b.evaluate(`String((function(m){return (m.altKey?1:0)|(m.ctrlKey?2:0)|(m.metaKey?4:0)|(m.shiftKey?8:0)})(`+modifiers+`))`), &flags)
 			keyName := strings.TrimPrefix(code, "Key")
-			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": keyName, "code": code, "modifiers": flags, "windowsVirtualKeyCode": map[string]int{"ArrowLeft": 37, "ArrowRight": 39, "ArrowUp": 38, "ArrowDown": 40}[code]}, nil)
+			if code == "Comma" {
+				keyName = "<"
+			}
+			if code == "Period" {
+				keyName = ">"
+			}
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": keyName, "code": code, "modifiers": flags, "windowsVirtualKeyCode": map[string]int{"ArrowLeft": 37, "ArrowRight": 39, "ArrowUp": 38, "ArrowDown": 40, "Comma": 188, "Period": 190}[code]}, nil)
 			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": keyName, "code": code, "modifiers": 0}, nil)
 		}
 		key("KeyK", `Object.assign({shiftKey:true},`+command+`)`)
@@ -141,13 +147,14 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.waitFor("plain left moves cursor", `String(document.getElementById('task-message-input').selectionStart)+':'+location.pathname`, "0:/tasks/a")
 		key("ArrowRight", `{}`)
 		b.waitFor("plain right moves cursor", `String(document.getElementById('task-message-input').selectionStart)+':'+location.pathname`, "1:/tasks/a")
+		b.waitFor("command arrows remain available for editing", `String(['ArrowLeft','ArrowRight'].every(function(code){var e=new KeyboardEvent('keydown',Object.assign({key:code,code:code,bubbles:true,cancelable:true},`+command+`));document.getElementById('task-message-input').dispatchEvent(e);return !e.defaultPrevented && location.pathname==='/tasks/a'}))`, "true")
 		for _, id := range []string{"b", "c", "b", "a", "b"} {
 			b.waitFor("composer focused before command shortcut", `document.activeElement.id`, "task-message-input")
-			direction := "ArrowRight"
+			direction := "Period"
 			if id == "a" || (id == "b" && b.evaluate(`location.pathname`) == "/tasks/c") {
-				direction = "ArrowLeft"
+				direction = "Comma"
 			}
-			key(direction, command)
+			key(direction, `Object.assign({shiftKey:true},`+command+`)`)
 			b.waitFor("task visit committed", `location.pathname`, "/tasks/"+id)
 			b.waitFor("breadcrumb visit settled", `String(!document.querySelector('template[hx-history-elt]') && !!document.getElementById('task-message-input'))`, "true")
 			if id == "a" {
@@ -161,10 +168,10 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		}
 		b.evaluate(`shortcutEditor.remove();document.getElementById('task-message-input').focus();'ready'`)
 		// Return to C then B so last-visited coverage retains the same sequence.
-		key("ArrowRight", command)
+		key("Period", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("command next from composer", `location.pathname`, "/tasks/c")
 		b.waitFor("composer on C", `document.activeElement.id`, "task-message-input")
-		key("ArrowLeft", command)
+		key("Comma", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("command previous from composer", `location.pathname`, "/tasks/b")
 		b.waitFor("composer on B", `document.activeElement.id`, "task-message-input")
 		key("KeyL", `Object.assign({shiftKey:true},`+command+`)`)

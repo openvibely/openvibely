@@ -94,7 +94,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 26;
+			var controllerVersion = 27;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -264,10 +264,10 @@ templ searchableSelectorScript() {
             }
             listen(document, 'keydown', async function(event) {
                 if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey) return;
-                var navigationArrow = (apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.shiftKey && (event.code === 'ArrowLeft' || event.code === 'ArrowRight');
+                var navigationShortcut = (apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && event.shiftKey && (event.code === 'Comma' || event.code === 'Period');
                 var lastVisited = event.shiftKey && (apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && event.code === 'KeyL';
-                if (!navigationArrow && !lastVisited) return;
-                if (navigationArrow && event.target.closest('[role="slider"], [role="tab"], [role="tree"], [role="menu"]')) return;
+                if (!navigationShortcut && !lastVisited) return;
+                if (navigationShortcut && event.target.closest('[role="slider"], [role="tab"], [role="tree"], [role="menu"]')) return;
                 if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
                 if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open], [data-automation-live-menu]:focus-within, [data-automation-builder-actions]:focus-within, [data-automation-live-menu].dropdown-open, [data-automation-builder-actions].dropdown-open') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open:not([role="tooltip"])'))) return;
                 var context = automationContext();
@@ -290,7 +290,7 @@ templ searchableSelectorScript() {
                             });
                         }
                         var index = visits.items.indexOf(context.id);
-                        if (index >= 0) next = visits.items[index + (event.code === 'ArrowLeft' ? -1 : 1)];
+                        if (index >= 0) next = visits.items[index + (event.code === 'Comma' ? -1 : 1)];
                     }
                     if (!next || !context.root.isConnected) return;
                     var builder = document.querySelector('[data-automation-yaml-builder]');
@@ -312,11 +312,11 @@ templ searchableSelectorScript() {
                     button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');
                     if (project || !(button.title || button.dataset.ovTooltip)) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';
                     if (!project && rootFor(button).getAttribute('data-searchable-selector-kind') === 'Task') {
-                        button.setAttribute('aria-keyshortcuts', apple ? 'Meta+K Meta+ArrowLeft Meta+ArrowRight Meta+Shift+L' : 'Control+K Control+ArrowLeft Control+ArrowRight Control+Shift+L');
+                        button.setAttribute('aria-keyshortcuts', apple ? 'Meta+K Meta+Shift+, Meta+Shift+. Meta+Shift+L' : 'Control+K Control+Shift+, Control+Shift+. Control+Shift+L');
                     }
                     if (automation && automation.root.contains(button)) {
-                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (' + (apple ? '⌘←' : 'Ctrl+←') + ')\nNext (' + (apple ? '⌘→' : 'Ctrl+→') + ')\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
-                        button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+K Meta+ArrowLeft Meta+ArrowRight Meta+Shift+L' : 'Control+K Control+ArrowLeft Control+ArrowRight Control+Shift+L'));
+                        button.title = 'Switch automation (' + (apple ? '⌘K' : 'Ctrl+K') + ')\nPrevious (' + (apple ? '⌘⇧,' : 'Ctrl+Shift+,') + ')\nNext (' + (apple ? '⌘⇧.' : 'Ctrl+Shift+.') + ')\nLast visited (' + (apple ? '⌘⇧L' : 'Ctrl+Shift+L') + ')';
+                        button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+K Meta+Shift+, Meta+Shift+. Meta+Shift+L' : 'Control+K Control+Shift+, Control+Shift+. Control+Shift+L'));
                     }
                 });
             }
