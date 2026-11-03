@@ -85,7 +85,8 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
 				<span class="task-list-count">{ strconv.Itoa(len(group.Tasks)) }</span>
 				<svg class="task-list-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
 			</summary>
-			<div class="task-list-rows">
+			<div class="task-list-scroll-wrap">
+            <div class="task-list-rows">
 			for i, task := range group.Tasks {
 				<a
 					class="task-list-row"
@@ -118,13 +119,13 @@ templ TaskListPanelContentWithProjects(projectID string, groups []TaskListGroup,
                     }
                 </template>
 			}
-			</div>
+            </div>
+            <div class="task-list-scroll-rail" aria-hidden="true"><div class="task-list-scroll-thumb"></div></div>
+            </div>
 			if len(group.Tasks) > 3 {
 				<button type="button" class="task-list-more" data-task-list-more={ strconv.Itoa(len(group.Tasks)) }>Show more</button>
                 <button type="button" class="task-list-browse-controls task-list-done">
                     <span>Show less</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Scroll to browse</span>
                 </button>
 			}
 		</details>
@@ -713,12 +714,40 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                         }
                     });
                 }
+                requestAnimationFrame(syncScrollbars);
                 entries.forEach(function(entry) {
                     entry.group.style.setProperty('--task-list-preview-height', (entry.limit * entry.rowHeight) + 'px');
                     entry.group.toggleAttribute('data-has-overflow', entry.rows.length > entry.limit);
                     entry.rows.forEach(function(row, index) { row.toggleAttribute('data-task-list-extra', index >= entry.limit); });
                 });
             }
+            function syncScrollbars() {
+                groups.querySelectorAll('.task-list-scroll-wrap').forEach(function(wrap) {
+                    var rows = wrap.querySelector('.task-list-rows'), rail = wrap.querySelector('.task-list-scroll-rail'), thumb = rail.firstElementChild;
+                    var height = rail.clientHeight;
+                    var size = Math.min(height, Math.max(24, height * rows.clientHeight / Math.max(1, rows.scrollHeight)));
+                    thumb.style.height = size + 'px';
+                    thumb.style.transform = 'translateY(' + ((height - size) * rows.scrollTop / Math.max(1, rows.scrollHeight - rows.clientHeight)) + 'px)';
+                });
+            }
+            groups.addEventListener('pointerdown', function(event) {
+                var rail = event.target.closest('.task-list-scroll-rail');
+                if (!rail || event.button !== 0) return;
+                event.preventDefault(); event.stopPropagation(); hideHoverCard();
+                var rows = rail.parentElement.querySelector('.task-list-rows'), thumb = rail.firstElementChild;
+                var rect = rail.getBoundingClientRect(), size = thumb.offsetHeight;
+                var offset = event.target === thumb ? event.clientY - thumb.getBoundingClientRect().top : size / 2;
+                function move(e) {
+                    rows.scrollTop = Math.max(0, Math.min(1, (e.clientY - rect.top - offset) / Math.max(1, rect.height - size))) * (rows.scrollHeight - rows.clientHeight);
+                    syncScrollbars();
+                }
+                function stop() { rail.removeEventListener('pointermove', move); rail.removeEventListener('lostpointercapture', stop); }
+                rail.setPointerCapture(event.pointerId);
+                rail.addEventListener('pointermove', move);
+                rail.addEventListener('lostpointercapture', stop);
+                move(event);
+            });
+            new MutationObserver(function() { requestAnimationFrame(syncScrollbars); }).observe(groups, {childList:true,subtree:true,attributes:true,attributeFilter:['data-browsing','data-searching','open','data-task-list-extra']});
             var previewFrame;
             function queuePreviewLayout() {
                 cancelAnimationFrame(previewFrame);
@@ -824,6 +853,7 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
 			groups.addEventListener('scroll', function(e) {
                 hideHoverCard();
                 if (e.target.matches('.task-list-rows')) {
+                    syncScrollbars();
                     var group = e.target.closest('.task-list-group');
                     browseScroll[taskListGroupKey(group)] = e.target.scrollTop;
                 }

@@ -149,9 +149,18 @@ func TestBrowserFunctional_TaskListSearchFiltersExtraRows(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("Browse all focuses first task", `document.activeElement.dataset.taskListRow || ''`, "login-first")
 		b.waitFor("show more reveals all nine rows", visible, `["login-first","other-2","other-3","other-4","other-5","other-6","other-7","login-extra","unrelated-extra"]`)
-		b.waitFor("Show less precedes browse hint outside scroller", `(()=>{var group=document.querySelector('.task-list-group'),footer=group.querySelector('.task-list-browse-controls');return String(footer.matches('button.task-list-done') && Math.abs(footer.getBoundingClientRect().width-group.getBoundingClientRect().width)<2 && getComputedStyle(footer).display==='flex' && Array.from(footer.children).map(el=>el.textContent.trim()).join(' ')==='Show less · Scroll to browse' && footer.previousElementSibling.matches('.task-list-more') && !group.querySelector('summary .task-list-done') && footer.getBoundingClientRect().top>=group.querySelector('.task-list-rows').getBoundingClientRect().bottom && getComputedStyle(group.querySelector('.task-list-more')).display==='none')})()`, "true")
+		b.waitFor("Show less precedes browse hint outside scroller", `(()=>{var group=document.querySelector('.task-list-group'),footer=group.querySelector('.task-list-browse-controls');return String(footer.matches('button.task-list-done') && Math.abs(footer.getBoundingClientRect().width-group.getBoundingClientRect().width)<2 && getComputedStyle(footer).display==='flex' && Array.from(footer.children).map(el=>el.textContent.trim()).join(' ')==='Show less' && footer.previousElementSibling.matches('.task-list-more') && !group.querySelector('summary .task-list-done') && footer.getBoundingClientRect().top>=group.querySelector('.task-list-rows').getBoundingClientRect().bottom && getComputedStyle(group.querySelector('.task-list-more')).display==='none')})()`, "true")
 		b.waitFor("browsing keeps preview height", `String(Math.abs(document.querySelector('.task-list-group').getBoundingClientRect().height-window.previewHeight)<2)`, "true")
 		b.evaluateAwait(`Promise.all(document.querySelector(".task-list-search-slot").getAnimations({subtree:true}).map(animation=>animation.finished.catch(()=>{}))).then(()=>"search animation settled")`)
+		b.waitFor("browse scrollbar visible before scrolling", `(()=>{var rail=document.querySelector('.task-list-scroll-rail'),thumb=rail.firstElementChild;return String(rail.getBoundingClientRect().width===8 && thumb.getBoundingClientRect().height>=24 && getComputedStyle(rail).display==='block')})()`, "true")
+		var railPoint struct{ X, Y float64 }
+		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('.task-list-scroll-rail').getBoundingClientRect();return JSON.stringify({X:r.left+4,Y:r.bottom-4})})()`)), &railPoint); err != nil {
+			t.Fatal(err)
+		}
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "button": "left", "clickCount": 1, "x": railPoint.X, "y": railPoint.Y}, nil)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "button": "left", "clickCount": 1, "x": railPoint.X, "y": railPoint.Y}, nil)
+		b.waitFor("scrollbar track click scrolls category", `String(document.querySelector('.task-list-rows').scrollTop>0)`, "true")
+		b.evaluate(`document.querySelector('.task-list-rows').scrollTop=0;'reset rail test'`)
 		var footerPoint struct{ X, Y float64 }
 		if err := json.Unmarshal([]byte(b.evaluate(`(()=>{var r=document.querySelector('.task-list-done').getBoundingClientRect();window.footerTop=r.top;window.sidebarScroll=document.getElementById('task-list-groups').scrollTop;return JSON.stringify({X:r.left+r.width/2,Y:r.top+r.height/2})})()`)), &footerPoint); err != nil {
 			t.Fatal(err)
