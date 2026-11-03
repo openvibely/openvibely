@@ -28,6 +28,8 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "shortcuts", Name: "Shortcuts"}
 	var lists atomic.Int32
+	var holdCachedC atomic.Bool
+	releaseCachedC := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -55,6 +57,13 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 			task := &models.Task{ID: strings.Split(r.URL.Path, "/")[2], ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 			component = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
 		case r.URL.Path == "/tasks/a" || r.URL.Path == "/tasks/b" || r.URL.Path == "/tasks/c":
+			if r.URL.Path == "/tasks/c" && holdCachedC.Load() {
+				select {
+				case <-releaseCachedC:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 			if r.Header.Get("X-OpenVibely-Thread-Refresh") == "true" {
 				component = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil, components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30))
@@ -73,6 +82,7 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		}
 	}))
 	defer server.Close()
+	defer close(releaseCachedC)
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("composer", `String(document.activeElement && document.activeElement.id)`, "task-message-input")
@@ -192,6 +202,32 @@ func testTaskShortcuts(t *testing.T, threadDelay time.Duration) {
 		b.evaluate(`document.querySelector('[data-task-list-group="Completed"]').open=false;'closed'`)
 		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("sidebar skips collapsed groups", `location.pathname`, "/tasks/a")
+
+		// The builder's dirty-state contract must protect sidebar navigation too.
+		b.evaluate(`document.querySelector('[data-task-list-group="Completed"]').open=true;window.savedConfirm=window.confirm;window.confirmCalls=0;window.confirm=()=>{window.confirmCalls++;return false};window.dirtyBuilder=document.createElement('div');dirtyBuilder.setAttribute('data-automation-yaml-builder','');dirtyBuilder.hasUnsavedAutomationChanges=()=>true;document.body.appendChild(dirtyBuilder);history.replaceState({},'', '/automations/example/builder?project_id=shortcuts');document.activeElement.blur();'ready'`)
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("dirty builder prompts before sidebar navigation", `String(window.confirmCalls)`, "1")
+		b.waitFor("cancel keeps builder URL", `location.pathname`, "/automations/example/builder")
+		b.waitFor("cancel retains edits", `String(dirtyBuilder.isConnected && dirtyBuilder.hasUnsavedAutomationChanges())`, "true")
+		b.evaluate(`window.confirm=()=>{window.confirmCalls++;return true};'ready'`)
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("discard opens sidebar task", `location.pathname`, "/tasks/c")
+		b.waitFor("discard confirmed once", `String(window.confirmCalls)`, "2")
+		b.waitFor("composer after discard", `document.activeElement.id`, "task-message-input")
+		b.evaluate(`dirtyBuilder.hasUnsavedAutomationChanges=()=>false;'ready'`)
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("clean builder allows navigation", `location.pathname`, "/tasks/a")
+		b.waitFor("clean builder does not prompt", `String(window.confirmCalls)`, "2")
+		b.evaluate(`dirtyBuilder.remove();window.confirm=window.savedConfirm;'ready'`)
+
+		// Hold the authoritative response so C is visible while the URL still says A.
+		holdCachedC.Store(true)
+		b.evaluate(`window.cachedNavigation=window.openVibelyNavigate('/tasks/c?from=tasks').catch(()=>{});'started'`)
+		b.waitFor("cached C displayed before URL commits", `String(document.getElementById('task-detail-content').dataset.taskId==='c' && location.pathname==='/tasks/a' && new URL(window.openVibelyDisplayedURL()).pathname==='/tasks/c')`, "true")
+		b.waitFor("cached composer focused", `document.activeElement.id`, "task-message-input")
+		key("ArrowDown", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("sidebar uses displayed C and opens A rather than B", `document.getElementById('task-detail-content').dataset.taskId`, "a")
+		b.waitFor("sidebar navigation commits A", `String(location.pathname==='/tasks/a' && !document.querySelector('template[hx-history-elt]'))`, "true")
 
 	})
 }

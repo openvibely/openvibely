@@ -635,9 +635,13 @@ groups.querySelectorAll('.task-list-group').forEach(function(group) {
                 if (!rows.length) return;
                 event.preventDefault();
                 if (taskListNavigating) return;
-                var index = rows.findIndex(function(row) { return new URL(row.href).pathname === location.pathname; });
+                var displayedURL = new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href, location.href);
+                var index = rows.findIndex(function(row) { return new URL(row.href).pathname === displayedURL.pathname; });
                 var next = index < 0 ? (event.code === 'ArrowDown' ? 0 : rows.length - 1) : index + (event.code === 'ArrowDown' ? 1 : -1);
                 if (next < 0 || next >= rows.length) return;
+                var builder = document.querySelector('[data-automation-yaml-builder]');
+                if (builder && builder.hasUnsavedAutomationChanges && builder.hasUnsavedAutomationChanges() &&
+                    !window.confirm('Discard unsaved automation changes and leave this page?')) return;
                 taskListNavigating = true;
                 try {
                     await window.openVibelyNavigate(rows[next].href);
