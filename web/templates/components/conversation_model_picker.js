@@ -684,7 +684,9 @@
       close(false);
       return;
     }
-    const r = active.getBoundingClientRect(),
+    // The button scales when pressed; its wrapper keeps a stable layout box
+    // while opening the menu and when a selection updates the button label.
+    const r = active.parentElement.getBoundingClientRect(),
       height = window.innerHeight,
       width = window.innerWidth;
     const above = r.top - 8,

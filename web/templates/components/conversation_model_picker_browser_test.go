@@ -320,7 +320,14 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  assert([...panel.querySelectorAll('.ov-mp-provider')].some(b=>b.dataset.provider==='Mixture'),'mixture configurations are grouped');assert(panel.querySelector('input[type=range]').disabled,'disable until saved effort loads');
  await trigger._ovModelState.ready;assert(effort.value==='high','load saved task effort');
  function choose(id){const search=panel.querySelector('input');search.value=id==='a'?'First':id==='b'?'Second':'Local';search.dispatchEvent(new Event('input'));panel.querySelector('.ov-mp-pick').click();}
+ // Hold the pressed-button scale while opening, then release it before selecting.
+ // Positioning must use the stable wrapper rather than the animated button bounds.
+ window.ovModelPicker.close(false);
+ trigger.style.transform='scale(0.95)';trigger.click();
+ const openedLeft=panel.getBoundingClientRect().left;
+ trigger.style.transform='';
  choose('b');await trigger._ovModelState.ready;assert(effort.value==='low'&&stored.b==='low','restore other model effort');
+ assert(Math.abs(panel.getBoundingClientRect().left-openedLeft)<0.5,'model selection keeps menu horizontally anchored after button press');
  choose('a');choose('b');await trigger._ovModelState.ready;await wait(100);
  assert(trigger.dataset.currentValue==='b'&&effort.value==='low'&&posts.at(-1)==='b','ignore stale model lookup');
  const slider=panel.querySelector('input[type=range]');slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));await trigger._ovModelState.pending;
