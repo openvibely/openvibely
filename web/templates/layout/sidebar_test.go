@@ -647,7 +647,7 @@ func TestSidebar_CollapseToggleHandlersSharePersistenceHelper(t *testing.T) {
 	}
 }
 
-func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
+func TestSidebar_UserAreaMenu(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 
 	var buf bytes.Buffer

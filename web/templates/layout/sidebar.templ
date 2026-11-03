@@ -1010,7 +1010,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					</ul>
 				</div>
 			</div>
-			<ul class="menu menu-sm p-0 sidebar-footer-menu" aria-label="Settings">
+			<ul class="menu menu-sm p-0 sidebar-footer-menu">
 				<li>
 					<a
 						data-nav-base="/themes"
@@ -1018,7 +1018,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						hx-get={ fmt.Sprintf("/themes?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
 						hx-push-url="true"
-						aria-label="Settings"
 						data-tip="Settings"
 						data-tip-side="right"
 					>

@@ -25,8 +25,6 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`data-catalog=`,
 		`getAttribute('data-catalog')`,
 		`openvibely.colorTheme`,
-		`openvibely.lastLightTheme`,
-		`openvibely.lastDarkTheme`,
 		`var rawSaved = document.documentElement.getAttribute('data-ui-theme') || '';`,
 		`var saved = normalizeStoredTheme(rawSaved);`,
 		`persistUIPreference({ theme: saved });`,
@@ -197,7 +195,6 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`[data-color-theme] .ov-task-result-start-btn {`,
 		`[data-color-theme] #selection-counter {`,
 		`[data-color-theme] .toggle {`,
-		`[data-color-theme] .theme-toggle-pill {`,
 		"[data-color-theme] {\n--ov-account-limit-track:",
 		"[data-color-theme] {\n--ov-account-limit-fill:",
 		`[data-color-theme] .btn-primary,`, `[data-color-theme] .btn-ghost:hover,`,
@@ -359,7 +356,7 @@ func TestSidebarSettingsLinkIsInFooter(t *testing.T) {
 		t.Fatal("Settings link must not be rendered in the main navigation list")
 	}
 	footer := html[footerStart:]
-	if !strings.Contains(footer, `data-nav-base="/themes"`) || !strings.Contains(footer, `aria-label="Settings"`) {
+	if !strings.Contains(footer, `data-nav-base="/themes"`) || !strings.Contains(footer, `<span class="sr-only">Settings</span>`) {
 		t.Fatal("Settings link must be rendered in the sidebar footer")
 	}
 	userMenu := strings.Index(footer, `id="sidebar-user-menu"`)
