@@ -543,6 +543,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					var messages = document.getElementById('task-thread-messages');
 					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
 					var url = '/tasks/' + encodeURIComponent(taskID) + '/thread?poll=1&limit=' + encodeURIComponent(limit);
+					var detail = document.getElementById('task-detail-content');
+					var projectID = (detail && detail.dataset.projectId) || '';
+					if (projectID) url += '&project_id=' + encodeURIComponent(projectID);
 					view.dataset.revisionSyncPending = 'true';
 					return fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {
 						if (!response.ok) throw new Error('HTTP ' + response.status);

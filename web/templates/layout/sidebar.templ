@@ -427,7 +427,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         // tab's scope, regardless of the shared startup preference.
                         if (sel.value && detail.verb !== 'get' && !detail.parameters.project_id) {
                             var worktreeAction = new URL(detail.path, location.href);
-                            if (worktreeAction.origin === location.origin && /^\/tasks\/[^/]+(?:\/|$)/.test(worktreeAction.pathname) && !worktreeAction.searchParams.has('project_id')) {
+                            if (worktreeAction.origin === location.origin && /^\/(?:tasks|thread-inputs)\/[^/]+(?:\/|$)/.test(worktreeAction.pathname) && !worktreeAction.searchParams.has('project_id')) {
                                 worktreeAction.searchParams.set('project_id', sel.value);
                                 detail.path = worktreeAction.pathname + worktreeAction.search;
                             }
