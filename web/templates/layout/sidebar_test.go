@@ -23,26 +23,16 @@ func TestSidebar_ThemeToggleInFooter(t *testing.T) {
 	if !strings.Contains(html, `id="sidebar" class="sidebar-aside relative z-[210] lg:z-auto`) {
 		t.Fatal("sidebar panel must be layered above the drawer overlay so footer controls are clickable on mobile")
 	}
-	if !strings.Contains(html, "theme-toggle-pill") {
-		t.Fatal("sidebar footer must contain theme toggle pill")
-	}
-	if !strings.Contains(html, "sidebar-hide-collapsed") {
-		t.Fatal("theme toggle pill must have sidebar-hide-collapsed class to hide when collapsed")
-	}
-	if !strings.Contains(html, "theme-toggle-collapsed-btn") {
-		t.Fatal("sidebar footer must contain collapsed theme toggle button")
-	}
 	if !strings.Contains(html, "sidebar-theme-toggle-container") {
 		t.Fatal("sidebar footer must contain theme toggle container")
 	}
 	if !strings.Contains(html, "justify-end") {
 		t.Fatal("sidebar theme-toggle container must right-align footer controls")
 	}
-	if !strings.Contains(html, "theme-toggle-sun") || !strings.Contains(html, "theme-toggle-moon") {
-		t.Fatal("theme toggle must include sun and moon icons")
-	}
-	if !strings.Contains(html, "theme-collapsed-sun") || !strings.Contains(html, "theme-collapsed-moon") {
-		t.Fatal("collapsed theme toggle must include sun and moon icons")
+	for _, removed := range []string{"theme-toggle-pill", "theme-toggle-collapsed-btn", "data-theme-mode-toggle", "window.toggleTheme"} {
+		if strings.Contains(html, removed) {
+			t.Fatalf("sidebar footer must not render light/dark toggle marker %q", removed)
+		}
 	}
 }
 

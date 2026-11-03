@@ -1443,12 +1443,6 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 	}
 
 	expected := []string{
-		".theme-toggle-pill {",
-		"background: #E8E8E8;",
-		"[data-theme=\"dark\"] .theme-toggle-pill {",
-		"background: #3a4455;",
-		"window.toggleTheme = function() {",
-		"window.openVibelyThemes.toggleMode();",
 		"localStorage.setItem(key, value);",
 		"document.documentElement.setAttribute('data-color-theme', themeID);",
 		"persistUIPreference({ theme: themeID });",

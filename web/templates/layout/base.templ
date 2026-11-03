@@ -195,8 +195,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							function persistUIPreference(payload) { try { fetch('/ui/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function() {}); } catch (_) {} }
 							function usesNativeTheme(id) { return id === defaultLight || id === defaultDark; }
 							function setCSSVars(theme) { catalog.forEach(function(entry) { Object.keys(entry.css || {}).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.removeProperty(name); }); }); ['automation-node-border', 'automation-edge', 'yaml-indent-rail', 'mode-track', 'mode-thumb', 'mode-active', 'mode-inactive'].forEach(function(name) { document.documentElement.style.removeProperty('--ov-' + name); }); catalog.forEach(function(entry) { Object.keys(entry.surfaceCSS || {}).forEach(function(name) { document.documentElement.style.removeProperty(name); }); }); Object.keys(theme.surfaceCSS || {}).forEach(function(name) { if (/^--ov-surface-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, theme.surfaceCSS[name]); }); if (theme.surfaceCSS) document.documentElement.setAttribute('data-theme-surfaces', ''); else document.documentElement.removeAttribute('data-theme-surfaces'); if (usesNativeTheme(theme.id)) return; var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); var roles = theme && Array.isArray(theme.r) ? theme.r : []; ['automation-node-border', 'automation-edge', 'yaml-indent-rail', 'mode-track', 'mode-thumb', 'mode-active', 'mode-inactive'].forEach(function(name, index) { if (roles[index]) document.documentElement.style.setProperty('--ov-' + name, String(roles[index])); }); }
-							function updateThemeToggleState(theme) { var mode = modeForTheme(theme); var label = mode === 'dark' ? 'Switch to last light theme' : 'Switch to last dark theme'; document.querySelectorAll('.theme-toggle-icon').forEach(function(icon) { icon.setAttribute('data-theme-current', mode); }); document.querySelectorAll('[data-theme-mode-toggle]').forEach(function(el) { el.setAttribute('aria-pressed', mode === 'dark' ? 'true' : 'false'); el.setAttribute('title', label); el.setAttribute('aria-label', label); el.setAttribute('data-tip', label); }); }
-							function applyTheme(id, options) { options = options || {}; var theme = validTheme(normalizeStoredTheme(id)) || validTheme(defaultDark) || catalog[0]; if (!theme) return null; var themeID = theme.id; var mode = modeForTheme(theme); document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', themeID); document.documentElement.setAttribute('data-ov-theme-layer', usesNativeTheme(themeID) ? 'native' : 'custom'); document.documentElement.setAttribute('data-color-theme-kind', theme.kind || mode); setCSSVars(theme); if (options.persistLocal !== false) { safeSet(exactKey, themeID); try { localStorage.setItem('theme', themeID); } catch (_) {} } if (options.persistDB) persistUIPreference({ theme: themeID }); safeSet(mode === 'light' ? lastLightKey : lastDarkKey, themeID); updateThemeToggleState(theme); if (window.openVibelyThemes && typeof window.openVibelyThemes.refreshThemeCards === 'function') window.openVibelyThemes.refreshThemeCards(); return theme; }
+							function applyTheme(id, options) { options = options || {}; var theme = validTheme(normalizeStoredTheme(id)) || validTheme(defaultDark) || catalog[0]; if (!theme) return null; var themeID = theme.id; var mode = modeForTheme(theme); document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', themeID); document.documentElement.setAttribute('data-ov-theme-layer', usesNativeTheme(themeID) ? 'native' : 'custom'); document.documentElement.setAttribute('data-color-theme-kind', theme.kind || mode); setCSSVars(theme); if (options.persistLocal !== false) { safeSet(exactKey, themeID); try { localStorage.setItem('theme', themeID); } catch (_) {} } if (options.persistDB) persistUIPreference({ theme: themeID }); safeSet(mode === 'light' ? lastLightKey : lastDarkKey, themeID); if (window.openVibelyThemes && typeof window.openVibelyThemes.refreshThemeCards === 'function') window.openVibelyThemes.refreshThemeCards(); return theme; }
 							function initialThemeID() { var rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''; var saved = normalizeStoredTheme(rawSaved); if (saved) { if (rawSaved !== saved) setTimeout(function() { persistUIPreference({ theme: saved }); }, 0); return saved; } var exactRaw = safeGet(exactKey); var exact = normalizeStoredTheme(exactRaw); if (exact) return exact; if (exactRaw) safeRemove(exactKey); var legacy = normalizeStoredTheme(safeGet(legacyModeKey)); if (legacy) return legacy; return defaultDark; }
 						window.openVibelyThemes = window.openVibelyThemes || {};
 						window.openVibelyThemes.catalog = catalog;
@@ -208,10 +207,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						window.openVibelyThemes.applySystemMode = function(mode) { return applyTheme(fallbackIDForMode(mode === 'light' ? 'light' : 'dark'), { persistLocal: false, persistDB: false }); };
 						window.openVibelyThemes.toggleMode = function() { var current = validTheme(window.openVibelyThemes.currentID()) || validTheme(initialThemeID()); var nextMode = modeForTheme(current) === 'dark' ? 'light' : 'dark'; var remembered = normalizeThemeID(safeGet(nextMode === 'light' ? lastLightKey : lastDarkKey)); return applyTheme(remembered || fallbackIDForMode(nextMode), { persistDB: true }); };
 						window.openVibelyThemes.themeForID = validTheme;
-						window.openVibelyThemes.syncThemeControls = function() { updateThemeToggleState(validTheme(window.openVibelyThemes.currentID()) || validTheme(initialThemeID())); };
 						window.applyOpenVibelyTheme = function(themeID, persist) { return applyTheme(themeID, { persistDB: !!persist }); };
 						applyTheme(initialThemeID(), { persistLocal: false, persistDB: false });
-						if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', window.openVibelyThemes.syncThemeControls, { once: true }); } else { window.openVibelyThemes.syncThemeControls(); }
 					function detectDesktopRuntime() {
 						try {
 							if (typeof window === 'undefined') return false;
@@ -1452,73 +1449,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
 						opacity: 0 !important;
 					}
-						/* Theme toggle shared styling */					.theme-toggle-pill {
-						display: inline-flex;
-						align-items: center;
-						justify-content: space-between;
-						position: relative;
-						width: 46px;
-						height: 24px;
-						border-radius: 9999px;
-						background: #E8E8E8;
-						cursor: pointer;
-						padding: 0 4px;
-						transition: background 0.2s;
-						user-select: none;
-						flex-shrink: 0;
-					}
-					[data-theme="dark"] .theme-toggle-pill {
-						background: #3a4455;
-					}
-					.theme-toggle-icon {
-						display: flex;
-						align-items: center;
-						justify-content: center;
-						width: 16px;
-						height: 16px;
-						z-index: 1;
-						transition: opacity 0.2s, color 0.2s;
-					}
-					.theme-toggle-thumb {
-						position: absolute;
-						top: 3px;
-						width: 18px;
-						height: 18px;
-						border-radius: 50%;
-						background: #d5dbe6;
-						transition: transform 0.25s ease, left 0.25s ease, right 0.25s ease;
-						box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-					}
-					/* Light mode: thumb on LEFT (sun side), sun visible and bright on left */
-					.theme-toggle-thumb {
-						left: 3px;
-					}
-						.theme-toggle-sun {
-							color: #646fe4;
-							opacity: 1;
-						}					.theme-toggle-moon {
-						color: #9ca3af;
-						opacity: 0.5;
-					}
-					/* Dark mode: thumb slides RIGHT (moon side), moon visible and bright on right */
-					[data-theme="dark"] .theme-toggle-thumb {
-						left: auto;
-						right: 3px;
-					}
-					[data-theme="dark"] .theme-toggle-sun {
-						color: #9ca3af;
-						opacity: 0.5;
-					}
-					[data-theme="dark"] .theme-toggle-moon {
-						color: #646fe4;
-						opacity: 1;
-					}
-                    /* Palette tinting only: retain the native toggle geometry and opacity. */
-                    [data-ov-theme-layer="custom"] .theme-toggle-pill { background: var(--ov-mode-track); }
-                    [data-ov-theme-layer="custom"] .theme-toggle-thumb { background: var(--ov-mode-thumb); }
-                    [data-ov-theme-layer="custom"] .theme-toggle-icon { color: var(--ov-mode-inactive); }
-                    [data-ov-theme-layer="custom"][data-theme="light"] .theme-toggle-sun,
-                    [data-ov-theme-layer="custom"][data-theme="dark"] .theme-toggle-moon { color: var(--ov-mode-active); }
 					/* Diff viewer styles */				.diff-table td {
 					padding-top: 1px;
 					padding-bottom: 1px;
@@ -3967,13 +3897,6 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						pre.appendChild(btn);
 					});
 				};
-// Theme toggle function
-					window.toggleTheme = function() {
-						if (window.openVibelyThemes && typeof window.openVibelyThemes.toggleMode === 'function') {
-							window.openVibelyThemes.toggleMode();
-						}
-					};
-
 					// Listen for system theme changes only while there is no persisted theme preference.
 					if (window.matchMedia) {
 						window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
