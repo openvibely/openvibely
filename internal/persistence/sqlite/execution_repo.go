@@ -980,6 +980,36 @@ func (r *ExecutionRepo) ListChatHistoryBefore(ctx context.Context, projectID, be
 	return r.listChatHistoryPage(ctx, projectID, beforeExecID, limit)
 }
 
+// ListChatModelHistoryBefore pages model history within the current chat's
+// project (and email session, when present). Unlike the UI window it can stop
+// exactly at a checkpoint, without reading covered payloads or metadata.
+func (r *ExecutionRepo) ListChatModelHistoryBefore(ctx context.Context, projectID, currentExecID, afterExecID, beforeExecID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	query := `SELECT ` + executionSelectColumnsAliasLight + ` FROM executions e
+ WHERE e.task_project_id = ? AND e.task_category = 'chat'
+ AND (NOT EXISTS (SELECT 1 FROM email_task_context ec JOIN executions current ON current.task_id = ec.task_id WHERE current.id = ?)
+ OR EXISTS (SELECT 1 FROM email_task_context ec JOIN email_task_context current_ec ON current_ec.email_session_key = ec.email_session_key JOIN executions current ON current.task_id = current_ec.task_id WHERE ec.task_id = e.task_id AND current.id = ?))`
+	args := []any{projectID, currentExecID, currentExecID}
+	if beforeExecID != "" {
+		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?) OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.history_order < (SELECT history_order FROM executions WHERE id = ?)))`
+		args = append(args, beforeExecID, beforeExecID, beforeExecID)
+	}
+	if afterExecID != "" {
+		query += ` AND (e.started_at > (SELECT started_at FROM executions WHERE id = ?) OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.history_order >= (SELECT history_order FROM executions WHERE id = ?)))`
+		args = append(args, afterExecID, afterExecID, afterExecID)
+	}
+	query += ` ORDER BY e.started_at DESC, e.history_order DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, modelHistoryQuery(ctx, query, true), args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat model history: %w", err)
+	}
+	defer rows.Close()
+	return scanExecutionsNewestFirstAsChronological(rows)
+}
+
 func (r *ExecutionRepo) ListEmailChatHistory(ctx context.Context, projectID, sessionKey string, limit int) ([]models.Execution, error) {
 	if limit <= 0 {
 		return []models.Execution{}, nil

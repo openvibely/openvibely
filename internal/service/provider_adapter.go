@@ -966,7 +966,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	var replayErr error
 	if installationContinuation {
 		// Installation completion edits the existing replay before restoration.
-		req, replayErr = s.completeTaskReplayHistory(req)
+		req, replayErr = s.completeReplayHistory(req)
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
 		}
@@ -990,7 +990,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	// messages from aggregate execution output already covered by a summary.
 	req = s.restoreCompactionCheckpoint(req)
 	if req.RestoredCompactionSourceExecutionID == "" && !req.HasNativeState() {
-		req, replayErr = s.completeTaskReplayHistory(req)
+		req, replayErr = s.completeReplayHistory(req)
 		if replayErr != nil {
 			return llmcontracts.AgentResult{}, replayErr
 		}
@@ -1027,7 +1027,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return res, err
 	}
 	loadUncompactedHistory := func() ([]models.Execution, error) {
-		full, err := s.completeTaskReplayHistory(uncompactedReq)
+		full, err := s.completeReplayHistory(uncompactedReq)
 		if err != nil {
 			return nil, err
 		}
@@ -1224,7 +1224,7 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 	}
 	// Extend only as far as the saved boundary. Keep the original request intact
 	// if a clear-context boundary invalidates this checkpoint.
-	expanded, err := s.checkpointTaskHistory(req, scope, checkpoint)
+	expanded, err := s.checkpointReplayHistory(req, scope, checkpoint)
 	if err != nil {
 		applog.Infof("[agent-svc] read checkpoint history range: %v", err)
 		return req
@@ -1405,16 +1405,10 @@ func (s *LLMService) checkpointWithinCurrentContext(req llmcontracts.AgentReques
 	}
 	before := req.ExecID
 	for {
-		var history []models.Execution
-		var err error
-		switch scope.Type {
-		case "task":
-			history, err = s.execRepo.ListByTaskChronologicalBefore(persistence.WithExecutionMetadata(req.Ctx), scope.ID, before, 100)
-		case "chat_project":
-			history, err = s.execRepo.ListChatHistoryBefore(persistence.WithExecutionMetadata(req.Ctx), scope.ID, before, 100)
-		default:
+		if scope.Type != "task" && scope.Type != "chat_project" {
 			return true
 		}
+		history, err := s.replayHistoryPage(req, scope, "", before)
 		if err != nil {
 			applog.Infof("[agent-svc] read checkpoint context boundary: %v", err)
 			return false

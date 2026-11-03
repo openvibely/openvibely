@@ -199,3 +199,63 @@ func TestReplaySurvivesTransportSwitchAndNativeCompaction(t *testing.T) {
 	require.Contains(t, string(raw), "function_call_output")
 	require.Greater(t, EstimateHistoryTokens(history), 0)
 }
+
+func TestMainChatSavesOnlyNewExchange(t *testing.T) {
+	ctx := retrytest.Context()
+	stores := teststores.New(t).Stores
+	turn := 0
+	serve := func(raw []byte) string {
+		for i := 0; i <= turn; i++ {
+			require.Contains(t, string(raw), fmt.Sprintf("MAIN_CHAT_%d", i))
+		}
+		return `{"type":"response.completed","response":{"id":"done","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}]}}`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			c, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer c.CloseNow()
+			for {
+				_, raw, err := c.Read(r.Context())
+				if err != nil {
+					return
+				}
+				if c.Write(r.Context(), websocket.MessageText, []byte(serve(raw))) != nil {
+					return
+				}
+			}
+		}
+		var raw json.RawMessage
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&raw))
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\n", serve(raw))
+	}))
+	defer srv.Close()
+	old := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = old }()
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", Model: "gpt-test"}
+	workDir := t.TempDir()
+	var history []models.Execution
+	for turn = 0; turn < 3; turn++ {
+		task := models.Task{ProjectID: "default", Title: fmt.Sprintf("chat-%d", turn), Category: models.CategoryChat, Status: models.StatusCompleted}
+		require.NoError(t, stores.Tasks.Create(ctx, &task))
+		e := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: fmt.Sprintf("MAIN_CHAT_%d", turn)}
+		require.NoError(t, stores.Executions.Create(ctx, &e))
+		_, _, err := New(nil, stores.Executions, nil, nil).CallChatStreaming(ctx, e.PromptSent, nil, agent, e.ID, "default", "", history, "", false, models.ChatModeOrchestrate, workDir, nil)
+		require.NoError(t, err)
+		saved, err := stores.Executions.ReplayMessagesByExecutionIDs(ctx, []string{e.ID})
+		require.NoError(t, err)
+		require.NotEmpty(t, saved[e.ID])
+		text := saved[e.ID][0].FullTranscriptJSON()
+		require.Contains(t, text, e.PromptSent)
+		for i := 0; i < turn; i++ {
+			require.NotContains(t, text, fmt.Sprintf("MAIN_CHAT_%d", i), "ordinary Chat sends must not save earlier exchanges again")
+		}
+		e.Status = models.ExecCompleted
+		e.ReplayMessages = saved[e.ID]
+		history = append(history, e)
+	}
+}

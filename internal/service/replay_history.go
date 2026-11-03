@@ -6,21 +6,25 @@ import (
 	"github.com/openvibely/openvibely/internal/persistence"
 )
 
-// completeTaskReplayHistory separates the UI's bounded execution window from
+// completeReplayHistory separates the UI's bounded execution window from
 // model history when no usable checkpoint supplies a boundary (or recovery needs
-// the original sequence). Checkpoint restoration uses checkpointTaskHistory instead.
+// the original sequence). Checkpoint restoration uses checkpointReplayHistory instead.
 // Only metadata is paged here, never provider payloads or aggregate output.
-func (s *LLMService) completeTaskReplayHistory(req contracts.AgentRequest) (contracts.AgentRequest, error) {
+func (s *LLMService) completeReplayHistory(req contracts.AgentRequest) (contracts.AgentRequest, error) {
 	if s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 || req.ExecID == "" || req.RawDirectPrompt || req.LifecycleHookCall {
 		return req, nil
 	}
 	first := req.ChatHistory[0]
+	scope, ok := s.compactionScopeForRequest(req)
+	if !ok {
+		scope = compactionScope{Type: "task", ID: first.TaskID}
+	}
 	if first.ID == "" || first.TaskID == "" {
 		return req, nil
 	}
 	for _, e := range req.ChatHistory {
 		// Synthetic histories and explicit context resets are already complete.
-		if e.ContextKind != "" || e.TaskID != first.TaskID || e.StartsNewContext {
+		if e.ContextKind != "" || (scope.Type == "task" && e.TaskID != first.TaskID) || e.StartsNewContext {
 			return req, nil
 		}
 	}
@@ -28,13 +32,13 @@ func (s *LLMService) completeTaskReplayHistory(req contracts.AgentRequest) (cont
 	if err != nil {
 		return req, err
 	}
-	if current == nil || current.TaskID != first.TaskID || current.StartsNewContext {
+	if current == nil || (scope.Type == "task" && current.TaskID != first.TaskID) || current.StartsNewContext {
 		return req, nil
 	}
 	before := first.ID
 	var older []models.Execution
 	for {
-		page, err := s.execRepo.ListByTaskChronologicalBefore(persistence.WithExecutionMetadata(req.Ctx), first.TaskID, before, 100)
+		page, err := s.replayHistoryPage(req, scope, "", before)
 		if err != nil {
 			return req, err
 		}
@@ -75,22 +79,22 @@ func (s *LLMService) completeTaskReplayHistory(req contracts.AgentRequest) (cont
 	return req, nil
 }
 
-// checkpointTaskHistory fills only the gap between a checkpoint and the caller's
+// checkpointReplayHistory fills only the gap between a checkpoint and the caller's
 // bounded history window. Including the source lets restoration validate context
 // resets and splice the checkpoint without reading any covered predecessors.
-func (s *LLMService) checkpointTaskHistory(req contracts.AgentRequest, scope compactionScope, cp *models.ChatCompactionCheckpoint) (contracts.AgentRequest, error) {
-	if scope.Type != "task" || cp.SourceExecutionID == "" || (len(cp.History) == 0 && !cp.HasNativeState()) || len(req.ChatHistory) == 0 || req.RawDirectPrompt || req.LifecycleHookCall {
+func (s *LLMService) checkpointReplayHistory(req contracts.AgentRequest, scope compactionScope, cp *models.ChatCompactionCheckpoint) (contracts.AgentRequest, error) {
+	if (scope.Type != "task" && scope.Type != "chat_project") || cp.SourceExecutionID == "" || (len(cp.History) == 0 && !cp.HasNativeState()) || len(req.ChatHistory) == 0 || req.RawDirectPrompt || req.LifecycleHookCall {
 		return req, nil
 	}
 	for _, e := range req.ChatHistory {
-		if e.ID == cp.SourceExecutionID || e.ContextKind != "" || e.TaskID != scope.ID {
+		if e.ID == cp.SourceExecutionID || e.ContextKind != "" || (scope.Type == "task" && e.TaskID != scope.ID) {
 			return req, nil
 		}
 	}
 	before := req.ChatHistory[0].ID
 	var pages [][]models.Execution
 	for before != "" {
-		page, err := s.execRepo.ListByTaskChronologicalBetween(persistence.WithExecutionMetadata(req.Ctx), scope.ID, cp.SourceExecutionID, before, 100)
+		page, err := s.replayHistoryPage(req, scope, cp.SourceExecutionID, before)
 		if err != nil {
 			return req, err
 		}
@@ -119,4 +123,16 @@ func (s *LLMService) checkpointTaskHistory(req contracts.AgentRequest, scope com
 		req.ChatHistory = append(history, req.ChatHistory...)
 	}
 	return req, nil
+}
+
+// Provider-independent paging; storage scopes differ, reconstruction does not.
+func (s *LLMService) replayHistoryPage(req contracts.AgentRequest, scope compactionScope, after, before string) ([]models.Execution, error) {
+	ctx := persistence.WithExecutionMetadata(req.Ctx)
+	if scope.Type == "chat_project" {
+		return s.execRepo.ListChatModelHistoryBefore(ctx, scope.ID, req.ExecID, after, before, 100)
+	}
+	if after != "" {
+		return s.execRepo.ListByTaskChronologicalBetween(ctx, scope.ID, after, before, 100)
+	}
+	return s.execRepo.ListByTaskChronologicalBefore(ctx, scope.ID, before, 100)
 }

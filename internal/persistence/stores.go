@@ -345,6 +345,7 @@ type ExecutionStore interface {
 	ListByTaskChronologicalPage(ctx context.Context, taskID string, offset int, limit int) ([]models.Execution, error)
 	ListChatHistory(ctx context.Context, projectID string, limit int) ([]models.Execution, error)
 	ListChatHistoryBefore(ctx context.Context, projectID string, beforeExecID string, limit int) ([]models.Execution, error)
+	ListChatModelHistoryBefore(ctx context.Context, projectID, currentExecID, afterExecID, beforeExecID string, limit int) ([]models.Execution, error)
 	ListEmailChatHistory(ctx context.Context, projectID string, sessionKey string, limit int) ([]models.Execution, error)
 	MarkRunning(ctx context.Context, id string) error
 	ReasoningContentByIDs(ctx context.Context, ids []string) (map[string]string, error)

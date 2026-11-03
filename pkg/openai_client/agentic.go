@@ -162,8 +162,6 @@ type AgenticOptions struct {
 	OnHistoryChanged func(context.Context, []any, int) error
 	// OnReplayChanged persists new items, or a replacement after a history rewrite.
 	OnReplayChanged func(context.Context, ResponsesReplayUpdate) error
-	// IndependentReplay saves an independent conversation for cross-task chat.
-	IndependentReplay bool
 	// ContinueFromHistory resumes an already recorded prompt after compaction.
 	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
@@ -406,7 +404,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	var exchange transcript.ExchangeTracker[any]
 	// Native checkpoints with no independently replayable history establish a
 	// replacement base; ordinary calls collect only their new exchange.
-	if opts.ContinueFromHistory || opts.IndependentReplay || len(c.History) == 0 {
+	if opts.ContinueFromHistory || len(c.History) == 0 {
 		exchange.ReplaceHistory(inputItems)
 	}
 

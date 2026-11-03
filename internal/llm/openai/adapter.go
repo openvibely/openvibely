@@ -777,7 +777,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		HasPendingSteering:             llmcontracts.SteeringPendingCheckFromContext(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
 		OnReplayChanged:                saveReplay,
-		IndependentReplay:              !isTaskFollowup,
 		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,

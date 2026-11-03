@@ -80,7 +80,7 @@ func TestOrderedReplayHistoryLegacyFallback(t *testing.T) {
 	require.NoError(t, store.Create(req.Ctx, &current))
 	req.ExecID = current.ID
 	req.ChatHistory = req.ChatHistory[6:]
-	expanded, err := svc.completeTaskReplayHistory(req)
+	expanded, err := svc.completeReplayHistory(req)
 	require.NoError(t, err)
 	require.Len(t, expanded.ChatHistory, 26)
 	require.Empty(t, expanded.ChatHistory[0].PromptSent, "paging must not load payloads")

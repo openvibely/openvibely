@@ -207,13 +207,12 @@ func TestResponsesReplayUpdateAppendAndRepair(t *testing.T) {
 		{"append", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, false, false},
 		{"repair", []any{map[string]any{"type": "function_call", "call_id": "unfinished", "name": "read", "arguments": "{}"}, map[string]any{"type": "message", "role": "user", "content": "old"}}, false, true},
 		{"retry", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, true, true},
-		{"independent", []any{map[string]any{"type": "message", "role": "user", "content": "old"}}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newHTTPTestAPIKeyClient("key")
 			c.History = []Message{{ResponsesInputItems: tc.prefix}}
 			var updates []ResponsesReplayUpdate
-			_, err := c.SendAgentic(context.Background(), "new", &AgenticOptions{Model: "gpt-test", DisableTools: true, OmitExecutionEnvironment: true, ContinueFromHistory: tc.resume, IndependentReplay: tc.name == "independent", OnReplayChanged: func(_ context.Context, u ResponsesReplayUpdate) error { updates = append(updates, u); return nil }})
+			_, err := c.SendAgentic(context.Background(), "new", &AgenticOptions{Model: "gpt-test", DisableTools: true, OmitExecutionEnvironment: true, ContinueFromHistory: tc.resume, OnReplayChanged: func(_ context.Context, u ResponsesReplayUpdate) error { updates = append(updates, u); return nil }})
 			require.NoError(t, err)
 			require.NotEmpty(t, updates)
 			for _, u := range updates {

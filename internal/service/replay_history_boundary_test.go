@@ -33,7 +33,7 @@ func TestOrderedReplayHistoryStopsAtContextReset(t *testing.T) {
 			boundedRestore := svc.restoreCompactionCheckpoint(req)
 			require.False(t, resumeHasSummary(boundedRestore.ChatHistory))
 			require.Empty(t, boundedRestore.RestoredCompactionSourceExecutionID)
-			expanded, err := svc.completeTaskReplayHistory(req)
+			expanded, err := svc.completeReplayHistory(req)
 			require.NoError(t, err)
 			require.Len(t, expanded.ChatHistory, 127)
 			require.Equal(t, resetID, expanded.ChatHistory[0].ID)
@@ -57,12 +57,12 @@ func TestOrderedReplayHistoryDoesNotExpandCrossTaskOrSyntheticInput(t *testing.T
 	req.ChatHistory = req.ChatHistory[6:]
 	original := req.ChatHistory
 	req.ChatHistory[0].ContextKind = "summary"
-	got, err := svc.completeTaskReplayHistory(req)
+	got, err := svc.completeReplayHistory(req)
 	require.NoError(t, err)
 	require.Equal(t, original, got.ChatHistory)
 	req.ChatHistory[0].ContextKind = ""
 	req.ChatHistory[1].TaskID = "different-task"
-	got, err = svc.completeTaskReplayHistory(req)
+	got, err = svc.completeReplayHistory(req)
 	require.NoError(t, err)
 	require.Equal(t, req.ChatHistory, got.ChatHistory)
 }
