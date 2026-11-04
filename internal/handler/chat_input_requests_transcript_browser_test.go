@@ -130,6 +130,10 @@ func runChatInputRequestProgressBrowser(t *testing.T, resolution string) {
 			if (!cardAnswerable()) fail('card lost its answer options after changing the model');
 			if (!firstAnswerKept()) fail('first answer lost after changing the model');
 
+			// Selection keeps the model picker open. Dismiss before acting on the card.
+			document.body.click();
+			await waitFor(function() { return document.getElementById('conversation-model-picker').hidden; }, 'models menu did not close after selection');
+
 			var pid = document.getElementById('chat-page-root').getAttribute('data-project-id');
 			var originalCard = cardPresent();
 			var inputFetches = 0;

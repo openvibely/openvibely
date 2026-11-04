@@ -4458,10 +4458,19 @@ func TestHandler_Schedule_NoViewportHeightOverflow(t *testing.T) {
 
 	// The schedule-content root must use flex layout to fill available space
 	// instead of a viewport-relative calc() height that causes outer scrollbar.
-	if !strings.Contains(body, `id="schedule-content"`) {
+	rootID := strings.Index(body, `id="schedule-content"`)
+	if rootID < 0 {
 		t.Fatal("missing schedule-content element")
 	}
-	if strings.Contains(body, "100vh") {
+	rootStart := strings.LastIndex(body[:rootID], "<")
+	rootEnd := strings.Index(body[rootID:], ">")
+	if rootStart < 0 || rootEnd < 0 {
+		t.Fatal("invalid schedule-content opening tag")
+	}
+	// The shared menu backdrop is intentionally viewport-sized; inspect only
+	// the schedule root's layout rather than unrelated embedded styles.
+	rootTag := body[rootStart : rootID+rootEnd]
+	if strings.Contains(rootTag, "100vh") {
 		t.Error("schedule page must not use viewport-relative height (100vh); use flex layout instead")
 	}
 	// The timeline container should use flex-1 to fill remaining space. Treat

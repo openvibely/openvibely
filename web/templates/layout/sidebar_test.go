@@ -485,9 +485,9 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 		t.Fatal("sidebar navigation script must uncheck the mobile drawer after nav selection")
 	}
 
-	pointerdownStart := strings.Index(html, `addEventListener('pointerdown'`)
-	beforeRequestStart := strings.Index(html, `addEventListener('htmx:beforeRequest'`)
-	beforeSendStart := strings.Index(html, `addEventListener('htmx:beforeSend'`)
+	pointerdownStart := strings.Index(html, `document.body.addEventListener('pointerdown'`)
+	beforeRequestStart := strings.Index(html, `document.body.addEventListener('htmx:beforeRequest'`)
+	beforeSendStart := strings.Index(html, `document.body.addEventListener('htmx:beforeSend'`)
 	if pointerdownStart == -1 || beforeRequestStart == -1 || beforeSendStart == -1 || beforeRequestStart <= pointerdownStart || beforeSendStart <= beforeRequestStart {
 		t.Fatal("sidebar navigation script must keep pointerdown before htmx:beforeRequest and close the drawer at htmx:beforeSend")
 	}

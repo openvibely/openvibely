@@ -50,6 +50,7 @@ func testProjectQuestionPickerInChrome(t *testing.T, all bool) {
  try{
  await wait(()=>document.querySelector('[data-chat-input-request-id="%s"]'));
  const card=document.querySelector('[data-chat-input-request-id="%s"]');
+ await wait(()=>card.isConnected&&card.checkVisibility({visibilityProperty:true})&&!card.closest('[hidden],[inert]'));
  card.querySelector('[data-chat-input-nav="recommended"]').click();
  const group=card.querySelector('[data-chat-input-question-id="scope"]');
  check(!group.classList.contains('hidden'),'recommended did not stop at projects');
@@ -57,18 +58,25 @@ func testProjectQuestionPickerInChrome(t *testing.T, all bool) {
  check(!group.querySelector('[data-chat-input-custom-option]'),'unexpected text alternative');
  group.querySelector('[data-option-label="Specific projects"]').click();
  const picker=group.querySelector('[data-project-picker]'),search=group.querySelector('[data-project-search]'),list=group.querySelector('[data-project-results]');
+ await wait(()=>search.checkVisibility({visibilityProperty:true})&&!search.closest('[hidden],[inert]'));
  const choices=Array.from(group.querySelectorAll('[data-project-choice]'));
  choices[0].click(); check(!list.classList.contains('hidden'),'picker closed after selection');
  choices[1].click(); check(!list.classList.contains('hidden'),'picker closed after second selection');
  check(group.querySelectorAll('[data-project-remove]').length===2,'missing selection chips');
  search.value='website';search.dispatchEvent(new Event('input',{bubbles:true}));
  check(choices[0].classList.contains('hidden')&&!choices[1].classList.contains('hidden'),'search failed');
+ // Escape dismisses results before navigation; outside clicks only dismiss.
+ search.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ check(list.classList.contains('hidden'),'Escape did not dismiss project results');
  card.querySelector('[data-chat-input-nav="previous"]').click();
  card.querySelector('[data-chat-input-nav="next"]').click();
  check(group.querySelectorAll('[data-project-choice][aria-pressed="true"]').length===2,'previous lost picks');
  group.querySelector('[data-project-remove]').click();
  check(group.querySelectorAll('[data-project-choice][aria-pressed="true"]').length===1,'remove failed');
+ search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));
  choices[0].click();
+ search.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ check(list.classList.contains('hidden'),'results remained open before Submit');
  card.querySelector('[data-chat-input-nav="submit"]').click();
  await wait(()=>!card.isConnected);
  await fetch('/browser-result',{method:'POST',headers:{'X-Browser-Status':'pass'},body:'picker flow passed'});

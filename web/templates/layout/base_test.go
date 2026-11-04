@@ -422,7 +422,7 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	script := `
 	const listeners = {};
 	let runtime = 'web';
-	global.window = { innerHeight: 320 };
+	global.window = { innerHeight: 320, addEventListener: function() {} };
 	global.document = {
 	  body: { name: 'body' },
 	  documentElement: { getAttribute: function() { return runtime; } },
@@ -1823,10 +1823,14 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 			t.Fatalf("expected tool output CSS fragment %q", fragment)
 		}
 	}
-	if strings.Contains(html, "max-height: none;") {
+	// Shared menu styles have an unbounded viewport backdrop. Only tool-output
+	// rules participate in this scrolling contract.
+	toolRules := regexp.MustCompile(`[^{}]*\.stream-tool[^{}]*\{[^{}]*\}`).FindAllString(html, -1)
+	toolCSS := strings.Join(toolRules, "\n")
+	if strings.Contains(toolCSS, "max-height: none;") {
 		t.Fatal("tool output body must be height-bounded instead of unbounded")
 	}
-	if strings.Contains(html, "overscroll-behavior: contain;") {
+	if strings.Contains(toolCSS, "overscroll-behavior: contain;") {
 		t.Fatal("tool output body must not contain overscroll, because page scrolling must chain at top/bottom boundaries")
 	}
 }
