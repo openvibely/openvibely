@@ -139,7 +139,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	tools := make([]map[string]interface{}, 0, len(toolDefs))
 	for _, td := range toolDefs {
 		function := map[string]interface{}{"name": td.Name, "description": td.Description, "parameters": td.ParameterSchema()}
-		function["strict"] = false
+		// Compatible endpoints may reject strict even when false; omission keeps
+		// Chat Completions non-strict by default.
+		if opts.FirstPartyOpenAI {
+			function["strict"] = false
+		}
 		tools = append(tools, map[string]interface{}{
 			"type":     "function",
 			"function": function,
