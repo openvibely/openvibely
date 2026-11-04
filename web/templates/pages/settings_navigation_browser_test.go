@@ -201,8 +201,8 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 	})
 }
 
-// Settings retains the composer instead of removing it; body-level picker panels
-// must close even when the navigation handler consumes the outside click.
+// Outside clicks dismiss the shared picker before navigation handlers run.
+// A second click navigates, and retained composers remain usable.
 func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,10 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 				b.waitFor("picker visible", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
 				b.evaluate(`document.querySelector('#conversation-model-picker .ov-mp-provider').click();'provider'`)
 				b.waitFor("submenu visible", `String(!document.getElementById('conversation-provider-models').hidden)`, "true")
-				b.evaluate(`document.querySelector('#sidebar [data-nav-base="/themes"]').click();'settings'`)
+				b.evaluate(`window.pickerNavigationRequests=0;document.addEventListener('htmx:beforeRequest',()=>window.pickerNavigationRequests++);window.pickerOriginalURL=location.href;'watch navigation'`)
+				b.click(`#sidebar [data-nav-base="/themes"]`)
+				b.waitFor("first click only dismisses", `String(document.getElementById('conversation-model-picker').hidden && document.getElementById('conversation-provider-models').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false' && location.href===window.pickerOriginalURL && !document.getElementById('settings-retained-workspace') && window.pickerNavigationRequests===0 && !window._sidebarNavigating)`, "true")
+				b.click(`#sidebar [data-nav-base="/themes"]`)
 				b.waitFor("workspace hidden in settings", `String(!!document.getElementById('themes-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
 				b.waitFor("picker and submenu dismissed", `String(document.getElementById('conversation-model-picker').hidden && document.getElementById('conversation-provider-models').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
 				b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened'`)

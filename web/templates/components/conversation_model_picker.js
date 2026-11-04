@@ -879,16 +879,31 @@
       .find((b) => b.dataset.provider === old)
       ?.focus();
   };
-  document.addEventListener(
+  function outsidePicker(target) {
+    return (
+      active &&
+      !panel.contains(target) &&
+      !sub.contains(target) &&
+      !active.contains(target)
+    );
+  }
+  // Window capture runs before document-level navigation handlers, including
+  // handlers that stop propagation. The first outside click only dismisses.
+  window.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.button !== 0 || !outsidePicker(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
+  window.addEventListener(
     "click",
     (e) => {
-      if (
-        !active ||
-        panel.contains(e.target) ||
-        sub.contains(e.target) ||
-        active.contains(e.target)
-      )
-        return;
+      if (!outsidePicker(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       close(false);
     },
     true,
