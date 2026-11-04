@@ -120,7 +120,7 @@ func TestBrowserFunctional_NewTaskTitleDraftRestoredFromProjectHistory(t *testin
 		b.click(`input[name="title"]`)
 		b.typeText("Project B draft")
 		b.waitFor("Project B title saved", `sessionStorage.getItem('openvibely.new-task-title.title-project-b')`, "Project B draft")
-		b.waitFor("Project A cached in HTMX history", `(function(){var items=JSON.parse(localStorage.getItem('htmx-history-cache')||'[]');return String(items.some(function(item){return item.url==='/tasks/new?project_id=title-project-a';}))})()`, "true")
+		b.waitFor("Project A cached in HTMX history", `(function(){var items=JSON.parse(sessionStorage.getItem('htmx-history-cache')||'[]');return String(items.some(function(item){return item.url==='/tasks/new?project_id=title-project-a';}))})()`, "true")
 		navigateHistory(-2, "/tasks/new:title-project-a")
 		b.waitFor("Project A history restore event", `String((window._newTaskHistoryRestores||[]).some(function(item){return item.cacheHit && item.path.indexOf('/tasks/new?project_id=title-project-a')===0}))`, "true")
 		b.waitFor("cached Project A title restored", `(function(){var root=document.getElementById('task-detail-content'),input=root&&root.querySelector('input[name="title"]');return location.pathname+':'+(root&&root.dataset.projectId)+':'+(input&&input.value)+':'+sessionStorage.getItem('openvibely.new-task-title.title-project-a')})()`, "/tasks/new:title-project-a:Project A draft:Project A draft")

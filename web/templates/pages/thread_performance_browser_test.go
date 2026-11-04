@@ -144,9 +144,9 @@ window.addEventListener('DOMContentLoaded', function() {
    assert(location.search==='?tab=details', 'superseded refresh lost tab URL');
    await window.openVibelyNavigate('/tasks/b');
    document.querySelector('[data-page]').setAttribute('hx-history','false');
-   localStorage.removeItem('htmx-history-cache');
+   sessionStorage.removeItem('htmx-history-cache');
    await window.openVibelyNavigate('/tasks/a');
-   assert(!(localStorage.getItem('htmx-history-cache')||'').includes('/tasks/b'), 'sensitive outgoing page leaked into history');
+   assert(!(sessionStorage.getItem('htmx-history-cache')||'').includes('/tasks/b'), 'sensitive outgoing page leaked into history');
    await window.openVibelyNavigate('/tasks/b');
    await fetch('/delete');
    await window.openVibelyNavigate('/tasks/a').catch(()=>{});
@@ -291,7 +291,7 @@ document.getElementById('leave').click();
 		if layouts := layoutCount() - before; layouts > 10 {
 			t.Fatalf("leaving a virtualized thread forced %.0f layouts", layouts)
 		}
-		if got := browser.evaluate(`(function(){const saved=JSON.parse(localStorage.getItem('htmx-history-cache')||'[]').find(item=>item.url==='/');if(!saved)return 'missing history';const clone=document.createElement('template');clone.innerHTML=saved.content;return String(!!document.getElementById('next') && clone.content.querySelectorAll('pre').length===400 && !clone.content.querySelector('[data-virtual-chat-row]'));})()`); got != "true" {
+		if got := browser.evaluate(`(function(){const saved=JSON.parse(sessionStorage.getItem('htmx-history-cache')||'[]').find(item=>item.url==='/');if(!saved)return 'missing history';const clone=document.createElement('template');clone.innerHTML=saved.content;return String(!!document.getElementById('next') && clone.content.querySelectorAll('pre').length===400 && !clone.content.querySelector('[data-virtual-chat-row]'));})()`); got != "true" {
 			t.Fatalf("navigation did not retain all offscreen output in history: %s", got)
 		}
 	})

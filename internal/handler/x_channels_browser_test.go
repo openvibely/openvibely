@@ -128,7 +128,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    return feedback.innerHTML;
 	  }
 	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });  (async function() {
-    if (!window.htmx || htmx.version !== '2.0.4') fail('real HTMX 2.0.11 was not loaded');
+    if (!window.htmx || htmx.version !== '2.0.11') fail('real HTMX 2.0.11 was not loaded');
     var add = document.querySelector('button[onclick="openXConfigModal()"]');
     if (!add) fail('missing production Add Channel X action');
     add.click();
