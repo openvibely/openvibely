@@ -4,7 +4,7 @@ import "github.com/openvibely/openvibely/web/templates/components"
 
 templ automationNodePanelHeader(readOnly bool) {
  @automationInspectorEditors(readOnly)
- @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{"details", "Details"}, {"schedule", "Schedule"}, {"connections", "Connections"}})
+ @components.InspectorTabs("automation-inspector-tab-", "automation-inspector-content-", "Node settings", []components.InspectorTab{{Key: "details", Label: "Details"}, {Key: "schedule", Label: "Schedule"}, {Key: "connections", Label: "Connections"}})
 
 }
 

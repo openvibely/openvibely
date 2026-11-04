@@ -42,7 +42,7 @@ func TaskDetailPanel() templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = components.InspectorTabs("inspector-tab-", "tab-", "Task details", []components.InspectorTab{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Files"}, {"lifecycle", "Lifecycle"}}).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.InspectorTabs("inspector-tab-", "tab-", "Task details", []components.InspectorTab{{Key: "details", Label: "Details"}, {Key: "schedules", Label: "Schedule"}, {Key: "chaining", Label: "Chaining"}, {Key: "attachments", Label: "Files"}, {Key: "lifecycle", Label: "Lifecycle"}}).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
