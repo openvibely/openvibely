@@ -45,40 +45,87 @@
     // The project search input is part of its menu, not a dismissal target.
     const surfaces = open.map(panel => panel.matches('[data-project-results]') ? panel.closest('[data-project-picker]') : panel);
     const width = innerWidth, height = innerHeight;
-    const rects = surfaces.map(panel => panel.getBoundingClientRect()).map(r => ({
-      left: Math.max(0, r.left), right: Math.min(width, r.right),
-      top: Math.max(0, r.top), bottom: Math.min(height, r.bottom)
-    })).filter(r => r.right > r.left && r.bottom > r.top);
-    const geometry = JSON.stringify([width, height, rects]);
+    const shapes = surfaces.map(panel => {
+      const r = panel.getBoundingClientRect(), style = getComputedStyle(panel);
+      const radius = value => {
+        const parts = value.split(' ');
+        const length = (part, size) => parseFloat(part) * (part.endsWith('%') ? size / 100 : 1);
+        return [length(parts[0], r.width), length(parts[1] || parts[0], r.height)];
+      };
+      const corners = [style.borderTopLeftRadius, style.borderTopRightRadius,
+        style.borderBottomRightRadius, style.borderBottomLeftRadius].map(radius);
+      // CSS scales all corner radii together when their sums exceed a side.
+      const [tl, tr, br, bl] = corners;
+      const scale = Math.min(1, r.width / (tl[0] + tr[0]), r.width / (bl[0] + br[0]),
+        r.height / (tl[1] + bl[1]), r.height / (tr[1] + br[1]));
+      return {left:r.left, top:r.top, right:r.right, bottom:r.bottom,
+        corners:corners.map(pair => pair.map(n => n * scale))};
+    }).filter(r => r.right > r.left && r.bottom > r.top);
+    const geometry = JSON.stringify([width, height, shapes]);
     if (geometry !== lastGeometry) {
       lastGeometry = geometry;
-      // Partition into horizontal strips, subtracting the UNION of panel bounds.
-      // This keeps overlapping menus usable, without reparenting their contents
-      // or changing their focus, positioning, form ownership, or HTMX ancestry.
-      const edges = Array.from(new Set([0, height, ...rects.flatMap(r => [r.top, r.bottom])])).sort((a, b) => a - b);
-      const tiles = [];
-      function tile(left, top, right, bottom) {
-        if (right <= left || bottom <= top) return;
-        const div = document.createElement('div');
-        div.style.cssText = `left:${left}px;top:${top}px;width:${right-left}px;height:${bottom-top}px`;
-        tiles.push(div);
+      // Each clip removes one rounded panel from the viewport. Nesting clips
+      // intersects their outside regions, so overlapping panels remain usable.
+      // Unlike rectangular holes, this also covers the transparent corners.
+      const fragment = document.createDocumentFragment();
+      let parent = fragment;
+      for (const r of shapes) {
+        const [tl, tr, br, bl] = r.corners, l = r.left, t = r.top, b = r.bottom, right = r.right;
+        const path = `M0 0H${width}V${height}H0Z ` +
+          `M${l+tl[0]} ${t}H${right-tr[0]}A${tr[0]} ${tr[1]} 0 0 1 ${right} ${t+tr[1]}` +
+          `V${b-br[1]}A${br[0]} ${br[1]} 0 0 1 ${right-br[0]} ${b}` +
+          `H${l+bl[0]}A${bl[0]} ${bl[1]} 0 0 1 ${l} ${b-bl[1]}` +
+          `V${t+tl[1]}A${tl[0]} ${tl[1]} 0 0 1 ${l+tl[0]} ${t}Z`;
+        const layer = document.createElement('div');
+        layer.style.clipPath = `path(evenodd, "${path}")`;
+        parent.append(layer);
+        parent = layer;
       }
-      for (let i = 1; i < edges.length; i++) {
-        const top = edges[i-1], bottom = edges[i];
-        const spans = rects.filter(r => r.top < bottom && r.bottom > top).sort((a, b) => a.left - b.left);
-        let left = 0;
-        for (const span of spans) {
-          tile(left, top, span.left, bottom);
-          left = Math.max(left, span.right);
-        }
-        tile(left, top, width, bottom);
-      }
-      backdrop.replaceChildren(...tiles);
+      const hit = document.createElement('div');
+      hit.setAttribute('data-menu-backdrop-hit', '');
+      parent.append(hit);
+      backdrop.replaceChildren(fragment);
     }
     if (!backdrop.matches(':popover-open')) backdrop.showPopover();
     // Track layout transitions, scrolling and submenu movement while open only.
     frame = requestAnimationFrame(sync);
   }
+  // A pointer backdrop alone is not a keyboard boundary. Keep Tab navigation
+  // within the live menu surfaces (including provider submenus and search).
+  // Do not intercept focus restoration or dialogs opened by menu actions.
+  window.addEventListener('keydown', event => {
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
+    const modals = document.querySelectorAll('dialog:modal');
+    const modal = modals[modals.length - 1];
+    const open = Array.from(document.querySelectorAll(selector)).filter(panel => visible(panel, modal));
+    if (!open.length) return;
+    const surfaces = open.map(panel => panel.matches('[data-project-results]') ? panel.closest('[data-project-picker]') : panel);
+    const candidates = new Set();
+    for (const surface of surfaces) {
+      if (surface.tabIndex >= 0) candidates.add(surface);
+      surface.querySelectorAll('a[href],button,input,select,textarea,summary,iframe,[tabindex],[contenteditable]').forEach(el => candidates.add(el));
+    }
+    const items = Array.from(candidates).filter(el => el.tabIndex >= 0 && !el.matches(':disabled') && visible(el, modal));
+    const tabbable = items.filter(el => {
+      if (!el.matches('input[type="radio"]') || !el.name) return true;
+      const group = items.filter(other => other.matches('input[type="radio"]') && other.name === el.name && other.form === el.form);
+      return el === (group.find(other => other.checked) || group[0]);
+    }).sort((a, b) => {
+      const priority = (a.tabIndex || Infinity) - (b.tabIndex || Infinity);
+      return priority || (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    });
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!tabbable.length) {
+      if (!surfaces[0].hasAttribute('tabindex')) surfaces[0].tabIndex = -1;
+      surfaces[0].focus({preventScroll:true});
+      return;
+    }
+    const index = tabbable.indexOf(document.activeElement);
+    const next = index < 0 ? (event.shiftKey ? tabbable.length - 1 : 0) :
+      (index + (event.shiftKey ? -1 : 1) + tabbable.length) % tabbable.length;
+    tabbable[next].focus();
+  }, true);
   // Dismissal remains owned by each menu. Its outside-click listener receives
   // this surface as the target, so no underlying control can activate.
   backdrop.addEventListener('pointerdown', event => event.preventDefault());

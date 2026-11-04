@@ -363,7 +363,9 @@ func TestBrowserFunctional_TaskListContextMenu(t *testing.T) {
 		key("Home")
 		b.waitFor("Home returns to first", `document.activeElement.textContent.trim().slice(0,100)`, "Run")
 		key("Tab")
-		b.waitFor("Tab dismisses menu", `String(!document.querySelector('[data-task-list-context-menu]').hasAttribute('data-kanban-menu-open'))`, "true")
+		b.waitFor("Tab stays inside menu", `String(document.querySelector('[data-task-list-context-menu]').hasAttribute('data-kanban-menu-open') && !!document.activeElement.closest('[data-task-list-context-menu]'))`, "true")
+		key("Escape")
+		b.waitFor("Escape releases focus after Tab", `String(!document.querySelector('[data-task-list-context-menu]').hasAttribute('data-kanban-menu-open') && document.activeElement.matches('[data-task-list-row="menu-task"]'))`, "true")
 
 		for _, submenu := range []string{"local", "github"} {
 			b.evaluate(open)

@@ -158,8 +158,8 @@
   font: inherit;
 }
 
-/* Transparent top-layer dismissal surface. Only the tiles outside menu bounds
-   receive input; the existing panels retain their DOM and keyboard behavior. */
+/* Transparent top-layer dismissal surface. Only the surface outside menu shapes
+   receives input; the existing panels retain their DOM and positioning. */
 #ov-menu-backdrop {
   position: fixed;
   inset: 0;
@@ -175,9 +175,13 @@
   pointer-events: none;
 }
 #ov-menu-backdrop::backdrop { background: transparent; pointer-events: none; }
-#ov-menu-backdrop > div {
+#ov-menu-backdrop div {
   position: absolute;
+  inset: 0;
   background: transparent;
+  pointer-events: none;
+}
+#ov-menu-backdrop [data-menu-backdrop-hit] {
   pointer-events: auto;
   cursor: default;
 }
