@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -90,6 +93,60 @@ func TestProviderSwitchOverflowTrimsWithoutSummary(t *testing.T) {
 			require.Zero(t, last)
 		})
 	}
+	// Exercise the same destination-window recovery through the real compatible
+	// adapter, with overflow delivered inside HTTP 200 rather than a mocked error.
+	for _, outcome := range []string{"overflow_once", "overflow_exhausted"} {
+		t.Run("litellm_sse/"+outcome, func(t *testing.T) {
+			t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+			var sizes []int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					http.Error(w, "read", 500)
+					return
+				}
+				var body struct {
+					Messages []json.RawMessage `json:"messages"`
+				}
+				if err := json.Unmarshal(raw, &body); err != nil {
+					t.Error(err)
+					http.Error(w, "json", 400)
+					return
+				}
+				sizes = append(sizes, len(body.Messages))
+				if !strings.Contains(string(raw), "PENDING") {
+					t.Error("lost pending user request")
+				}
+				if strings.Contains(string(raw), "CONTEXT CHECKPOINT COMPACTION") {
+					t.Error("switch-window recovery must not generate a summary")
+				}
+				if len(sizes) > 1 && sizes[len(sizes)-1] >= sizes[len(sizes)-2] {
+					t.Error("overflow recovery did not shrink history")
+				}
+				if outcome == "overflow_once" && len(sizes) > 1 {
+					compactionServerReply(w, models.ProviderOpenAICompatible, "RECOVERED", "")
+					return
+				}
+				compactionMatrixError(w, true, 400, "context_length_exceeded", "context window exceeded")
+			}))
+			defer server.Close()
+			svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+			req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true, Message: "PENDING", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "test", ContextWindow: 200000, AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1", PresetSlug: "vllm"}, ChatHistory: []models.Execution{{Status: models.ExecCompleted, PromptSent: "old", Output: "answer"}, {Status: models.ExecCompleted, PromptSent: "new", Output: "recent"}}}
+			input, err := summaryHistoryInput(req.Agent.Provider, req.ChatHistory)
+			require.NoError(t, err)
+			result, err := svc.callProviderWithTruncatedRecovery(svc.providerAdapters[req.Agent.Provider], req, req)
+			if outcome == "overflow_once" {
+				require.NoError(t, err)
+				require.Equal(t, "RECOVERED", result.Output)
+				require.Len(t, sizes, 2)
+			} else {
+				require.Error(t, err)
+				require.Len(t, sizes, len(input)+1, "overflow retries must stop after history is exhausted")
+			}
+		})
+	}
+
 }
 
 func TestProviderSwitchDoesNotReplayExecutedTools(t *testing.T) {

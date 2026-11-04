@@ -609,6 +609,11 @@ func TestConnectedAnthropicNativeLifecycle(t *testing.T) {
 }
 
 func TestConnectedProviderSwitchLifecycle(t *testing.T) {
+	t.Run("http_error", func(t *testing.T) { runConnectedProviderSwitchLifecycle(t, false) })
+	t.Run("litellm_sse_error", func(t *testing.T) { runConnectedProviderSwitchLifecycle(t, true) })
+}
+
+func runConnectedProviderSwitchLifecycle(t *testing.T, streamError bool) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, from := range providers {
@@ -618,6 +623,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 				modes = append(modes, "native_source")
 			}
 			for _, mode := range modes {
+				if streamError && !(from == models.ProviderOpenAICompatible && (mode == "inturn_summary_source" || mode == "steering_summary_source") || to == models.ProviderOpenAICompatible && mode == "summary") {
+					continue
+				}
 				t.Run(string(from)+"/"+string(to)+"/"+mode, func(t *testing.T) {
 					partialFailure := strings.HasPrefix(mode, "partial_")
 					emptyFailure := strings.HasPrefix(mode, "failed_")
@@ -639,6 +647,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 						file = connectedImageAttachment(t, dir).FilePath
 					}
 					sourceCalls, targetCalls, summaries, restarts := 0, 0, 0, 0
+					targetSummaryFailures := 0
 					server := connectedModelServer(t, "websocket", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						raw, _ := io.ReadAll(r.Body)
 						text := string(raw)
@@ -651,6 +660,11 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 							return
 						}
 						if strings.Contains(text, localContextCompactionInstruction) || strings.Contains(text, "CONTEXT CHECKPOINT COMPACTION") {
+							if streamError && stage == 1 && provider == models.ProviderOpenAICompatible && targetSummaryFailures == 0 {
+								targetSummaryFailures++
+								compactionMatrixError(w, true, 503, "server_error", "temporarily unavailable")
+								return
+							}
 							summaries++
 							if !strings.Contains(text, "HISTORY_EVIDENCE") {
 								t.Error("switch summary lost old history")
@@ -696,7 +710,7 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 								if !strings.Contains(text, "SOURCE_TOOL_EVIDENCE") {
 									t.Error("request lost SOURCE_TOOL_EVIDENCE")
 								}
-								compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
+								compactionMatrixError(w, streamError && provider == models.ProviderOpenAICompatible, 400, "context_length_exceeded", "context length exceeded")
 								return
 							}
 							if sourceSummary && (!strings.Contains(text, "SWITCH_SUMMARY") || !strings.Contains(text, "SOURCE_REQUEST")) {
@@ -950,6 +964,9 @@ func TestConnectedProviderSwitchLifecycle(t *testing.T) {
 					result, err = fresh.callProviderWithCompaction(fresh.providerAdapters[to], req)
 					require.NoError(t, err)
 					require.Equal(t, 1, targetCalls)
+					if streamError && to == models.ProviderOpenAICompatible && mode == "summary" {
+						require.Equal(t, 1, targetSummaryFailures, "destination must recover from streamed summary failure")
+					}
 					if mode == "smaller_target" {
 						checkpoint, checkpointErr := stores.Executions.GetChatCompactionCheckpoint(ctx, "task", task.ID)
 						require.NoError(t, checkpointErr)

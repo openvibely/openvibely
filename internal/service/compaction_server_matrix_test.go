@@ -29,8 +29,16 @@ import (
 // connected lifecycle tests. Successful summary cases also reload their saved
 // checkpoint through a fresh service and send a second follow-up.
 func TestCompactionServerSummaryMatrix(t *testing.T) {
+	t.Run("http_error", func(t *testing.T) { runCompactionServerSummaryMatrix(t, false) })
+	t.Run("litellm_sse_error", func(t *testing.T) { runCompactionServerSummaryMatrix(t, true) })
+}
+
+func runCompactionServerSummaryMatrix(t *testing.T, streamError bool) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible} {
+		if streamError && provider != models.ProviderOpenAICompatible {
+			continue
+		}
 		for _, phase := range []string{"preturn", "inturn", "steering", "preturn_native_failure", "inturn_native_failure", "steering_native_failure"} {
 			if strings.Contains(phase, "native") && (provider == models.ProviderOpenAICompatible || (provider == models.ProviderOpenAI && !strings.HasPrefix(phase, "preturn"))) {
 				continue
@@ -165,15 +173,15 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								}
 								lastSummarySize = len(items)
 								if outcome == "summary_overflow_exhausted" || outcome == "summary_overflow_once" && summaries == 1 {
-									compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
+									compactionMatrixError(w, streamError, 400, "context_length_exceeded", "context length exceeded")
 									return
 								}
 								if outcome == "authentication" {
-									compactionServerError(w, 401, "authentication_error", "invalid API key")
+									compactionMatrixError(w, streamError, 401, "authentication_error", "invalid API key")
 									return
 								}
 								if outcome == "transient_exhausted" || outcome == "transient_once" && summaries == 1 {
-									compactionServerError(w, 503, "server_error", "temporarily unavailable")
+									compactionMatrixError(w, streamError, 503, "server_error", "temporarily unavailable")
 									return
 								}
 								answer := "RECOVERED_739: TOOL_EVIDENCE_739 already read"
@@ -188,7 +196,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 							}
 							if phase == "preturn_native_failure" && summaries == 0 {
 								events = append(events, "native_failure")
-								compactionServerError(w, 400, "invalid_request_error", "context management failed")
+								compactionMatrixError(w, streamError, 400, "invalid_request_error", "context management failed")
 								return
 							}
 							generations++
@@ -214,9 +222,9 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 									t.Error("tool did not execute before overflow")
 								}
 								if strings.HasSuffix(phase, "native_failure") {
-									compactionServerError(w, 400, "invalid_request_error", "context management failed")
+									compactionMatrixError(w, streamError, 400, "invalid_request_error", "context management failed")
 								} else {
-									compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
+									compactionMatrixError(w, streamError, 400, "context_length_exceeded", "context length exceeded")
 								}
 								return
 							}
@@ -238,7 +246,7 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 								return
 							}
 							if outcome == "continuation_overflow" {
-								compactionServerError(w, 400, "context_length_exceeded", "context length exceeded")
+								compactionMatrixError(w, streamError, 400, "context_length_exceeded", "context length exceeded")
 								return
 							}
 							compactionServerReply(w, provider, "FINAL_739", "")
@@ -465,6 +473,28 @@ func TestCompactionServerSummaryMatrix(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Exercise the same recovery assertions with LiteLLM errors inside HTTP 200
+// streams. Native providers continue using their original HTTP fixtures.
+func compactionMatrixError(w http.ResponseWriter, streamError bool, status int, kind, message string) {
+	if !streamError {
+		compactionServerError(w, status, kind, message)
+		return
+	}
+	exception := "BadRequestError"
+	switch status {
+	case 401:
+		exception = "AuthenticationError"
+	case 503:
+		exception = "ServiceUnavailableError"
+	}
+	if kind == "context_length_exceeded" {
+		exception = "ContextWindowExceededError"
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	frame, _ := json.Marshal(map[string]any{"error": map[string]any{"message": "litellm." + exception + ": " + message, "type": "invalid_request_error", "code": fmt.Sprint(status)}})
+	fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", frame)
 }
 
 func compactionServerError(w http.ResponseWriter, status int, kind, message string) {
