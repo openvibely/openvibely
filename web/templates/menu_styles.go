@@ -9,7 +9,10 @@ import (
 //go:embed menu.css
 var menuCSS string
 
-// Share one stylesheet per render, including standalone HTMX fragments.
-var menuStyles = templ.NewOnceHandle(templ.WithComponent(templ.Raw("<style data-ov-menu-styles>" + menuCSS + "</style>")))
+//go:embed menu_backdrop.js
+var menuBackdropJS string
+
+// Share menu styling and the pointer boundary, including standalone HTMX fragments.
+var menuStyles = templ.NewOnceHandle(templ.WithComponent(templ.Raw("<style data-ov-menu-styles>" + menuCSS + "</style><script>" + menuBackdropJS + "</script>")))
 
 func MenuStyles() templ.Component { return menuStyles.Once() }

@@ -206,13 +206,23 @@ func (c *composerFocusCDP) saveChromeTrace(path string) {
 }
 
 func (c *composerFocusCDP) click(selector string) {
+	c.clickTarget(selector, false)
+}
+
+// Dismiss at a control’s coordinates, requiring the menu backdrop to receive
+// the gesture and verifying that the control cannot hover behind the menu.
+func (c *composerFocusCDP) clickMenuBackdrop(selector string) {
+	c.clickTarget(selector, true)
+}
+
+func (c *composerFocusCDP) clickTarget(selector string, backdrop bool) {
 	c.t.Helper()
 	// Opening dialogs scale their content in; measuring mid-transition makes the press miss the moving target.
 	c.evaluateAwait(fmt.Sprintf(`(function(){var el=document.querySelector(%q),running=[];for(var node=el;node;node=node.parentElement){running=running.concat(node.getAnimations().filter(function(a){return a.effect&&a.effect.getComputedTiming().endTime!==Infinity;}));}return Promise.all(running.map(function(a){return a.finished.catch(function(){});})).then(function(){return 'settled';});})()`, selector))
 	// Scrolling/resizing can schedule layout observers (including panel sizing and
 	// rounded clipping). Let those settle before measuring the native click point.
 	c.evaluateAwait(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(el)el.scrollIntoView({block:'center',inline:'center'});return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve('ready'))));})()`, selector))
-	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';var r=el.getBoundingClientRect(),fractions=[.5,.25,.75],x,y,hit,owns=false;for(var yi=0;yi<fractions.length&&!owns;yi++){for(var xi=0;xi<fractions.length&&!owns;xi++){x=r.left+r.width*fractions[xi];y=r.top+r.height*fractions[yi];hit=document.elementFromPoint(x,y);owns=!!(hit&&(hit===el||el.contains(hit)));}}return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),hitHTML:hit&&hit.outerHTML.slice(0,180),targetRect:[r.left,r.top,r.right,r.bottom],hitRect:hit&&function(){var h=hit.getBoundingClientRect();return [h.left,h.top,h.right,h.bottom]}(),owns:owns,visibility:getComputedStyle(el).visibility,active:document.activeElement&&(document.activeElement.id||document.activeElement.tagName)});})()`, selector))
+	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';var r=el.getBoundingClientRect(),fractions=[.5,.25,.75],x,y,hit,owns=false;for(var yi=0;yi<fractions.length&&!owns;yi++){for(var xi=0;xi<fractions.length&&!owns;xi++){x=r.left+r.width*fractions[xi];y=r.top+r.height*fractions[yi];hit=document.elementFromPoint(x,y);owns=!!(hit&&(hit===el||el.contains(hit)));}}return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),hitHTML:hit&&hit.outerHTML.slice(0,180),targetRect:[r.left,r.top,r.right,r.bottom],hitRect:hit&&function(){var h=hit.getBoundingClientRect();return [h.left,h.top,h.right,h.bottom]}(),owns:owns,backdrop:!!(hit&&hit.closest('#ov-menu-backdrop')),visibility:getComputedStyle(el).visibility,active:document.activeElement&&(document.activeElement.id||document.activeElement.tagName)});})()`, selector))
 	if coordinates == "missing" {
 		c.t.Fatalf("native click target %s is missing", selector)
 	}
@@ -224,14 +234,19 @@ func (c *composerFocusCDP) click(selector string) {
 		TargetRect []float64 `json:"targetRect"`
 		HitRect    []float64 `json:"hitRect"`
 		Owns       bool      `json:"owns"`
+		Backdrop   bool      `json:"backdrop"`
 		Visibility string    `json:"visibility"`
 		Active     string    `json:"active"`
 	}
 	if err := json.Unmarshal([]byte(coordinates), &point); err != nil {
 		c.t.Fatalf("decode click coordinates for %s: %v", selector, err)
 	}
-	if !point.Owns {
+	if (!backdrop && !point.Owns) || (backdrop && !point.Backdrop) {
 		c.t.Fatalf("native click target %s was covered by %s (target visibility %s, focus on %s, target rect %v, hit rect %v): %s", selector, point.Hit, point.Visibility, point.Active, point.TargetRect, point.HitRect, point.HitHTML)
+	}
+	if backdrop {
+		c.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+		c.waitFor("backdrop blocks hover and uses normal cursor", fmt.Sprintf(`String(!document.querySelector(%q).matches(':hover') && getComputedStyle(document.elementFromPoint(%f,%f)).cursor==='default')`, selector, point.X, point.Y), "true")
 	}
 	for _, params := range []map[string]any{
 		{"type": "mouseMoved", "x": point.X, "y": point.Y},

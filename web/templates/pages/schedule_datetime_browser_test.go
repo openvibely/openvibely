@@ -64,7 +64,7 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 
 		b.evaluate(`document.querySelector('[data-time-column="minute"]').focus(); 'focused'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Home"}, nil)
-		b.click(`#outside`)
+		b.clickMenuBackdrop(`#outside`)
 		b.waitFor("midnight serialized in local format", `new FormData(document.getElementById('schedule')).get('run_at')`, "2036-02-29T00:00")
 		b.waitFor("outside closes picker only", `String(!document.querySelector('.schedule-datetime-popup').matches(':popover-open') && document.getElementById('editor').open)`, "true")
 		b.waitFor("dismissal does not activate outside button", `String(!window.outsideClicks)`, "true")
@@ -82,7 +82,7 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.waitFor("next month", `document.querySelector('[data-month-title]').textContent`, "February 2036")
 		b.click(`[data-month-step="1"]`)
 		b.click(`[data-date="2036-03-10"]`)
-		b.click(`#outside`)
+		b.clickMenuBackdrop(`#outside`)
 		b.waitFor("outside keeps selection", `String(!document.querySelector('.schedule-datetime-popup').matches(':popover-open'))+document.querySelector('[name="run_at"]').value`, "true2036-03-10T00:00")
 		b.click(`[data-run-at-picker]`)
 		b.evaluate(`document.getElementById("outside").focus();'tabbed outside'`)
@@ -118,7 +118,7 @@ func TestBrowserFunctional_ScheduleDateTimePicker(t *testing.T) {
 		b.click(`[data-month-step="1"]`)
 		b.waitFor("today enabled away from current month", `String(!document.querySelector('[data-today]').disabled)`, "true")
 
-		b.click(`#outside`)
+		b.clickMenuBackdrop(`#outside`)
 		b.call("Emulation.setTimezoneOverride", map[string]any{"timezoneId": "America/New_York"}, nil)
 		b.evaluate(`document.querySelector('[name="run_at"]').value='2036-03-08T02:30'; window.refreshScheduleDateTimes(document); 'configured'`)
 		b.click(`[data-run-at-picker]`)
@@ -168,7 +168,7 @@ func TestBrowserFunctional_SchedulePageDateTimePicker(t *testing.T) {
 		b.waitFor("combined picker opens from schedule page", `String(document.querySelector('.schedule-datetime-popup').matches(':popover-open'))`, "true")
 		// The first press must not open the underlying native select.
 		b.evaluate(`window.pickerClosedBeforeRepeat=false; document.getElementById('sched-repeat-type-select').addEventListener('pointerdown',function(){window.pickerClosedBeforeRepeat=!document.querySelector('.schedule-datetime-popup').matches(':popover-open');},{once:true}); 'watching'`)
-		b.click(`#sched-repeat-type-select`)
+		b.clickMenuBackdrop(`#sched-repeat-type-select`)
 		b.waitFor("first repeat click only dismisses picker", `String(!window.pickerClosedBeforeRepeat && !document.querySelector('.schedule-datetime-popup').matches(':popover-open') && document.activeElement.id!=='sched-repeat-type-select' && document.getElementById('new_scheduled_task_modal').open)`, "true")
 		b.click(`#sched-repeat-type-select`)
 		b.waitFor("second repeat click reaches native select", `String(window.pickerClosedBeforeRepeat && document.activeElement.id==='sched-repeat-type-select')`, "true")
