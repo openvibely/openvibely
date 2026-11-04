@@ -330,3 +330,57 @@ func TestBrowserFunctional_ChatProjectPickerConsumesOutsideClick(t *testing.T) {
 		b.waitFor("project selection still works", `document.querySelector('[data-project-choice="project"]').getAttribute('aria-pressed')`, "true")
 	})
 }
+
+func TestBrowserFunctional_UnmarkedDropdownsConsumeOutsideClick(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		var content templ.Component
+		switch r.URL.Path {
+		case "/fixture/skills":
+			content = SkillsContent(nil, true)
+		case "/fixture/channels":
+			content = SettingsContent(ChannelsSettingsView{})
+		case "/fixture/automations":
+			content = AutomationsContent(nil, "project")
+		case "/fixture/chat":
+			content = ChatContent(nil, nil, "project", nil, nil, nil, false, false, 20)
+		case "/fixture/merge":
+			content = WorktreeInfoPanel(&models.Task{ID: "task", WorktreeBranch: "feature", MergeTargetBranch: "main"}, nil)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := layout.Base("Dropdowns", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(templ.WithChildren(r.Context(), content), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	for _, tc := range []struct{ name, route, setup, trigger, panel string }{
+		{"skills", "skills", "", `[aria-label="Add Skill"]`, `[aria-label="Add Skill"] + ul`},
+		{"channels", "channels", "", `[aria-label="Add Channel"]`, `[aria-label="Add Channel"] + ul`},
+		{"automations", "automations", "", `[aria-label="New Automation"]`, `[data-automation-new-menu]`},
+		{"chat", "chat", "", `[aria-controls="chat-actions-menu"]`, `#chat-actions-menu`},
+		{"filters", "skills", "", `[data-card-filters-button]`, `[data-card-filters-popover]`},
+		{"merge", "merge", `document.querySelector('#worktree-info-panel details').open=true`, `#merge-dropdown > [role="button"]`, `#merge-dropdown > ul`},
+		{"user", "skills", `document.getElementById('sidebar-auth-user').style.setProperty('display','flex','important')`, `#sidebar-user-menu-trigger`, `#sidebar-user-menu`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runComposerFocusCDP(t, chrome, server.URL+"/fixture/"+tc.route, "dropdown-"+tc.name, func(b *composerFocusCDP) {
+				b.waitFor("page ready", `String(document.readyState==='complete' && typeof handleDropdownToggle==='function')`, "true")
+				if tc.setup != "" {
+					b.evaluate(tc.setup + `;'setup'`)
+				}
+				visible := `(()=>{const panel=document.querySelector('` + tc.panel + `');return panel.getClientRects().length>0 && getComputedStyle(panel).visibility==='visible' && getComputedStyle(panel).opacity!=='0'})()`
+				b.click(tc.trigger)
+				b.waitFor("menu open", `String(`+visible+`)`, "true")
+				assertMenuConsumesOutsideClick(b, `!`+visible)
+				b.click(tc.trigger)
+				b.waitFor("menu reopens", `String(`+visible+`)`, "true")
+				assertMenuConsumesOutsideClick(b, `!`+visible)
+			})
+		})
+	}
+}

@@ -1109,7 +1109,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					transform: none !important;
 					z-index: 1001 !important;
 				}
-				[data-menu-dropdown][data-menu-dismissed] > [data-menu-content] {
+				[data-menu-dropdown][data-menu-dismissed] > [data-menu-content],
+                .dropdown[data-menu-dismissed] > .dropdown-content {
                     visibility: hidden !important;
                     opacity: 0 !important;
                     pointer-events: none !important;
@@ -4008,7 +4009,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			function menuDropdownForTarget(target) {
                 if (!target || !target.closest) return null;
                 const panel = target.closest('[data-menu-submenu-portaled="true"]');
-                return panel ? panel.__openVibelySubmenuDropdown : target.closest('[data-menu-dropdown], [data-kanban-menu-key]');
+                return panel ? panel.__openVibelySubmenuDropdown : target.closest('[data-menu-dropdown], [data-kanban-menu-key], .dropdown');
             }
             function kanbanDropdownForTarget(target) {
                 const dropdown = menuDropdownForTarget(target);
@@ -4152,6 +4153,14 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 
             function closeGenericDropdown(dropdown) {
                 closeMenuSubmenus(dropdown, null);
+                if (dropdown.contains(document.activeElement)) document.activeElement.blur();
+                if (dropdown.hasAttribute('data-chat-actions-dropdown')) {
+                    dropdown.removeAttribute('data-chat-actions-open');
+                    dropdown.querySelector('[aria-controls="chat-actions-menu"]')?.setAttribute('aria-expanded', 'false');
+                }
+                if (dropdown.querySelector('[data-card-filters-button]') && window.setCardFilterDropdownState) {
+                    window.setCardFilterDropdownState(dropdown, false);
+                }
                 dropdown.classList.remove('dropdown-open');
                 dropdown.setAttribute('data-menu-dismissed', '');
             }
@@ -4171,11 +4180,11 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
                 // A confirmation dialog may open from a menu before its request
                 // closes that menu. Background menus must not intercept the dialog.
                 const modal = document.querySelector('dialog:modal');
-                const outside = Array.from(document.querySelectorAll('[data-menu-dropdown]')).filter(function(dropdown) {
+                const outside = Array.from(document.querySelectorAll('[data-menu-dropdown], .dropdown')).filter(function(dropdown) {
                     if (modal && !modal.contains(dropdown)) return false;
-                    if (dropdown === owner) return false;
+                    if (dropdown === owner || dropdown.contains(event.target)) return false;
                     if (dropdown.hasAttribute('data-kanban-menu-key')) return dropdown.getAttribute('data-kanban-menu-open') === 'true';
-                    const panel = dropdown.querySelector(':scope > [data-menu-content]');
+                    const panel = dropdown.querySelector(':scope > [data-menu-content], :scope > .dropdown-content:not([popover])');
                     if (!panel || !panel.getClientRects().length) return false;
                     const style = getComputedStyle(panel);
                     return style.visibility === 'visible' && style.display !== 'none' && style.opacity !== '0';
@@ -4425,7 +4434,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
-                const genericOwner = label.closest('[data-menu-dropdown]:not([data-kanban-menu-key])');
+                const genericOwner = label.closest('[data-menu-dropdown]:not([data-kanban-menu-key]), .dropdown:not([data-kanban-menu-key])');
                 if (genericOwner && genericOwner.hasAttribute('data-menu-dismissed')) {
                     genericOwner.removeAttribute('data-menu-dismissed');
                     label.focus({preventScroll: true});
@@ -6578,6 +6587,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						function setCardFilterDropdown(dropdown, open) {
 							if (!dropdown) return;
 							dropdown.classList.toggle('dropdown-open', open);
+                            if (open) dropdown.removeAttribute('data-menu-dismissed');
 							var button = dropdown.querySelector('[data-card-filters-button]');
 							if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
 							var popover = dropdown.querySelector('[data-card-filters-popover]');
