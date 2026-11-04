@@ -329,7 +329,33 @@
       .querySelectorAll(".ov-mp-provider")
       .forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
+  function ownerVisible(btn) {
+    return (
+      btn.isConnected &&
+      !btn.closest("[hidden],[inert]") &&
+      btn.getClientRects().length > 0 &&
+      getComputedStyle(btn).visibility === "visible"
+    );
+  }
+  // Body-level panels must not outlive their visible owner. Navigation can
+  // retain a hidden composer without firing HTMX cleanup or outside clicks.
+  const ownerObserver = new MutationObserver(() => {
+    if (!active) return;
+    if (!ownerVisible(active)) close(false);
+    else observeOwner();
+  });
+  function observeOwner() {
+    ownerObserver.disconnect();
+    for (let node = active; node; node = node.parentElement) {
+      ownerObserver.observe(node, {
+        childList: true,
+        attributes: true,
+        attributeFilter: ["hidden", "inert", "class", "style"],
+      });
+    }
+  }
   function close(focus) {
+    ownerObserver.disconnect();
     const btn = active;
     closeSub();
     panel.hidden = true;
@@ -780,6 +806,7 @@
     save,
     close,
     open(btn) {
+      if (!ownerVisible(btn)) return;
       init(btn);
       active = btn;
       provider = null;
@@ -791,6 +818,7 @@
       renderSub();
       loadFavorites();
       search.focus({ preventScroll: true });
+      observeOwner();
       const s = state(btn);
       if (s.error) {
         s.ready = s.failedSave

@@ -9,6 +9,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -198,4 +199,67 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			t.Fatalf("settings Search requested workspace %d times", n)
 		}
 	})
+}
+
+// Settings retains the composer instead of removing it; body-level picker panels
+// must close even when the navigation handler consumes the outside click.
+func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		var content templ.Component
+		switch r.URL.Path {
+		case "/themes":
+			content = ThemesContent(nil)
+		case "/chat", "/tasks/picker-thread":
+			content = components.ChatInputForm(components.ChatInputFormConfig{
+				FormID: "picker-form", InputID: "picker-message", TargetID: "messages",
+				PostEndpoint: "/chat/send", ProjectID: "project", ShowModelSelector: true,
+				Agents:          []models.LLMConfig{{ID: "model", Name: "Test model", Provider: models.ProviderOpenAI, Model: "test"}},
+				SelectedAgentID: "model",
+			})
+		default:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			if err := content.Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if err := layout.Base("Picker navigation", []models.Project{{ID: "project", Name: "Project"}}, "project").Render(templ.WithChildren(r.Context(), content), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	for _, route := range []string{"/chat", "/tasks/picker-thread"} {
+		t.Run(route, func(t *testing.T) {
+			runComposerFocusCDP(t, chrome, server.URL+route, "settings-picker", func(b *composerFocusCDP) {
+				b.waitFor("picker ready", `String(document.readyState==='complete' && !!window.ovModelPicker && !!window.workspaceNavigation && !!document.querySelector('.chat-model-select'))`, "true")
+				b.evaluate(`window.originalPickerButton=document.querySelector('.chat-model-select');window.ovModelPicker.open(window.originalPickerButton);'opened'`)
+				b.waitFor("picker visible", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
+				b.evaluate(`document.querySelector('#conversation-model-picker .ov-mp-provider').click();'provider'`)
+				b.waitFor("submenu visible", `String(!document.getElementById('conversation-provider-models').hidden)`, "true")
+				b.evaluate(`document.querySelector('#sidebar [data-nav-base="/themes"]').click();'settings'`)
+				b.waitFor("workspace hidden in settings", `String(!!document.getElementById('themes-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
+				b.waitFor("picker and submenu dismissed", `String(document.getElementById('conversation-model-picker').hidden && document.getElementById('conversation-provider-models').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
+				b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened'`)
+				b.waitFor("retained picker usable", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")
+				// The same lifecycle must work without Settings or HTMX events.
+				for _, hide := range []string{"owner.hidden=true", "owner.inert=true", "owner.style.display='none'", "owner.remove()"} {
+					b.evaluate(`window.pickerOwner=window.originalPickerButton.closest('form');window.pickerParent=window.pickerOwner.parentElement;window.ovModelPicker.open(window.originalPickerButton);'opened'`)
+					b.waitFor("generic picker open", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
+					b.evaluate(`(function(){const owner=window.pickerOwner;` + hide + `;return 'hidden';})()`)
+					b.waitFor("unavailable owner dismisses picker", `String(document.getElementById('conversation-model-picker').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
+					b.evaluate(`window.ovModelPicker.open(window.originalPickerButton);'attempt reopen'`)
+					b.waitFor("hidden owner cannot reopen picker", `String(document.getElementById('conversation-model-picker').hidden)`, "true")
+					b.evaluate(`window.pickerOwner.hidden=false;window.pickerOwner.inert=false;window.pickerOwner.style.display='';if(!window.pickerOwner.isConnected)window.pickerParent.append(window.pickerOwner);'restored'`)
+				}
+
+			})
+		})
+	}
 }
